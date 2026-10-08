@@ -1875,40 +1875,55 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 }
 
 /* --------------------------------------------------------------------------
-   Notifications — event & channel matrix (grid component, no table).
-   Desktop: one aligned row per event. Phones: event title + compact 2×2 grid.
+   Notifications — event & channel matrix.
+   Layout is driven by the matrix's own width (container queries), not the
+   viewport, so it stays inside its parent card at every size:
+     • wide  (≥ 640px panel): one aligned row per event — Event | 4 channels
+     • narrow (default):      event title on its own line + compact 2×2 grid
+     • very narrow (< 300px): channels stack one per line
+   No overflow:hidden is used; every track is minmax(0, …) so content wraps
+   inside its own cell instead of pushing the layout wider.
    -------------------------------------------------------------------------- */
-.sh-mx__note { margin: 0 0 12px; }
-.sh-mx { width: 100%; max-width: 100%; border: 1px solid var(--sh-line); border-radius: 9px; background: #fff; }
-.sh-mx__head, .sh-mx__row { display: grid; grid-template-columns: minmax(150px, 1.5fr) repeat(4, minmax(0, 1fr)); align-items: center; column-gap: 10px; padding: 0 14px; }
-.sh-mx__head { background: #fafbfc; border-bottom: 1px solid var(--sh-line); border-radius: 9px 9px 0 0; min-height: 40px; }
-.sh-mx__h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--sh-muted); text-align: center; padding: 8px 0; line-height: 1.3; }
-.sh-mx__h--event { text-align: left; }
-.sh-mx__h small, .sh-mx__name small { display: block; font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--sh-muted); line-height: 1.2; }
-.sh-mx__row { border-bottom: 1px solid var(--sh-line-2); min-height: 46px; }
+.sh-mx-panel { container-type: inline-size; }
+.sh-mx__note { margin: 0 0 12px; font-size: 12.5px; line-height: 1.4; color: var(--sh-muted); }
+.sh-mx { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; background: #fff;
+  border: 1px solid var(--sh-line); border-radius: 9px; }
+.sh-mx__head { display: none; }
+.sh-mx__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 0;
+  min-width: 0; box-sizing: border-box; padding: 9px 12px 6px; border-bottom: 1px solid var(--sh-line-2); }
 .sh-mx__row:last-child { border-bottom: 0; }
-.sh-mx__row:hover { background: #fcfcfd; }
-.sh-mx__event { font-size: 13.5px; font-weight: 600; color: var(--sh-ink); padding: 10px 0; line-height: 1.3; overflow-wrap: break-word; }
-.sh-mx__ch { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 0; cursor: pointer; min-width: 0; }
-.sh-mx__ch .sh-mx__name { display: none; }
-.sh-mx__toggle { display: inline-flex; margin: 0; flex: none; }
-.sh-mx__ch--off .sh-toggle__track { opacity: .55; }
-.sh-mx__save { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
-@media (max-width: 760px) {
-  .sh-mx__head { display: none; }
-  .sh-mx__row { padding: 10px 14px 6px; }
-  .sh-mx__row:nth-child(even) { background: #fcfcfd; }
-  .sh-mx__event { padding: 0 0 4px; font-size: 13.5px; }
-  .sh-mx__row .sh-mx__ch { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 0; justify-content: stretch; }
-  .sh-mx__ch .sh-mx__name { display: block; font-size: 13px; font-weight: 500; color: var(--sh-ink-2); line-height: 1.25; }
-  .sh-mx__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; row-gap: 0; }
-  .sh-mx__event { grid-column: 1 / -1; }
-  .sh-mx__save .sh-btn { flex: 1 1 auto; justify-content: center; }
-}
-@media (max-width: 340px) {
+.sh-mx__event { grid-column: 1 / -1; min-width: 0; padding: 0 0 6px; font-size: 13.5px; font-weight: 600; line-height: 1.3;
+  color: var(--sh-ink); overflow-wrap: anywhere; }
+.sh-mx__ch { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; min-height: 32px; padding: 3px 0; }
+.sh-mx__name { min-width: 0; font-size: 13px; font-weight: 500; line-height: 1.25; color: var(--sh-ink-2); overflow-wrap: anywhere; }
+.sh-mx__toggle { display: inline-flex; flex: 0 0 auto; margin: 0; }
+.sh-mx__toggle .sh-toggle__track { flex: 0 0 auto; }
+
+.sh-mx__save { margin-top: 14px; display: flex; justify-content: flex-end; min-width: 0; }
+.sh-mx__save .sh-btn { min-height: 38px; padding-left: 18px; padding-right: 18px; }
+
+/* Very narrow matrix: one channel per line. */
+@container (max-width: 289px) {
   .sh-mx__row { grid-template-columns: minmax(0, 1fr); }
-  .sh-mx__save .sh-btn { flex-basis: 100%; }
 }
+/* Narrow matrix: full-width save button inside the card. */
+@container (max-width: 639px) {
+  .sh-mx__save .sh-btn { width: 100%; justify-content: center; }
+}
+/* Wide matrix: header + one aligned row per event. */
+@container (min-width: 640px) {
+  .sh-mx__head, .sh-mx__row { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(4, minmax(0, 1fr));
+    column-gap: 16px; align-items: center; padding: 0 16px; }
+  .sh-mx__head { min-height: 38px; background: #fafbfc; border-bottom: 1px solid var(--sh-line); border-radius: 8px 8px 0 0; }
+  .sh-mx__h { min-width: 0; padding: 9px 0; font-size: 11px; font-weight: 700; line-height: 1.2; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--sh-muted); text-align: left; }
+  .sh-mx__row { min-height: 48px; padding: 0 16px; }
+  .sh-mx__row:hover { background: #fcfcfd; }
+  .sh-mx__event { grid-column: auto; padding: 10px 0; }
+  .sh-mx__ch { justify-content: flex-start; gap: 0; min-height: 0; padding: 8px 0; }
+  .sh-mx__name { display: none; }
+}
+
 /* Channel status cards: two-up on phones, one column only when very narrow. */
 @media (max-width: 640px) {
   .sh-admin-body .sh-chanrow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
