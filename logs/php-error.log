@@ -1,0 +1,4 @@
+[03-Sep-2026 20:36:59 UTC] ShopHaat webhook dependency failure: SQLSTATE[HY000] [2002] No such file or directory
+[03-Sep-2026 20:36:59 UTC] ShopHaat webhook dependency failure: SQLSTATE[HY000] [2002] No such file or directory
+[03-Sep-2026 20:36:59 UTC] ShopHaat webhook dependency failure: SQLSTATE[HY000] [2002] No such file or directory
+[03-Sep-2026 20:57:16 UTC] PHP Fatal error:  Cannot redeclare function sh_cart_items() (previously declared in /home/user/shop/includes/cart.php:11) in /home/user/shop/includes/cart.php on line 11

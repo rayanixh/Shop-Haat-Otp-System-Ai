@@ -1,0 +1,1086 @@
+[2026-09-03 06:39:32] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:39:40] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:39:40] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:39:40] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:39:49] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:39:49] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:40:20] [database] Database server unreachable: SQLSTATE[HY000] [2002] No such file or directory | uri=/
+[2026-09-03 06:40:20] [api-cart-db] PDOException: SQLSTATE[HY000] [2002] No such file or directory in /home/user/shop/includes/db.php:34 | uri=/api/cart.php?action=count
+[2026-09-03 06:41:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:41:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:12] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:12] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:12] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:41:12] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:12] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:41:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:41:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:41:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:41:23] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:41:23] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 06:41:23] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 06:41:23] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 06:41:23] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 06:50:25] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:39] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:39] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:39] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:39] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:48] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:50:48] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:51:32] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:51:32] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:51:39] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:51:48] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:15] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:52:24] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:24] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:27] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:52:27] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:52:27] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:52:27] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:52:27] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:27] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:52:29] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:52:29] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 06:52:29] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 06:52:29] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 06:52:29] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 06:58:53] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:58:53] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:59:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:59:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:59:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:59:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:59:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 06:59:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 06:59:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:59:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 06:59:08] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 06:59:08] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 06:59:08] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 06:59:08] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 06:59:08] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:08:49] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:08:49] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:08:59] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 07:08:59] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 07:09:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:09:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:09:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:09:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:09:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:09:06] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:09:08] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:09:08] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 07:09:08] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 07:09:08] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 07:09:08] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:09:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:09:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:09:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:09:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:09:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:09:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:09:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:09:20] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 07:09:20] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 07:09:20] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 07:09:20] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:25:56] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:26:24] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:26:34] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:26:34] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 07:26:34] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 07:26:34] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 07:26:34] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:26:45] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:26:45] [admin] Payment #3 approved by admin@shophaat.test | uri=/admin/payments.php?id=3
+[2026-09-03 07:26:45] [security] CSRF token rejected | uri=/admin/payments.php?id=3
+[2026-09-03 07:26:45] [admin] Order SH26090300003 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=3
+[2026-09-03 07:26:45] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:27:28] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:27:29] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:27:29] [admin] Payment #4 approved by admin@shophaat.test | uri=/admin/payments.php?id=4
+[2026-09-03 07:27:29] [security] CSRF token rejected | uri=/admin/payments.php?id=4
+[2026-09-03 07:27:29] [admin] Order SH26090300004 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=4
+[2026-09-03 07:27:29] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:27:41] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:27:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:28:41] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:18] [admin] Telegram settings updated | uri=/admin/telegram.php
+[2026-09-03 07:29:28] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:29:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:29:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:29:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:29:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:29:30] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:30] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 07:29:30] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 07:29:30] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 07:29:30] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:29:31] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:32] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:29:32] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 07:29:32] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 07:29:32] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 07:29:32] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:40:09] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:40:09] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 07:41:25] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 07:41:34] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:41:55] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:42:15] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:42:16] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:42:16] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:42:16] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:42:16] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:42:16] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:42:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:42:18] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 07:42:18] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 07:42:18] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 07:42:18] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:42:56] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:42:56] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 07:43:15] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:43:25] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:43:25] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 07:43:37] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:43:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:43:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 07:43:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 07:43:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:43:38] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 07:43:39] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:43:39] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 07:43:39] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 07:43:39] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 07:43:39] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 07:43:40] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:43:40] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 07:56:27] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:56:55] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:57:11] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:57:24] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:57:38] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:57:55] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:57:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:01] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:11] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:14] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:22] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:25] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:27] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 07:58:49] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:01:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:01:03] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:01:03] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:01:03] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 08:01:03] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:01:03] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:01:05] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:01:05] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 08:01:05] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 08:01:05] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 08:01:05] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:01:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:01:06] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 08:01:16] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:20:42] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:20:57] [sql] Query failed [23000]: SQLSTATE[23000]: Integrity constraint violation: 1048 Column 'compare_price' cannot be null | sql=UPDATE `products` SET `category_id` = ?,`brand_id` = ?,`name` = ?,`slug` = ?,`sku` = ?,`short_description` = ?,`description` = ?,`specifications` = ?,`price` = ?,`compare_price` = ?,`stock` = ?,`product_type` = ?,`image` = ?,`is_featured` = ?,`is_flash_sale` = ?,`flash_sale_ends_at` = ?,`status` = ?,`meta_title` = ?,`meta_description` = ? WHERE id = ? | uri=/admin/products.php?edit=1
+[2026-09-03 08:20:57] [product-save] RuntimeException: Database query failed. in /home/user/shop/includes/db.php:57 | uri=/admin/products.php?edit=1
+[2026-09-03 08:21:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:22:46] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:22:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:23:26] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:08] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:19] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:24:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:24:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 08:24:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:24:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:24:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:21] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 08:24:21] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 08:24:21] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 08:24:21] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:24:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:22] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:22] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 08:24:22] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 08:24:22] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 08:24:22] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:24:23] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:24:23] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 08:25:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:21] [admin] Payment #3 approved by admin@shophaat.test | uri=/admin/payments.php?id=3
+[2026-09-03 08:26:21] [security] CSRF token rejected | uri=/admin/payments.php?id=3
+[2026-09-03 08:26:21] [admin] Order SH26090300003 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=3
+[2026-09-03 08:26:21] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:26:35] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:36] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:36] [admin] Payment #4 approved by admin@shophaat.test | uri=/admin/payments.php?id=4
+[2026-09-03 08:26:36] [security] CSRF token rejected | uri=/admin/payments.php?id=4
+[2026-09-03 08:26:36] [admin] Order SH26090300004 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=4
+[2026-09-03 08:26:36] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:26:55] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:26:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 08:26:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 08:26:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:26:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 08:26:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:57] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 08:26:57] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 08:26:57] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 08:26:57] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:26:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:58] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 08:26:58] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 08:26:58] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 08:26:58] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 08:26:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 08:26:59] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 08:27:39] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:41:09] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 13:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 13:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 13:41:46] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:17] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 13:42:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 13:42:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 13:42:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 13:42:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 13:42:19] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:19] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 13:42:19] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 13:42:19] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 13:42:19] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:42:19] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:20] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 13:42:20] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 13:42:20] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 13:42:20] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:42:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:20] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 13:42:27] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:28] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:28] [admin] Payment #3 approved by admin@shophaat.test | uri=/admin/payments.php?id=3
+[2026-09-03 13:42:28] [security] CSRF token rejected | uri=/admin/payments.php?id=3
+[2026-09-03 13:42:28] [admin] Order SH26090300003 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=3
+[2026-09-03 13:42:28] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:42:50] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:51] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:42:51] [admin] Payment #4 approved by admin@shophaat.test | uri=/admin/payments.php?id=4
+[2026-09-03 13:42:51] [security] CSRF token rejected | uri=/admin/payments.php?id=4
+[2026-09-03 13:42:51] [admin] Order SH26090300004 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=4
+[2026-09-03 13:42:51] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:43:29] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:43:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 13:43:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 13:43:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 13:43:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 13:43:29] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 13:43:31] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:43:31] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 13:43:31] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 13:43:31] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 13:43:32] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:43:32] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:43:33] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:43:33] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 13:43:33] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 13:43:33] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 13:43:33] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 13:43:33] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 13:43:33] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 13:44:42] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:15] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:07:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:07:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 14:07:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:07:15] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:07:17] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:17] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 14:07:17] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 14:07:17] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 14:07:17] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:07:17] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:18] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 14:07:18] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 14:07:18] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 14:07:18] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:07:19] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:07:19] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 14:07:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:09:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:09:58] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:09:58] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:09:58] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 14:09:58] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:09:58] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:10:00] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:10:00] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 14:10:00] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 14:10:00] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 14:10:00] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:10:01] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:10:01] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:10:02] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 14:10:02] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 14:10:02] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 14:10:02] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:10:02] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:10:02] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 14:10:41] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:23:45] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:23:58] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 14:24:41] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:24:55] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:25:10] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:37] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:37] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:25:37] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:25:37] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 14:25:37] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:25:37] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:25:39] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:39] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 14:25:39] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 14:25:39] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 14:25:39] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:25:39] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:40] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:40] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 14:25:40] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 14:25:40] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 14:25:40] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:25:40] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:25:40] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 14:26:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:28:50] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:28:50] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 14:28:50] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:28:50] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:28:50] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 14:29:01] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:01] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:29:01] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 14:29:01] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 14:29:01] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:29:02] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 14:29:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:03] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 14:29:03] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 14:29:03] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 14:29:03] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:29:04] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:04] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:04] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 14:29:04] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 14:29:04] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 14:29:04] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 14:29:05] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:05] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 14:29:05] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 14:29:05] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 14:29:05] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:29:05] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 14:29:05] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 14:29:45] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:24:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:25:05] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 17:25:05] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 17:29:28] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:31:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:31:06] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 17:31:06] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 17:31:06] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 17:31:06] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:31:25] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:31:36] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:31:46] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:32:00] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:32:02] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:32:11] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:32:20] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/login.php:20 | uri=/login.php
+[2026-09-03 17:34:19] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:34:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:34:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:34:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 17:34:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:34:19] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:34:21] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:34:21] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:34:21] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:34:22] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:34:22] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:34:22] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:34:22] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:35:01] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:36:42] [uncaught] Error: Call to undefined function sh_login_throttled() in /home/user/shop/admin/login.php:18 | uri=/admin/login.php
+[2026-09-03 17:36:55] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:07] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:37:07] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:37:07] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 17:37:07] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:37:07] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:37:09] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:09] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 17:37:09] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 17:37:09] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 17:37:09] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:37:09] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:10] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:10] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 17:37:10] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 17:37:10] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 17:37:10] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:37:10] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:10] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 17:37:11] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:37:11] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 17:37:11] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 17:37:11] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 17:37:11] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 17:37:51] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:40:42] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 17:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 17:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:41:18] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 17:41:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:20] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 17:41:20] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 17:41:20] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 17:41:20] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:41:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:21] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 17:41:21] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 17:41:21] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 17:41:21] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 17:41:22] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:22] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 17:41:22] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:41:22] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 17:41:22] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 17:41:22] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 17:41:22] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 17:42:02] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 17:44:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:28:21] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 19:28:30] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 19:28:30] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 19:28:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:31:31] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:31:42] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 19:32:17] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 19:32:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 19:32:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 19:32:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 19:32:17] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 19:32:19] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:19] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 19:32:19] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 19:32:19] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 19:32:19] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 19:32:20] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:21] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 19:32:21] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 19:32:21] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 19:32:21] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 19:32:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:21] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:21] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 19:32:21] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:32:22] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:32:22] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 19:32:29] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:29] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:39] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:39] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:40] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:40] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 19:32:40] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:32:40] [promo] Slide #8 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:32:40] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 19:32:53] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:32:54] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:54] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:54] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:32:54] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:02] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:02] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:02] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:02] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:02] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:44] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:45] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 19:33:45] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 19:33:45] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 19:33:45] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 19:33:45] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 19:33:46] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:47] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 19:33:47] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 19:33:47] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 19:33:47] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 19:33:47] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:48] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:48] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 19:33:48] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 19:33:48] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 19:33:48] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 19:33:48] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:48] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:48] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:48] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:48] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 19:33:49] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:33:49] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 19:33:49] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:33:49] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 19:33:49] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 19:34:30] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 19:36:32] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:29:02] [database] Database server unreachable: SQLSTATE[HY000] [1045] Access denied for user 'shopuser'@'localhost' (using password=[redacted]) | uri=/
+[2026-09-03 20:29:14] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 20:29:14] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php
+[2026-09-03 20:32:35] [whatsapp] Verification attempted but no verify token is configured. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=whatever&hub.challenge=CHAL123
+[2026-09-03 20:32:35] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=CHAL123
+[2026-09-03 20:32:35] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=my_secret_verify_123&hub.challenge=X
+[2026-09-03 20:33:13] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:33:13] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:33:13] [whatsapp] Malformed JSON payload ignored (15 bytes). | uri=/webhook.php
+[2026-09-03 20:33:56] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:35:44] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:35:58] [admin] WhatsApp settings updated | uri=/admin/whatsapp.php
+[2026-09-03 20:36:12] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SIGNED1 | uri=/webhook.php
+[2026-09-03 20:36:12] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:36:12] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T1 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T2 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T3 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T4 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T5 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T6 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T7 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T8 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T9 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T10 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T11 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T12 | uri=/webhook.php
+[2026-09-03 20:36:30] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.T13 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:38:26] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:38:26] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:38:26] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:38:37] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.RACE1 | uri=/webhook.php
+[2026-09-03 20:39:03] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SNAP2 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ1 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ2 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ3 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ4 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ5 | uri=/webhook.php
+[2026-09-03 20:39:16] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SEQ6 | uri=/webhook.php
+[2026-09-03 20:39:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:39:50] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:39:50] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:39:50] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:00] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.DBG1 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:15] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:15] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:15] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:26] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:26] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:26] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:26] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:35] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:35] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:35] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:40:35] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:40:47] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.PROBE | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:12] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:12] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:12] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:13] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:13] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:41:13] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:41:13] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:41:13] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:41:14] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:41:15] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:41:15] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:41:15] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:33] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:34] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:41:34] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:41:34] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 20:41:34] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:41:34] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:41:35] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:36] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 20:41:36] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 20:41:36] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 20:41:36] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:41:36] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:37] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:37] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 20:41:37] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 20:41:37] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 20:41:37] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:41:37] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:37] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:41:37] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:41:38] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:41:38] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:41:38] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:41:38] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 20:41:38] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:41:38] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:41:38] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 20:41:38] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:38] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:38] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:41:38] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:41:38] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:41:39] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:41:40] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:41:41] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:42:35] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:54] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:42:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:42:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 20:42:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:42:55] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:42:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:57] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 20:42:57] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 20:42:57] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 20:42:57] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:42:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:58] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 20:42:58] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 20:42:58] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 20:42:58] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:42:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:58] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:42:58] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:42:58] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:42:58] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:42:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:42:59] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 20:42:59] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:42:59] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:42:59] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 20:42:59] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:42:59] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:42:59] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:42:59] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:00] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:00] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:43:00] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:43:00] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:43:00] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:43:01] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:43:02] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:43:02] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:43:02] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:43:02] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:43:42] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:45:44] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:54:54] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:54:54] [admin] Payment #3 approved by admin@shophaat.test | uri=/admin/payments.php?id=3
+[2026-09-03 20:54:54] [security] CSRF token rejected | uri=/admin/payments.php?id=3
+[2026-09-03 20:54:54] [admin] Order SH26090300003 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=3
+[2026-09-03 20:54:54] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:57:16] [fatal] Cannot redeclare function sh_cart_items() (previously declared in /home/user/shop/includes/cart.php:11) in /home/user/shop/includes/cart.php:11 | uri=cli
+[2026-09-03 20:57:33] [telegram] Unauthorised callback from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:57:39] [telegram] Duplicate update 90001 ignored. | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Malformed JSON update ignored (13 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Malformed JSON update ignored (0 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Malformed JSON update ignored (7 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Unauthorised callback from Telegram user  | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Rejected update with a bad or missing secret token. | uri=/telegram-webhook.php
+[2026-09-03 20:57:48] [telegram] Duplicate update 987654 ignored. | uri=/telegram-webhook.php
+[2026-09-03 20:57:49] [telegram] Unauthorised command from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:58:02] [telegram] Unauthorised callback from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Malformed JSON update ignored (13 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Malformed JSON update ignored (0 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Malformed JSON update ignored (7 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Unauthorised callback from Telegram user  | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Rejected update with a bad or missing secret token. | uri=/telegram-webhook.php
+[2026-09-03 20:58:10] [telegram] Duplicate update 987654 ignored. | uri=/telegram-webhook.php
+[2026-09-03 20:58:11] [telegram] Unauthorised command from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:58:32] [telegram] Unauthorised callback from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:58:40] [telegram] Malformed JSON update ignored (13 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:40] [telegram] Malformed JSON update ignored (0 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:40] [telegram] Malformed JSON update ignored (7 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:58:40] [telegram] Unauthorised callback from Telegram user  | uri=/telegram-webhook.php
+[2026-09-03 20:58:40] [telegram] Rejected update with a bad or missing secret token. | uri=/telegram-webhook.php
+[2026-09-03 20:58:41] [telegram] Duplicate update 987654 ignored. | uri=/telegram-webhook.php
+[2026-09-03 20:58:42] [telegram] Unauthorised command from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:58:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:00] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:59:00] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/
+[2026-09-03 20:59:00] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair&reason=database
+[2026-09-03 20:59:00] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:59:00] [database] Database "shopdb" unavailable: SQLSTATE[HY000] [1049] Unknown database 'shopdb' | uri=/install/index.php?step=repair
+[2026-09-03 20:59:01] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:01] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-03 20:59:01] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-03 20:59:01] [admin] Order SH26090300001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-03 20:59:01] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:59:02] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:03] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-03 20:59:03] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-03 20:59:03] [admin] Order SH26090300002 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=2
+[2026-09-03 20:59:03] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-03 20:59:03] [telegram] API getWebhookInfo failed: Failed to connect to 127.0.0.1 port 9099 after 0 ms: Could not connect to server | uri=/admin/telegram.php
+[2026-09-03 20:59:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:03] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:59:03] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:59:03] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:59:03] [admin] Payment method "bKash" saved by admin@shophaat.test | uri=/admin/payment-methods.php?edit=1
+[2026-09-03 20:59:04] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 20:59:04] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php?edit=1
+[2026-09-03 20:59:04] [promo] Promo content saved by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:59:04] [promo] Slide #7 deleted by admin@shophaat.test | uri=/admin/homepage.php
+[2026-09-03 20:59:04] [security] CSRF token rejected | uri=/admin/homepage.php
+[2026-09-03 20:59:04] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:59:04] [whatsapp] Verification rejected (mode=subscribe, token mismatch). | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:59:04] [whatsapp] Verification rejected (mode=unsubscribe, token mismatch). | uri=/webhook.php?hub.mode=unsubscribe&hub.verify_token=[redacted]
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=0 duplicates=1 statuses=0 errors=0 ids=wamid.SUITE_TEXT | uri=/webhook.php
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:04] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:05] [whatsapp] POST processed — messages=0 duplicates=0 statuses=1 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:05] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T1 | uri=/webhook.php
+[2026-09-03 20:59:05] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T2 | uri=/webhook.php
+[2026-09-03 20:59:05] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T3 | uri=/webhook.php
+[2026-09-03 20:59:05] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T4 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T5 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T6 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T7 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T8 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T9 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T10 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T11 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_T12 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Malformed JSON payload ignored (0 bytes). | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Malformed JSON payload ignored (10 bytes). | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=1 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_BARE | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Ignored webhook for object "page". | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=0 duplicates=0 statuses=0 errors=0 | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Malformed JSON payload ignored (200000 bytes). | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] POST processed — messages=1 duplicates=0 statuses=0 errors=0 ids=wamid.SUITE_SIGNED | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:59:06] [whatsapp] Rejected webhook with an invalid X-Hub-Signature-256. | uri=/webhook.php
+[2026-09-03 20:59:07] [whatsapp] Webhook verified successfully by Meta. | uri=/webhook.php?hub.mode=subscribe&hub.verify_token=[redacted]
+[2026-09-03 20:59:07] [telegram] Unauthorised callback from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:59:15] [telegram] Malformed JSON update ignored (13 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:59:15] [telegram] Malformed JSON update ignored (0 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:59:15] [telegram] Malformed JSON update ignored (7 bytes). | uri=/telegram-webhook.php
+[2026-09-03 20:59:15] [telegram] Unauthorised callback from Telegram user  | uri=/telegram-webhook.php
+[2026-09-03 20:59:15] [telegram] Rejected update with a bad or missing secret token. | uri=/telegram-webhook.php
+[2026-09-03 20:59:16] [telegram] Duplicate update 987654 ignored. | uri=/telegram-webhook.php
+[2026-09-03 20:59:17] [telegram] Unauthorised command from Telegram user 111222333 | uri=/telegram-webhook.php
+[2026-09-03 20:59:59] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 21:02:03] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-03 21:02:52] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php

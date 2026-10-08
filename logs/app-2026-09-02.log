@@ -1,0 +1,46 @@
+[2026-09-02 17:39:38] [uncaught] Error: Call to undefined function sh_user() in /home/user/shop/checkout.php:13 | uri=/checkout.php
+[2026-09-02 17:43:24] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 17:43:24] [sql] Query failed [42S22]: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'is_digital' in 'WHERE' | sql=SELECT id, name, slug, stock FROM products WHERE is_digital = 0 AND status = 1 AND stock <= 5 ORDER BY stock ASC LIMIT 8 | uri=/admin/dashboard.php
+[2026-09-02 17:43:24] [uncaught] RuntimeException: Database query failed. in /home/user/shop/includes/db.php:57 | uri=/admin/dashboard.php
+[2026-09-02 17:43:58] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 17:57:16] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 17:57:23] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 17:58:19] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 17:58:19] [security] CSRF token rejected | uri=/checkout.php
+[2026-09-02 17:58:57] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 17:58:57] [uncaught] Error: Call to undefined function sh_notify() in /home/user/shop/includes/payment.php:297 | uri=/admin/payments.php?id=1
+[2026-09-02 17:58:57] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-02 17:58:57] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 18:00:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:00:18] [admin] Payment #2 approved by admin@shophaat.test | uri=/admin/payments.php?id=2
+[2026-09-02 18:00:18] [security] CSRF token rejected | uri=/admin/payments.php?id=2
+[2026-09-02 18:00:18] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 18:00:41] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:00:41] [admin] Payment #3 approved by admin@shophaat.test | uri=/admin/payments.php?id=3
+[2026-09-02 18:00:41] [security] CSRF token rejected | uri=/admin/payments.php?id=3
+[2026-09-02 18:00:41] [admin] Order SH26090200003 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=3
+[2026-09-02 18:00:41] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 18:02:18] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:02:21] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:02:45] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:04:56] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:06:49] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:06:50] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:06:50] [admin] Payment #4 approved by admin@shophaat.test | uri=/admin/payments.php?id=4
+[2026-09-02 18:06:50] [security] CSRF token rejected | uri=/admin/payments.php?id=4
+[2026-09-02 18:06:50] [admin] Order SH26090200004 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=4
+[2026-09-02 18:06:50] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 18:08:05] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:08:06] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 18:08:06] [admin] Payment #5 approved by admin@shophaat.test | uri=/admin/payments.php?id=5
+[2026-09-02 18:08:06] [security] CSRF token rejected | uri=/admin/payments.php?id=5
+[2026-09-02 18:08:06] [admin] Order SH26090200005 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=5
+[2026-09-02 18:08:06] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 18:08:48] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 19:16:26] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 19:16:30] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
+[2026-09-02 19:16:30] [admin] Payment #1 approved by admin@shophaat.test | uri=/admin/payments.php?id=1
+[2026-09-02 19:16:30] [security] CSRF token rejected | uri=/admin/payments.php?id=1
+[2026-09-02 19:16:30] [admin] Order SH26090200001 status -> completed by admin@shophaat.test | uri=/admin/orders.php?id=1
+[2026-09-02 19:16:30] [security] CSRF token rejected | uri=/api/cart.php
+[2026-09-02 19:24:12] [security] Admin signed in: admin@shophaat.test | uri=/admin/login.php
