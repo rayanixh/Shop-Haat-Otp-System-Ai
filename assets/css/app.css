@@ -1082,8 +1082,8 @@ body.sh-modal-open { overflow: hidden; }
 
 
 .sh-chanrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
-.sh-chancard { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0;
-  border: 1px solid var(--sh-line); border-radius: 9px; padding: 13px; background: #fff;
+.sh-chancard { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
+  border: 1px solid var(--sh-line); border-radius: 9px; padding: 11px 12px; background: #fff;
   transition: border-color .15s ease, box-shadow .15s ease; }
 .sh-chancard:hover { border-color: var(--sh-brand); box-shadow: 0 2px 10px rgba(20,25,40,.07); }
 .sh-chancard__head { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
@@ -1341,6 +1341,9 @@ body.sh-modal-open { overflow: hidden; }
   .sh-admin-body .sh-table:not([data-no-cards]), .sh-admin-body .sh-table:not([data-no-cards]) tbody,
   .sh-admin-body .sh-table:not([data-no-cards]) tr, .sh-admin-body .sh-table:not([data-no-cards]) td,
   .sh-admin-body .sh-table:not([data-no-cards]) th { display: block; width: 100%; box-sizing: border-box; }
+  /* width:auto (not 100%) so the row's side margins inset it INSIDE the card
+     instead of pushing it past the card edge. */
+  .sh-admin-body .sh-table:not([data-no-cards]) tbody tr { width: auto; }
   .sh-admin-body .sh-table:not([data-no-cards]) tbody tr { border: 1px solid var(--sh-line); border-radius: 10px; margin: 10px 10px; background: #fff; padding: 4px 0; }
   .sh-admin-body .sh-table:not([data-no-cards]) tbody tr:hover { background: #fff; }
   .sh-admin-body .sh-table:not([data-no-cards]) td, .sh-admin-body .sh-table:not([data-no-cards]) tbody th { border: 0; border-bottom: 1px solid var(--sh-line-2); padding: 8px 12px; text-align: left !important; white-space: normal; width: auto !important; max-width: none; }
@@ -1350,7 +1353,7 @@ body.sh-modal-open { overflow: hidden; }
   .sh-admin-body .sh-table td:empty { display: none; }
   .sh-admin-body .sh-table__actions, .sh-admin-body .sh-table .sh-actions { justify-content: flex-start; flex-wrap: wrap; }
   .sh-admin-body .sh-table .sh-btn--sm { min-height: 36px; }
-  .sh-admin-body .sh-table tr.sh-table--empty td { text-align: center !important; padding: 26px 12px; }
+  .sh-admin-body .sh-table tr.sh-table--empty td { text-align: center !important; padding: 18px 12px; }
   .sh-admin-body .sh-table tr.sh-table--empty td::before { display: none; }
   .sh-admin-body .sh-table .sh-table__cell { align-items: flex-start; }
   .sh-admin-body .sh-table[data-no-cards] { min-width: 560px; }
@@ -1885,21 +1888,23 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
    inside its own cell instead of pushing the layout wider.
    -------------------------------------------------------------------------- */
 .sh-mx-panel { container-type: inline-size; }
-.sh-mx__note { margin: 0 0 12px; font-size: 12.5px; line-height: 1.4; color: var(--sh-muted); }
+.sh-mx__note { margin: 0 0 10px; font-size: 12.5px; line-height: 1.45; color: var(--sh-muted); }
 .sh-mx { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; background: #fff;
   border: 1px solid var(--sh-line); border-radius: 9px; }
 .sh-mx__head { display: none; }
-.sh-mx__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 0;
-  min-width: 0; box-sizing: border-box; padding: 9px 12px 6px; border-bottom: 1px solid var(--sh-line-2); }
-.sh-mx__row:last-child { border-bottom: 0; }
-.sh-mx__event { grid-column: 1 / -1; min-width: 0; padding: 0 0 6px; font-size: 13.5px; font-weight: 600; line-height: 1.3;
-  color: var(--sh-ink); overflow-wrap: anywhere; }
-.sh-mx__ch { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; min-height: 32px; padding: 3px 0; }
-.sh-mx__name { min-width: 0; font-size: 13px; font-weight: 500; line-height: 1.25; color: var(--sh-ink-2); overflow-wrap: anywhere; }
+/* Mobile / narrow: compact event block — title on its own full-width line,
+   then a tight 2×2 grid of channel name + toggle. Two rows per event only. */
+.sh-mx__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 2px;
+  min-width: 0; box-sizing: border-box; padding: 7px 12px 4px; border-bottom: 1px solid var(--sh-line-2); }
+.sh-mx__row:last-child { border-bottom: 0; border-radius: 0 0 8px 8px; }
+.sh-mx__event { grid-column: 1 / -1; min-width: 0; padding: 0 0 4px; font-size: 13.5px; font-weight: 600; line-height: 1.3;
+  color: var(--sh-ink); overflow-wrap: break-word; }
+.sh-mx__ch { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 3px 0; }
+.sh-mx__name { min-width: 0; font-size: 13px; font-weight: 500; line-height: 1.25; color: var(--sh-ink-2); overflow-wrap: break-word; }
 .sh-mx__toggle { display: inline-flex; flex: 0 0 auto; margin: 0; }
 .sh-mx__toggle .sh-toggle__track { flex: 0 0 auto; }
 
-.sh-mx__save { margin-top: 14px; display: flex; justify-content: flex-end; min-width: 0; }
+.sh-mx__save { margin-top: 12px; display: flex; justify-content: flex-end; min-width: 0; }
 .sh-mx__save .sh-btn { min-height: 38px; padding-left: 18px; padding-right: 18px; }
 
 /* Very narrow matrix: one channel per line. */
@@ -1910,17 +1915,20 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 @container (max-width: 639px) {
   .sh-mx__save .sh-btn { width: 100%; justify-content: center; }
 }
-/* Wide matrix: header + one aligned row per event. */
+/* Wide matrix: header + exactly one aligned row per event. The event track is
+   wide enough that every event name stays on a single line down to the
+   640px switch point, and every channel track is at least as wide as its
+   header label and toggle, so nothing wraps or overflows. */
 @container (min-width: 640px) {
-  .sh-mx__head, .sh-mx__row { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(4, minmax(0, 1fr));
-    column-gap: 16px; align-items: center; padding: 0 16px; }
+  .sh-mx__head, .sh-mx__row { display: grid; grid-template-columns: minmax(150px, 2fr) repeat(4, minmax(88px, 1fr));
+    column-gap: 14px; align-items: center; padding: 0 14px; }
   .sh-mx__head { min-height: 38px; background: #fafbfc; border-bottom: 1px solid var(--sh-line); border-radius: 8px 8px 0 0; }
   .sh-mx__h { min-width: 0; padding: 9px 0; font-size: 11px; font-weight: 700; line-height: 1.2; letter-spacing: .5px;
     text-transform: uppercase; color: var(--sh-muted); text-align: left; }
-  .sh-mx__row { min-height: 48px; padding: 0 16px; }
+  .sh-mx__row { min-height: 48px; }
   .sh-mx__row:hover { background: #fcfcfd; }
   .sh-mx__event { grid-column: auto; padding: 10px 0; }
-  .sh-mx__ch { justify-content: flex-start; gap: 0; min-height: 0; padding: 8px 0; }
+  .sh-mx__ch { justify-content: flex-start; gap: 0; padding: 8px 0; }
   .sh-mx__name { display: none; }
 }
 
