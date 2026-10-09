@@ -1,264 +1,205 @@
 <?php
-/**
- * Admin — Notification Channels.
- *
- * Event & channel matrix (per-event, per-channel switches), channel readiness
- * status and the delivery log. Uses the existing notification engine tables and
- * helpers; this page only renders and saves the switch preferences.
- */
 declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/admin-auth.php';
-require_once SH_ROOT . '/includes/admin-tools.php';
-require_once SH_ROOT . '/includes/admin-perms.php';
 require_once SH_ROOT . '/includes/notifications.php';
 
 sh_session_start();
-$admin = sh_require_admin();
+sh_require_admin();
+require_once SH_ROOT . '/includes/admin-perms.php';
 sh_require_perm('integrations.manage');
-
-const SH_CHANNEL_LABELS = [
-    'telegram'  => 'Telegram',
-    'whatsapp'  => 'WhatsApp',
-    'messenger' => 'Messenger',
-    'email'     => 'Email',
-];
-const SH_CHANNEL_ICONS = [
-    'telegram'  => 'message',
-    'whatsapp'  => 'message',
-    'messenger' => 'message',
-    'email'     => 'mail',
-];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
-    $form = sh_post('form');
-
-    if ($form === 'save') {
-        $old = sh_notification_matrix();
-        $posted = $_POST['m'] ?? [];
-        $posted = is_array($posted) ? $posted : [];
-        $new = [];
+    if (sh_post('form') === 'matrix') {
+        $on = $_POST['on'] ?? [];
+        $on = is_array($on) ? $on : [];
         try {
-            foreach (SH_CHANNELS as $channel) {
-                foreach (array_keys(SH_EVENTS) as $event) {
-                    $on = isset($posted[$channel][$event]) ? 1 : 0;
-                    sh_query(
-                        'INSERT INTO notifications (channel, event, enabled) VALUES (?, ?, ?) '
-                        . 'ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)',
-                        [$channel, $event, $on]
-                    );
-                    $new[$channel][$event] = $on === 1;
+            foreach (SH_EVENTS as $event) {
+                foreach (SH_CHANNELS as $channel) {
+                    $enabled = isset($on[$event][$channel]) ? 1 : 0;
+                    $exists = sh_one('SELECT id FROM notifications WHERE event = ? AND channel = ? LIMIT 1', [$event, $channel]);
+                    if ($exists) { sh_query('UPDATE notifications SET enabled = ? WHERE id = ?', [$enabled, (int)$exists['id']]); }
+                    else { sh_insert('notifications', ['event' => $event, 'channel' => $channel, 'enabled' => $enabled]); }
                 }
             }
-            $oldA = [];
-            $newA = [];
-            foreach (SH_CHANNELS as $channel) {
-                foreach (SH_EVENTS as $event => $label) {
-                    $key = $channel . '.' . $event;
-                    $oldA[$key] = !empty($old[$channel][$event]) ? 'on' : 'off';
-                    $newA[$key] = !empty($new[$channel][$event]) ? 'on' : 'off';
-                }
-            }
-            if ($oldA !== $newA) {
-                sh_audit('settings_changed', 'settings', null, 'notification_matrix', $oldA, $newA);
-            }
+            sh_log_line('admin', 'Notification matrix updated');
             sh_flash('success', 'Notification preferences saved.');
         } catch (Throwable $e) {
-            sh_log_exception($e, 'notify-save');
-            sh_flash('error', 'The preferences could not be saved. Please try again.');
+            sh_log_exception($e, 'notif-matrix');
+            sh_flash('error', 'The preferences could not be saved.');
         }
         sh_redirect('admin/notifications.php');
     }
-
-    if ($form === 'prune') {
-        $days = in_array((int)($_POST['days'] ?? 30), [7, 30, 90], true) ? (int)$_POST['days'] : 30;
-        try {
-            $n = sh_query('DELETE FROM notification_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)', [$days])->rowCount();
-            sh_audit('notification_logs_pruned', 'settings', null, 'Entries older than ' . $days . ' days', null, ['deleted' => $n]);
-            sh_flash('success', number_format($n) . ' log entries older than ' . $days . ' days were deleted.');
-        } catch (Throwable $e) {
-            sh_log_exception($e, 'notify-prune');
-            sh_flash('error', 'The old entries could not be deleted.');
-        }
+    if (sh_post('form') === 'clear_log') {
+        sh_query('DELETE FROM notification_logs WHERE created_at < ?', [date('Y-m-d H:i:s', time() - 30 * 86400)]);
+        sh_flash('success', 'Log entries older than 30 days were removed.');
         sh_redirect('admin/notifications.php');
     }
 }
 
-// ---- Matrix state -----------------------------------------------------------
-$matrix = sh_notification_matrix();
+$matrix = [];
+foreach (sh_all('SELECT event, channel, enabled FROM notifications') as $r) {
+    $matrix[$r['event']][$r['channel']] = (int)$r['enabled'] === 1;
+}
 
-// ---- Channel readiness (mirrors the checks in the send functions) -----------
-$ready = [
-    'telegram'  => (string)sh_setting('telegram_enabled', '0') === '1'
-        && trim((string)sh_setting('telegram_bot_token', '')) !== ''
-        && trim((string)sh_setting('telegram_chat_id', '')) !== '',
-    'whatsapp'  => (string)sh_setting('whatsapp_enabled', '0') === '1'
-        && trim((string)sh_setting('whatsapp_phone_id', '')) !== ''
-        && trim((string)sh_setting('whatsapp_token', '')) !== ''
-        && trim((string)sh_setting('whatsapp_recipient', '')) !== '',
-    'messenger' => (string)sh_setting('messenger_enabled', '0') === '1'
-        && trim((string)sh_setting('messenger_token', '')) !== ''
-        && trim((string)sh_setting('messenger_recipient', '')) !== '',
-    'email'     => (function (): bool {
-        $to = trim((string)sh_setting('admin_notify_email', (string)sh_setting('contact_email', '')));
-        return $to !== '' && sh_valid_email($to);
-    })(),
+$channelState = [
+    'telegram'  => sh_setting('telegram_enabled', '0') === '1' && (string)sh_setting('telegram_bot_token', '') !== '' && (string)sh_setting('telegram_chat_id', '') !== '',
+    'whatsapp'  => sh_setting('whatsapp_enabled', '0') === '1' && (string)sh_setting('whatsapp_token', '') !== '',
+    'messenger' => sh_setting('messenger_enabled', '0') === '1' && (string)sh_setting('messenger_token', '') !== '',
+    'email'     => sh_setting('email_enabled', '0') === '1' && (string)sh_setting('admin_notify_email', '') !== '',
+];
+$channelPage = ['telegram' => 'telegram.php', 'whatsapp' => 'whatsapp.php', 'messenger' => 'messenger.php', 'email' => 'email.php'];
+$eventLabels = [
+    'order_created' => 'New order placed',
+    'payment_submitted' => 'Customer submitted a payment',
+    'payment_approved' => 'Payment approved',
+    'payment_rejected' => 'Payment rejected',
+    'order_processing' => 'Order moved to processing',
+    'order_completed' => 'Order completed',
+    'code_delivered' => 'Digital code delivered',
+    'low_stock' => 'Product stock running low',
 ];
 
-// ---- Delivery log -----------------------------------------------------------
 $fChannel = sh_get('channel');
 $fStatus = sh_get('status');
-if (!in_array($fChannel, SH_CHANNELS, true)) { $fChannel = ''; }
-if (!in_array($fStatus, ['sent', 'failed', 'skipped'], true)) { $fStatus = ''; }
-
-$logWhere = ['1=1'];
-$logArgs = [];
-if ($fChannel !== '') { $logWhere[] = 'channel = ?'; $logArgs[] = $fChannel; }
-if ($fStatus !== '') { $logWhere[] = 'status = ?'; $logArgs[] = $fStatus; }
-$logWhereSql = implode(' AND ', $logWhere);
-
-$logTotal = (int)sh_val('SELECT COUNT(*) FROM notification_logs', [], 0);
+$page = max(1, sh_int($_GET['page'] ?? 1));
+$per = 30;
+$where = ['1=1']; $args = [];
+if (in_array($fChannel, SH_CHANNELS, true)) { $where[] = 'channel = ?'; $args[] = $fChannel; }
+if (in_array($fStatus, ['sent', 'failed', 'skipped'], true)) { $where[] = 'status = ?'; $args[] = $fStatus; }
+$whereSql = implode(' AND ', $where);
+$logTotal = (int)sh_val("SELECT COUNT(*) FROM notification_logs WHERE $whereSql", $args, 0);
+$logPages = max(1, (int)ceil($logTotal / $per));
+$page = min($page, $logPages);
 $logs = sh_all(
-    "SELECT * FROM notification_logs WHERE $logWhereSql ORDER BY id DESC LIMIT 100",
-    $logArgs
+    "SELECT l.*, o.order_number FROM notification_logs l
+     LEFT JOIN orders o ON o.id = l.order_id
+     WHERE $whereSql ORDER BY l.id DESC LIMIT $per OFFSET " . (($page - 1) * $per),
+    $args
 );
 
 $adminPage = 'notifications';
-$adminTitle = 'Notification Channels';
+$adminTitle = 'Notifications';
 require __DIR__ . '/_layout.php';
 ?>
-<form method="post" class="sh-panel sh-mx-panel" id="notification-matrix">
-  <?= sh_csrf_field() ?>
-  <input type="hidden" name="form" value="save">
+<div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('bell', 17) ?> Event &amp; channel matrix</h2>
+    <h2 class="sh-panel__title"><?= sh_icon('bell', 17) ?> Channel status</h2>
   </div>
-  <div class="sh-panel__body">
-    <p class="sh-mx__note">Choose which channels receive each notification.</p>
-
-    <div class="sh-mx">
-      <div class="sh-mx__head" aria-hidden="true">
-        <div class="sh-mx__h sh-mx__h--event">Event</div>
-        <?php foreach (SH_CHANNELS as $channel): ?>
-          <div class="sh-mx__h"><?= e(SH_CHANNEL_LABELS[$channel]) ?></div>
-        <?php endforeach; ?>
-      </div>
-
-      <?php foreach (SH_EVENTS as $event => $eventLabel): ?>
-        <div class="sh-mx__row">
-          <div class="sh-mx__event"><?= e($eventLabel) ?></div>
-          <?php foreach (SH_CHANNELS as $channel):
-            $on = !empty($matrix[$channel][$event]);
-            $fid = 'mx-' . $channel . '-' . $event;
-          ?>
-            <div class="sh-mx__ch">
-              <span class="sh-mx__name"><?= e(SH_CHANNEL_LABELS[$channel]) ?></span>
-              <label class="sh-toggle sh-mx__toggle" for="<?= e($fid) ?>">
-                <input type="checkbox" id="<?= e($fid) ?>" name="m[<?= e($channel) ?>][<?= e($event) ?>]" value="1" <?= $on ? 'checked' : '' ?>>
-                <span class="sh-toggle__track"></span>
-                <span class="sh-sr-only"><?= e($eventLabel . ' via ' . SH_CHANNEL_LABELS[$channel]) ?></span>
-              </label>
-            </div>
-          <?php endforeach; ?>
-        </div>
-      <?php endforeach; ?>
-    </div>
-
-    <div class="sh-mx__save">
-      <button class="sh-btn" type="submit">Save preferences</button>
-    </div>
-  </div>
-</form>
-
-<div class="sh-panel sh-chan-panel">
-  <div class="sh-panel__head">
-    <h2 class="sh-panel__title">Channel status</h2>
-  </div>
-  <div class="sh-panel__body">
-    <div class="sh-chanrow">
-      <?php foreach (SH_CHANNELS as $channel): ?>
-        <div class="sh-chancard">
-          <div class="sh-chancard__head">
-            <?= sh_icon(SH_CHANNEL_ICONS[$channel], 15) ?>
-            <span class="sh-chancard__name"><?= e(SH_CHANNEL_LABELS[$channel]) ?></span>
-          </div>
-          <span class="sh-statuspill <?= $ready[$channel] ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>"><?= $ready[$channel] ? 'Configured' : 'Not configured' ?></span>
-        </div>
-      <?php endforeach; ?>
-    </div>
+  <div class="sh-panel__body sh-chanrow">
+    <?php foreach ($channelState as $ch => $ready): ?>
+      <a class="sh-chancard" href="<?= e(sh_url('admin/' . $channelPage[$ch])) ?>">
+        <span class="sh-chancard__head">
+          <?= sh_icon($ch === 'email' ? 'mail' : ($ch === 'telegram' ? 'send' : 'message'), 16) ?>
+          <span class="sh-chancard__name"><?= e(ucfirst($ch)) ?></span>
+        </span>
+        <span class="sh-statuspill <?= $ready ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>">
+          <?= $ready ? 'Active' : 'Not configured' ?></span>
+      </a>
+    <?php endforeach; ?>
   </div>
 </div>
 
-<div class="sh-panel" id="delivery-log">
-  <div class="sh-panel__head sh-panel__head--wrap">
-    <h2 class="sh-panel__title">Delivery log (<?= number_format($logTotal) ?>)</h2>
-    <form method="post" class="sh-inline-form sh-log-prune" data-confirm="Delete delivery log entries older than the selected period? This cannot be undone.">
-      <?= sh_csrf_field() ?>
-      <input type="hidden" name="form" value="prune">
-      <select class="sh-select sh-select--sm" name="days" aria-label="Age of entries to prune">
-        <option value="7">older than 7 days</option>
-        <option value="30" selected>older than 30 days</option>
-        <option value="90">older than 90 days</option>
-      </select>
-      <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= sh_icon('trash', 14) ?> Prune old entries</button>
-    </form>
+<div class="sh-panel">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('sliders', 17) ?> Event and channel matrix</h2>
   </div>
   <div class="sh-panel__body">
-    <form class="sh-filterbar sh-log-filter" method="get">
-      <div class="sh-field">
-        <label class="sh-field__label" for="f-channel">Channel</label>
-        <select class="sh-select" id="f-channel" name="channel">
-          <option value="">All</option>
-          <?php foreach (SH_CHANNELS as $channel): ?>
-            <option value="<?= e($channel) ?>" <?= $fChannel === $channel ? 'selected' : '' ?>><?= e(SH_CHANNEL_LABELS[$channel]) ?></option>
+    <p class="sh-panel__note" style="margin-bottom:12px">
+      Choose which channels receive which events. A channel that is switched off or not configured is skipped and recorded
+      in the log — an order is never blocked or failed because a notification could not be sent.
+    </p>
+    <form method="post">
+      <?= sh_csrf_field() ?>
+      <input type="hidden" name="form" value="matrix">
+      <div class="sh-tablewrap">
+        <table class="sh-matrix">
+          <thead>
+            <tr><th>Event</th>
+              <?php foreach (SH_CHANNELS as $ch): ?>
+                <th><?= e(ucfirst($ch)) ?><?php if (!$channelState[$ch]): ?><br><span style="font-weight:400;text-transform:none;letter-spacing:0">not configured</span><?php endif; ?></th>
+              <?php endforeach; ?>
+            </tr>
+          </thead>
+          <tbody>
+          <?php foreach (SH_EVENTS as $event): ?>
+            <tr>
+              <td><?= e($eventLabels[$event] ?? str_replace('_', ' ', $event)) ?></td>
+              <?php foreach (SH_CHANNELS as $ch): ?>
+                <td>
+                  <label class="sh-toggle">
+                    <input type="checkbox" name="on[<?= e($event) ?>][<?= e($ch) ?>]" value="1"
+                           <?= !empty($matrix[$event][$ch]) ? 'checked' : '' ?>>
+                    <span class="sh-toggle__track"></span>
+                    <span class="sh-sr-only"><?= e($event . ' ' . $ch) ?></span>
+                  </label>
+                </td>
+              <?php endforeach; ?>
+            </tr>
           <?php endforeach; ?>
-        </select>
+          </tbody>
+        </table>
       </div>
-      <div class="sh-field">
-        <label class="sh-field__label" for="f-status">Status</label>
-        <select class="sh-select" id="f-status" name="status">
-          <option value="">All</option>
-          <?php foreach (['sent' => 'Sent', 'failed' => 'Failed', 'skipped' => 'Skipped'] as $v => $l): ?>
-            <option value="<?= e($v) ?>" <?= $fStatus === $v ? 'selected' : '' ?>><?= e($l) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <button class="sh-btn sh-btn--ghost" type="submit"><?= sh_icon('search', 14) ?> Filter</button>
+      <button class="sh-btn" style="margin-top:14px" type="submit"><?= sh_icon('check-circle', 15) ?> Save preferences</button>
     </form>
   </div>
+</div>
 
-  <div class="sh-table-wrap sh-log-wrap">
-    <table class="sh-table sh-log-table">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Channel</th>
-          <th>Event</th>
-          <th>Recipient</th>
-          <th>Status</th>
-          <th>Details</th>
-        </tr>
-      </thead>
+<div class="sh-panel" id="log">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('list', 17) ?> Delivery log (<?= number_format($logTotal) ?>)</h2>
+    <div class="sh-panel__actions">
+      <form method="post" data-confirm="Delete log entries older than 30 days?">
+        <?= sh_csrf_field() ?><input type="hidden" name="form" value="clear_log">
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= sh_icon('trash', 14) ?> Prune old entries</button>
+      </form>
+    </div>
+  </div>
+  <div class="sh-panel__body" style="padding-bottom:0">
+    <form class="sh-filterbar" method="get">
+      <div class="sh-field"><label class="sh-field__label" for="f-ch">Channel</label>
+        <select class="sh-select" id="f-ch" name="channel">
+          <option value="">All</option>
+          <?php foreach (SH_CHANNELS as $ch): ?>
+            <option value="<?= e($ch) ?>" <?= $fChannel === $ch ? 'selected' : '' ?>><?= e(ucfirst($ch)) ?></option>
+          <?php endforeach; ?>
+        </select></div>
+      <div class="sh-field"><label class="sh-field__label" for="f-st">Status</label>
+        <select class="sh-select" id="f-st" name="status">
+          <option value="">All</option>
+          <?php foreach (['sent', 'failed', 'skipped'] as $s): ?>
+            <option value="<?= e($s) ?>" <?= $fStatus === $s ? 'selected' : '' ?>><?= e(ucfirst($s)) ?></option>
+          <?php endforeach; ?>
+        </select></div>
+      <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('filter', 14) ?> Filter</button>
+      <?php if ($fChannel !== '' || $fStatus !== ''): ?>
+        <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/notifications.php')) ?>">Reset</a><?php endif; ?>
+    </form>
+  </div>
+  <div class="sh-tablewrap">
+    <table class="sh-table">
+      <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead>
       <tbody>
-      <?php if (!$logs): ?>
-        <tr class="sh-table--empty"><td colspan="6">No log entries.</td></tr>
-      <?php else: foreach ($logs as $r):
-        $label = SH_EVENTS[$r['event']] ?? ucwords(str_replace('_', ' ', (string)$r['event']));
-        $statusCls = $r['status'] === 'sent' ? 'sh-badge--ok' : ($r['status'] === 'failed' ? 'sh-badge--bad' : 'sh-badge--muted');
-      ?>
+      <?php if (!$logs): ?><tr class="sh-table--empty"><td colspan="6">No log entries.</td></tr>
+      <?php else: foreach ($logs as $l): ?>
         <tr>
-          <td class="sh-table__meta" data-label="Time"><?= e(date('d M Y H:i', strtotime((string)$r['created_at']))) ?></td>
-          <td data-label="Channel"><?= e(SH_CHANNEL_LABELS[$r['channel']] ?? ucfirst((string)$r['channel'])) ?></td>
-          <td data-label="Event"><?= e($label) ?></td>
-          <td class="sh-table__meta" data-label="Recipient"><?= e((string)($r['recipient'] ?? '')) ?: '—' ?></td>
-          <td data-label="Status"><span class="sh-badge <?= $statusCls ?>"><?= e(ucfirst((string)$r['status'])) ?></span></td>
-          <td class="sh-table__meta" data-label="Details"><?= e((string)($r['error_message'] ?? '')) ?: '—' ?></td>
+          <td><?php if ($l['order_number']): ?>
+            <a href="<?= e(sh_url('admin/orders.php?id=' . (int)$l['order_id'])) ?>"><?= e($l['order_number']) ?></a>
+          <?php else: ?><span class="sh-table__meta">—</span><?php endif; ?></td>
+          <td><?= e(str_replace('_', ' ', $l['event'])) ?></td>
+          <td><?= e(ucfirst($l['channel'])) ?></td>
+          <td><span class="sh-badge <?= $l['status'] === 'sent' ? 'sh-badge--ok' : ($l['status'] === 'failed' ? 'sh-badge--bad' : '') ?>"><?= e($l['status']) ?></span></td>
+          <td class="sh-table__meta" style="max-width:360px"><?= e((string)($l['error_message'] ?? '')) ?></td>
+          <td class="sh-table__meta"><?= e(date('d M, H:i', strtotime($l['created_at']))) ?></td>
         </tr>
       <?php endforeach; endif; ?>
       </tbody>
     </table>
   </div>
+  <?php if ($logPages > 1): ?>
+    <div class="sh-panel__body"><?= sh_paginate($logTotal, $per, $page, sh_url('admin/notifications.php') . '?' . http_build_query(array_diff_key($_GET, ['page' => 1]))) ?></div>
+  <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_footer.php'; ?>

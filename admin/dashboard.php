@@ -98,7 +98,7 @@ require __DIR__ . '/_layout.php';
         <thead><tr><th>Period</th><th>Revenue</th><th>Orders</th><th>Completed</th><th>Cancelled</th></tr></thead>
         <tbody>
         <?php foreach ($periods as $label => $p): ?>
-          <tr><td data-label="Period"><strong><?= e($label) ?></strong></td><td data-label="Revenue"><?= e(sh_money($p['revenue'])) ?></td><td data-label="Orders"><?= number_format($p['orders']) ?></td><td data-label="Completed"><?= number_format($p['completed']) ?></td><td data-label="Cancelled"><?= number_format($p['cancelled']) ?></td></tr>
+          <tr><td><strong><?= e($label) ?></strong></td><td><?= e(sh_money($p['revenue'])) ?></td><td><?= number_format($p['orders']) ?></td><td><?= number_format($p['completed']) ?></td><td><?= number_format($p['cancelled']) ?></td></tr>
         <?php endforeach; ?>
         </tbody>
       </table>
