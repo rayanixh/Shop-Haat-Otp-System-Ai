@@ -1,0 +1,32 @@
+# ShopHaat — Apache settings (mod_php hosts).
+#
+# The upload limits below are wrapped in <IfModule> guards so this file is
+# harmless — never a 500 — on hosts where PHP runs as FPM/CGI or LiteSpeed,
+# where the php_value directive does not exist. Those hosts read the matching
+# .user.ini instead. If Apache is configured with AllowOverride None this file
+# is ignored entirely.
+
+<IfModule mod_php.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
+<IfModule mod_php7.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
+<IfModule mod_php8.c>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
+<IfModule php_module>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
+<IfModule php7_module>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
+<IfModule php8_module>
+  php_value upload_max_filesize 64M
+  php_value post_max_size 68M
+</IfModule>
