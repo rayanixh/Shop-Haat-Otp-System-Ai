@@ -50,17 +50,13 @@ $channelState = [
     'messenger' => sh_setting('messenger_enabled', '0') === '1' && (string)sh_setting('messenger_token', '') !== '',
     'email'     => sh_setting('email_enabled', '0') === '1' && (string)sh_setting('admin_notify_email', '') !== '',
 ];
-$channelPage = ['telegram' => 'telegram.php', 'whatsapp' => 'whatsapp.php', 'messenger' => 'messenger.php', 'email' => 'email.php'];
-$eventLabels = [
-    'order_created' => 'New order placed',
-    'payment_submitted' => 'Customer submitted a payment',
-    'payment_approved' => 'Payment approved',
-    'payment_rejected' => 'Payment rejected',
-    'order_processing' => 'Order moved to processing',
-    'order_completed' => 'Order completed',
-    'code_delivered' => 'Digital code delivered',
-    'low_stock' => 'Product stock running low',
+$channelLabels = [
+    'telegram' => 'Telegram',
+    'whatsapp' => 'WhatsApp',
+    'messenger' => 'Messenger',
+    'email' => 'Email',
 ];
+$channelPage = ['telegram' => 'telegram.php', 'whatsapp' => 'whatsapp.php', 'messenger' => 'messenger.php', 'email' => 'email.php'];
 
 $fChannel = sh_get('channel');
 $fStatus = sh_get('status');
@@ -84,7 +80,7 @@ $adminPage = 'notifications';
 $adminTitle = 'Notifications';
 require __DIR__ . '/_layout.php';
 ?>
-<div class="sh-panel">
+<div class="sh-panel sh-notif-status">
   <div class="sh-panel__head">
     <h2 class="sh-panel__title"><?= sh_icon('bell', 17) ?> Channel status</h2>
   </div>
@@ -93,7 +89,7 @@ require __DIR__ . '/_layout.php';
       <a class="sh-chancard" href="<?= e(sh_url('admin/' . $channelPage[$ch])) ?>">
         <span class="sh-chancard__head">
           <?= sh_icon($ch === 'email' ? 'mail' : ($ch === 'telegram' ? 'send' : 'message'), 16) ?>
-          <span class="sh-chancard__name"><?= e(ucfirst($ch)) ?></span>
+          <span class="sh-chancard__name"><?= e($channelLabels[$ch] ?? ucfirst($ch)) ?></span>
         </span>
         <span class="sh-statuspill <?= $ready ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>">
           <?= $ready ? 'Active' : 'Not configured' ?></span>
@@ -102,52 +98,49 @@ require __DIR__ . '/_layout.php';
   </div>
 </div>
 
-<div class="sh-panel">
+<div class="sh-panel sh-mx-panel">
   <div class="sh-panel__head">
     <h2 class="sh-panel__title"><?= sh_icon('sliders', 17) ?> Event and channel matrix</h2>
   </div>
-  <div class="sh-panel__body">
-    <p class="sh-panel__note" style="margin-bottom:12px">
-      Choose which channels receive which events. A channel that is switched off or not configured is skipped and recorded
-      in the log — an order is never blocked or failed because a notification could not be sent.
-    </p>
-    <form method="post">
+  <div class="sh-panel__body sh-mx-panel__body">
+    <p class="sh-mx__note">Choose which channels receive each notification.</p>
+    <form class="sh-mx-form" method="post">
       <?= sh_csrf_field() ?>
       <input type="hidden" name="form" value="matrix">
-      <div class="sh-tablewrap">
-        <table class="sh-matrix">
-          <thead>
-            <tr><th>Event</th>
+      <div class="sh-mx" role="table" aria-label="Notification event and channel preferences">
+        <div class="sh-mx__head" role="row">
+          <span class="sh-mx__h" role="columnheader">Event</span>
+          <?php foreach (SH_CHANNELS as $ch): ?>
+            <span class="sh-mx__h" role="columnheader"><?= e($channelLabels[$ch] ?? ucfirst($ch)) ?></span>
+          <?php endforeach; ?>
+        </div>
+        <div class="sh-mx__body" role="rowgroup">
+          <?php foreach (SH_EVENTS as $event => $eventName): ?>
+            <div class="sh-mx__row" role="row">
+              <span class="sh-mx__event" role="rowheader"><?= e($eventName) ?></span>
               <?php foreach (SH_CHANNELS as $ch): ?>
-                <th><?= e(ucfirst($ch)) ?><?php if (!$channelState[$ch]): ?><br><span style="font-weight:400;text-transform:none;letter-spacing:0">not configured</span><?php endif; ?></th>
-              <?php endforeach; ?>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach (SH_EVENTS as $event): ?>
-            <tr>
-              <td><?= e($eventLabels[$event] ?? str_replace('_', ' ', $event)) ?></td>
-              <?php foreach (SH_CHANNELS as $ch): ?>
-                <td>
-                  <label class="sh-toggle">
+                <div class="sh-mx__ch" role="cell">
+                  <span class="sh-mx__name" aria-hidden="true"><?= e($channelLabels[$ch] ?? ucfirst($ch)) ?></span>
+                  <label class="sh-toggle sh-mx__toggle">
                     <input type="checkbox" name="on[<?= e($event) ?>][<?= e($ch) ?>]" value="1"
                            <?= !empty($matrix[$event][$ch]) ? 'checked' : '' ?>>
-                    <span class="sh-toggle__track"></span>
-                    <span class="sh-sr-only"><?= e($event . ' ' . $ch) ?></span>
+                    <span class="sh-toggle__track" aria-hidden="true"></span>
+                    <span class="sh-sr-only"><?= e($eventName . ' — ' . ($channelLabels[$ch] ?? ucfirst($ch))) ?></span>
                   </label>
-                </td>
+                </div>
               <?php endforeach; ?>
-            </tr>
+            </div>
           <?php endforeach; ?>
-          </tbody>
-        </table>
+        </div>
       </div>
-      <button class="sh-btn" style="margin-top:14px" type="submit"><?= sh_icon('check-circle', 15) ?> Save preferences</button>
+      <div class="sh-mx__save">
+        <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save preferences</button>
+      </div>
     </form>
   </div>
 </div>
 
-<div class="sh-panel" id="log">
+<div class="sh-panel sh-notif-log" id="log">
   <div class="sh-panel__head">
     <h2 class="sh-panel__title"><?= sh_icon('list', 17) ?> Delivery log (<?= number_format($logTotal) ?>)</h2>
     <div class="sh-panel__actions">
@@ -158,12 +151,12 @@ require __DIR__ . '/_layout.php';
     </div>
   </div>
   <div class="sh-panel__body" style="padding-bottom:0">
-    <form class="sh-filterbar" method="get">
+    <form class="sh-notif-log__filters" method="get">
       <div class="sh-field"><label class="sh-field__label" for="f-ch">Channel</label>
         <select class="sh-select" id="f-ch" name="channel">
           <option value="">All</option>
           <?php foreach (SH_CHANNELS as $ch): ?>
-            <option value="<?= e($ch) ?>" <?= $fChannel === $ch ? 'selected' : '' ?>><?= e(ucfirst($ch)) ?></option>
+            <option value="<?= e($ch) ?>" <?= $fChannel === $ch ? 'selected' : '' ?>><?= e($channelLabels[$ch] ?? ucfirst($ch)) ?></option>
           <?php endforeach; ?>
         </select></div>
       <div class="sh-field"><label class="sh-field__label" for="f-st">Status</label>
@@ -173,26 +166,29 @@ require __DIR__ . '/_layout.php';
             <option value="<?= e($s) ?>" <?= $fStatus === $s ? 'selected' : '' ?>><?= e(ucfirst($s)) ?></option>
           <?php endforeach; ?>
         </select></div>
-      <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('filter', 14) ?> Filter</button>
-      <?php if ($fChannel !== '' || $fStatus !== ''): ?>
-        <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/notifications.php')) ?>">Reset</a><?php endif; ?>
+      <div class="sh-notif-log__actions">
+        <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('filter', 14) ?> Filter</button>
+        <?php if ($fChannel !== '' || $fStatus !== ''): ?>
+          <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/notifications.php')) ?>">Reset</a>
+        <?php endif; ?>
+      </div>
     </form>
   </div>
   <div class="sh-tablewrap">
-    <table class="sh-table">
+    <table class="sh-table sh-notif-log__table">
       <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead>
       <tbody>
       <?php if (!$logs): ?><tr class="sh-table--empty"><td colspan="6">No log entries.</td></tr>
       <?php else: foreach ($logs as $l): ?>
         <tr>
-          <td><?php if ($l['order_number']): ?>
+          <td data-label="Order"><?php if ($l['order_number']): ?>
             <a href="<?= e(sh_url('admin/orders.php?id=' . (int)$l['order_id'])) ?>"><?= e($l['order_number']) ?></a>
           <?php else: ?><span class="sh-table__meta">—</span><?php endif; ?></td>
-          <td><?= e(str_replace('_', ' ', $l['event'])) ?></td>
-          <td><?= e(ucfirst($l['channel'])) ?></td>
-          <td><span class="sh-badge <?= $l['status'] === 'sent' ? 'sh-badge--ok' : ($l['status'] === 'failed' ? 'sh-badge--bad' : '') ?>"><?= e($l['status']) ?></span></td>
-          <td class="sh-table__meta" style="max-width:360px"><?= e((string)($l['error_message'] ?? '')) ?></td>
-          <td class="sh-table__meta"><?= e(date('d M, H:i', strtotime($l['created_at']))) ?></td>
+          <td data-label="Event"><?= e(str_replace('_', ' ', $l['event'])) ?></td>
+          <td data-label="Channel"><?= e($channelLabels[$l['channel']] ?? ucfirst($l['channel'])) ?></td>
+          <td data-label="Status"><span class="sh-badge <?= $l['status'] === 'sent' ? 'sh-badge--ok' : ($l['status'] === 'failed' ? 'sh-badge--bad' : '') ?>"><?= e($l['status']) ?></span></td>
+          <td data-label="Detail" class="sh-table__meta" style="max-width:360px"><?= e((string)($l['error_message'] ?? '')) ?></td>
+          <td data-label="Time" class="sh-table__meta"><?= e(date('d M, H:i', strtotime($l['created_at']))) ?></td>
         </tr>
       <?php endforeach; endif; ?>
       </tbody>
