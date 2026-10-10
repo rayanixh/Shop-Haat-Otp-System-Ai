@@ -85,9 +85,9 @@ require_once SH_ROOT . '/includes/header.php';
       <input type="hidden" name="action" value="verify">
       <div class="sh-field">
         <label class="sh-field__label" for="otp-code">Verification code</label>
-        <input class="sh-input sh-otp__input" id="otp-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+        <input class="sh-input sh-otp__input" id="otp-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
                maxlength="<?= (int)sh_otp_length() ?>" placeholder="<?= str_repeat('•', (int)sh_otp_length()) ?>"
-               pattern="\d*" autofocus>
+               pattern="\d*" required autofocus>
         <p class="sh-field__hint">Code expires after <?= (int)ceil(sh_otp_expiry_seconds() / 60) ?> minutes.</p>
       </div>
       <button class="sh-btn sh-btn--lg sh-btn--block" type="submit"><?= sh_icon('check-circle', 16) ?> Verify code</button>

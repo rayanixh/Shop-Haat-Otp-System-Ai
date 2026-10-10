@@ -26,8 +26,13 @@ if ($order === null || !sh_order_can_view($order)) {
 
 $items = sh_order_items($orderId);
 $codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
-$isCod = false;
-if ($order['payment_method_id']) {
+// Preserve the payment method that was saved with this order. A later admin
+// edit/disable of the live method must not turn an existing COD order into an
+// online-payment prompt on refresh or reopen.
+$payment = sh_order_latest_payment($orderId);
+$isCod = (string)($payment['kind'] ?? '') === 'cod';
+if (!$isCod && $payment === null && $order['payment_method_id']) {
+    // Narrow legacy fallback for orders created before payment snapshots.
     $m = sh_one('SELECT type FROM payment_methods WHERE id = ?', [(int)$order['payment_method_id']]);
     $isCod = $m && $m['type'] === 'cod';
 }

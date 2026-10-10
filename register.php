@@ -9,8 +9,8 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 
 sh_session_start();
-$redirect = sh_get('redirect');
-if (sh_user() !== null) { sh_redirect(sh_safe_redirect($redirect, 'account.php')); }
+$redirect = sh_customer_return_target(sh_get('redirect'), '');
+if (sh_user() !== null) { sh_redirect($redirect !== '' ? $redirect : 'account.php'); }
 
 $mode = sh_auth_mode();
 
@@ -25,7 +25,7 @@ $otpMasked = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
-    $redirect = sh_post('redirect', $redirect);
+    $redirect = sh_customer_return_target(sh_post('redirect', $redirect), '');
 
     if ($mode === 'email_password') {
         $v = new ShValidator($_POST);
@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($exists) {
                     $errors['email'] = 'An account with this email address already exists.';
                 } else {
-                    $target = sh_safe_redirect($redirect, 'account.php');
+                    $target = sh_customer_return_target($redirect, 'account.php');
                     $uid = sh_insert('users', [
                         'name'          => $form['name'],
                         'email'         => $form['email'],
@@ -84,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors['phone'] = 'Please enter a valid phone number.';
             } else {
                 try {
-                    $target = sh_safe_redirect($redirect, 'account.php');
+                    $target = sh_customer_return_target($redirect, 'account.php');
                     $exists = sh_find_user_by_phone($phone);
                     if ($exists !== null) {
                         $errors['phone'] = 'An account already exists with this phone number. Please log in instead.';

@@ -61,21 +61,49 @@ try {
         $order = $orderId > 0 ? sh_order_get($orderId) : null;
         if ($order === null) { sh_json(['success' => false, 'error' => 'Order not found.'], 404); }
 
-        $reference = (string)($_REQUEST['tran_id'] ?? $_REQUEST['reference'] ?? '');
+        $reference = trim((string)($_REQUEST['tran_id'] ?? $_REQUEST['reference'] ?? ''));
         if ($reference === '') { sh_json(['success' => false, 'error' => 'Missing transaction reference.'], 400); }
 
+        // A callback is not allowed to choose an order merely by knowing its ID.
+        // A real initiator must have persisted the provider's expected reference
+        // on the selected gateway payment before redirect/webhook delivery. This
+        // codebase deliberately has no initiator yet, so an unbound callback is
+        // refused rather than using a valid payment from another order.
+        $boundPayment = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$orderId]);
+        $boundReference = trim((string)($boundPayment['gateway_reference'] ?? ''));
+        if ($boundPayment === null || (string)($boundPayment['kind'] ?? '') !== 'gateway'
+            || (int)($boundPayment['gateway_id'] ?? 0) !== (int)$gw['id']
+            || $boundReference === '' || !hash_equals($boundReference, $reference)) {
+            sh_log_line('gateway', 'Refused callback with no matching pre-bound gateway payment for order ' . $orderId . '.');
+            sh_json(['success' => false, 'error' => 'This gateway callback does not match an active payment transaction.'], 400);
+        }
+
         // Every driver MUST verify against the provider's own API before settling.
-        $verify = sh_gateway_verify($gw, $order, $_REQUEST);
+        $verify = sh_gateway_verify($gw, $order, $_REQUEST, $boundReference);
         if ($verify['status'] === 'unsupported') {
             sh_log_line('gateway', 'No verification driver available for ' . $gw['driver'] . '; refusing to settle.');
             sh_json(['success' => false, 'error' => $verify['error']], 501);
         }
+        // A transport/format/reference mismatch is not a provider-authorized
+        // rejection. Leave the payment untouched so a forged or incomplete
+        // callback cannot turn a live order into payment_rejected.
+        if (!in_array((string)($verify['status'] ?? ''), ['verified', 'declined'], true)) {
+            sh_log_line('gateway', 'Callback verification remained unconfirmed for order ' . $orderId . '.');
+            sh_json(['success' => false, 'verified' => false, 'error' => (string)($verify['error'] ?? 'Gateway verification was not confirmed.')], 400);
+        }
         $res = sh_gateway_settle($orderId, (int)$gw['id'], $reference, (array)$_REQUEST, $verify['status'] === 'verified');
+        // A duplicate callback reports the already-persisted outcome rather than
+        // the potentially contradictory retry payload from the provider.
+        $settledVerified = array_key_exists('verified', $res)
+            ? (bool)$res['verified']
+            : $verify['status'] === 'verified';
         sh_json([
             'success'   => !empty($res['ok']),
-            'verified'  => $verify['status'] === 'verified',
+            'verified'  => !empty($res['ok']) && $settledVerified,
             'duplicate' => !empty($res['duplicate']),
-            'error'     => $verify['status'] === 'verified' ? null : ($verify['error'] ?? 'Payment was not verified.'),
+            'error'     => !empty($res['ok'])
+                ? ($settledVerified ? null : ($verify['error'] ?? 'Payment was declined by the gateway.'))
+                : (string)($res['error'] ?? 'Gateway settlement could not be recorded safely.'),
         ]);
     }
 
@@ -93,7 +121,7 @@ try {
  * documentation/credentials are not wired up return 'unsupported' rather
  * than pretending the payment succeeded.
  */
-function sh_gateway_verify(array $gw, array $order, array $request): array
+function sh_gateway_verify(array $gw, array $order, array $request, string $expectedReference): array
 {
     $creds = sh_gateway_credentials($gw);
     $sandbox = $gw['mode'] === 'sandbox';
@@ -102,7 +130,7 @@ function sh_gateway_verify(array $gw, array $order, array $request): array
         case 'sslcommerz':
             // Official validation endpoint documented by SSLCommerz.
             $valId = (string)($request['val_id'] ?? '');
-            if ($valId === '') { return ['status' => 'failed', 'error' => 'Missing val_id in callback.']; }
+            if ($valId === '') { return ['status' => 'unverified', 'error' => 'Missing val_id in callback.']; }
             $base = $sandbox ? 'https://sandbox.sslcommerz.com' : 'https://securepay.sslcommerz.com';
             $url = $base . '/validator/api/validationserverAPI.php?' . http_build_query([
                 'val_id'        => $valId,
@@ -111,13 +139,26 @@ function sh_gateway_verify(array $gw, array $order, array $request): array
                 'format'        => 'json',
             ]);
             $resp = sh_http_get($url);
-            if (!$resp['ok']) { return ['status' => 'failed', 'error' => 'Validation request failed: ' . $resp['error']]; }
+            if (!$resp['ok']) { return ['status' => 'unverified', 'error' => 'Validation request failed: ' . $resp['error']]; }
             $j = json_decode($resp['body'], true);
-            if (!is_array($j)) { return ['status' => 'failed', 'error' => 'Invalid validation response.']; }
+            if (!is_array($j)) { return ['status' => 'unverified', 'error' => 'Invalid validation response.']; }
+            $returnedReference = trim((string)($j['tran_id'] ?? ''));
+            if ($returnedReference === '' || !hash_equals($expectedReference, $returnedReference)) {
+                return ['status' => 'unverified', 'error' => 'Gateway transaction reference did not match the order.'];
+            }
             $statusOk = in_array(($j['status'] ?? ''), ['VALID', 'VALIDATED'], true);
+            if (!$statusOk) {
+                // This is a genuine provider response for the pre-bound
+                // transaction, so it may safely move the payment to rejected.
+                return ['status' => 'declined', 'error' => 'Gateway reported status: ' . ($j['status'] ?? 'unknown')];
+            }
+            $currency = strtoupper(trim((string)($j['currency_type'] ?? $j['currency'] ?? '')));
+            if ($currency !== '' && $currency !== 'BDT') {
+                return ['status' => 'unverified', 'error' => 'Gateway payment currency did not match the order currency.'];
+            }
             $amountOk = abs((float)($j['amount'] ?? 0) - (float)$order['total']) < 0.51;
-            if ($statusOk && $amountOk) { return ['status' => 'verified']; }
-            return ['status' => 'failed', 'error' => $statusOk ? 'Paid amount did not match the order total.' : 'Gateway reported status: ' . ($j['status'] ?? 'unknown')];
+            if (!$amountOk) { return ['status' => 'unverified', 'error' => 'Paid amount did not match the order total.']; }
+            return ['status' => 'verified'];
 
         default:
             return [
@@ -149,7 +190,14 @@ function sh_http_get(string $url, int $timeout = 20): array
     } finally {
         restore_error_handler();
     }
-    return $body === false
-        ? ['ok' => false, 'body' => '', 'error' => 'Connection failed.']
-        : ['ok' => true, 'body' => (string)$body, 'error' => ''];
+    $code = 0;
+    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
+        $code = (int)$m[1];
+    }
+    if ($body === false) { return ['ok' => false, 'body' => '', 'error' => 'Connection failed.']; }
+    return [
+        'ok' => $code >= 200 && $code < 300,
+        'body' => (string)$body,
+        'error' => $code >= 300 ? 'HTTP ' . $code : ($code === 0 ? 'Validation response status was unavailable.' : ''),
+    ];
 }

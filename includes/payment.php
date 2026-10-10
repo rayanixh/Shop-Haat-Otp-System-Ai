@@ -49,19 +49,31 @@ function sh_payment_logo_url(array $method): string
     return '';
 }
 
+/**
+ * Is this active method genuinely usable for an order of this type?
+ * Keep this check reusable by both the checkout form and the server-side order
+ * creator so a crafted payment_method_id cannot create an unpayable order.
+ */
+function sh_payment_method_available_for_order(array $method, bool $hasPhysical = true): bool
+{
+    $type = (string)($method['type'] ?? '');
+    if (!in_array($type, ['manual', 'cod', 'gateway'], true)) { return false; }
+    if ($type === 'cod') { return $hasPhysical; } // no COD for digital-only orders
+    if ($type === 'manual') { return trim((string)($method['account_number'] ?? '')) !== ''; }
+    $gatewayId = (int)($method['gateway_id'] ?? 0);
+    $gateway = $gatewayId > 0 ? sh_gateway_by_id($gatewayId) : null;
+    return $gateway !== null
+        && (int)($gateway['status'] ?? 0) === 1
+        && sh_gateway_is_configured($gateway)
+        && sh_gateway_can_initiate($gateway);
+}
+
 /** Only methods a customer can actually complete right now. */
 function sh_payment_methods_available(bool $hasPhysical = true): array
 {
     $out = [];
     foreach (sh_payment_methods(true) as $m) {
-        if ($m['type'] === 'cod' && !$hasPhysical) { continue; } // no COD for digital-only orders
-        if ($m['type'] === 'gateway') {
-            if ((int)($m['gateway_status'] ?? 0) !== 1) { continue; }
-            $gw = sh_gateway_by_id((int)$m['gateway_id']);
-            if ($gw === null || !sh_gateway_is_configured($gw)) { continue; }
-        }
-        if ($m['type'] === 'manual' && trim((string)$m['account_number']) === '') { continue; }
-        $out[] = $m;
+        if (sh_payment_method_available_for_order($m, $hasPhysical)) { $out[] = $m; }
     }
     return $out;
 }
@@ -69,6 +81,193 @@ function sh_payment_methods_available(bool $hasPhysical = true): array
 function sh_payment_method(int $id): ?array
 {
     return sh_one('SELECT * FROM payment_methods WHERE id = ? AND status = 1 LIMIT 1', [$id]);
+}
+
+/**
+ * Resolve the single, server-authoritative customer payment route for a saved
+ * order.  The browser supplies an order ID only; it never selects a provider on
+ * the payment page.  The order/payment snapshots must agree before any manual
+ * instruction, gateway action, or transaction-ID form can be rendered.
+ *
+ * COD is an already-placed offline flow, so it remains readable from its saved
+ * payment snapshot even if an administrator later disables the method.  Every
+ * online/manual route must still be enabled and correctly configured now.
+ *
+ * @return array{ok:bool,kind?:string,method?:array|null,payment?:array|null,method_name?:string,error?:string}
+ */
+function sh_order_payment_route(array $order, ?array $payment = null): array
+{
+    $orderId = (int)($order['id'] ?? 0);
+    $methodId = (int)($order['payment_method_id'] ?? 0);
+    $methodName = trim((string)($order['payment_method_name'] ?? ''));
+    if ($orderId <= 0 || $methodId <= 0) {
+        return ['ok' => false, 'method_name' => $methodName, 'error' => 'This order does not have a valid selected payment method.'];
+    }
+
+    try {
+        $payment = $payment ?? sh_order_latest_payment($orderId);
+        if ($payment === null || (int)($payment['order_id'] ?? 0) !== $orderId) {
+            return ['ok' => false, 'method_name' => $methodName, 'error' => 'The saved payment record could not be verified for this order.'];
+        }
+        if ((int)($payment['payment_method_id'] ?? 0) !== $methodId) {
+            return ['ok' => false, 'method_name' => $methodName, 'error' => 'The saved payment method does not match this order.'];
+        }
+
+        $kind = (string)($payment['kind'] ?? '');
+        if (!in_array($kind, ['manual', 'cod', 'gateway'], true)) {
+            return ['ok' => false, 'method_name' => $methodName, 'error' => 'The saved payment method is not supported.'];
+        }
+        if (abs((float)($payment['amount'] ?? -1) - (float)($order['total'] ?? 0)) > 0.004) {
+            return ['ok' => false, 'method_name' => $methodName, 'error' => 'The saved payment amount does not match this order.'];
+        }
+
+        // A completed COD selection must never turn into an online payment page
+        // merely because an admin later edits or disables its live method row.
+        if ($kind === 'cod') {
+            return [
+                'ok' => true,
+                'kind' => 'cod',
+                'method' => null,
+                'payment' => $payment,
+                'method_name' => $methodName !== '' ? $methodName : (string)($payment['method_name'] ?? 'Cash on Delivery'),
+            ];
+        }
+
+        $method = sh_payment_method($methodId);
+        if ($method === null) {
+            return ['ok' => false, 'method_name' => $methodName, 'payment' => $payment, 'error' => 'The selected payment method is no longer enabled.'];
+        }
+        if ((string)($method['type'] ?? '') !== $kind) {
+            return ['ok' => false, 'method_name' => $methodName, 'payment' => $payment, 'error' => 'The selected payment method configuration changed and cannot be used safely.'];
+        }
+        if ($kind === 'gateway' && (int)($method['gateway_id'] ?? 0) !== (int)($payment['gateway_id'] ?? 0)) {
+            return ['ok' => false, 'method_name' => $methodName, 'payment' => $payment, 'error' => 'The selected payment gateway no longer matches this order.'];
+        }
+
+        $hasPhysical = (int)sh_val(
+            "SELECT COUNT(*) FROM order_items WHERE order_id = ? AND product_type = 'physical'",
+            [$orderId],
+            0
+        ) > 0;
+        if (!sh_payment_method_available_for_order($method, $hasPhysical)) {
+            return ['ok' => false, 'method_name' => $methodName, 'payment' => $payment, 'error' => 'The selected payment method is currently unavailable.'];
+        }
+
+        return [
+            'ok' => true,
+            'kind' => $kind,
+            'method' => $method,
+            'payment' => $payment,
+            'method_name' => $methodName !== '' ? $methodName : (string)($method['name'] ?? ''),
+        ];
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'order-payment-route');
+        return ['ok' => false, 'method_name' => $methodName, 'error' => 'The selected payment method could not be checked safely.'];
+    }
+}
+
+/**
+ * Explicitly change an unpaid/rejected order's method from the Checkout retry
+ * screen. This is deliberately not reachable from payment.php: the payment
+ * screen is strictly bound to the original saved selection and never renders
+ * alternative providers. A customer must consciously return to Checkout and
+ * submit one new enabled method here.
+ */
+function sh_reselect_order_payment_method(int $orderId, int $methodId): array
+{
+    $userId = sh_user_id();
+    if ($userId <= 0) { return ['ok' => false, 'error' => 'Please sign in to update the payment method.']; }
+    if ($orderId <= 0 || $methodId <= 0) { return ['ok' => false, 'error' => 'Choose a valid payment method.']; }
+
+    $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('payment-method-reselect', 'Refused Checkout retry while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'The payment method could not be updated safely. Please try again.'];
+    }
+
+    $transactionStarted = false;
+    $emitCod = false;
+    $kind = '';
+    try {
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        if ((int)$order['user_id'] !== $userId) { throw new DomainException('You are not allowed to update this order.'); }
+        if (in_array((string)$order['payment_status'], ['submitted', 'verified', 'refunded'], true)
+            || in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
+            throw new DomainException('The payment method can no longer be changed for this order.');
+        }
+
+        $payment = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
+        if ($payment === null || (int)($payment['payment_method_id'] ?? 0) !== (int)($order['payment_method_id'] ?? 0)) {
+            throw new DomainException('The saved payment record does not match this order.');
+        }
+        if (abs((float)($payment['amount'] ?? -1) - (float)$order['total']) > 0.004) {
+            throw new DomainException('The saved payment amount does not match this order.');
+        }
+        if ((string)($payment['kind'] ?? '') === 'cod') {
+            throw new DomainException('Cash on Delivery has already been placed for this order.');
+        }
+
+        $hasPhysical = (int)sh_val(
+            "SELECT COUNT(*) FROM order_items WHERE order_id = ? AND product_type = 'physical'",
+            [$orderId],
+            0
+        ) > 0;
+        $method = sh_one('SELECT * FROM payment_methods WHERE id = ? AND status = 1 FOR UPDATE', [$methodId]);
+        if ($method === null || !sh_payment_method_available_for_order($method, $hasPhysical)) {
+            throw new DomainException('That payment method is no longer available. Please choose another method.');
+        }
+
+        $kind = (string)$method['type'];
+        if ((int)$order['payment_method_id'] === (int)$method['id']
+            && (string)($payment['kind'] ?? '') === $kind
+            && (int)($payment['gateway_id'] ?? 0) === ($kind === 'gateway' ? (int)($method['gateway_id'] ?? 0) : 0)) {
+            if (!$pdo->inTransaction()) { throw new LogicException('Payment-method retry transaction ended unexpectedly before unchanged commit.'); }
+            $pdo->commit();
+            $transactionStarted = false;
+            return ['ok' => true, 'unchanged' => true, 'method_type' => $kind];
+        }
+
+        $gatewayId = $kind === 'gateway' && !empty($method['gateway_id']) ? (int)$method['gateway_id'] : null;
+        $orderStatus = $kind === 'cod' ? 'processing' : 'awaiting_payment';
+        sh_query(
+            "UPDATE orders
+             SET payment_method_id = ?, payment_method_name = ?, payment_status = 'unpaid', status = ?
+             WHERE id = ?",
+            [(int)$method['id'], (string)$method['name'], $orderStatus, $orderId]
+        );
+        sh_query(
+            "UPDATE payments
+             SET payment_method_id = ?, gateway_id = ?, method_name = ?, kind = ?,
+                 transaction_id = NULL, sender_phone = NULL, gateway_reference = NULL,
+                 gateway_payload = NULL, status = 'pending', admin_note = NULL,
+                 verified_by = NULL, verified_at = NULL
+             WHERE id = ?",
+            [(int)$method['id'], $gatewayId, (string)$method['name'], $kind, (int)$payment['id']]
+        );
+
+        if (!$pdo->inTransaction()) { throw new LogicException('Payment-method retry transaction ended unexpectedly before commit.'); }
+        $pdo->commit();
+        $transactionStarted = false;
+        $emitCod = $kind === 'cod';
+    } catch (Throwable $e) {
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'payment-method-reselect-rollback'); }
+        }
+        sh_log_exception($e, 'payment-method-reselect');
+        return [
+            'ok' => false,
+            'error' => $e instanceof DomainException
+                ? $e->getMessage()
+                : 'The payment method could not be updated. Please try again.',
+        ];
+    }
+
+    if ($emitCod) { sh_emit_cod_order_created_notifications($orderId); }
+    return ['ok' => true, 'method_type' => $kind];
 }
 
 // ---------------------------------------------------------------------------
@@ -92,8 +291,8 @@ function sh_create_order(array $input): array
     if (!$summary['items']) {
         return ['ok' => false, 'error' => 'Your cart is empty.'];
     }
-    if ($method['type'] === 'cod' && !$summary['has_physical']) {
-        return ['ok' => false, 'error' => 'Cash on Delivery is not available for digital-only orders.'];
+    if (!sh_payment_method_available_for_order($method, (bool)$summary['has_physical'])) {
+        return ['ok' => false, 'error' => 'That payment method is no longer available. Please choose another method.'];
     }
 
     $userId = sh_user_id();
@@ -108,27 +307,142 @@ function sh_create_order(array $input): array
     // authentication modes. A signed-in customer can place unlimited orders
     // during their active session; no verification gate is applied here.
 
+    // The browser page validates these too, but this server-side backstop keeps
+    // any future/API caller from creating an incomplete order record.
+    $customerName = trim((string)($input['customer_name'] ?? ''));
+    $customerPhone = trim((string)($input['customer_phone'] ?? ''));
+    $addressLine = trim((string)($input['address_line'] ?? ''));
+    $area = trim((string)($input['area'] ?? ''));
+    $city = trim((string)($input['city'] ?? ''));
+    $postcode = trim((string)($input['postcode'] ?? ''));
+    $note = trim((string)($input['note'] ?? ''));
+    if ($customerName === '' || mb_strlen($customerName) > 110 || !sh_valid_phone($customerPhone)
+        || mb_strlen($addressLine) > 240 || mb_strlen($area) > 120 || mb_strlen($city) > 110
+        || mb_strlen($postcode) > 20 || mb_strlen($note) > 480) {
+        return ['ok' => false, 'error' => 'Please review your checkout details and try again.'];
+    }
+    if (!empty($summary['has_physical']) && ($addressLine === '' || mb_strlen($addressLine) > 240 || $city === '' || mb_strlen($city) > 110)) {
+        return ['ok' => false, 'error' => 'Please provide a valid delivery address and city.'];
+    }
+
     // Fall back to the account email for phone-only customers who did not
     // supply an order email.
     $email = trim((string)($input['customer_email'] ?? ''));
+    if ($email !== '' && !sh_valid_email($email)) {
+        return ['ok' => false, 'error' => 'Please provide a valid email address.'];
+    }
     if ($email === '' && $userId !== null) {
         $email = (string)(sh_user_field($userId, 'email') ?? '');
     }
     if ($email === '') {
-        $email = sh_synthetic_email((string)($input['customer_phone'] ?? ''));
+        $email = sh_synthetic_email(sh_phone_normalize($customerPhone));
     }
 
+    // Keep the exact cart rows represented by this server-side summary. A new
+    // item added in another tab after checkout begins must not be cleared by the
+    // successful order's cleanup.
+    $cartId = sh_cart_id(false);
+    $cartItemIds = array_values(array_unique(array_filter(array_map(
+        static fn(array $item): int => (int)($item['item_id'] ?? 0),
+        $summary['items']
+    ))));
+    if ($cartId <= 0 || !$cartItemIds) {
+        return ['ok' => false, 'error' => 'Your cart changed. Please review it and try again.'];
+    }
+
+    // IMPORTANT: all lazy schema work happens before BEGIN. MySQL/MariaDB DDL
+    // implicitly commits the current connection, which used to make the first
+    // checkout report "There is no active transaction" after clearing its cart.
+    if ($pdo->inTransaction()) {
+        sh_log_line('order-create', 'Refused to start checkout while the shared PDO connection already has an active transaction.');
+        return ['ok' => false, 'error' => 'The order could not be started safely. Your cart is unchanged; please try again.'];
+    }
+    try {
+        if (!sh_order_items_ensure_schema()) {
+            return ['ok' => false, 'error' => 'The order system is being prepared. Your cart is unchanged; please try again shortly.'];
+        }
+        require_once SH_ROOT . '/includes/verification.php';
+        $verificationFields = sh_verify_order_ip_fields();
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'order-create-preflight');
+        return ['ok' => false, 'error' => 'The order could not be prepared. Your cart is unchanged; please try again.'];
+    }
+
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
+        $transactionStarted = true;
+
+        // Lock the actual cart rows used for this order before stock/order work.
+        // If a stale page refers to a changed cart, fail before writing anything.
+        $itemPlaceholders = implode(',', array_fill(0, count($cartItemIds), '?'));
+        $lockedCartRows = sh_all(
+            'SELECT id, product_id, quantity FROM cart_items WHERE cart_id = ? AND id IN (' . $itemPlaceholders . ') FOR UPDATE',
+            array_merge([$cartId], $cartItemIds)
+        );
+        $expectedCartRows = [];
+        foreach ($summary['items'] as $item) {
+            $itemId = (int)($item['item_id'] ?? 0);
+            if ($itemId <= 0 || isset($expectedCartRows[$itemId])) {
+                throw new DomainException('Your cart changed. Please review it and try again.');
+            }
+            $expectedCartRows[$itemId] = [
+                'product_id' => (int)$item['product_id'],
+                'quantity' => (int)$item['quantity'],
+            ];
+        }
+        if (count($lockedCartRows) !== count($expectedCartRows)) {
+            throw new DomainException('Your cart changed. Please review it and try again.');
+        }
+        foreach ($lockedCartRows as $row) {
+            $expected = $expectedCartRows[(int)$row['id']] ?? null;
+            // Do not use an old total to delete a row whose quantity changed in
+            // another tab (or whose stock was reduced and had been clamped in
+            // the preview). The customer keeps that row and can review it.
+            if ($expected === null || (int)$row['product_id'] !== $expected['product_id']
+                || (int)$row['quantity'] !== $expected['quantity']) {
+                throw new DomainException('Your cart changed. Please review it and try again.');
+            }
+        }
+
+        // Re-read the exact selected method while locked. The checkout form's
+        // posted ID was already matched to an enabled method, but an admin could
+        // disable, relink, or misconfigure it while the customer submits. Never
+        // create an order that silently falls through to another provider.
+        $lockedMethod = sh_one('SELECT * FROM payment_methods WHERE id = ? AND status = 1 FOR UPDATE', [$methodId]);
+        if ($lockedMethod === null || !sh_payment_method_available_for_order($lockedMethod, (bool)$summary['has_physical'])) {
+            throw new DomainException('The selected payment method is no longer available. Please return to Checkout and choose another method.');
+        }
+        $method = $lockedMethod;
+
+        // Lock and revalidate the coupon before consuming its usage. The summary
+        // was calculated before BEGIN, so without this lock concurrent orders
+        // could both consume the last allowed use.
+        $lockedCouponId = null;
+        if (!empty($summary['coupon']['id'])) {
+            $lockedCoupon = sh_one('SELECT * FROM coupons WHERE id = ? FOR UPDATE', [(int)$summary['coupon']['id']]);
+            $couponCheck = sh_coupon_evaluate_record($lockedCoupon, (float)$summary['subtotal']);
+            if (empty($couponCheck['valid'])) {
+                throw new DomainException((string)($couponCheck['error'] ?? 'Your coupon changed. Please review your order and try again.'));
+            }
+            if (abs((float)$couponCheck['discount'] - (float)$summary['discount']) > 0.004) {
+                throw new DomainException('Your coupon discount changed. Please review your order and try again.');
+            }
+            $lockedCouponId = (int)$lockedCoupon['id'];
+        }
 
         // Re-verify stock inside the transaction with row locks.
         foreach ($summary['items'] as $it) {
-            $row = sh_one('SELECT stock, status, name FROM products WHERE id = ? FOR UPDATE', [$it['product_id']]);
+            $row = sh_one('SELECT stock, status, name, price, product_type FROM products WHERE id = ? FOR UPDATE', [$it['product_id']]);
             if ($row === null || (int)$row['status'] !== 1) {
-                throw new RuntimeException(($row['name'] ?? 'A product') . ' is no longer available.');
+                throw new DomainException(($row['name'] ?? 'A product') . ' is no longer available.');
+            }
+            if ((string)$row['product_type'] !== (string)$it['product_type']
+                || abs((float)$row['price'] - (float)$it['unit_price']) > 0.004) {
+                throw new DomainException('A product price changed. Please review your cart and try again.');
             }
             if ((int)$row['stock'] < $it['quantity']) {
-                throw new RuntimeException('Insufficient stock for ' . $row['name'] . '. Please update your cart.');
+                throw new DomainException('Insufficient stock for ' . $row['name'] . '. Please update your cart.');
             }
         }
 
@@ -137,21 +451,20 @@ function sh_create_order(array $input): array
             if ($it['product_type'] === 'digital') { $hasDigital = true; break; }
         }
 
-        require_once SH_ROOT . '/includes/verification.php';
-        $orderId = sh_insert('orders', sh_verify_order_ip_fields() + [
+        $orderId = sh_insert('orders', $verificationFields + [
             'order_number'        => 'TMP' . bin2hex(random_bytes(6)),
             'user_id'             => $userId,
-            'customer_name'       => $input['customer_name'],
+            'customer_name'       => $customerName,
             'customer_email'      => $email,
-            'customer_phone'      => $input['customer_phone'],
+            'customer_phone'      => $customerPhone,
             'phone_verified_at'   => null,
             'verification_required' => 0,
             'verification_method' => null,
-            'shipping_address'    => $input['address_line'] ?? null,
-            'shipping_area'       => $input['area'] ?? null,
-            'shipping_city'       => $input['city'] ?? null,
-            'shipping_postcode'   => $input['postcode'] ?? null,
-            'order_note'          => $input['note'] ?? null,
+            'shipping_address'    => $addressLine,
+            'shipping_area'       => $area,
+            'shipping_city'       => $city,
+            'shipping_postcode'   => $postcode,
+            'order_note'          => $note,
             'payment_method_id'   => (int)$method['id'],
             'payment_method_name' => $method['name'],
             'coupon_id'           => $summary['coupon']['id'] ?? null,
@@ -169,28 +482,26 @@ function sh_create_order(array $input): array
         sh_query('UPDATE orders SET order_number = ? WHERE id = ?', [$orderNumber, $orderId]);
 
         foreach ($summary['items'] as $it) {
-            sh_order_items_ensure_schema();
             sh_insert('order_items', [
                 'order_id'        => $orderId,
                 'product_id'      => $it['product_id'],
                 'product_name'    => $it['name'],
                 'product_image'   => $it['image'],
                 'product_variant' => ($it['variant'] ?? '') !== '' ? mb_substr((string)$it['variant'], 0, 190) : null,
-                'product_type'  => $it['product_type'],
-                'unit_price'    => $it['unit_price'],
-                'quantity'      => $it['quantity'],
-                'line_total'    => $it['line_total'],
+                'product_type'    => $it['product_type'],
+                'unit_price'      => $it['unit_price'],
+                'quantity'        => $it['quantity'],
+                'line_total'      => $it['line_total'],
             ]);
             // Reserve stock immediately so two customers cannot buy the same unit.
             sh_query('UPDATE products SET stock = stock - ?, sold_count = sold_count + ? WHERE id = ?',
                 [$it['quantity'], $it['quantity'], $it['product_id']]);
         }
 
-        if (!empty($summary['coupon']['id'])) {
-            sh_query('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', [$summary['coupon']['id']]);
+        if ($lockedCouponId !== null) {
+            sh_query('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?', [$lockedCouponId]);
         }
 
-        // Payment record
         sh_insert('payments', [
             'order_id'          => $orderId,
             'payment_method_id' => (int)$method['id'],
@@ -198,42 +509,124 @@ function sh_create_order(array $input): array
             'method_name'       => $method['name'],
             'kind'              => $method['type'],
             'amount'            => $summary['total'],
-            'status'            => $method['type'] === 'cod' ? 'pending' : 'pending',
+            'status'            => 'pending',
         ]);
 
-        // Clear the cart within the same transaction.
-        $cartId = sh_cart_id(false);
-        if ($cartId > 0) { sh_query('DELETE FROM cart_items WHERE cart_id = ?', [$cartId]); }
+        // Do not clear a cart after an accidental implicit commit. All current
+        // order writes must still be protected by this exact PDO transaction.
+        if (!$pdo->inTransaction()) {
+            throw new LogicException('Checkout transaction ended unexpectedly before cart cleanup.');
+        }
+
+        // Delete only the locked rows that became saved order items. New rows
+        // added in another tab remain in the customer cart.
+        $deleted = sh_query(
+            'DELETE FROM cart_items WHERE cart_id = ? AND id IN (' . $itemPlaceholders . ')',
+            array_merge([$cartId], $cartItemIds)
+        )->rowCount();
+        if ($deleted !== count($cartItemIds)) {
+            throw new DomainException('Your cart changed. Please review it and try again.');
+        }
+        if (!$pdo->inTransaction()) {
+            throw new LogicException('Checkout transaction ended unexpectedly before commit.');
+        }
 
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        $rolledBack = false;
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); $rolledBack = true; }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'order-create-rollback'); }
+        }
         sh_log_exception($e, 'order-create');
-        return ['ok' => false, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'The order could not be placed. Please try again.'];
+        return [
+            'ok' => false,
+            // PDOException extends RuntimeException, so never expose its raw
+            // database/provider text (including "There is no active transaction").
+            // If a connection failed during COMMIT and PDO no longer knows its
+            // state, do not falsely promise the cart/order rolled back; ask the
+            // customer to check their orders before retrying instead.
+            'error' => $e instanceof DomainException
+                ? $e->getMessage()
+                : ($rolledBack
+                    ? 'The order could not be placed. Your cart is still available; please try again.'
+                    : 'We could not confirm the order. Please check your orders before trying again.'),
+        ];
     }
 
     // Post-commit side effects — must never roll the order back.
     sh_session_start();
     $_SESSION['last_order_id'] = $orderId;
-    $_SESSION['guest_orders'][] = $orderId;
+    if (!isset($_SESSION['guest_orders']) || !is_array($_SESSION['guest_orders'])) {
+        $_SESSION['guest_orders'] = [];
+    }
+    if (!in_array($orderId, array_map('intval', $_SESSION['guest_orders']), true)) {
+        $_SESSION['guest_orders'][] = $orderId;
+    }
 
-    $order = sh_order_get($orderId);
+    // A post-commit reload is only for notifications. If the database becomes
+    // temporarily unavailable at this point, keep returning the committed order
+    // result so checkout can consume its token and show the payment step.
+    try { $order = sh_order_get($orderId); }
+    catch (Throwable $e) { sh_log_exception($e, 'order-create-post-commit-reload'); $order = null; }
+    if ($method['type'] === 'cod') {
+        // Attempt independently of the optional post-commit order reload above.
+        // The keyed dispatcher prevents duplicates if the first attempt worked.
+        sh_emit_cod_order_created_notifications($orderId);
+    }
     if ($order) {
+        // Stock warnings are independent of the customer-facing payment flow.
         try {
             require_once SH_ROOT . '/includes/admin-tools.php';
-            sh_admin_notify('new_order', 'New order ' . $order['order_number'], $order['customer_name'] . ' · ' . sh_money($order['total']) . ' · ' . (string)$order['payment_method_name'], 'admin/orders.php?id=' . $orderId);
-            foreach ($summary['items'] as $it) { if (!empty($it['product_id'])) { sh_stock_check_alert((int)$it['product_id']); } }
-        } catch (Throwable $e) { sh_log_exception($e, 'admin-notify'); }
-        sh_notify('order_created', sh_order_notify_payload($order));
-        // Telegram additionally receives an interactive control card. A failure
-        // here must never affect the order, so it is fully contained.
-        try {
-            if (function_exists('sh_tg_push_order')) { sh_tg_push_order((int)$order['id'], '🛒 NEW ORDER'); }
-        } catch (Throwable $e) { sh_log_exception($e, 'tg-push-order'); }
-        if ($method['type'] === 'cod') { sh_check_low_stock_for_order($orderId); }
+            foreach ($summary['items'] as $it) {
+                if (!empty($it['product_id'])) { sh_stock_check_alert((int)$it['product_id']); }
+            }
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'order-stock-notify');
+        }
+        // Manual/gateway orders intentionally send no NEW ORDER provider message
+        // here. Their first consolidated provider event is payment_submitted.
     }
 
     return ['ok' => true, 'order_id' => $orderId, 'order_number' => $orderNumber, 'method_type' => $method['type']];
+}
+
+/**
+ * Emit the one allowed initial COD event after its order/payment snapshot is
+ * committed. The delivery key is stable, so this helper is also safe recovery
+ * if a request ends after commit but before its post-commit side effects.
+ */
+function sh_emit_cod_order_created_notifications(int $orderId): void
+{
+    try {
+        $order = sh_order_get($orderId);
+        $payment = sh_order_latest_payment($orderId);
+        if ($order === null || !sh_order_is_cod($order, $payment)) {
+            sh_log_line('cod-order-notify', 'Suppressed non-COD or missing order notification for order ' . $orderId);
+            return;
+        }
+
+        try {
+            require_once SH_ROOT . '/includes/admin-tools.php';
+            sh_admin_notify(
+                'new_order',
+                'New COD order ' . $order['order_number'],
+                $order['customer_name'] . ' · ' . sh_money($order['total']) . ' · ' . (string)$order['payment_method_name'],
+                'admin/orders.php?id=' . $orderId,
+                'cod-order-' . $orderId
+            );
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'cod-admin-notify');
+        }
+
+        // sh_notify claims order-created:<id>:1 per channel before it contacts a
+        // provider, so recovery calls cannot create duplicate NEW ORDER media.
+        sh_notify('order_created', sh_order_created_notify_payload($order, $payment));
+        sh_check_low_stock_for_order($orderId);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'cod-order-notify');
+    }
 }
 
 /**
@@ -261,22 +654,91 @@ function sh_order_get(int $id): ?array
     return sh_one('SELECT * FROM orders WHERE id = ? LIMIT 1', [$id]);
 }
 
-/** Add order_items.product_variant on installs that predate it (idempotent, runs once per request). */
-function sh_order_items_ensure_schema(): void
+/**
+ * Add order_items.product_variant on installs that predate it.
+ *
+ * MySQL/MariaDB DDL implicitly commits the active connection.  This migration
+ * therefore MUST run before an order transaction starts; doing it after an
+ * order insert is what previously left a partially committed order, deleted the
+ * cart, and made PDO throw "There is no active transaction" on commit.
+ */
+function sh_order_items_ensure_schema(): bool
 {
     static $done = false;
-    if ($done) { return; }
-    $done = true;
+    static $ready = false;
+    if ($done) { return $ready; }
+
     try {
+        $pdo = sh_db();
+        if ($pdo->inTransaction()) {
+            // Never issue ALTER TABLE in a business transaction. The caller can
+            // fail safely and preserve the cart rather than lose atomicity.
+            sh_log_line('order-items-schema', 'Deferred product_variant migration because a transaction is active.');
+            return false;
+        }
         $n = (int)sh_val('SELECT COUNT(*) FROM information_schema.columns
                           WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
                          ['order_items', 'product_variant'], 0);
         if ($n === 0) {
-            sh_db()->exec('ALTER TABLE order_items ADD COLUMN product_variant VARCHAR(190) DEFAULT NULL AFTER product_image');
+            $pdo->exec('ALTER TABLE order_items ADD COLUMN product_variant VARCHAR(190) DEFAULT NULL AFTER product_image');
         }
+        $ready = true;
     } catch (Throwable $e) {
         sh_log_exception($e, 'order-items-schema');
+        $ready = false;
     }
+    $done = true;
+    return $ready;
+}
+
+/**
+ * Add payment-submission metadata to older installs without touching existing
+ * payments.  submission_version gives each rejected/resubmitted payment attempt
+ * a stable idempotency key, while submitted_at is the customer-facing event time.
+ */
+function sh_payment_submission_schema_ensure(): bool
+{
+    static $done = false;
+    static $ok = false;
+    if ($done) { return $ok; }
+    $done = true;
+
+    try {
+        $pdo = sh_db();
+        // ALTER TABLE has an implicit commit on MySQL/MariaDB. Both callers run
+        // this preflight before BEGIN; guard direct/future callers too.
+        if ($pdo->inTransaction()) {
+            sh_log_line('payment-submission-schema', 'Deferred payment metadata migration because a transaction is active.');
+            return false;
+        }
+        $st = $pdo->prepare(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $st->execute(['payments']);
+        $columns = array_fill_keys($st->fetchAll(PDO::FETCH_COLUMN), true);
+        if (!isset($columns['submitted_at'])) {
+            $pdo->exec('ALTER TABLE payments ADD COLUMN submitted_at DATETIME DEFAULT NULL AFTER status');
+        }
+        if (!isset($columns['submission_version'])) {
+            $pdo->exec('ALTER TABLE payments ADD COLUMN submission_version INT UNSIGNED NOT NULL DEFAULT 0 AFTER submitted_at');
+        }
+
+        $idx = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+        );
+        $idx->execute(['payments', 'idx_payments_transaction_id']);
+        if ((int)$idx->fetchColumn() === 0) {
+            // Supports a locking duplicate-TrxID lookup; a customer can still
+            // correct and resubmit their own rejected order record.
+            $pdo->exec('ALTER TABLE payments ADD KEY idx_payments_transaction_id (transaction_id)');
+        }
+        $ok = true;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-submission-schema');
+    }
+    return $ok;
 }
 
 /**
@@ -299,6 +761,40 @@ function sh_order_item_image(array $item): string
         if ($cache[$pid] !== '') { return sh_product_image($cache[$pid]); }
     }
     return sh_product_image(null);
+}
+
+/**
+ * Resolve an order item's real stored image into a provider-fetchable public URL.
+ * A neutral placeholder is deliberately never returned: messaging providers must
+ * only receive a picture that actually belongs to the ordered product.
+ */
+function sh_order_item_public_image_url(array $item): string
+{
+    $filename = '';
+    $snapshot = basename((string)($item['product_image'] ?? ''));
+    if ($snapshot !== '' && is_file(SH_UPLOAD_DIR . '/products/' . $snapshot)) {
+        $filename = $snapshot;
+    } elseif (!empty($item['product_id'])) {
+        try {
+            $current = basename((string)sh_val(
+                'SELECT image FROM products WHERE id = ? LIMIT 1',
+                [(int)$item['product_id']],
+                ''
+            ));
+            if ($current !== '' && is_file(SH_UPLOAD_DIR . '/products/' . $current)) {
+                $filename = $current;
+            }
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'order-item-public-image');
+        }
+    }
+    if ($filename === '') { return ''; }
+
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    if (!in_array($extension, ['jpg', 'jpeg', 'png', 'webp'], true)) { return ''; }
+    $base = sh_public_site_url();
+    if ($base === '') { return ''; }
+    return $base . '/uploads/products/' . rawurlencode($filename);
 }
 
 /** Variant/package line for display; falls back to the live category for legacy orders. */
@@ -342,12 +838,159 @@ function sh_order_notify_payload(array $order): array
         'order_number'   => $order['order_number'],
         'customer_name'  => $order['customer_name'],
         'customer_email' => $order['customer_email'],
-        'customer_phone' => $order['customer_phone'],
-        'total'          => $order['total'],
-        'payment_method' => $order['payment_method_name'],
-        'status'         => $order['status'],
-        'items'          => sh_order_items((int)$order['id']),
+        'customer_phone'    => $order['customer_phone'],
+        'shipping_address'  => $order['shipping_address'] ?? '',
+        'shipping_area'     => $order['shipping_area'] ?? '',
+        'shipping_city'     => $order['shipping_city'] ?? '',
+        'shipping_postcode' => $order['shipping_postcode'] ?? '',
+        'order_note'        => $order['order_note'] ?? '',
+        'coupon_code'       => $order['coupon_code'] ?? '',
+        'subtotal'          => $order['subtotal'] ?? 0,
+        'discount'          => $order['discount'] ?? 0,
+        'delivery_fee'      => $order['delivery_fee'] ?? 0,
+        'total'             => $order['total'],
+        'payment_method'    => $order['payment_method_name'],
+        'status'            => $order['status'],
+        'payment_status'    => $order['payment_status'] ?? '',
+        'order_created_at'  => $order['created_at'] ?? '',
+        'items'             => sh_order_items((int)$order['id']),
     ];
+}
+
+/** Optional username support for stores that added a users.username field. */
+function sh_order_customer_username(array $order): string
+{
+    $userId = (int)($order['user_id'] ?? 0);
+    if ($userId <= 0 || !sh_table_has_column('users', 'username')) { return ''; }
+    try {
+        return trim((string)sh_val('SELECT username FROM users WHERE id = ? LIMIT 1', [$userId], ''));
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-customer-username');
+        return '';
+    }
+}
+
+/** Latest persisted payment record for an order (used only for server-side notifications). */
+function sh_order_latest_payment(int $orderId): ?array
+{
+    if ($orderId <= 0) { return null; }
+    try {
+        return sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$orderId]);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'order-latest-payment');
+        return null;
+    }
+}
+
+/** Determine COD from its immutable payment snapshot before consulting live settings. */
+function sh_order_is_cod(array $order, ?array $payment = null): bool
+{
+    if ($payment !== null && trim((string)($payment['kind'] ?? '')) !== '') {
+        return (string)$payment['kind'] === 'cod';
+    }
+    $methodId = (int)($order['payment_method_id'] ?? 0);
+    if ($methodId <= 0) { return false; }
+    try {
+        return (string)sh_val('SELECT type FROM payment_methods WHERE id = ? LIMIT 1', [$methodId], '') === 'cod';
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'order-is-cod');
+        return false;
+    }
+}
+
+/**
+ * Build the one allowed order-created provider event: a COD order after commit.
+ * Its fixed key prevents reloads or duplicate checkout callbacks from re-sending
+ * the consolidated summary or any supporting product media.
+ */
+function sh_order_created_notify_payload(array $order, ?array $payment = null): array
+{
+    $orderId = (int)($order['id'] ?? 0);
+    $payment = $payment ?? sh_order_latest_payment($orderId);
+    $payload = sh_order_notify_payload($order);
+    $payload['payment_id'] = (int)($payment['id'] ?? 0);
+    $payload['payment_amount'] = $payment['amount'] ?? ($order['total'] ?? 0);
+    $payload['transaction_id'] = (string)($payment['transaction_id'] ?? '');
+    $payload['sender_phone'] = (string)($payment['sender_phone'] ?? '');
+    $payload['notification_key'] = 'order-created:' . $orderId . ':1';
+    $payload['notification_version'] = 1;
+    $username = sh_order_customer_username($order);
+    if ($username !== '') { $payload['customer_username'] = $username; }
+    return $payload;
+}
+
+/**
+ * Build the payment-submitted event only from persisted order/payment records.
+ * The browser never supplies any product, amount, status or image information.
+ */
+function sh_payment_submitted_notify_payload(array $order, array $payment): array
+{
+    $paymentId = (int)($payment['id'] ?? 0);
+    $storedVersion = (int)($payment['submission_version'] ?? 0);
+    $version = max(1, $storedVersion);
+    $submittedAt = (string)($payment['submitted_at'] ?? '');
+    if ($submittedAt === '') { $submittedAt = (string)($payment['updated_at'] ?? $payment['created_at'] ?? ''); }
+    // On a locked-down legacy host the optional submission_version migration may
+    // be unavailable. A fingerprint of persisted fields still distinguishes a
+    // genuine corrected re-submission from a browser retry of the same record.
+    $legacySuffix = 'legacy-' . substr(hash('sha256', implode('|', [
+        (string)($payment['transaction_id'] ?? ''),
+        (string)($payment['gateway_reference'] ?? ''),
+        (string)($payment['sender_phone'] ?? ''),
+        $submittedAt,
+    ])), 0, 16);
+    $eventSuffix = $storedVersion > 0 ? (string)$storedVersion : $legacySuffix;
+
+    $payload = array_merge(sh_order_notify_payload($order), [
+        'payment_id'           => $paymentId,
+        // Gateway references are the persisted payment identifier for automatic
+        // methods; never require a browser-style manual transaction ID there.
+        'transaction_id'       => trim((string)($payment['transaction_id'] ?? '')) !== ''
+            ? (string)$payment['transaction_id'] : (string)($payment['gateway_reference'] ?? ''),
+        'gateway_reference'    => (string)($payment['gateway_reference'] ?? ''),
+        'sender_phone'         => (string)($payment['sender_phone'] ?? ''),
+        'payment_amount'        => $payment['amount'] ?? ($order['total'] ?? 0),
+        'payment_submitted_at' => $submittedAt,
+        'payment_status'       => (string)($order['payment_status'] ?? $payment['status'] ?? 'submitted'),
+        'notification_key'     => 'payment-submitted:' . $paymentId . ':' . $eventSuffix,
+        'notification_version' => $version,
+    ]);
+    $username = sh_order_customer_username($order);
+    if ($username !== '') { $payload['customer_username'] = $username; }
+    return $payload;
+}
+
+/**
+ * Post-commit initial event for a persisted non-COD payment submission. Calling
+ * this again after a browser retry is intentional recovery, not a second
+ * provider trigger: the stable payment key is claimed per channel before send.
+ */
+function sh_emit_payment_submitted_notifications(int $orderId, int $paymentId, string $transactionId = ''): void
+{
+    try {
+        $fresh = sh_order_get($orderId);
+        $payment = $paymentId > 0 ? sh_one('SELECT * FROM payments WHERE id = ? LIMIT 1', [$paymentId]) : null;
+        if ($fresh === null || $payment === null) {
+            sh_log_line('payment', 'Payment submission saved but notification payload could not be reloaded for order ' . $orderId);
+            return;
+        }
+        $eventPayload = sh_payment_submitted_notify_payload($fresh, $payment);
+        sh_notify('payment_submitted', $eventPayload);
+        try {
+            require_once SH_ROOT . '/includes/admin-tools.php';
+            sh_admin_notify(
+                'payment_pending',
+                'Payment waiting for verification · ' . $fresh['order_number'],
+                sh_money($fresh['total']) . ' · Customer TrxID ' . ($transactionId !== '' ? $transactionId : (string)($payment['transaction_id'] ?? $payment['gateway_reference'] ?? '')),
+                'admin/payments.php?status=pending',
+                'pay-pending-' . $orderId . '-' . substr(hash('sha256', (string)$eventPayload['notification_key']), 0, 20)
+            );
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'payment-admin-notify');
+        }
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-submission-notify');
+    }
 }
 
 /** IDOR guard: a customer may only view their own orders. */
@@ -365,62 +1008,144 @@ function sh_order_can_view(array $order): bool
 // ---------------------------------------------------------------------------
 function sh_submit_manual_payment(int $orderId, string $transactionId, string $senderPhone): array
 {
-    $order = sh_order_get($orderId);
-    if ($order === null) { return ['ok' => false, 'error' => 'Order not found.']; }
-    if (!sh_order_can_view($order)) { return ['ok' => false, 'error' => 'You are not allowed to modify this order.']; }
-    if (in_array($order['payment_status'], ['verified'], true)) {
-        return ['ok' => false, 'error' => 'This order has already been paid.'];
-    }
-    $transactionId = strtoupper(trim($transactionId));
-    if (strlen($transactionId) < 4 || strlen($transactionId) > 60) {
+    $hasSubmissionMeta = sh_payment_submission_schema_ensure();
+
+    // Payment submission is a customer-only action. Unlike the legacy
+    // guest_orders display allowance, it must match the authenticated order owner.
+    $userId = sh_user_id();
+    if ($userId <= 0) { return ['ok' => false, 'error' => 'Please sign in to submit payment details.']; }
+    if ($orderId <= 0) { return ['ok' => false, 'error' => 'Order not found.']; }
+
+    $transactionId = mb_strtoupper(trim($transactionId));
+    if (mb_strlen($transactionId) < 4 || mb_strlen($transactionId) > 60
+        || preg_match('/^[^\s\x00-\x1f\x7f]+$/u', $transactionId) !== 1) {
         return ['ok' => false, 'error' => 'Enter the transaction ID exactly as shown in your payment confirmation.'];
     }
     if (!sh_valid_phone($senderPhone)) {
         return ['ok' => false, 'error' => 'Enter the mobile number you paid from.'];
     }
-    $dupe = sh_one('SELECT id FROM payments WHERE transaction_id = ? AND order_id <> ? AND status <> \'rejected\' LIMIT 1',
-        [$transactionId, $orderId]);
-    if ($dupe !== null) {
-        return ['ok' => false, 'error' => 'This transaction ID has already been submitted for another order.'];
+    $senderPhone = sh_phone_normalize($senderPhone);
+    if ($senderPhone === '') {
+        return ['ok' => false, 'error' => 'Enter the mobile number you paid from.'];
     }
 
     $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('manual-payment', 'Refused payment submission while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'Your payment could not be recorded safely. Please try again.'];
+    }
+    $paymentId = 0;
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
-        $pay = sh_one('SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
-        if ($pay) {
-            sh_query('UPDATE payments SET transaction_id = ?, sender_phone = ?, status = \'pending\' WHERE id = ?',
-                [$transactionId, $senderPhone, $pay['id']]);
-        } else {
-            sh_insert('payments', [
-                'order_id'          => $orderId,
-                'payment_method_id' => $order['payment_method_id'],
-                'method_name'       => $order['payment_method_name'],
-                'kind'              => 'manual',
-                'amount'            => $order['total'],
-                'transaction_id'    => $transactionId,
-                'sender_phone'      => $senderPhone,
-                'status'            => 'pending',
-            ]);
+        $transactionStarted = true;
+        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        if ((int)$order['user_id'] !== $userId) {
+            throw new DomainException('You are not allowed to modify this order.');
         }
-        // Never auto-verify a manual payment.
-        sh_query('UPDATE orders SET status = \'payment_submitted\', payment_status = \'submitted\' WHERE id = ?', [$orderId]);
+        if (in_array((string)$order['payment_status'], ['verified', 'refunded'], true)) {
+            throw new DomainException('This order has already been paid.');
+        }
+        if (in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
+            throw new DomainException('Payment details can no longer be submitted for this order.');
+        }
+
+        $pay = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
+        $savedManual = $pay !== null
+            && (int)($pay['payment_method_id'] ?? 0) === (int)($order['payment_method_id'] ?? 0)
+            && (string)($pay['kind'] ?? '') === 'manual'
+            && abs((float)($pay['amount'] ?? -1) - (float)$order['total']) <= 0.004;
+        if ((string)$order['payment_status'] === 'submitted') {
+            // A browser/network retry after the successful database commit is
+            // idempotent. It receives success but never emits a second event.
+            // It is allowed to recover notification dispatch even if the method
+            // was disabled after this already-persisted submission.
+            if ($savedManual && hash_equals((string)($pay['transaction_id'] ?? ''), $transactionId)) {
+                $paymentId = (int)$pay['id'];
+                if (!$pdo->inTransaction()) {
+                    throw new LogicException('Payment submission transaction ended unexpectedly before idempotent commit.');
+                }
+                $pdo->commit();
+                $transactionStarted = false;
+                // Recover safely if the original request died between its
+                // committed payment and post-commit provider dispatch. A sent
+                // keyed event is claimed and therefore never sent twice.
+                sh_emit_payment_submitted_notifications($orderId, $paymentId, $transactionId);
+                return ['ok' => true, 'already_submitted' => true];
+            }
+            throw new DomainException('Payment details are already pending verification for this order.');
+        }
+
+        // Resolve only the order's immutable selected method. A customer cannot
+        // use this endpoint to turn a COD/gateway order into manual payment, or
+        // submit against a disabled/misconfigured replacement provider.
+        $route = sh_order_payment_route($order, $pay);
+        if (empty($route['ok']) || (string)($route['kind'] ?? '') !== 'manual') {
+            throw new DomainException((string)($route['error'] ?? 'This order is not using an available manual payment method.'));
+        }
+
+        // This lookup is performed inside the transaction and uses the indexed
+        // transaction_id column, preserving duplicate detection across orders.
+        $dupe = sh_one(
+            "SELECT id FROM payments
+             WHERE transaction_id = ? AND order_id <> ?
+             LIMIT 1 FOR UPDATE",
+            [$transactionId, $orderId]
+        );
+        if ($dupe !== null) {
+            throw new DomainException('This transaction ID has already been submitted for another order.');
+        }
+
+        // sh_order_payment_route() has already required this locked payment
+        // snapshot to match the saved order/method/amount exactly.
+        if ($pay === null) { throw new LogicException('Payment record disappeared before manual submission.'); }
+        $paymentId = (int)$pay['id'];
+        if ($hasSubmissionMeta) {
+            sh_query(
+                "UPDATE payments
+                 SET transaction_id = ?, sender_phone = ?, status = 'pending',
+                     admin_note = NULL, verified_by = NULL, verified_at = NULL,
+                     submitted_at = NOW(), submission_version = submission_version + 1
+                 WHERE id = ?",
+                [$transactionId, $senderPhone, $paymentId]
+            );
+        } else {
+            // A locked-down host may deny ALTER TABLE. Preserve the pre-
+            // migration payment workflow instead of rejecting the payment.
+            sh_query(
+                "UPDATE payments
+                 SET transaction_id = ?, sender_phone = ?, status = 'pending',
+                     admin_note = NULL, verified_by = NULL, verified_at = NULL
+                 WHERE id = ?",
+                [$transactionId, $senderPhone, $paymentId]
+            );
+        }
+
+        // A manual submission is always pending verification; it never approves
+        // itself regardless of a valid-looking customer Transaction ID.
+        sh_query("UPDATE orders SET status = 'payment_submitted', payment_status = 'submitted' WHERE id = ?", [$orderId]);
+        if (!$pdo->inTransaction()) {
+            throw new LogicException('Payment submission transaction ended unexpectedly before commit.');
+        }
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'manual-payment-rollback'); }
+        }
+        if ($e instanceof DomainException) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
         sh_log_exception($e, 'manual-payment');
         return ['ok' => false, 'error' => 'Could not record your payment. Please try again.'];
     }
 
-    $fresh = sh_order_get($orderId);
-    sh_notify('payment_submitted', array_merge(sh_order_notify_payload($fresh), ['transaction_id' => $transactionId]));
-    try {
-        require_once SH_ROOT . '/includes/admin-tools.php';
-        sh_admin_notify('payment_pending', 'Payment waiting for verification · ' . $fresh['order_number'], sh_money($fresh['total']) . ' · TrxID ' . $transactionId, 'admin/payments.php?status=pending', 'pay-pending-' . $orderId);
-    } catch (Throwable $e) {}
-    try {
-        if (function_exists('sh_tg_push_order')) { sh_tg_push_order($orderId, '💳 PAYMENT SUBMITTED'); }
-    } catch (Throwable $e) { sh_log_exception($e, 'tg-push-payment'); }
+    // All notification work is deliberately post-commit. A provider timeout or
+    // bad remote image can be retried without undoing the saved payment.
+    sh_emit_payment_submitted_notifications($orderId, $paymentId, $transactionId);
+
     return ['ok' => true];
 }
 
@@ -429,59 +1154,114 @@ function sh_submit_manual_payment(int $orderId, string $transactionId, string $s
 // ---------------------------------------------------------------------------
 function sh_approve_payment(int $paymentId, int $adminId, string $note = ''): array
 {
+    // Telegram's authorized control surface records a system verifier as 0, so
+    // only the payment ID itself is required here.
+    if ($paymentId <= 0) { return ['ok' => false, 'error' => 'Payment approval could not be recorded.']; }
     $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('payment-approve', 'Refused approval while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'Payment approval could not be recorded safely.'];
+    }
     $orderId = 0;
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
+        $transactionStarted = true;
         $pay = sh_one('SELECT * FROM payments WHERE id = ? FOR UPDATE', [$paymentId]);
-        if ($pay === null) { throw new RuntimeException('Payment record not found.'); }
-        if ($pay['status'] === 'verified') { throw new RuntimeException('This payment is already verified.'); }
+        if ($pay === null) { throw new DomainException('Payment record not found.'); }
+        if ((string)$pay['status'] === 'verified') { throw new DomainException('This payment is already verified.'); }
         $orderId = (int)$pay['order_id'];
+        $order = sh_one('SELECT id, status, payment_status FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null || in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
+            throw new DomainException('This order can no longer accept a payment approval.');
+        }
 
-        sh_query('UPDATE payments SET status = \'verified\', verified_by = ?, verified_at = NOW(), admin_note = ? WHERE id = ?',
+        sh_query("UPDATE payments SET status = 'verified', verified_by = ?, verified_at = NOW(), admin_note = ? WHERE id = ?",
             [$adminId, mb_substr($note, 0, 250), $paymentId]);
-        sh_query('UPDATE orders SET payment_status = \'verified\', status = \'processing\' WHERE id = ?', [$orderId]);
+        sh_query("UPDATE orders SET payment_status = 'verified', status = 'processing' WHERE id = ?", [$orderId]);
+        if (!$pdo->inTransaction()) { throw new LogicException('Payment approval transaction ended unexpectedly before commit.'); }
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'payment-approve-rollback'); }
+        }
         sh_log_exception($e, 'payment-approve');
-        return ['ok' => false, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'Could not approve this payment.'];
+        return ['ok' => false, 'error' => $e instanceof DomainException ? $e->getMessage() : 'Could not approve this payment.'];
     }
 
-    $order = sh_order_get($orderId);
-    sh_notify('payment_approved', sh_order_notify_payload($order));
-    sh_notify('order_processing', sh_order_notify_payload($order));
+    try {
+        $order = sh_order_get($orderId);
+        if ($order === null) { throw new RuntimeException('The committed order could not be reloaded.'); }
+        sh_notify('payment_approved', sh_order_notify_payload($order));
+        sh_notify('order_processing', sh_order_notify_payload($order));
 
-    // Digital fulfilment happens only after verified payment.
-    if ((int)$order['has_digital'] === 1) {
-        sh_deliver_digital_codes($orderId);
-    } else {
-        sh_check_low_stock_for_order($orderId);
+        // Digital fulfilment happens only after verified payment.
+        if ((int)$order['has_digital'] === 1) {
+            sh_deliver_digital_codes($orderId);
+        } else {
+            sh_check_low_stock_for_order($orderId);
+        }
+    } catch (Throwable $e) {
+        // Approval is committed even if a post-commit notification/reload has a
+        // transient problem. Never report it to the admin as an undone payment.
+        sh_log_exception($e, 'payment-approve-post-commit');
     }
     return ['ok' => true];
 }
 
 function sh_reject_payment(int $paymentId, int $adminId, string $note = ''): array
 {
+    // Telegram's authorized control surface records a system verifier as 0, so
+    // only the payment ID itself is required here.
+    if ($paymentId <= 0) { return ['ok' => false, 'error' => 'Payment rejection could not be recorded.']; }
     $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('payment-reject', 'Refused rejection while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'Payment rejection could not be recorded safely.'];
+    }
     $orderId = 0;
+    $alreadyRejected = false;
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
+        $transactionStarted = true;
         $pay = sh_one('SELECT * FROM payments WHERE id = ? FOR UPDATE', [$paymentId]);
-        if ($pay === null) { throw new RuntimeException('Payment record not found.'); }
-        if ($pay['status'] === 'verified') { throw new RuntimeException('A verified payment cannot be rejected.'); }
+        if ($pay === null) { throw new DomainException('Payment record not found.'); }
+        if ((string)$pay['status'] === 'verified') { throw new DomainException('A verified payment cannot be rejected.'); }
         $orderId = (int)$pay['order_id'];
-        sh_query('UPDATE payments SET status = \'rejected\', verified_by = ?, verified_at = NOW(), admin_note = ? WHERE id = ?',
-            [$adminId, mb_substr($note, 0, 250), $paymentId]);
-        sh_query('UPDATE orders SET payment_status = \'rejected\', status = \'payment_rejected\' WHERE id = ?', [$orderId]);
+        $order = sh_one('SELECT id, status FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null || in_array((string)($order['status'] ?? ''), ['cancelled', 'completed'], true)) {
+            throw new DomainException('This order can no longer accept a payment rejection.');
+        }
+        if ((string)$pay['status'] === 'rejected') {
+            $alreadyRejected = true;
+        } else {
+            sh_query("UPDATE payments SET status = 'rejected', verified_by = ?, verified_at = NOW(), admin_note = ? WHERE id = ?",
+                [$adminId, mb_substr($note, 0, 250), $paymentId]);
+            sh_query("UPDATE orders SET payment_status = 'rejected', status = 'payment_rejected' WHERE id = ?", [$orderId]);
+        }
+        if (!$pdo->inTransaction()) { throw new LogicException('Payment rejection transaction ended unexpectedly before commit.'); }
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'payment-reject-rollback'); }
+        }
         sh_log_exception($e, 'payment-reject');
-        return ['ok' => false, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'Could not reject this payment.'];
+        return ['ok' => false, 'error' => $e instanceof DomainException ? $e->getMessage() : 'Could not reject this payment.'];
     }
-    $order = sh_order_get($orderId);
-    sh_notify('payment_rejected', array_merge(sh_order_notify_payload($order), ['note' => $note]));
+    if ($alreadyRejected) { return ['ok' => true, 'already_rejected' => true]; }
+
+    try {
+        $order = sh_order_get($orderId);
+        if ($order === null) { throw new RuntimeException('The committed order could not be reloaded.'); }
+        sh_notify('payment_rejected', array_merge(sh_order_notify_payload($order), ['note' => $note]));
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-reject-post-commit');
+    }
     return ['ok' => true];
 }
 
@@ -490,22 +1270,31 @@ function sh_reject_payment(int $paymentId, int $adminId, string $note = ''): arr
 // ---------------------------------------------------------------------------
 function sh_deliver_digital_codes(int $orderId): array
 {
+    if ($orderId <= 0) { return ['ok' => false, 'error' => 'Order not found.']; }
     $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('code-delivery', 'Refused digital delivery while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'Code delivery could not be recorded safely.'];
+    }
     $delivered = [];
     $shortfall = [];
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
+        $transactionStarted = true;
         $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
-        if ($order === null) { throw new RuntimeException('Order not found.'); }
-        if ($order['payment_status'] !== 'verified') {
-            throw new RuntimeException('Codes can only be delivered after the payment is verified.');
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        if ((string)$order['payment_status'] !== 'verified') {
+            throw new DomainException('Codes can only be delivered after the payment is verified.');
         }
         if ((int)$order['codes_delivered'] === 1) {
+            if (!$pdo->inTransaction()) { throw new LogicException('Code-delivery transaction ended unexpectedly before idempotent commit.'); }
             $pdo->commit();
+            $transactionStarted = false;
             return ['ok' => true, 'codes' => [], 'already' => true];
         }
 
-        foreach (sh_all('SELECT * FROM order_items WHERE order_id = ? AND product_type = \'digital\'', [$orderId]) as $item) {
+        foreach (sh_all("SELECT * FROM order_items WHERE order_id = ? AND product_type = 'digital'", [$orderId]) as $item) {
             $need = (int)$item['quantity'];
             $already = (int)sh_val('SELECT COUNT(*) FROM product_codes WHERE order_item_id = ?', [(int)$item['id']], 0);
             $need -= $already;
@@ -513,9 +1302,9 @@ function sh_deliver_digital_codes(int $orderId): array
 
             // Lock available codes so a concurrent order cannot take them.
             $rows = sh_all(
-                'SELECT id, code FROM product_codes
-                 WHERE product_id = ? AND status = \'available\'
-                 ORDER BY id ASC LIMIT ' . $need . ' FOR UPDATE',
+                "SELECT id, code FROM product_codes
+                 WHERE product_id = ? AND status = 'available'
+                 ORDER BY id ASC LIMIT " . $need . ' FOR UPDATE',
                 [(int)$item['product_id']]
             );
             if (count($rows) < $need) {
@@ -523,39 +1312,57 @@ function sh_deliver_digital_codes(int $orderId): array
             }
             foreach ($rows as $c) {
                 sh_query(
-                    'UPDATE product_codes SET status = \'used\', order_id = ?, order_item_id = ?, delivered_at = NOW()
-                     WHERE id = ? AND status = \'available\'',
+                    "UPDATE product_codes SET status = 'used', order_id = ?, order_item_id = ?, delivered_at = NOW()
+                     WHERE id = ? AND status = 'available'",
                     [$orderId, (int)$item['id'], (int)$c['id']]
                 );
                 $delivered[] = ['product' => $item['product_name'], 'code' => $c['code']];
             }
             // Digital stock mirrors the number of remaining codes.
             sh_query(
-                'UPDATE products SET stock = (SELECT COUNT(*) FROM product_codes WHERE product_id = ? AND status = \'available\')
-                 WHERE id = ?',
+                "UPDATE products SET stock = (SELECT COUNT(*) FROM product_codes WHERE product_id = ? AND status = 'available')
+                 WHERE id = ?",
                 [(int)$item['product_id'], (int)$item['product_id']]
             );
         }
 
         if ($shortfall) {
             // Do not half-deliver: roll back and let the admin restock.
-            throw new RuntimeException('Not enough digital codes in stock for: ' . implode('; ', $shortfall));
+            throw new DomainException('Not enough digital codes in stock for: ' . implode('; ', $shortfall));
         }
 
-        sh_query('UPDATE orders SET codes_delivered = 1, status = \'completed\' WHERE id = ?', [$orderId]);
+        $hasPhysicalItems = (int)sh_val("SELECT COUNT(*) FROM order_items WHERE order_id = ? AND product_type = 'physical'", [$orderId], 0) > 0;
+        // A mixed basket can receive its digital codes now, but its physical
+        // shipment remains in processing rather than falsely completing the
+        // entire order.
+        sh_query("UPDATE orders SET codes_delivered = 1, status = ? WHERE id = ?", [$hasPhysicalItems ? 'processing' : 'completed', $orderId]);
+        if (!$pdo->inTransaction()) { throw new LogicException('Code-delivery transaction ended unexpectedly before commit.'); }
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'code-delivery-rollback'); }
+        }
         sh_log_exception($e, 'code-delivery');
-        return ['ok' => false, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'Code delivery failed.'];
+        return ['ok' => false, 'error' => $e instanceof DomainException ? $e->getMessage() : 'Code delivery failed.'];
     }
 
-    $order = sh_order_get($orderId);
-    $payload = sh_order_notify_payload($order);
-    $payload['codes'] = $delivered;
-    sh_notify('code_delivered', $payload);
-    sh_notify('order_completed', sh_order_notify_payload($order));
-    sh_check_low_stock_for_order($orderId);
+    try {
+        $order = sh_order_get($orderId);
+        if ($order === null) { throw new RuntimeException('The committed order could not be reloaded.'); }
+        $payload = sh_order_notify_payload($order);
+        $payload['codes'] = $delivered;
+        sh_notify('code_delivered', $payload);
+        if ((string)$order['status'] === 'completed') {
+            sh_notify('order_completed', sh_order_notify_payload($order));
+        }
+        sh_check_low_stock_for_order($orderId);
+    } catch (Throwable $e) {
+        // The irreversible code allocation is committed; notification trouble is
+        // logged for recovery and never represented as a failed delivery action.
+        sh_log_exception($e, 'code-delivery-post-commit');
+    }
     return ['ok' => true, 'codes' => $delivered];
 }
 
@@ -593,10 +1400,45 @@ function sh_check_low_stock_for_order(int $orderId): void
 
 function sh_complete_order(int $orderId): array
 {
-    $order = sh_order_get($orderId);
-    if ($order === null) { return ['ok' => false, 'error' => 'Order not found.']; }
-    sh_query('UPDATE orders SET status = \'completed\' WHERE id = ?', [$orderId]);
-    sh_notify('order_completed', sh_order_notify_payload(sh_order_get($orderId)));
+    if ($orderId <= 0) { return ['ok' => false, 'error' => 'Order not found.']; }
+    $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('order-complete', 'Refused completion while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'The order could not be completed safely.'];
+    }
+    $already = false;
+    $transactionStarted = false;
+    try {
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        if ((string)$order['status'] === 'cancelled') { throw new DomainException('A cancelled order cannot be completed.'); }
+        if ((string)$order['status'] === 'completed') {
+            $already = true;
+        } else {
+            sh_query("UPDATE orders SET status = 'completed' WHERE id = ?", [$orderId]);
+        }
+        if (!$pdo->inTransaction()) { throw new LogicException('Order-completion transaction ended unexpectedly before commit.'); }
+        $pdo->commit();
+        $transactionStarted = false;
+    } catch (Throwable $e) {
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'order-complete-rollback'); }
+        }
+        sh_log_exception($e, 'order-complete');
+        return ['ok' => false, 'error' => $e instanceof DomainException ? $e->getMessage() : 'The order could not be completed.'];
+    }
+    if ($already) { return ['ok' => true, 'already' => true]; }
+
+    try {
+        $order = sh_order_get($orderId);
+        if ($order === null) { throw new RuntimeException('The committed order could not be reloaded.'); }
+        sh_notify('order_completed', sh_order_notify_payload($order));
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'order-complete-post-commit');
+    }
     return ['ok' => true];
 }
 
@@ -647,15 +1489,26 @@ function sh_gateway_is_configured(array $gateway): bool
 }
 
 /**
- * Honest status reporting: we do not ship fabricated live integrations.
- * A driver is only "active" when official credentials have been supplied.
+ * Whether this installation has a real server-side checkout-initiation driver.
+ * Callback verification alone is not an initiation integration: presenting a
+ * redirect/payment success without creating a provider session would strand a
+ * customer's persisted order. No current driver implements that first request.
  */
+function sh_gateway_can_initiate(array $gateway): bool
+{
+    return false;
+}
+
+/** Honest status reporting: configured credentials do not imply live checkout. */
 function sh_gateway_status_text(array $gateway): string
 {
     if (!sh_gateway_is_configured($gateway)) {
         return 'Not configured — enter the merchant credentials issued by ' . $gateway['name'] . ' to activate this gateway.';
     }
-    return ucfirst($gateway['mode']) . ' mode credentials saved.';
+    if (!sh_gateway_can_initiate($gateway)) {
+        return ucfirst((string)$gateway['mode']) . ' credentials are saved, but no server-side checkout-initiation driver is implemented. Customer checkout is kept unavailable rather than showing a fake payment redirect.';
+    }
+    return ucfirst((string)$gateway['mode']) . ' mode checkout is configured.';
 }
 
 /**
@@ -664,46 +1517,133 @@ function sh_gateway_status_text(array $gateway): string
  */
 function sh_gateway_settle(int $orderId, int $gatewayId, string $reference, array $payload, bool $verified): array
 {
+    $reference = trim($reference);
+    if ($orderId <= 0 || $gatewayId <= 0 || $reference === '') {
+        sh_log_line('gateway-settle', 'Refused callback with a missing order, gateway, or provider reference.');
+        return ['ok' => false, 'error' => 'Gateway settlement could not be recorded safely.'];
+    }
+    // Gateway callbacks are also persisted payment submissions. Ensure the same
+    // stable submission metadata used by manual payment notices is available.
+    $hasSubmissionMeta = sh_payment_submission_schema_ensure();
     $pdo = sh_db();
+    if ($pdo->inTransaction()) {
+        sh_log_line('gateway-settle', 'Refused gateway settlement while the shared PDO connection already has a transaction.');
+        return ['ok' => false, 'error' => 'Gateway settlement could not be recorded safely.'];
+    }
+
+    $paymentId = 0;
+    $transactionStarted = false;
     try {
         $pdo->beginTransaction();
+        $transactionStarted = true;
         $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
-        if ($order === null) { throw new RuntimeException('Order not found.'); }
-
-        $existing = sh_one('SELECT id, status FROM payments WHERE gateway_id = ? AND gateway_reference = ? LIMIT 1',
-            [$gatewayId, $reference]);
-        if ($existing !== null && $existing['status'] === 'verified') {
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        $existing = sh_one(
+            'SELECT id, order_id, status FROM payments WHERE gateway_id = ? AND gateway_reference = ? LIMIT 1 FOR UPDATE',
+            [$gatewayId, $reference]
+        );
+        if ($existing !== null && (int)$existing['order_id'] !== $orderId) {
+            throw new DomainException('This gateway reference belongs to a different order.');
+        }
+        // Both a confirmed success and a confirmed decline are terminal for the
+        // exact pre-bound provider reference. A provider retry must acknowledge
+        // that settled outcome rather than re-emitting payment events.
+        if ($existing !== null && in_array((string)$existing['status'], ['verified', 'failed', 'rejected', 'cancelled'], true)) {
+            if (!$pdo->inTransaction()) { throw new LogicException('Gateway transaction ended unexpectedly before duplicate commit.'); }
             $pdo->commit();
-            return ['ok' => true, 'duplicate' => true];
+            $transactionStarted = false;
+            return [
+                'ok' => true,
+                'duplicate' => true,
+                'verified' => (string)$existing['status'] === 'verified',
+            ];
+        }
+        if (in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
+            throw new DomainException('This order can no longer accept a gateway payment.');
+        }
+        if (in_array((string)$order['payment_status'], ['verified', 'refunded'], true)) {
+            throw new DomainException('This order payment has already been finalized.');
         }
 
-        $pay = sh_one('SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
+        // Always validate the immutable order selection as well as any payment
+        // row. A legacy gateway payment with a NULL gateway_id must not become
+        // an authorization to settle it through an arbitrary configured gateway.
+        $method = !empty($order['payment_method_id'])
+            ? sh_one('SELECT type, gateway_id FROM payment_methods WHERE id = ? LIMIT 1', [(int)$order['payment_method_id']])
+            : null;
+        if ($method === null || (string)$method['type'] !== 'gateway' || (int)($method['gateway_id'] ?? 0) !== $gatewayId) {
+            throw new DomainException('The gateway does not match this order.');
+        }
+
+        $pay = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
+        // A callback may settle only the payment method/persisted payment record
+        // selected for this order. This prevents a valid reference from one
+        // gateway being used to mutate a COD or manual order. The reference must
+        // also have been bound by a real server-side initiator before the
+        // callback; an inbound request never establishes that binding itself.
+        if ($pay === null || (string)($pay['kind'] ?? '') !== 'gateway'
+            || (int)($pay['gateway_id'] ?? 0) !== $gatewayId
+            || trim((string)($pay['gateway_reference'] ?? '')) === ''
+            || !hash_equals(trim((string)$pay['gateway_reference']), $reference)) {
+            throw new DomainException('The gateway callback does not match this order payment.');
+        }
+
         $status = $verified ? 'verified' : 'failed';
-        $safePayload = json_encode(sh_gateway_scrub($payload), JSON_UNESCAPED_SLASHES);
+        $safePayload = json_encode(sh_gateway_scrub($payload), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($safePayload === false) { $safePayload = '{}'; }
         if ($pay) {
-            sh_query('UPDATE payments SET gateway_id = ?, gateway_reference = ?, gateway_payload = ?, status = ?, verified_at = NOW() WHERE id = ?',
-                [$gatewayId, $reference, $safePayload, $status, $pay['id']]);
+            $paymentId = (int)$pay['id'];
+            if ($hasSubmissionMeta && $verified) {
+                sh_query(
+                    "UPDATE payments
+                     SET gateway_id = ?, gateway_reference = ?, gateway_payload = ?, status = ?, verified_at = NOW(),
+                         submitted_at = COALESCE(submitted_at, NOW()),
+                         submission_version = CASE WHEN submission_version < 1 THEN 1 ELSE submission_version END
+                     WHERE id = ?",
+                    [$gatewayId, $reference, $safePayload, $status, $paymentId]
+                );
+            } else {
+                sh_query('UPDATE payments SET gateway_id = ?, gateway_reference = ?, gateway_payload = ?, status = ?, verified_at = NOW() WHERE id = ?',
+                    [$gatewayId, $reference, $safePayload, $status, $paymentId]);
+            }
         } else {
-            sh_insert('payments', [
-                'order_id' => $orderId, 'gateway_id' => $gatewayId, 'kind' => 'gateway',
-                'amount' => $order['total'], 'gateway_reference' => $reference,
-                'gateway_payload' => $safePayload, 'status' => $status,
-            ]);
+            throw new LogicException('Gateway payment record disappeared before settlement.');
         }
         if ($verified) {
-            sh_query('UPDATE orders SET payment_status = \'verified\', status = \'processing\' WHERE id = ?', [$orderId]);
+            sh_query("UPDATE orders SET payment_status = 'verified', status = 'processing' WHERE id = ?", [$orderId]);
         } else {
-            sh_query('UPDATE orders SET payment_status = \'rejected\', status = \'payment_rejected\' WHERE id = ?', [$orderId]);
+            sh_query("UPDATE orders SET payment_status = 'rejected', status = 'payment_rejected' WHERE id = ?", [$orderId]);
+        }
+        if (!$pdo->inTransaction()) {
+            throw new LogicException('Gateway settlement transaction ended unexpectedly before commit.');
         }
         $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($transactionStarted && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'gateway-settle-rollback'); }
+        }
         sh_log_exception($e, 'gateway-settle');
         return ['ok' => false, 'error' => 'Gateway settlement failed.'];
     }
 
     $order = sh_order_get($orderId);
+    $payment = $paymentId > 0 ? sh_one('SELECT * FROM payments WHERE id = ? LIMIT 1', [$paymentId]) : null;
+    if ($order === null) {
+        sh_log_line('gateway-settle', 'Settlement committed but the order could not be reloaded: ' . $orderId);
+        return ['ok' => true];
+    }
     if ($verified) {
+        // The one permitted initial provider event for every non-COD route is
+        // emitted only after the successful payment record commits. Approval is
+        // a legitimate later lifecycle event and remains separate.
+        if ($payment !== null) {
+            try { sh_notify('payment_submitted', sh_payment_submitted_notify_payload($order, $payment)); }
+            catch (Throwable $e) { sh_log_exception($e, 'gateway-payment-submitted-notify'); }
+        } else {
+            sh_log_line('gateway-settle', 'Verified payment could not be reloaded for order ' . $orderId);
+        }
         sh_notify('payment_approved', sh_order_notify_payload($order));
         if ((int)$order['has_digital'] === 1) { sh_deliver_digital_codes($orderId); }
     } else {

@@ -9,7 +9,7 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 
 sh_session_start();
-$redirect = sh_safe_redirect(sh_get('redirect'), '');
+$redirect = sh_customer_return_target(sh_get('redirect'), '');
 
 if (sh_user() !== null) { sh_redirect($redirect !== '' ? $redirect : 'account.php'); }
 

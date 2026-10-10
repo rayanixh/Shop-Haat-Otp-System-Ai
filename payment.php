@@ -34,30 +34,27 @@ if ($order['payment_status'] === 'verified' || $order['status'] === 'completed')
 }
 
 $items = sh_order_items($orderId);
-$method = $order['payment_method_id'] ? sh_payment_method((int)$order['payment_method_id']) : null;
-$allMethods = sh_payment_methods_available((bool)sh_val('SELECT COUNT(*) FROM order_items WHERE order_id = ? AND product_type = \'physical\'', [$orderId], 0));
-$error = '';
-$submitted = ($order['payment_status'] === 'submitted');
-
-// Allow switching method before payment is submitted
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && sh_post('form') === 'switch' && !$submitted) {
-    sh_csrf_require();
-    $newId = sh_int($_POST['payment_method_id'] ?? 0);
-    foreach ($allMethods as $m) {
-        if ((int)$m['id'] === $newId) {
-            // Keep the order status consistent with the method type (COD orders skip the payment wait).
-            $status = $m['type'] === 'cod' ? 'processing' : 'awaiting_payment';
-            sh_query("UPDATE orders SET payment_method_id = ?, payment_method_name = ?,
-                             status = IF(status IN ('processing','awaiting_payment'), ?, status) WHERE id = ?",
-                [$newId, $m['name'], $status, $orderId]);
-            $_SESSION['checkout_payment_method_id'] = $newId;   // remembered for the next checkout
-            sh_query('UPDATE payments SET payment_method_id = ?, method_name = ?, kind = ? WHERE order_id = ? AND status = \'pending\'',
-                [$newId, $m['name'], $m['type'], $orderId]);
-            sh_redirect('payment.php?id=' . $orderId);
-        }
-    }
-    $error = 'That payment method is not available.';
+$payment = sh_order_latest_payment($orderId);
+// The order/payment snapshot, not a query-string provider name or a posted
+// method ID, is the only authority for this screen's payment route.
+$route = sh_order_payment_route($order, $payment);
+if (!empty($route['ok']) && (string)($route['kind'] ?? '') === 'cod') {
+    // COD has already followed its order-created workflow. Never expose a
+    // generic online-payment page or transaction-ID form for it.
+    sh_redirect('order-success.php?id=' . $orderId);
 }
+$method = is_array($route['method'] ?? null) ? $route['method'] : null;
+$selectedMethodName = trim((string)($route['method_name'] ?? $order['payment_method_name'] ?? ''));
+if ($selectedMethodName === '') { $selectedMethodName = 'Selected payment method'; }
+$routeError = empty($route['ok']) ? (string)($route['error'] ?? 'The selected payment method is unavailable.') : '';
+$methodLogo = $method !== null ? sh_payment_logo_url($method) : '';
+$error = '';
+// Keep valid customer-entered payment details visible when validation, database
+// or provider-notification work fails. They are never written until
+// sh_submit_manual_payment() commits its own transaction.
+$manualTransactionId = trim((string)($_POST['transaction_id'] ?? ''));
+$manualSenderPhone = trim((string)($_POST['sender_phone'] ?? $order['customer_phone'] ?? ''));
+$submitted = ($order['payment_status'] === 'submitted');
 
 // Manual payment submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && sh_post('form') === 'manual') {
@@ -71,8 +68,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && sh_post('form') === 'manual') {
 }
 
 $order = sh_order_get($orderId);
+$payment = sh_order_latest_payment($orderId);
+$route = sh_order_payment_route($order, $payment);
+$method = is_array($route['method'] ?? null) ? $route['method'] : null;
+$selectedMethodName = trim((string)($route['method_name'] ?? $order['payment_method_name'] ?? ''));
+if ($selectedMethodName === '') { $selectedMethodName = 'Selected payment method'; }
+$routeError = empty($route['ok']) ? (string)($route['error'] ?? 'The selected payment method is unavailable.') : '';
+$methodLogo = $method !== null ? sh_payment_logo_url($method) : '';
 $submitted = ($order['payment_status'] === 'submitted');
-$payment = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$orderId]);
 
 $pageTitle = 'Complete Payment — ' . $order['order_number'];
 $pageDescription = 'Complete the payment for your order.';
@@ -99,35 +102,35 @@ require_once SH_ROOT . '/includes/header.php';
       <div class="sh-payment-card">
         <div class="sh-payment-card__head">
           <?= sh_icon('credit-card', 21) ?>
+          <?php if ($methodLogo !== ''): ?>
+            <img src="<?= e($methodLogo) ?>" alt="<?= e($selectedMethodName) ?>" style="width:32px;height:32px;object-fit:contain">
+          <?php endif; ?>
           <div>
-            <h1>Complete your payment</h1>
-            <p class="sh-payment-card__sub">Order <?= e($order['order_number']) ?> · placed <?= e(date('d M Y, h:i A', strtotime($order['created_at']))) ?></p>
+            <h1>Pay with <?= e($selectedMethodName) ?></h1>
+            <p class="sh-payment-card__sub">Order <?= e($order['order_number']) ?> · <?= e($selectedMethodName) ?> · placed <?= e(date('d M Y, h:i A', strtotime($order['created_at']))) ?></p>
           </div>
         </div>
 
-        <?php if (count($allMethods) > 1 && !$submitted): ?>
-          <p class="sh-payment-card__sub" style="padding:0 17px;margin:12px 0 -4px">Choose how you want to pay:</p>
-          <form class="sh-paytabs" method="post" data-no-lock>
-            <?= sh_csrf_field() ?>
-            <input type="hidden" name="form" value="switch">
-            <?php foreach ($allMethods as $m): $lg = sh_payment_logo_url($m); ?>
-              <button class="sh-paytab <?= $method && (int)$m['id'] === (int)$method['id'] ? 'sh-paytab--on' : '' ?>"
-                      type="submit" name="payment_method_id" value="<?= (int)$m['id'] ?>">
-                <?php if ($lg !== ''): ?><img src="<?= e($lg) ?>" alt="">
-                <?php else: ?><?= sh_icon($m['type'] === 'cod' ? 'truck' : 'credit-card', 16) ?><?php endif; ?>
-                <?= e($m['name']) ?>
-              </button>
-            <?php endforeach; ?>
-          </form>
-        <?php endif; ?>
-
         <div class="sh-payment-card__body">
+          <?php if ($order['payment_status'] === 'rejected'): ?>
+            <div class="sh-alert sh-alert--error">
+              <?= sh_icon('x-circle', 17) ?>
+              <div><strong>Payment rejected</strong>
+                <p style="margin-top:3px"><?= e($payment['admin_note'] ?? 'The transaction could not be verified.') ?>
+                  <?php if (!empty($route['ok']) && (string)($route['kind'] ?? '') === 'manual'): ?>
+                    Please submit corrected <?= e($selectedMethodName) ?> transaction details or contact support.
+                  <?php else: ?>
+                    This order has not been switched to another provider. Return to Checkout to explicitly choose a new method or contact support.
+                  <?php endif; ?></p></div>
+            </div>
+          <?php endif; ?>
+
           <?php if ($submitted): ?>
             <div class="sh-alert sh-alert--warning">
               <?= sh_icon('clock', 17) ?>
               <div>
                 <strong>Payment pending verification</strong>
-                <p style="margin-top:3px">We have received your transaction details and our team is verifying the payment.
+                <p style="margin-top:3px">We have received your <?= e($selectedMethodName) ?> transaction details and our team is verifying the payment.
                   You will be notified as soon as it is approved. This usually takes a few minutes during business hours.</p>
               </div>
             </div>
@@ -142,37 +145,31 @@ require_once SH_ROOT . '/includes/header.php';
             <?php endif; ?>
             <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('order-details.php?id=' . $orderId)) ?>">View order details</a>
 
-          <?php elseif ($order['payment_status'] === 'rejected'): ?>
-            <div class="sh-alert sh-alert--error">
-              <?= sh_icon('x-circle', 17) ?>
-              <div><strong>Payment rejected</strong>
-                <p style="margin-top:3px"><?= e($payment['admin_note'] ?? 'The transaction could not be verified.') ?>
-                  Please submit the correct transaction details or contact support.</p></div>
+          <?php elseif (empty($route['ok'])): ?>
+            <div class="sh-alert sh-alert--warning">
+              <?= sh_icon('alert', 17) ?>
+              <div><strong><?= e($selectedMethodName) ?> is unavailable for this order</strong>
+                <p style="margin-top:3px"><?= e($routeError) ?> This order has not been switched to another provider.</p></div>
+            </div>
+            <div class="sh-actions" style="margin-top:12px">
+              <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('checkout.php?retry_order=' . $orderId)) ?>">Return to Checkout</a>
+              <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('support.php')) ?>">Contact support</a>
             </div>
 
-          <?php elseif ($method === null): ?>
-            <div class="sh-alert sh-alert--warning"><?= sh_icon('alert', 16) ?><span>No payment method is selected for this order.</span></div>
-
-          <?php elseif ($method['type'] === 'cod'): ?>
-            <div class="sh-alert sh-alert--info"><?= sh_icon('truck', 17) ?>
-              <div><strong>Cash on Delivery</strong>
-                <p style="margin-top:3px"><?= e($method['instructions']) ?></p></div>
-            </div>
-            <a class="sh-btn sh-btn--lg" href="<?= e(sh_url('order-success.php?id=' . $orderId)) ?>">Continue <?= sh_icon('chevron-right', 16) ?></a>
-
-          <?php elseif ($method['type'] === 'gateway'):
-            $gw = $method['gateway_id'] ? sh_gateway_by_id((int)$method['gateway_id']) : null; ?>
+          <?php elseif ((string)$route['kind'] === 'gateway'):
+            $gw = $method !== null && !empty($method['gateway_id']) ? sh_gateway_by_id((int)$method['gateway_id']) : null; ?>
             <div class="sh-amount-box">
-              <p class="sh-amount-box__label">Amount to pay</p>
+              <p class="sh-amount-box__label">Amount to pay with <?= e($selectedMethodName) ?></p>
               <p class="sh-amount-box__value"><?= e(sh_money($order['total'])) ?></p>
             </div>
-            <?php if ($gw === null || !sh_gateway_is_configured($gw)): ?>
+            <?php if ($gw === null || !sh_gateway_is_configured($gw) || !sh_gateway_can_initiate($gw)): ?>
               <div class="sh-alert sh-alert--warning">
                 <?= sh_icon('alert', 17) ?>
-                <div><strong>This gateway is not configured</strong>
-                  <p style="margin-top:3px">Automatic payment is unavailable because the merchant credentials have not been
-                    added yet. Please choose another payment method above or contact support.</p></div>
+                <div><strong><?= e($selectedMethodName) ?> is currently unavailable</strong>
+                  <p style="margin-top:3px">No payment has been requested and this order has not been switched to another provider.
+                    Return to Checkout to choose another method or contact support.</p></div>
               </div>
+              <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('checkout.php?retry_order=' . $orderId)) ?>">Return to Checkout</a>
             <?php else: ?>
               <div class="sh-alert sh-alert--info">
                 <?= sh_icon('external', 17) ?>
@@ -183,15 +180,15 @@ require_once SH_ROOT . '/includes/header.php';
               <p style="font-size:12.5px;color:var(--sh-muted)">Mode: <?= e(ucfirst($gw['mode'])) ?></p>
             <?php endif; ?>
 
-          <?php else: /* manual MFS */ ?>
+          <?php elseif ((string)$route['kind'] === 'manual' && $method !== null): ?>
             <div class="sh-amount-box">
-              <p class="sh-amount-box__label">Amount to send</p>
+              <p class="sh-amount-box__label">Amount to send with <?= e($selectedMethodName) ?></p>
               <p class="sh-amount-box__value"><?= e(sh_money($order['total'])) ?></p>
             </div>
 
             <div class="sh-merchant">
               <div>
-                <p class="sh-merchant__label"><?= e($method['name']) ?> merchant number</p>
+                <p class="sh-merchant__label"><?= e($selectedMethodName) ?> merchant number</p>
                 <p class="sh-merchant__number"><?= e($method['account_number']) ?></p>
                 <?php if ($method['account_type']): ?>
                   <p class="sh-merchant__type">Account type: <?= e($method['account_type']) ?></p>
@@ -204,7 +201,7 @@ require_once SH_ROOT . '/includes/header.php';
 
             <?php if ($method['instructions']): ?>
               <div class="sh-instructions">
-                <p class="sh-instructions__title">How to pay with <?= e($method['name']) ?></p>
+                <p class="sh-instructions__title">How to pay with <?= e($selectedMethodName) ?></p>
                 <div class="sh-instructions__list"><?= e($method['instructions']) ?></div>
               </div>
             <?php endif; ?>
@@ -217,24 +214,32 @@ require_once SH_ROOT . '/includes/header.php';
                 <div class="sh-field">
                   <label class="sh-field__label" for="pay-trx">Transaction ID (TrxID) <span class="sh-field__req">*</span></label>
                   <input class="sh-input" id="pay-trx" name="transaction_id" required maxlength="60"
-                         placeholder="e.g. 9F7HD3K1QA" style="text-transform:uppercase">
-                  <p class="sh-field__hint">Copy it exactly from your <?= e($method['name']) ?> confirmation message.</p>
+                         value="<?= e($manualTransactionId) ?>" placeholder="e.g. 9F7HD3K1QA" style="text-transform:uppercase">
+                  <p class="sh-field__hint">Copy it exactly from your <?= e($selectedMethodName) ?> confirmation message.</p>
                 </div>
                 <div class="sh-field">
-                  <label class="sh-field__label" for="pay-phone">Your <?= e($method['name']) ?> number <span class="sh-field__req">*</span></label>
+                  <label class="sh-field__label" for="pay-phone">Your <?= e($selectedMethodName) ?> number <span class="sh-field__req">*</span></label>
                   <input class="sh-input" id="pay-phone" name="sender_phone" required maxlength="20"
-                         placeholder="01XXXXXXXXX" value="<?= e($order['customer_phone']) ?>">
+                         placeholder="01XXXXXXXXX" value="<?= e($manualSenderPhone) ?>">
                   <p class="sh-field__hint">The number you sent the money from.</p>
                 </div>
               </div>
               <button class="sh-btn sh-btn--lg sh-btn--block" type="submit">
-                <?= sh_icon('check-circle', 17) ?> Submit Payment
+                <?= sh_icon('check-circle', 17) ?> Submit <?= e($selectedMethodName) ?> payment
               </button>
               <p style="font-size:12px;color:var(--sh-muted);margin-top:10px;text-align:center">
                 Your payment will be marked <strong>Pending verification</strong> until our team confirms the transaction.
                 Payments are never approved automatically.
               </p>
             </form>
+
+          <?php else: ?>
+            <div class="sh-alert sh-alert--warning">
+              <?= sh_icon('alert', 17) ?>
+              <div><strong>The selected payment method cannot be opened</strong>
+                <p style="margin-top:3px">This order has not been changed to another payment provider. Please return to Checkout or contact support.</p></div>
+            </div>
+            <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('checkout.php?retry_order=' . $orderId)) ?>">Return to Checkout</a>
           <?php endif; ?>
         </div>
       </div>
@@ -265,8 +270,14 @@ require_once SH_ROOT . '/includes/header.php';
 
       <div class="sh-secure-note">
         <?= sh_icon('shield', 16) ?>
-        <span><strong>Secure payment.</strong> We never ask for your PIN or OTP. Only the transaction ID is required.
-          All amounts are verified against our server records before an order is approved.</span>
+        <?php if (!empty($route['ok']) && (string)($route['kind'] ?? '') === 'manual' && !$submitted): ?>
+          <span><strong>Secure <?= e($selectedMethodName) ?> payment.</strong> We never ask for your PIN or OTP. Only the transaction ID is required.
+            All amounts are verified against our server records before an order is approved.</span>
+        <?php elseif (!empty($route['ok']) && (string)($route['kind'] ?? '') === 'gateway'): ?>
+          <span><strong>Secure <?= e($selectedMethodName) ?> payment.</strong> Never share your PIN or OTP. Payment is confirmed only after server-side provider verification.</span>
+        <?php else: ?>
+          <span><strong>Order security.</strong> The saved order and selected payment method are verified on our server before any payment status changes.</span>
+        <?php endif; ?>
       </div>
     </aside>
   </div>

@@ -9,6 +9,7 @@ function sh_login_user(int $userId): void
     session_regenerate_id(true);
     $_SESSION['user_id'] = $userId;
     $_SESSION['user_login_at'] = time();
+    unset($_SESSION['sh_auth_expired']);
     sh_query('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$userId]);
     sh_merge_guest_cart($userId);
 }
@@ -16,24 +17,43 @@ function sh_login_user(int $userId): void
 function sh_logout_user(): void
 {
     sh_session_start();
-    unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['sh_auth_expired']);
     session_regenerate_id(true);
+}
+
+/** Mark an invalid or expired browser session without exposing account details. */
+function sh_forget_customer_session(bool $expired = false): void
+{
+    sh_session_start();
+    unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    if ($expired) { $_SESSION['sh_auth_expired'] = 1; }
 }
 
 function sh_user(): ?array
 {
     static $user = null;
-    static $done = false;
-    if ($done) { return $user; }
-    $done = true;
+    static $identity = null;
+
     sh_session_start();
     $id = (int)($_SESSION['user_id'] ?? 0);
-    if ($id <= 0) { return null; }
-    // Server-side 24h session: the login expires automatically, after which the
-    // customer must sign in again with phone + OTP.
     $loginAt = (int)($_SESSION['user_login_at'] ?? 0);
-    if ($loginAt > 0 && (time() - $loginAt) > sh_session_ttl()) {
-        unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    // A login/logout/session regeneration can happen later in the same PHP
+    // request (for example during an OAuth callback). Cache only while the
+    // session identity itself is unchanged; otherwise a guest cart could be
+    // selected after a successful customer login.
+    $currentIdentity = $id . ':' . $loginAt;
+    $now = time();
+    $stillValid = $id <= 0 || ($loginAt > 0 && $loginAt <= $now && ($now - $loginAt) <= sh_session_ttl());
+    if ($identity === $currentIdentity && $stillValid) { return $user; }
+    $identity = $currentIdentity;
+    $user = null;
+    if ($id <= 0) { return null; }
+
+    // Server-side 24h session: a missing timestamp is treated as expired too.
+    // That prevents a stale/partially-written session from reaching profile code
+    // with a null customer record.
+    if ($loginAt <= 0 || $loginAt > $now || ($now - $loginAt) > sh_session_ttl()) {
+        sh_forget_customer_session(true);
         return null;
     }
     try {
@@ -44,7 +64,7 @@ function sh_user(): ?array
         return null;
     }
     if ($u === null || $u['status'] !== 'active') {
-        unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+        sh_forget_customer_session(true);
         return null;
     }
     $user = $u;
@@ -57,6 +77,42 @@ function sh_user_id(): int
     return $u ? (int)$u['id'] : 0;
 }
 
+/**
+ * Restrict a post-login destination to a customer-facing internal page.
+ * Authentication pages and admin/API endpoints are intentionally excluded to
+ * prevent loops and cross-surface redirects.
+ */
+function sh_customer_return_target(string $raw, string $fallback = 'account.php'): string
+{
+    $target = sh_safe_redirect($raw, '');
+    if ($target === '') { return $fallback; }
+
+    $path = (string)(parse_url($target, PHP_URL_PATH) ?? '');
+    // sh_safe_redirect() rejects dangerous decoded values, but preserve the
+    // encoded target itself for a legitimate customer URL. Decode here too so
+    // admin/login routes cannot bypass the allowlist as admin%2Forders.php.
+    for ($i = 0; $i < 2; $i++) {
+        $decoded = rawurldecode($path);
+        if ($decoded === $path) { break; }
+        $path = $decoded;
+    }
+    $path = strtolower(ltrim(explode('?', $path, 2)[0], '/'));
+    if ($path === '' || preg_match('~^(?:admin|api|install)(?:/|\.php$|$)~', $path) === 1) {
+        return $fallback;
+    }
+    $blocked = [
+        'login.php', 'register.php', 'logout.php', 'otp.php', 'forgot-password.php',
+        'reset-password.php', 'auth/google/login.php', 'auth/google/callback.php',
+    ];
+    return in_array($path, $blocked, true) ? $fallback : $target;
+}
+
+function sh_login_url(string $returnTo = 'account.php'): string
+{
+    $target = sh_customer_return_target($returnTo, 'account.php');
+    return 'login.php?redirect=' . rawurlencode($target);
+}
+
 function sh_require_login(string $redirectTo = ''): array
 {
     $u = sh_user();
@@ -64,8 +120,14 @@ function sh_require_login(string $redirectTo = ''): array
         if (sh_wants_json()) {
             sh_json(['success' => false, 'error' => 'Please sign in to continue.', 'auth_required' => true], 401);
         }
-        $target = $redirectTo !== '' ? $redirectTo : ($_SERVER['REQUEST_URI'] ?? '');
-        sh_redirect('login.php?redirect=' . urlencode($target));
+
+        sh_session_start();
+        if (!empty($_SESSION['sh_auth_expired'])) {
+            unset($_SESSION['sh_auth_expired']);
+            sh_flash('info', 'Your session has expired. Please sign in again.');
+        }
+        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        sh_redirect(sh_login_url($target));
     }
     return $u;
 }
@@ -85,7 +147,8 @@ function sh_cart_token(): string
     $token = bin2hex(random_bytes(32));
     $_SESSION['cart_token'] = $token;
     if (!headers_sent()) {
-        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
         setcookie('sh_cart', $token, [
             'expires'  => time() + 86400 * 30,
             'path'     => sh_base_url() . '/',
@@ -100,46 +163,110 @@ function sh_cart_token(): string
 /** Returns the current cart id, creating one when needed. */
 function sh_cart_id(bool $create = true): int
 {
-    static $id = null;
-    if ($id !== null && $id > 0) { return $id; }
+    // The request can transition from guest to authenticated after
+    // session_regenerate_id(). Cache by owner rather than one unqualified ID so
+    // a guest cart ID can never be reused for the newly signed-in customer.
+    static $ids = [];
     $uid = sh_user_id();
     if ($uid > 0) {
+        $key = 'user:' . $uid;
+        if (isset($ids[$key]) && $ids[$key] > 0) { return $ids[$key]; }
         $row = sh_one('SELECT id FROM cart WHERE user_id = ? ORDER BY id DESC LIMIT 1', [$uid]);
-        if ($row) { return $id = (int)$row['id']; }
+        if ($row) { return $ids[$key] = (int)$row['id']; }
+
+        // If the first login request could not finish its merge (for example a
+        // transient database fault), keep retrying from ordinary cart reads.
+        // The guest cart remains untouched until this succeeds, so it is never
+        // silently replaced with an empty authenticated cart.
+        $guestToken = $_SESSION['cart_token'] ?? ($_COOKIE['sh_cart'] ?? '');
+        if (is_string($guestToken) && preg_match('/^[a-f0-9]{64}$/', $guestToken)) {
+            sh_merge_guest_cart($uid);
+            $row = sh_one('SELECT id FROM cart WHERE user_id = ? ORDER BY id DESC LIMIT 1', [$uid]);
+            if ($row) { return $ids[$key] = (int)$row['id']; }
+        }
         if (!$create) { return 0; }
-        return $id = sh_insert('cart', ['user_id' => $uid]);
+        return $ids[$key] = sh_insert('cart', ['user_id' => $uid]);
     }
+
     $token = sh_cart_token();
+    $key = 'guest:' . $token;
+    if (isset($ids[$key]) && $ids[$key] > 0) { return $ids[$key]; }
     $row = sh_one('SELECT id FROM cart WHERE session_token = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1', [$token]);
-    if ($row) { return $id = (int)$row['id']; }
+    if ($row) { return $ids[$key] = (int)$row['id']; }
     if (!$create) { return 0; }
-    return $id = sh_insert('cart', ['session_token' => $token]);
+    return $ids[$key] = sh_insert('cart', ['session_token' => $token]);
 }
 
+/**
+ * Move a guest cart into an authenticated customer's cart atomically. A login
+ * session ID regeneration retains the random cart token; this transaction makes
+ * its one-time migration safe even when the customer already has a cart.
+ */
 function sh_merge_guest_cart(int $userId): void
 {
     sh_session_start();
     $token = $_SESSION['cart_token'] ?? ($_COOKIE['sh_cart'] ?? '');
-    if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) { return; }
+    if ($userId <= 0 || !is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) { return; }
+
+    $pdo = null;
+    $transactionStarted = false;
     try {
-        $guest = sh_one('SELECT id FROM cart WHERE session_token = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1', [$token]);
-        if ($guest === null) { return; }
-        $guestId = (int)$guest['id'];
-        $own = sh_one('SELECT id FROM cart WHERE user_id = ? ORDER BY id DESC LIMIT 1', [$userId]);
-        if ($own === null) {
-            sh_query('UPDATE cart SET user_id = ?, session_token = NULL WHERE id = ?', [$userId, $guestId]);
+        $pdo = sh_db();
+        if ($pdo->inTransaction()) {
+            // Do not attach an authentication/cart migration to someone else's
+            // business transaction. The guest rows stay intact rather than
+            // becoming partially moved.
+            sh_log_line('cart-merge', 'Deferred guest-cart merge because a transaction is active.');
             return;
         }
-        $ownId = (int)$own['id'];
-        foreach (sh_all('SELECT product_id, quantity FROM cart_items WHERE cart_id = ?', [$guestId]) as $it) {
-            sh_query(
-                'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
-                 ON DUPLICATE KEY UPDATE quantity = LEAST(quantity + VALUES(quantity), 99)',
-                [$ownId, $it['product_id'], $it['quantity']]
-            );
+        $pdo->beginTransaction();
+        $transactionStarted = true;
+
+        // Serialize migrations for one customer. cart.user_id is indexed but is
+        // intentionally not globally unique on older installs, so locking the
+        // owning user prevents two concurrent sign-ins from creating separate
+        // user carts and leaving one of their guest carts invisible.
+        $owner = sh_one('SELECT id FROM users WHERE id = ? LIMIT 1 FOR UPDATE', [$userId]);
+        if ($owner === null) { throw new DomainException('Customer account not found.'); }
+        $guest = sh_one(
+            'SELECT id FROM cart WHERE session_token = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1 FOR UPDATE',
+            [$token]
+        );
+        if ($guest === null) {
+            if (!$pdo->inTransaction()) { throw new LogicException('Guest-cart merge transaction ended unexpectedly before commit.'); }
+            $pdo->commit();
+            $transactionStarted = false;
+            return;
         }
-        sh_query('DELETE FROM cart WHERE id = ?', [$guestId]);
+        $guestId = (int)$guest['id'];
+        // auth.php is also used by Login without loading cart.php, so do not
+        // assume the cart module's SH_MAX_QTY constant is already defined.
+        $maxQty = defined('SH_MAX_QTY') ? (int)SH_MAX_QTY : 20;
+        $own = sh_one('SELECT id FROM cart WHERE user_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$userId]);
+        if ($own === null) {
+            sh_query('UPDATE cart SET user_id = ?, session_token = NULL WHERE id = ?', [$userId, $guestId]);
+        } else {
+            $ownId = (int)$own['id'];
+            foreach (sh_all('SELECT product_id, quantity FROM cart_items WHERE cart_id = ? FOR UPDATE', [$guestId]) as $it) {
+                sh_query(
+                    'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
+                     ON DUPLICATE KEY UPDATE quantity = LEAST(quantity + VALUES(quantity), ?)',
+                    [$ownId, (int)$it['product_id'], max(1, min($maxQty, (int)$it['quantity'])), $maxQty]
+                );
+            }
+            sh_query('DELETE FROM cart WHERE id = ?', [$guestId]);
+        }
+
+        if (!$pdo->inTransaction()) {
+            throw new LogicException('Guest-cart merge transaction ended unexpectedly.');
+        }
+        $pdo->commit();
+        $transactionStarted = false;
     } catch (Throwable $e) {
+        if ($transactionStarted && $pdo instanceof PDO && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'cart-merge-rollback'); }
+        }
         sh_log_exception($e, 'cart-merge');
     }
 }
