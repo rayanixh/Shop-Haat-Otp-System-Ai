@@ -25,6 +25,128 @@ const SH_EVENTS = [
 
 const SH_CHANNELS = ['telegram', 'whatsapp', 'messenger', 'email'];
 
+/**
+ * Add delivery-idempotency fields to the existing notification log without
+ * replacing historical records.  The compact 100-character key keeps the
+ * composite unique index compatible with older MySQL/MariaDB installations.
+ */
+function sh_notification_log_schema_ensure(): bool
+{
+    static $done = false;
+    static $ok = false;
+    if ($done) { return $ok; }
+    $done = true;
+
+    try {
+        if (!sh_table_exists('notification_logs')) { return false; }
+        $pdo = sh_db();
+        $st = $pdo->prepare(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $st->execute(['notification_logs']);
+        $columns = array_fill_keys($st->fetchAll(PDO::FETCH_COLUMN), true);
+        $add = [
+            'idempotency_key' => 'VARCHAR(100) DEFAULT NULL AFTER event',
+            'attempts'        => 'SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER status',
+            'updated_at'      => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at',
+        ];
+        foreach ($add as $column => $ddl) {
+            if (!isset($columns[$column])) {
+                $pdo->exec("ALTER TABLE notification_logs ADD COLUMN `$column` $ddl");
+            }
+        }
+
+        $idx = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+        );
+        $idx->execute(['notification_logs', 'uq_notification_idempotency']);
+        if ((int)$idx->fetchColumn() === 0) {
+            $pdo->exec('ALTER TABLE notification_logs ADD UNIQUE KEY uq_notification_idempotency (channel, event, idempotency_key)');
+        }
+        $ok = true;
+    } catch (Throwable $e) {
+        // Notification delivery must never block a paid/order submission.
+        sh_log_exception($e, 'notification-log-schema');
+    }
+    return $ok;
+}
+
+/** Only application-generated compact keys may be used for delivery locking. */
+function sh_notification_key(string $key): string
+{
+    $key = trim($key);
+    if ($key === '' || strlen($key) > 100 || preg_match('/^[A-Za-z0-9._:-]+$/', $key) !== 1) { return ''; }
+    return $key;
+}
+
+/** Reserve a keyed delivery before an outbound API call, preventing duplicates. */
+function sh_notification_claim(?int $orderId, string $channel, string $event, string $key, bool $retry = false): array
+{
+    $key = sh_notification_key($key);
+    if ($key === '' || !sh_notification_log_schema_ensure()) {
+        return ['claimed' => true, 'log_id' => 0];
+    }
+
+    try {
+        $id = sh_insert('notification_logs', [
+            'order_id'        => $orderId,
+            'channel'         => $channel,
+            'event'           => $event,
+            'idempotency_key' => $key,
+            // "skipped" is a valid legacy ENUM value and is only a short-lived
+            // reservation until the provider call below finishes.
+            'status'          => 'skipped',
+            'attempts'        => 1,
+            'error_message'   => 'Delivery in progress.',
+        ]);
+        return ['claimed' => true, 'log_id' => $id];
+    } catch (Throwable $e) {
+        try {
+            $existing = sh_one(
+                'SELECT id, status FROM notification_logs
+                 WHERE channel = ? AND event = ? AND idempotency_key = ? LIMIT 1',
+                [$channel, $event, $key]
+            );
+            if ($existing !== null && $retry && (string)$existing['status'] === 'failed') {
+                $updated = sh_query(
+                    "UPDATE notification_logs
+                     SET status = 'skipped', attempts = attempts + 1, error_message = 'Delivery retry in progress.'
+                     WHERE id = ? AND status = 'failed'",
+                    [(int)$existing['id']]
+                )->rowCount();
+                if ($updated === 1) { return ['claimed' => true, 'log_id' => (int)$existing['id']]; }
+            }
+            if ($existing !== null) {
+                return ['claimed' => false, 'log_id' => (int)$existing['id'], 'status' => (string)$existing['status']];
+            }
+        } catch (Throwable $lookupError) {
+            sh_log_exception($lookupError, 'notification-claim-lookup');
+        }
+
+        // If a host cannot apply the additive migration, retain the former
+        // best-effort delivery behavior rather than blocking the payment flow.
+        sh_log_exception($e, 'notification-claim');
+        return ['claimed' => true, 'log_id' => 0];
+    }
+}
+
+/** Finish a delivery reservation with the provider's final outcome. */
+function sh_notification_finish_claim(int $logId, string $status, ?string $recipient = null, ?string $error = null): void
+{
+    if ($logId <= 0) { return; }
+    try {
+        sh_update('notification_logs', [
+            'recipient'     => $recipient !== null ? mb_substr(sh_scrub_secrets($recipient), 0, 190) : null,
+            'status'        => in_array($status, ['sent', 'failed', 'skipped'], true) ? $status : 'failed',
+            'error_message' => $error !== null ? mb_substr(sh_scrub_secrets($error), 0, 500) : null,
+        ], 'id = ?', [$logId]);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'notification-finish');
+    }
+}
+
 function sh_notification_matrix(): array
 {
     $m = [];
@@ -48,14 +170,16 @@ function sh_notification_enabled(string $channel, string $event): bool
 function sh_notify_log(?int $orderId, string $channel, string $event, string $status, ?string $recipient = null, ?string $error = null): void
 {
     try {
-        sh_insert('notification_logs', [
+        $data = [
             'order_id'      => $orderId,
             'channel'       => $channel,
             'event'         => $event,
             'recipient'     => $recipient !== null ? mb_substr(sh_scrub_secrets($recipient), 0, 190) : null,
-            'status'        => $status,
+            'status'        => in_array($status, ['sent', 'failed', 'skipped'], true) ? $status : 'failed',
             'error_message' => $error !== null ? mb_substr(sh_scrub_secrets($error), 0, 500) : null,
-        ]);
+        ];
+        if (sh_notification_log_schema_ensure()) { $data['attempts'] = 1; }
+        sh_insert('notification_logs', $data);
     } catch (Throwable $e) {
         sh_log_exception($e, 'notify-log');
     }
@@ -72,40 +196,137 @@ function sh_notify(string $event, array $data = []): array
         sh_log_line('notify', 'Unknown notification event: ' . $event);
         return $results;
     }
+
     $orderId = isset($data['order_id']) ? (int)$data['order_id'] : null;
     $message = sh_notify_message($event, $data);
+    $notificationKey = sh_notification_key((string)($data['notification_key'] ?? ''));
+    $isRetry = !empty($data['retry_notification']);
+    $retryChannel = trim((string)($data['retry_channel'] ?? ''));
 
     foreach (SH_CHANNELS as $channel) {
+        $claim = ['claimed' => true, 'log_id' => 0];
         try {
+            if ($isRetry && $retryChannel !== '' && $channel !== $retryChannel) {
+                $results[$channel] = ['status' => 'skipped', 'error' => 'Not selected for this channel-specific retry.'];
+                continue;
+            }
             if (!sh_notification_enabled($channel, $event)) {
                 $results[$channel] = ['status' => 'skipped', 'error' => 'Event disabled for this channel.'];
                 continue;
             }
+
+            $claim = sh_notification_claim(
+                $orderId,
+                $channel,
+                $event,
+                $notificationKey,
+                $isRetry && ($retryChannel === '' || $retryChannel === $channel)
+            );
+            if (empty($claim['claimed'])) {
+                $results[$channel] = [
+                    'status' => 'skipped',
+                    'error' => 'This notification event was already delivered or is being processed.',
+                ];
+                continue;
+            }
+
             $res = match ($channel) {
-                'telegram'  => sh_send_telegram($message['text']),
+                // Payment submitted has its own order-level Telegram delivery: a
+                // complete validated summary plus every available product image.
+                'telegram'  => $event === 'payment_submitted' && function_exists('sh_tg_send_payment_submitted')
+                    ? sh_tg_send_payment_submitted($data)
+                    : sh_send_telegram($message['text']),
                 'whatsapp'  => sh_send_whatsapp($message['text'], $data),
                 'messenger' => sh_send_messenger($message['text']),
                 'email'     => sh_send_email_notification($event, $message, $data),
                 default     => ['ok' => false, 'error' => 'Unknown channel.', 'skipped' => true],
             };
+
+            $logId = (int)($claim['log_id'] ?? 0);
             if (!empty($res['skipped'])) {
-                $results[$channel] = ['status' => 'skipped', 'error' => $res['error'] ?? 'Not configured.'];
-                sh_notify_log($orderId, $channel, $event, 'skipped', $res['recipient'] ?? null, $res['error'] ?? 'Not configured.');
+                $error = (string)($res['error'] ?? 'Not configured.');
+                $results[$channel] = ['status' => 'skipped', 'error' => $error];
+                if ($logId > 0) { sh_notification_finish_claim($logId, 'skipped', $res['recipient'] ?? null, $error); }
+                else { sh_notify_log($orderId, $channel, $event, 'skipped', $res['recipient'] ?? null, $error); }
             } elseif (!empty($res['ok'])) {
-                $results[$channel] = ['status' => 'sent', 'error' => null];
-                sh_notify_log($orderId, $channel, $event, 'sent', $res['recipient'] ?? null, null);
+                // A photo can be unavailable while the complete text summary was
+                // delivered. Keep that actionable detail in the log without
+                // treating the customer's saved payment as a failure.
+                $warning = !empty($res['warning']) ? (string)$res['warning'] : null;
+                $results[$channel] = ['status' => 'sent', 'error' => $warning];
+                if ($logId > 0) { sh_notification_finish_claim($logId, 'sent', $res['recipient'] ?? null, $warning); }
+                else { sh_notify_log($orderId, $channel, $event, 'sent', $res['recipient'] ?? null, $warning); }
             } else {
-                $results[$channel] = ['status' => 'failed', 'error' => $res['error'] ?? 'Unknown error.'];
-                sh_notify_log($orderId, $channel, $event, 'failed', $res['recipient'] ?? null, $res['error'] ?? 'Unknown error.');
+                $error = (string)($res['error'] ?? 'Unknown error.');
+                $results[$channel] = ['status' => 'failed', 'error' => $error];
+                if ($logId > 0) { sh_notification_finish_claim($logId, 'failed', $res['recipient'] ?? null, $error); }
+                else { sh_notify_log($orderId, $channel, $event, 'failed', $res['recipient'] ?? null, $error); }
             }
         } catch (Throwable $e) {
             // A channel blowing up must never abort the order.
             sh_log_exception($e, 'notify-' . $channel);
-            $results[$channel] = ['status' => 'failed', 'error' => $e->getMessage()];
-            sh_notify_log($orderId, $channel, $event, 'failed', null, $e->getMessage());
+            $error = sh_scrub_secrets($e->getMessage());
+            $results[$channel] = ['status' => 'failed', 'error' => $error];
+            $logId = (int)($claim['log_id'] ?? 0);
+            if ($logId > 0) { sh_notification_finish_claim($logId, 'failed', null, $error); }
+            else { sh_notify_log($orderId, $channel, $event, 'failed', null, $error); }
         }
     }
     return $results;
+}
+
+/**
+ * Admin-only retry for a failed, keyed payment-submitted Telegram delivery.
+ * It rebuilds every field from the current server-side order/payment snapshot;
+ * no browser-supplied product, amount or transaction data is reused.
+ */
+function sh_retry_payment_submitted_telegram(int $logId): array
+{
+    if ($logId <= 0 || !sh_notification_log_schema_ensure()) {
+        return ['ok' => false, 'error' => 'This notification cannot be retried yet.'];
+    }
+
+    try {
+        $log = sh_one(
+            "SELECT * FROM notification_logs
+             WHERE id = ? AND channel = 'telegram' AND event = 'payment_submitted' LIMIT 1",
+            [$logId]
+        );
+        if ($log === null) { return ['ok' => false, 'error' => 'Notification record not found.']; }
+        if ((string)$log['status'] !== 'failed') {
+            return ['ok' => false, 'error' => 'Only failed Telegram deliveries can be retried.'];
+        }
+        if (!preg_match('/^payment-submitted:(\d+):(\d+)$/', (string)($log['idempotency_key'] ?? ''), $match)) {
+            return ['ok' => false, 'error' => 'This legacy notification has no safe retry key.'];
+        }
+
+        $payment = sh_one('SELECT * FROM payments WHERE id = ? LIMIT 1', [(int)$match[1]]);
+        $order = $payment !== null ? sh_order_get((int)$payment['order_id']) : null;
+        if ($payment === null || $order === null) {
+            return ['ok' => false, 'error' => 'The related payment or order is no longer available.'];
+        }
+        if (max(1, (int)($payment['submission_version'] ?? 0)) !== (int)$match[2]) {
+            return ['ok' => false, 'error' => 'A newer payment submission exists; the older notification will not be retried.'];
+        }
+        if (!function_exists('sh_payment_submitted_notify_payload')) {
+            return ['ok' => false, 'error' => 'Payment notification support is unavailable.'];
+        }
+
+        $payload = sh_payment_submitted_notify_payload($order, $payment);
+        $payload['retry_notification'] = true;
+        // This admin control retries only the failed Telegram delivery; it must
+        // not resend an already delivered email/WhatsApp/Messenger event.
+        $payload['retry_channel'] = 'telegram';
+        $result = sh_notify('payment_submitted', $payload);
+        $telegram = $result['telegram'] ?? ['status' => 'failed', 'error' => 'Telegram delivery was not attempted.'];
+        return [
+            'ok' => (string)($telegram['status'] ?? '') === 'sent',
+            'error' => (string)($telegram['error'] ?? ''),
+        ];
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'notification-retry');
+        return ['ok' => false, 'error' => 'The notification could not be retried.'];
+    }
 }
 
 /** Builds the human-readable message body for an event. */
@@ -118,14 +339,31 @@ function sh_notify_message(string $event, array $data): array
     if (!empty($data['order_number'])) { $lines[] = 'Order: ' . $data['order_number']; }
     if (!empty($data['customer_name'])) { $lines[] = 'Customer: ' . $data['customer_name']; }
     if (!empty($data['customer_phone'])) { $lines[] = 'Phone: ' . $data['customer_phone']; }
+    $address = array_filter([
+        (string)($data['shipping_address'] ?? ''), (string)($data['shipping_area'] ?? ''),
+        (string)($data['shipping_city'] ?? ''), (string)($data['shipping_postcode'] ?? ''),
+    ], static fn(string $part): bool => trim($part) !== '');
+    if ($address) { $lines[] = 'Delivery address: ' . implode(', ', $address); }
+    if (isset($data['subtotal'])) { $lines[] = 'Items subtotal: ' . sh_money($data['subtotal']); }
+    if (isset($data['discount'])) { $lines[] = 'Discount: ' . sh_money($data['discount']); }
+    if (isset($data['delivery_fee'])) { $lines[] = 'Delivery fee: ' . sh_money($data['delivery_fee']); }
     if (isset($data['total'])) { $lines[] = 'Amount: ' . sh_money($data['total']); }
+    if (!empty($data['coupon_code'])) { $lines[] = 'Coupon: ' . $data['coupon_code']; }
     if (!empty($data['payment_method'])) { $lines[] = 'Payment method: ' . $data['payment_method']; }
+    if (isset($data['payment_amount'])) { $lines[] = 'Payment amount: ' . sh_money($data['payment_amount']); }
     if (!empty($data['transaction_id'])) { $lines[] = 'Transaction ID: ' . $data['transaction_id']; }
+    if (!empty($data['sender_phone'])) { $lines[] = 'Sender phone: ' . $data['sender_phone']; }
     if (!empty($data['status'])) { $lines[] = 'Status: ' . sh_status_label((string)$data['status']); }
     if (!empty($data['items']) && is_array($data['items'])) {
         $lines[] = 'Items:';
-        foreach ($data['items'] as $it) {
-            $lines[] = '  - ' . ($it['product_name'] ?? $it['name'] ?? 'Item') . ' x' . (int)($it['quantity'] ?? 1);
+        foreach ($data['items'] as $index => $it) {
+            $line = '  ' . ((int)$index + 1) . '. ' . ($it['product_name'] ?? $it['name'] ?? 'Item')
+                . ' — Qty ' . (int)($it['quantity'] ?? 1)
+                . ' · Unit ' . sh_money($it['unit_price'] ?? 0)
+                . ' · Subtotal ' . sh_money($it['line_total'] ?? 0);
+            $variant = function_exists('sh_order_item_variant_text') ? sh_order_item_variant_text($it) : (string)($it['product_variant'] ?? '');
+            if ($variant !== '') { $line .= ' · Package ' . $variant; }
+            $lines[] = $line;
         }
     }
     if (!empty($data['codes']) && is_array($data['codes'])) {
@@ -145,7 +383,18 @@ function sh_notify_message(string $event, array $data): array
 function sh_http_post(string $url, $body, array $headers = [], int $timeout = 15): array
 {
     $isJson = is_array($body) && !isset($body['__form']);
-    $payload = is_string($body) ? $body : ($isJson ? json_encode($body) : http_build_query($body));
+    if (is_string($body)) {
+        $payload = $body;
+    } elseif ($isJson) {
+        // Telegram's sendMediaGroup accepts a real JSON media array. Substitute
+        // malformed legacy UTF-8 rather than issuing an empty/broken request.
+        $payload = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($payload === false) {
+            return ['ok' => false, 'status' => 0, 'body' => '', 'error' => 'Could not encode the notification request.'];
+        }
+    } else {
+        $payload = http_build_query($body);
+    }
     if ($isJson) { $headers[] = 'Content-Type: application/json'; }
     elseif (!is_string($body)) { $headers[] = 'Content-Type: application/x-www-form-urlencoded'; }
 

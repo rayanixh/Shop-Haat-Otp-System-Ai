@@ -23,6 +23,9 @@ $shCanonical  = $pageCanonical ?? '';
 $shCategories = sh_categories();
 $shCartCount  = sh_cart_count();
 $shUser       = sh_user();
+// Keep the Account control useful for guests: it enters Login with a validated
+// return target, while signed-in customers continue straight to their profile.
+$shAccountHref = sh_url($shUser ? 'account.php' : sh_login_url('account.php'));
 $shLogo       = sh_logo_image((string)sh_setting('site_logo', ''));
 $shFavicon    = sh_logo_image((string)sh_setting('site_favicon', ''));
 $shFlash      = sh_flash_pull();
@@ -101,7 +104,7 @@ $shTransition = sh_transition_config();
       </div>
 
       <div class="sh-actions">
-        <a class="sh-action" href="<?= e(sh_url($shUser ? 'account.php' : 'login.php')) ?>">
+        <a class="sh-action" href="<?= e($shAccountHref) ?>">
           <?= sh_icon('user', 21) ?><span class="sh-action__label"><?= $shUser ? 'Account' : 'Login' ?></span>
         </a>
         <?php if (!$shUser): ?>
@@ -135,7 +138,7 @@ $shTransition = sh_transition_config();
           <span class="sh-brand__mark sh-brand__mark--sm">SH</span><span><?= e($shSiteName) ?></span>
         <?php endif; ?>
       </a>
-      <a class="sh-mheader__btn" href="<?= e(sh_url($shUser ? 'account.php' : 'login.php')) ?>" aria-label="Account"><?= sh_icon('user', 21) ?></a>
+      <a class="sh-mheader__btn" href="<?= e($shAccountHref) ?>" aria-label="Account"><?= sh_icon('user', 21) ?></a>
       <a class="sh-mheader__btn sh-mheader__btn--cart" href="<?= e(sh_url('cart.php')) ?>" aria-label="Cart">
         <?= sh_icon('shopping-cart', 21) ?>
         <span class="sh-badge-count" data-cart-count<?= $shCartCount > 0 ? '' : ' hidden' ?>><?= (int)$shCartCount ?></span>

@@ -280,6 +280,50 @@ function sh_order_items_ensure_schema(): void
 }
 
 /**
+ * Add payment-submission metadata to older installs without touching existing
+ * payments.  submission_version gives each rejected/resubmitted payment attempt
+ * a stable idempotency key, while submitted_at is the customer-facing event time.
+ */
+function sh_payment_submission_schema_ensure(): bool
+{
+    static $done = false;
+    static $ok = false;
+    if ($done) { return $ok; }
+    $done = true;
+
+    try {
+        $pdo = sh_db();
+        $st = $pdo->prepare(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $st->execute(['payments']);
+        $columns = array_fill_keys($st->fetchAll(PDO::FETCH_COLUMN), true);
+        if (!isset($columns['submitted_at'])) {
+            $pdo->exec('ALTER TABLE payments ADD COLUMN submitted_at DATETIME DEFAULT NULL AFTER status');
+        }
+        if (!isset($columns['submission_version'])) {
+            $pdo->exec('ALTER TABLE payments ADD COLUMN submission_version INT UNSIGNED NOT NULL DEFAULT 0 AFTER submitted_at');
+        }
+
+        $idx = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+        );
+        $idx->execute(['payments', 'idx_payments_transaction_id']);
+        if ((int)$idx->fetchColumn() === 0) {
+            // Supports a locking duplicate-TrxID lookup; a customer can still
+            // correct and resubmit their own rejected order record.
+            $pdo->exec('ALTER TABLE payments ADD KEY idx_payments_transaction_id (transaction_id)');
+        }
+        $ok = true;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-submission-schema');
+    }
+    return $ok;
+}
+
+/**
  * Thumbnail URL for an order line. Order of preference: the image snapshot
  * saved with the order, the product's current image, the neutral placeholder.
  */
@@ -342,12 +386,62 @@ function sh_order_notify_payload(array $order): array
         'order_number'   => $order['order_number'],
         'customer_name'  => $order['customer_name'],
         'customer_email' => $order['customer_email'],
-        'customer_phone' => $order['customer_phone'],
-        'total'          => $order['total'],
-        'payment_method' => $order['payment_method_name'],
-        'status'         => $order['status'],
-        'items'          => sh_order_items((int)$order['id']),
+        'customer_phone'    => $order['customer_phone'],
+        'shipping_address'  => $order['shipping_address'] ?? '',
+        'shipping_area'     => $order['shipping_area'] ?? '',
+        'shipping_city'     => $order['shipping_city'] ?? '',
+        'shipping_postcode' => $order['shipping_postcode'] ?? '',
+        'order_note'        => $order['order_note'] ?? '',
+        'coupon_code'       => $order['coupon_code'] ?? '',
+        'subtotal'          => $order['subtotal'] ?? 0,
+        'discount'          => $order['discount'] ?? 0,
+        'delivery_fee'      => $order['delivery_fee'] ?? 0,
+        'total'             => $order['total'],
+        'payment_method'    => $order['payment_method_name'],
+        'status'            => $order['status'],
+        'payment_status'    => $order['payment_status'] ?? '',
+        'order_created_at'  => $order['created_at'] ?? '',
+        'items'             => sh_order_items((int)$order['id']),
     ];
+}
+
+/** Optional username support for stores that added a users.username field. */
+function sh_order_customer_username(array $order): string
+{
+    $userId = (int)($order['user_id'] ?? 0);
+    if ($userId <= 0 || !sh_table_has_column('users', 'username')) { return ''; }
+    try {
+        return trim((string)sh_val('SELECT username FROM users WHERE id = ? LIMIT 1', [$userId], ''));
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-customer-username');
+        return '';
+    }
+}
+
+/**
+ * Build the payment-submitted event only from persisted order/payment records.
+ * The browser never supplies any product, amount, status or image information.
+ */
+function sh_payment_submitted_notify_payload(array $order, array $payment): array
+{
+    $paymentId = (int)($payment['id'] ?? 0);
+    $version = max(1, (int)($payment['submission_version'] ?? 0));
+    $submittedAt = (string)($payment['submitted_at'] ?? '');
+    if ($submittedAt === '') { $submittedAt = (string)($payment['updated_at'] ?? $payment['created_at'] ?? ''); }
+
+    $payload = sh_order_notify_payload($order);
+    $payload += [
+        'payment_id'           => $paymentId,
+        'transaction_id'       => (string)($payment['transaction_id'] ?? ''),
+        'sender_phone'         => (string)($payment['sender_phone'] ?? ''),
+        'payment_amount'        => $payment['amount'] ?? ($order['total'] ?? 0),
+        'payment_submitted_at' => $submittedAt,
+        'payment_status'       => (string)($order['payment_status'] ?? $payment['status'] ?? 'submitted'),
+        'notification_key'     => 'payment-submitted:' . $paymentId . ':' . $version,
+    ];
+    $username = sh_order_customer_username($order);
+    if ($username !== '') { $payload['customer_username'] = $username; }
+    return $payload;
 }
 
 /** IDOR guard: a customer may only view their own orders. */
@@ -365,34 +459,104 @@ function sh_order_can_view(array $order): bool
 // ---------------------------------------------------------------------------
 function sh_submit_manual_payment(int $orderId, string $transactionId, string $senderPhone): array
 {
-    $order = sh_order_get($orderId);
-    if ($order === null) { return ['ok' => false, 'error' => 'Order not found.']; }
-    if (!sh_order_can_view($order)) { return ['ok' => false, 'error' => 'You are not allowed to modify this order.']; }
-    if (in_array($order['payment_status'], ['verified'], true)) {
-        return ['ok' => false, 'error' => 'This order has already been paid.'];
-    }
-    $transactionId = strtoupper(trim($transactionId));
-    if (strlen($transactionId) < 4 || strlen($transactionId) > 60) {
+    $hasSubmissionMeta = sh_payment_submission_schema_ensure();
+
+    // Payment submission is a customer-only action. Unlike the legacy
+    // guest_orders display allowance, it must match the authenticated order owner.
+    $userId = sh_user_id();
+    if ($userId <= 0) { return ['ok' => false, 'error' => 'Please sign in to submit payment details.']; }
+    if ($orderId <= 0) { return ['ok' => false, 'error' => 'Order not found.']; }
+
+    $transactionId = mb_strtoupper(trim($transactionId));
+    if (mb_strlen($transactionId) < 4 || mb_strlen($transactionId) > 60
+        || preg_match('/^[^\s\x00-\x1f\x7f]+$/u', $transactionId) !== 1) {
         return ['ok' => false, 'error' => 'Enter the transaction ID exactly as shown in your payment confirmation.'];
     }
     if (!sh_valid_phone($senderPhone)) {
         return ['ok' => false, 'error' => 'Enter the mobile number you paid from.'];
     }
-    $dupe = sh_one('SELECT id FROM payments WHERE transaction_id = ? AND order_id <> ? AND status <> \'rejected\' LIMIT 1',
-        [$transactionId, $orderId]);
-    if ($dupe !== null) {
-        return ['ok' => false, 'error' => 'This transaction ID has already been submitted for another order.'];
+    $senderPhone = sh_phone_normalize($senderPhone);
+    if ($senderPhone === '') {
+        return ['ok' => false, 'error' => 'Enter the mobile number you paid from.'];
     }
 
     $pdo = sh_db();
+    $paymentId = 0;
     try {
         $pdo->beginTransaction();
-        $pay = sh_one('SELECT id FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
-        if ($pay) {
-            sh_query('UPDATE payments SET transaction_id = ?, sender_phone = ?, status = \'pending\' WHERE id = ?',
-                [$transactionId, $senderPhone, $pay['id']]);
+        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        if ($order === null) { throw new DomainException('Order not found.'); }
+        if ((int)$order['user_id'] !== $userId) {
+            throw new DomainException('You are not allowed to modify this order.');
+        }
+        if (in_array((string)$order['payment_status'], ['verified', 'refunded'], true)) {
+            throw new DomainException('This order has already been paid.');
+        }
+        if (in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
+            throw new DomainException('Payment details can no longer be submitted for this order.');
+        }
+
+        $pay = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$orderId]);
+        if ((string)$order['payment_status'] === 'submitted') {
+            // A browser/network retry after the successful database commit is
+            // idempotent. It receives success but never emits a second event.
+            if ($pay !== null && hash_equals((string)($pay['transaction_id'] ?? ''), $transactionId)) {
+                $pdo->commit();
+                return ['ok' => true, 'already_submitted' => true];
+            }
+            throw new DomainException('Payment details are already pending verification for this order.');
+        }
+
+        // Never allow the JSON endpoint to turn a COD/gateway order into a
+        // manual payment. Existing manual records remain valid even if an admin
+        // later disables their payment-method row.
+        $isManual = $pay !== null && (string)($pay['kind'] ?? '') === 'manual';
+        if (!$isManual) {
+            $method = !empty($order['payment_method_id'])
+                ? sh_one('SELECT type FROM payment_methods WHERE id = ? LIMIT 1', [(int)$order['payment_method_id']])
+                : null;
+            $isManual = $method !== null && (string)$method['type'] === 'manual';
+        }
+        if (!$isManual) {
+            throw new DomainException('This order is not using a manual payment method.');
+        }
+
+        // This lookup is performed inside the transaction and uses the indexed
+        // transaction_id column, preserving duplicate detection across orders.
+        $dupe = sh_one(
+            "SELECT id FROM payments
+             WHERE transaction_id = ? AND order_id <> ?
+             LIMIT 1 FOR UPDATE",
+            [$transactionId, $orderId]
+        );
+        if ($dupe !== null) {
+            throw new DomainException('This transaction ID has already been submitted for another order.');
+        }
+
+        if ($pay !== null) {
+            $paymentId = (int)$pay['id'];
+            if ($hasSubmissionMeta) {
+                sh_query(
+                    "UPDATE payments
+                     SET transaction_id = ?, sender_phone = ?, status = 'pending',
+                         admin_note = NULL, verified_by = NULL, verified_at = NULL,
+                         submitted_at = NOW(), submission_version = submission_version + 1
+                     WHERE id = ?",
+                    [$transactionId, $senderPhone, $paymentId]
+                );
+            } else {
+                // A locked-down host may deny ALTER TABLE. Preserve the pre-
+                // migration payment workflow instead of rejecting the payment.
+                sh_query(
+                    "UPDATE payments
+                     SET transaction_id = ?, sender_phone = ?, status = 'pending',
+                         admin_note = NULL, verified_by = NULL, verified_at = NULL
+                     WHERE id = ?",
+                    [$transactionId, $senderPhone, $paymentId]
+                );
+            }
         } else {
-            sh_insert('payments', [
+            $newPayment = [
                 'order_id'          => $orderId,
                 'payment_method_id' => $order['payment_method_id'],
                 'method_name'       => $order['payment_method_name'],
@@ -401,26 +565,53 @@ function sh_submit_manual_payment(int $orderId, string $transactionId, string $s
                 'transaction_id'    => $transactionId,
                 'sender_phone'      => $senderPhone,
                 'status'            => 'pending',
-            ]);
+            ];
+            if ($hasSubmissionMeta) {
+                $newPayment['submitted_at'] = date('Y-m-d H:i:s');
+                $newPayment['submission_version'] = 1;
+            }
+            $paymentId = sh_insert('payments', $newPayment);
         }
-        // Never auto-verify a manual payment.
-        sh_query('UPDATE orders SET status = \'payment_submitted\', payment_status = \'submitted\' WHERE id = ?', [$orderId]);
+
+        // A manual submission is always pending verification; it never approves
+        // itself regardless of a valid-looking customer Transaction ID.
+        sh_query("UPDATE orders SET status = 'payment_submitted', payment_status = 'submitted' WHERE id = ?", [$orderId]);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($e instanceof DomainException) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
         sh_log_exception($e, 'manual-payment');
         return ['ok' => false, 'error' => 'Could not record your payment. Please try again.'];
     }
 
-    $fresh = sh_order_get($orderId);
-    sh_notify('payment_submitted', array_merge(sh_order_notify_payload($fresh), ['transaction_id' => $transactionId]));
+    // All notification work is deliberately post-commit. A Telegram timeout or
+    // bad remote image can be retried from admin without undoing the payment.
     try {
-        require_once SH_ROOT . '/includes/admin-tools.php';
-        sh_admin_notify('payment_pending', 'Payment waiting for verification · ' . $fresh['order_number'], sh_money($fresh['total']) . ' · TrxID ' . $transactionId, 'admin/payments.php?status=pending', 'pay-pending-' . $orderId);
-    } catch (Throwable $e) {}
-    try {
-        if (function_exists('sh_tg_push_order')) { sh_tg_push_order($orderId, '💳 PAYMENT SUBMITTED'); }
-    } catch (Throwable $e) { sh_log_exception($e, 'tg-push-payment'); }
+        $fresh = sh_order_get($orderId);
+        $payment = $paymentId > 0 ? sh_one('SELECT * FROM payments WHERE id = ? LIMIT 1', [$paymentId]) : null;
+        if ($fresh !== null && $payment !== null) {
+            sh_notify('payment_submitted', sh_payment_submitted_notify_payload($fresh, $payment));
+            try {
+                require_once SH_ROOT . '/includes/admin-tools.php';
+                sh_admin_notify(
+                    'payment_pending',
+                    'Payment waiting for verification · ' . $fresh['order_number'],
+                    sh_money($fresh['total']) . ' · Customer TrxID ' . $transactionId,
+                    'admin/payments.php?status=pending',
+                    'pay-pending-' . $orderId . '-' . max(1, (int)($payment['submission_version'] ?? 0))
+                );
+            } catch (Throwable $e) {
+                sh_log_exception($e, 'payment-admin-notify');
+            }
+        } else {
+            sh_log_line('payment', 'Payment submission saved but notification payload could not be reloaded for order ' . $orderId);
+        }
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'payment-submission-notify');
+    }
+
     return ['ok' => true];
 }
 

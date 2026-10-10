@@ -27,7 +27,7 @@ if (sh_user() !== null) { sh_redirect('account.php'); }
 try {
     // Remember where the customer wanted to go (cart / checkout) before the
     // single-use OAuth context is consumed below.
-    $redirect = sh_safe_redirect((string)($_SESSION['sh_google_oauth']['redirect'] ?? ''), '');
+    $redirect = sh_customer_return_target((string)($_SESSION['sh_google_oauth']['redirect'] ?? ''), '');
     $res = sh_google_complete($_GET);
     if (!$res['ok']) { $back($res['error'], $redirect); }
 
@@ -35,7 +35,7 @@ try {
     if (!$acct['ok']) { $back($acct['error'], $redirect); }
 
     $uid = (int)$acct['user_id'];
-    $target = sh_safe_redirect($redirect, 'account.php');
+    $target = sh_customer_return_target($redirect, 'account.php');
     sh_login_user($uid); // regenerates the session id + merges the guest cart
     sh_security_log('login_success', $uid, ['via' => 'google']);
     sh_flash('success', !empty($acct['created'])

@@ -25,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($contactEmail !== '' && !sh_valid_email($contactEmail)) {
             $errors['contact_email'] = 'The contact email address is not valid.';
         }
+        $siteUrl = rtrim(trim((string)($_POST['site_url'] ?? '')), '/');
+        if ($siteUrl !== '' && !sh_is_public_https_url($siteUrl)) {
+            $errors['site_url'] = 'The canonical website URL must be a public HTTPS URL (for example, https://shop.example.com).';
+        }
         foreach (['delivery_fee_inside', 'delivery_fee_outside', 'free_delivery_over'] as $k) {
             if (!is_numeric($_POST[$k] ?? '0')) { $errors[$k] = 'Delivery values must be numbers.'; }
         }
@@ -49,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($text as $k) {
                 if (array_key_exists($k, $_POST)) { sh_setting_save($k, trim((string)$_POST[$k])); }
             }
+            sh_setting_save('site_url', $siteUrl);
             foreach (['delivery_fee_inside', 'delivery_fee_outside', 'free_delivery_over'] as $k) {
                 sh_setting_save($k, (string)(float)$_POST[$k]);
             }
@@ -175,6 +180,11 @@ require __DIR__ . '/_layout.php';
       <div class="sh-field"><label class="sh-field__label" for="st-desc">Meta description</label>
         <textarea class="sh-textarea" id="st-desc" name="site_description" rows="2" maxlength="300"><?= e($s('site_description')) ?></textarea>
         <span class="sh-field__hint">Used as the default description in search results.</span></div>
+      <div class="sh-field"><label class="sh-field__label" for="st-url">Canonical website URL</label>
+        <input class="sh-input <?= isset($errors['site_url']) ? 'sh-input--error' : '' ?>" id="st-url" type="url" name="site_url"
+               maxlength="255" placeholder="https://shop.example.com" value="<?= e(isset($errors['site_url']) ? (string)($_POST['site_url'] ?? '') : $s('site_url')) ?>" inputmode="url">
+        <?php if (isset($errors['site_url'])): ?><p class="sh-field__error"><?= e($errors['site_url']) ?></p><?php endif; ?>
+        <span class="sh-field__hint">Use your public HTTPS storefront URL. Telegram uses it to fetch ordered product images; localhost and private URLs are never sent.</span></div>
       <div class="sh-grid2">
         <div class="sh-field"><label class="sh-field__label" for="st-logo">Site logo</label>
           <input class="sh-input" id="st-logo" type="file" name="site_logo" accept="image/*">

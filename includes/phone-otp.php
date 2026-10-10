@@ -705,7 +705,7 @@ function sh_otp_complete(string $purpose, string $phone): array
                 'status'                  => 'active',
             ]);
             try { require_once SH_ROOT . '/includes/admin-tools.php'; sh_admin_notify('new_customer', 'New customer registered', 'Phone sign-up', 'admin/customers.php?id=' . $uid); } catch (Throwable $e) {}
-            $redirect = sh_safe_redirect($pend['redirect']);
+            $redirect = sh_customer_return_target((string)$pend['redirect'], 'account.php');
             sh_pending_signup_clear();
             sh_login_user($uid); // merges any guest cart
             sh_security_log('account_created', $uid, ['phone' => sh_phone_mask($phone)]);
@@ -725,7 +725,7 @@ function sh_otp_complete(string $purpose, string $phone): array
                 return ['ok' => false, 'error' => 'This account has been blocked. Please contact customer support.'];
             }
             sh_user_mark_verified($uid, $phone, 'sms');
-            $redirect = sh_safe_redirect($pend['redirect']);
+            $redirect = sh_customer_return_target((string)$pend['redirect'], 'account.php');
             sh_pending_login_clear();
             sh_login_user($uid); // merges the guest cart now that verification passed
             sh_security_log('login_success', $uid, ['phone' => sh_phone_mask($phone)]);
