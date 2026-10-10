@@ -1,6 +1,6 @@
 <?php
 /**
- * Checkout — customer info, delivery, order summary. The payment method is chosen on the payment step.
+ * Checkout — customer info, delivery, payment method and order summary.
  */
 declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
@@ -57,6 +57,21 @@ foreach ($form as $k => $v) {
     if (isset($_POST[$k]) && is_string($_POST[$k])) { $form[$k] = trim($_POST[$k]); }
 }
 
+// Select a real method before the order is persisted. This avoids treating a
+// first/remembered fallback as COD and emitting an order event before the
+// customer has actually chosen how to pay.
+$rememberedMethodId = (int)($_SESSION['checkout_payment_method_id'] ?? 0);
+$selectedMethodId = $_SERVER['REQUEST_METHOD'] === 'POST'
+    ? sh_int($_POST['payment_method_id'] ?? 0)
+    : $rememberedMethodId;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $rememberedAvailable = false;
+    foreach ($methods as $m) {
+        if ((int)$m['id'] === $selectedMethodId) { $rememberedAvailable = true; break; }
+    }
+    if (!$rememberedAvailable && $methods) { $selectedMethodId = (int)$methods[0]['id']; }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     // Double-submit / idempotency guard: the token is consumed on success, so a
@@ -69,14 +84,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $zone = $form['delivery_zone'] === 'outside' ? 'outside' : 'inside';
     $_SESSION['delivery_zone'] = $zone;
     $summary = sh_cart_summary($coupon, $zone);
+    // Recompute method availability from the just-refreshed cart snapshot. A
+    // product may have changed type/availability in another request since this
+    // checkout form was first rendered.
+    $methods = sh_payment_methods_available((bool)$summary['has_physical']);
 
-    // The payment method is chosen on the Complete Payment step, not here. The
-    // order is created with the customer's last used method (kept in session)
-    // or the first available one; the payment page lets them switch before paying.
-    $remembered = (int)($_SESSION['checkout_payment_method_id'] ?? 0);
+    // The selected method is submitted with the checkout form and revalidated
+    // against the currently available server-side list below.
     $chosen = null;
-    foreach ($methods as $m) { if ((int)$m['id'] === $remembered) { $chosen = $m; break; } }
-    if ($chosen === null && $methods) { $chosen = $methods[0]; }
+    foreach ($methods as $m) {
+        if ((int)$m['id'] === $selectedMethodId) { $chosen = $m; break; }
+    }
     $methodId = $chosen ? (int)$chosen['id'] : 0;
 
     $v = new ShValidator($_POST);
@@ -108,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         if ($res['ok']) {
             unset($_SESSION['coupon_code']);
+            $_SESSION['checkout_payment_method_id'] = $methodId;
             sh_order_idempotency_reset();
             // Save the address for signed-in customers
             if ($user && $summary['has_physical']) {
@@ -125,7 +144,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 } catch (Throwable $e) { sh_log_exception($e, 'save-address'); }
             }
-            // Every order continues to the payment step, where the method is picked.
+            // Every order continues to the payment step to submit/complete its
+            // already-selected payment method.
             sh_redirect('payment.php?id=' . (int)$res['order_id']);
         }
         $errors['order'] = $res['error'];
@@ -265,6 +285,21 @@ require_once SH_ROOT . '/includes/header.php';
         <div class="sh-summary__row"><span>Delivery</span>
           <span><?= $summary['delivery'] > 0 ? e(sh_money($summary['delivery'])) : 'Free' ?></span></div>
         <div class="sh-summary__total"><span>Total payable</span><span><?= e(sh_money($summary['total'])) ?></span></div>
+
+        <?php if ($methods): ?>
+          <div class="sh-field" style="margin:14px 0 2px">
+            <span class="sh-field__label">Payment method <span class="sh-field__req">*</span></span>
+            <?php foreach ($methods as $paymentMethod): $paymentLogo = sh_payment_logo_url($paymentMethod); ?>
+              <label class="sh-check" style="align-items:center;margin:8px 0">
+                <input type="radio" name="payment_method_id" value="<?= (int)$paymentMethod['id'] ?>"
+                       <?= (int)$paymentMethod['id'] === $selectedMethodId ? 'checked' : '' ?> required>
+                <?php if ($paymentLogo !== ''): ?><img src="<?= e($paymentLogo) ?>" alt="" style="width:25px;height:25px;object-fit:contain;margin:0 5px">
+                <?php else: ?><?= sh_icon($paymentMethod['type'] === 'cod' ? 'truck' : 'credit-card', 15) ?><?php endif; ?>
+                <span><?= e($paymentMethod['name']) ?><?= $paymentMethod['type'] === 'cod' ? ' — Cash on Delivery' : '' ?></span>
+              </label>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
 
         <?php if (!$methods): ?>
           <div class="sh-alert sh-alert--warning" style="margin:12px 0 0">

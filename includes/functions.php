@@ -19,6 +19,26 @@ function sh_json($data, int $status = 200): void
     exit;
 }
 
+/**
+ * Whether this request expects an API response instead of an HTML redirect.
+ *
+ * Authentication guards are used by both browser pages and JSON endpoints.  This
+ * helper deliberately does not treat a browser's common wildcard Accept header as JSON,
+ * otherwise an expired browser session would receive a raw 401 instead of the
+ * sign-in page.
+ */
+function sh_wants_json(): bool
+{
+    if (defined('SH_JSON_CONTEXT') && SH_JSON_CONTEXT) { return true; }
+
+    $path = (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '');
+    if (preg_match('~(?:^|/)api(?:/|$)~i', $path) === 1) { return true; }
+
+    $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+    return str_contains($accept, 'application/json')
+        || str_contains($accept, 'application/problem+json');
+}
+
 function sh_redirect(string $path): void
 {
     if (!headers_sent()) {
@@ -219,6 +239,42 @@ function sh_product_image(?string $file, string $size = 'md'): string
         return sh_url('uploads/products/' . rawurlencode(basename($file)));
     }
     return sh_url('assets/images/placeholder.svg');
+}
+
+/**
+ * Return the configured, externally reachable HTTPS storefront URL.
+ *
+ * Product photos sent to third-party providers must never be built from a
+ * localhost/private host header.  The installer stores site_url, which is the
+ * canonical source; an HTTPS request URL is only a backwards-compatible
+ * fallback for installs whose setting predates that field.
+ */
+function sh_public_site_url(): string
+{
+    $configured = trim((string)sh_setting('site_url', ''));
+    $candidates = $configured !== '' ? [$configured] : [sh_site_url()];
+
+    foreach ($candidates as $candidate) {
+        $candidate = rtrim(trim((string)$candidate), '/');
+        if ($candidate === '' || !sh_is_public_https_url($candidate)) { continue; }
+        return $candidate;
+    }
+    return '';
+}
+
+/** True only for an absolute public HTTPS origin/path, never localhost/private IPs. */
+function sh_is_public_https_url(string $url): bool
+{
+    if (filter_var($url, FILTER_VALIDATE_URL) === false) { return false; }
+    $parts = parse_url($url);
+    if (!is_array($parts) || strtolower((string)($parts['scheme'] ?? '')) !== 'https') { return false; }
+    if (!empty($parts['user']) || !empty($parts['pass']) || !empty($parts['query']) || !empty($parts['fragment'])) { return false; }
+    $host = strtolower(trim((string)($parts['host'] ?? '')));
+    if ($host === '' || $host === 'localhost' || str_ends_with($host, '.local')) { return false; }
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+    }
+    return preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i', $host) === 1;
 }
 
 function sh_logo_image(?string $file): string
@@ -726,6 +782,27 @@ function sh_table_exists(string $table): bool
     return $known[$table] = $n > 0;
 }
 
+/**
+ * Check an existing schema column without interpolating user-controlled names.
+ * Used for optional backwards-compatible fields such as a customer username.
+ */
+function sh_table_has_column(string $table, string $column): bool
+{
+    static $known = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $known)) { return $known[$key]; }
+    try {
+        $n = (int)sh_val(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            [$table, $column], 0
+        );
+    } catch (Throwable $e) {
+        $n = 0;
+    }
+    return $known[$key] = $n > 0;
+}
+
 /** Fetch a single column from the users table by id. */
 function sh_user_field(int $userId, string $field): ?string
 {
@@ -737,21 +814,50 @@ function sh_user_field(int $userId, string $field): ?string
 /**
  * Server-side open-redirect guard. Accepts only a safe internal path (relative,
  * no scheme, no traversal, safe characters). Returns $fallback otherwise.
+ *
+ * REQUEST_URI includes the installation subfolder on shared hosting.  Strip that
+ * prefix before returning a path to sh_redirect(), which adds the base URL back;
+ * without this a login return target could become /shop/shop/account.php.
  */
 function sh_safe_redirect(string $raw, string $fallback = 'account.php'): string
 {
     $raw = trim((string)$raw);
     if ($raw === '') { return $fallback; }
+    if (preg_match('/[\x00-\x1f\x7f]/', $raw) === 1) { return $fallback; }
     if (preg_match('~^(?:https?:)?//~i', $raw)) { return $fallback; }
     if (preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $raw)) { return $fallback; }
-    if (str_contains($raw, '\\') || str_contains($raw, "\0")) { return $fallback; }
+    if (str_contains($raw, '\\') || str_contains($raw, "\0") || str_contains($raw, '#')) { return $fallback; }
+
+    // Reject encoded protocol-relative paths, traversal and backslashes too.
+    $decoded = $raw;
+    for ($i = 0; $i < 2; $i++) {
+        $next = rawurldecode($decoded);
+        if ($next === $decoded) { break; }
+        $decoded = $next;
+    }
+    if (preg_match('/[\x00-\x1f\x7f]/', $decoded) === 1
+        || preg_match('~^(?:https?:)?//~i', $decoded) === 1
+        || preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $decoded) === 1
+        || str_contains($decoded, '\\')
+        || str_contains($decoded, '#')) {
+        return $fallback;
+    }
+
     $path = ltrim($raw, '/');
     if ($path === '') { return $fallback; }
     if (preg_match('~^[a-zA-Z0-9_./?=&%+\-]+$~', $path) !== 1) { return $fallback; }
-    foreach (explode('/', $path) as $seg) {
+
+    $decodedPath = ltrim($decoded, '/');
+    $pathOnly = explode('?', $decodedPath, 2)[0];
+    foreach (explode('/', $pathOnly) as $seg) {
         if ($seg === '..' || $seg === '.') { return $fallback; }
     }
-    return $path;
+
+    $base = trim(sh_base_url(), '/');
+    if ($base !== '' && ($path === $base || str_starts_with($path, $base . '/'))) {
+        $path = ltrim(substr($path, strlen($base)), '/');
+    }
+    return $path !== '' ? $path : $fallback;
 }
 
 
