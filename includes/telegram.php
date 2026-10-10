@@ -107,6 +107,8 @@ function sh_tg_api(string $method, array $params = []): array
     $desc = is_array($json) && !empty($json['description'])
         ? (string)$json['description']
         : (string)($res['error'] ?? 'Telegram API error.');
+    $desc = sh_scrub_secrets($desc);
+    if ($token !== '') { $desc = str_replace($token, '[redacted]', $desc); }
     sh_tg_log('API ' . $method . ' failed: ' . $desc, true);
     return ['ok' => false, 'error' => $desc];
 }
@@ -128,6 +130,40 @@ function sh_tg_send(string $text, ?array $keyboard = null, ?string $chatId = nul
         return ['ok' => true, 'message_id' => (string)(($r['result']['message_id'] ?? '')), 'chat_id' => $chat];
     }
     return $r;
+}
+
+/** Send one public product image with an order-aware caption. */
+function sh_tg_send_photo(string $photoUrl, string $caption, ?string $chatId = null): array
+{
+    $chat = $chatId ?? trim((string)sh_setting('telegram_chat_id', ''));
+    if ($chat === '') { return ['ok' => false, 'error' => 'No chat ID configured.']; }
+    $r = sh_tg_api('sendPhoto', [
+        'chat_id' => $chat,
+        'photo' => $photoUrl,
+        'caption' => $caption,
+        'parse_mode' => 'HTML',
+    ]);
+    if (!empty($r['ok'])) {
+        return ['ok' => true, 'message_id' => (string)(($r['result']['message_id'] ?? '')), 'chat_id' => $chat];
+    }
+    return $r + ['chat_id' => $chat];
+}
+
+/** Send 2–10 images as one valid Telegram media group. */
+function sh_tg_send_media_group(array $media, ?string $chatId = null): array
+{
+    $chat = $chatId ?? trim((string)sh_setting('telegram_chat_id', ''));
+    if ($chat === '') { return ['ok' => false, 'error' => 'No chat ID configured.']; }
+    if (count($media) < 2 || count($media) > 10) {
+        return ['ok' => false, 'error' => 'Telegram media groups must contain 2 to 10 images.', 'chat_id' => $chat];
+    }
+    // sh_tg_api() uses sh_http_post(), which serializes array payloads as
+    // application/json. Telegram's JSON Bot API expects media to remain an
+    // actual JSON array here (not PHP's indexed form fields or a double-encoded
+    // JSON string), so every caption/photo object stays intact.
+    $r = sh_tg_api('sendMediaGroup', ['chat_id' => $chat, 'media' => array_values($media)]);
+    if (!empty($r['ok'])) { return ['ok' => true, 'chat_id' => $chat]; }
+    return $r + ['chat_id' => $chat];
 }
 
 /** Replace the text and buttons of an existing message. */
@@ -306,6 +342,298 @@ function sh_tg_confirm_keyboard(string $action, int $orderId, string $label): ar
         [['text' => $label, 'callback_data' => $action . '_confirm:' . $orderId]],
         [['text' => '↩️ Back', 'callback_data' => 'order_view:' . $orderId]],
     ];
+}
+
+/** Keep Telegram fields readable and safely below message/caption limits. */
+function sh_tg_payment_text($value, string $fallback = 'Not provided', int $limit = 180): string
+{
+    $value = trim((string)$value);
+    $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+    if ($value === '') { return $fallback; }
+    return mb_strlen($value) > $limit ? mb_substr($value, 0, max(1, $limit - 1)) . '…' : $value;
+}
+
+function sh_tg_payment_status_text(string $status): string
+{
+    return match ($status) {
+        'submitted', 'pending' => 'Pending Verification',
+        'verified'             => 'Verified',
+        'rejected'             => 'Rejected',
+        'refunded'             => 'Refunded',
+        default                => sh_status_label($status !== '' ? $status : 'pending'),
+    };
+}
+
+/**
+ * Build one or more valid Telegram HTML messages for either permissible initial
+ * event. Items stay at line boundaries so long orders never silently lose data
+ * to Telegram's 4096-character limit.
+ */
+function sh_tg_order_event_summary_chunks(string $event, array $data): array
+{
+    $isCod = $event === 'order_created';
+    $heading = $isCod ? '🛒 <b>NEW COD ORDER</b>' : '🧾 <b>PAYMENT SUBMITTED</b>';
+    $headingText = $isCod ? 'NEW COD ORDER' : 'PAYMENT SUBMITTED';
+    $orderNumber = sh_tg_payment_text($data['order_number'] ?? '', 'Not provided', 80);
+    $customerName = sh_tg_payment_text($data['customer_name'] ?? '', 'Not provided', 120);
+    $customerPhone = sh_tg_payment_text($data['customer_phone'] ?? '', 'Not provided', 40);
+    $email = (string)($data['customer_email'] ?? '');
+    if ($email === '' || sh_is_synthetic_email($email)) { $email = 'Not provided'; }
+    else { $email = sh_tg_payment_text($email, 'Not provided', 180); }
+    $username = trim((string)($data['customer_username'] ?? ''));
+    $items = !empty($data['items']) && is_array($data['items']) ? array_values($data['items']) : [];
+
+    $header = [
+        $heading,
+        '',
+        '<b>Order:</b> #' . sh_tg_esc($orderNumber),
+        '<b>Customer:</b> ' . sh_tg_esc($customerName),
+    ];
+    if ($username !== '') { $header[] = '<b>Username:</b> ' . sh_tg_esc(sh_tg_payment_text($username, '', 100)); }
+    $header[] = '<b>Mobile:</b> ' . sh_tg_esc($customerPhone);
+    $header[] = '<b>Email:</b> ' . sh_tg_esc($email);
+    $deliveryParts = array_filter([
+        sh_tg_payment_text($data['shipping_address'] ?? '', '', 220),
+        sh_tg_payment_text($data['shipping_area'] ?? '', '', 100),
+        sh_tg_payment_text($data['shipping_city'] ?? '', '', 100),
+        sh_tg_payment_text($data['shipping_postcode'] ?? '', '', 40),
+    ], static fn(string $part): bool => $part !== '');
+    if ($deliveryParts) { $header[] = '<b>Delivery address:</b> ' . sh_tg_esc(implode(', ', $deliveryParts)); }
+    $createdAt = trim((string)($data['order_created_at'] ?? ''));
+    $createdTs = $createdAt !== '' ? strtotime($createdAt) : false;
+    if ($createdTs !== false) { $header[] = '<b>Order placed:</b> ' . sh_tg_esc(date('d M Y, h:i A', $createdTs)); }
+    $note = sh_tg_payment_text($data['order_note'] ?? '', '', 300);
+    if ($note !== '') { $header[] = '<b>Order note:</b> ' . sh_tg_esc($note); }
+    $header[] = '';
+    $header[] = '<b>📦 ORDER ITEMS</b>';
+
+    $itemLines = [];
+    $totalQty = 0;
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) { continue; }
+        $quantity = max(0, (int)($item['quantity'] ?? 0));
+        $totalQty += $quantity;
+        $name = sh_tg_payment_text($item['product_name'] ?? $item['name'] ?? '', 'Item', 170);
+        $variant = sh_order_item_variant_text($item);
+        $line = '<b>' . ($index + 1) . '. ' . sh_tg_esc($name) . '</b>';
+        if ($variant !== '') { $line .= "\n   <b>Package:</b> " . sh_tg_esc(sh_tg_payment_text($variant, '', 150)); }
+        $line .= "\n   <b>Quantity:</b> " . $quantity;
+        $line .= "\n   <b>Unit price:</b> " . sh_tg_esc(sh_money($item['unit_price'] ?? 0));
+        $line .= "\n   <b>Subtotal:</b> " . sh_tg_esc(sh_money($item['line_total'] ?? 0));
+        $itemLines[] = $line;
+    }
+    if (!$itemLines) { $itemLines[] = 'No order items were found in the saved order record.'; }
+
+    $submittedAt = trim((string)($data['payment_submitted_at'] ?? ''));
+    $eventTime = $submittedAt !== '' ? $submittedAt : $createdAt;
+    $eventLabel = 'Not provided';
+    $eventTs = $eventTime !== '' ? strtotime($eventTime) : false;
+    if ($eventTs !== false) { $eventLabel = date('d M Y, h:i A', $eventTs); }
+    $transaction = sh_tg_payment_text($data['transaction_id'] ?? '', $isCod ? 'Not applicable for COD' : 'Not provided', 80);
+    $sender = sh_tg_payment_text($data['sender_phone'] ?? '', $isCod ? 'Not applicable for COD' : 'Not provided', 40);
+
+    $footer = [
+        '',
+        '<b>📊 ORDER SUMMARY</b>',
+        '<b>Different products:</b> ' . count($items),
+        '<b>Total item quantity:</b> ' . $totalQty,
+        '<b>Items subtotal:</b> ' . sh_tg_esc(sh_money($data['subtotal'] ?? 0)),
+        '<b>Discount:</b> ' . sh_tg_esc(sh_money($data['discount'] ?? 0)),
+        '<b>Delivery fee:</b> ' . sh_tg_esc(sh_money($data['delivery_fee'] ?? 0)),
+        '<b>Total amount:</b> ' . sh_tg_esc(sh_money($data['total'] ?? 0)),
+        '',
+        '<b>💳 PAYMENT DETAILS</b>',
+        '<b>Method:</b> ' . sh_tg_esc(sh_tg_payment_text($data['payment_method'] ?? '', 'Not provided', 120)),
+        '<b>Payment amount:</b> ' . sh_tg_esc(sh_money($data['payment_amount'] ?? $data['total'] ?? 0)),
+        '<b>Customer Transaction ID:</b> <code>' . sh_tg_esc($transaction) . '</code>',
+        '<b>Sender mobile:</b> ' . sh_tg_esc($sender),
+        '<b>' . ($isCod ? 'Order-created at' : 'Submitted at') . ':</b> ' . sh_tg_esc($eventLabel),
+        '<b>Payment status:</b> ' . sh_tg_esc(sh_tg_payment_status_text((string)($data['payment_status'] ?? 'pending'))),
+        '<b>Order status:</b> ' . sh_tg_esc(sh_status_label((string)($data['status'] ?? ($isCod ? 'pending' : 'payment_submitted')))),
+    ];
+    $coupon = sh_tg_payment_text($data['coupon_code'] ?? '', '', 80);
+    if ($coupon !== '') { array_splice($footer, 7, 0, '<b>Coupon:</b> ' . sh_tg_esc($coupon)); }
+
+    $max = 3800; // margin below Telegram's 4096-character text limit
+    $chunks = [];
+    $current = implode("\n", $header);
+    $continuation = $heading . ' — continued' . "\n" . '<b>Order:</b> #' . sh_tg_esc($orderNumber);
+    $append = static function (string $line) use (&$chunks, &$current, $continuation, $max): void {
+        $candidate = $current . "\n" . $line;
+        if (mb_strlen($candidate) > $max && $current !== '') {
+            $chunks[] = $current;
+            $current = $continuation;
+            $candidate = $current . "\n" . $line;
+        }
+        // Dynamic fields are capped above. This final guard protects unusual
+        // legacy records without splitting inside an HTML tag.
+        if (mb_strlen($candidate) > $max) {
+            $line = mb_substr($line, 0, max(1, $max - mb_strlen($current) - 2)) . '…';
+            $candidate = $current . "\n" . $line;
+        }
+        $current = $candidate;
+    };
+    foreach ($itemLines as $line) { $append($line); }
+    foreach ($footer as $line) { $append($line); }
+    if ($current !== '') { $chunks[] = $current; }
+    return $chunks;
+}
+
+/** Compatibility wrapper for older callers/tests. */
+function sh_tg_payment_summary_chunks(array $data): array
+{
+    return sh_tg_order_event_summary_chunks('payment_submitted', $data);
+}
+
+/**
+ * Produce a public HTTPS URL only for a real product file. Missing snapshots
+ * fall back to the current product image; no placeholder is ever sent as proof
+ * of an ordered product.
+ */
+function sh_tg_order_item_photo_url(array $item): string
+{
+    return sh_order_item_public_image_url($item);
+}
+
+/** Caption for one supporting Telegram product photo. */
+function sh_tg_product_caption(array $item, int $number, int $total, string $orderNumber): string
+{
+    $name = sh_tg_payment_text($item['product_name'] ?? $item['name'] ?? '', 'Item', 170);
+    $variant = sh_order_item_variant_text($item);
+    $lines = [
+        '<b>Order:</b> #' . sh_tg_esc(sh_tg_payment_text($orderNumber, 'Not provided', 80)) . ' · <b>Item ' . $number . ' of ' . $total . '</b>',
+        '<b>Product:</b> ' . sh_tg_esc($name),
+    ];
+    if ($variant !== '') { $lines[] = '<b>Package:</b> ' . sh_tg_esc(sh_tg_payment_text($variant, '', 150)); }
+    $lines[] = '<b>Quantity:</b> ' . max(0, (int)($item['quantity'] ?? 0));
+    $lines[] = '<b>Unit price:</b> ' . sh_tg_esc(sh_money($item['unit_price'] ?? 0));
+    $lines[] = '<b>Subtotal:</b> ' . sh_tg_esc(sh_money($item['line_total'] ?? 0));
+    return mb_substr(implode("\n", $lines), 0, 1000);
+}
+
+/**
+ * Send a COD order-created or manual payment-submitted Telegram event. Summary
+ * delivery is confirmed first; each real product image has its own idempotent
+ * claim and can be safely retried without repeating the summary.
+ */
+function sh_tg_send_order_event(string $event, array $data, bool $retry = false, ?int $onlyItemId = null, bool $sendSummary = true): array
+{
+    if (!in_array($event, ['order_created', 'payment_submitted'], true)) {
+        return ['ok' => false, 'error' => 'Unsupported Telegram order event.'];
+    }
+    if ((string)sh_setting('telegram_enabled', '0') !== '1') {
+        return ['skipped' => true, 'error' => 'Telegram integration is disabled.'];
+    }
+    $chat = trim((string)sh_setting('telegram_chat_id', ''));
+    if (trim((string)sh_setting('telegram_bot_token', '')) === '' || $chat === '') {
+        return ['skipped' => true, 'error' => 'Telegram is not fully configured.'];
+    }
+
+    // Rebuild even for direct calls so a webhook/controller cannot inject a
+    // browser-provided total, product or image into the admin chat.
+    $rebuilt = function_exists('sh_notification_order_event_payload')
+        ? sh_notification_order_event_payload($event, $data)
+        : ['ok' => false, 'error' => 'Order notification support is unavailable.'];
+    if (empty($rebuilt['ok']) || empty($rebuilt['payload']) || !is_array($rebuilt['payload'])) {
+        return ['ok' => false, 'error' => (string)($rebuilt['error'] ?? 'Saved order details were not found.'), 'recipient' => 'chat:' . $chat];
+    }
+    $payload = $rebuilt['payload'];
+    $order = sh_order_get((int)$payload['order_id']);
+    if ($order === null) { return ['ok' => false, 'error' => 'Order not found.', 'recipient' => 'chat:' . $chat]; }
+
+    if ($sendSummary) {
+        $firstMessageId = '';
+        foreach (sh_tg_order_event_summary_chunks($event, $payload) as $index => $summary) {
+            $keyboard = $index === 0 ? sh_tg_order_keyboard($order) : null;
+            $sent = sh_tg_send($summary, $keyboard, $chat);
+            if (empty($sent['ok'])) {
+                return ['ok' => false, 'error' => (string)($sent['error'] ?? 'Telegram rejected the order summary.'), 'recipient' => 'chat:' . $chat];
+            }
+            if ($index === 0) { $firstMessageId = (string)($sent['message_id'] ?? ''); }
+        }
+        if ($firstMessageId !== '') {
+            try { sh_query('UPDATE orders SET telegram_message_id = ? WHERE id = ?', [$firstMessageId, (int)$payload['order_id']]); }
+            catch (Throwable $e) { sh_log_exception($e, 'tg-store-order-event-message'); }
+        }
+    }
+
+    $items = is_array($payload['items'] ?? null) ? array_values($payload['items']) : [];
+    $total = count($items);
+    $photos = [];
+    $warnings = [];
+    $matched = $onlyItemId === null;
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) { continue; }
+        if ($onlyItemId !== null && (int)($item['id'] ?? 0) !== $onlyItemId) { continue; }
+        $matched = true;
+        $prepared = sh_notification_prepare_order_image('telegram', $event, $payload, $item, $retry);
+        if (empty($prepared['claimed'])) {
+            if (empty($prepared['ok']) && !empty($prepared['error'])) { $warnings[] = (string)$prepared['error']; }
+            continue;
+        }
+        if (empty($prepared['ok']) || empty($prepared['url'])) {
+            $warnings[] = (string)($prepared['error'] ?? 'No accessible public image for item ' . ($index + 1) . '.');
+            continue;
+        }
+        $photos[] = [
+            'prepared' => $prepared,
+            'url' => (string)$prepared['url'],
+            'caption' => sh_tg_product_caption($item, $index + 1, $total, (string)$payload['order_number']),
+            'index' => $index + 1,
+            'name' => sh_tg_payment_text($item['product_name'] ?? '', 'Item', 60),
+        ];
+    }
+    if (!$matched) { return ['ok' => false, 'error' => 'The saved order item was not found.', 'recipient' => 'chat:' . $chat]; }
+
+    // Telegram accepts 2–10 media records per group. If a group is rejected,
+    // retry every member once as an individual photo so one bad URL cannot hide
+    // other ordered products. Every final result is persisted independently.
+    foreach (array_chunk($photos, 10) as $group) {
+        if (count($group) === 1) {
+            $photo = $group[0];
+            $sent = sh_tg_send_photo($photo['url'], $photo['caption'], $chat);
+            if (!empty($sent['ok'])) {
+                sh_notification_finish_order_image($photo['prepared'], true, 'chat:' . $chat);
+            } else {
+                $error = (string)($sent['error'] ?? 'Telegram rejected this product image.');
+                sh_notification_finish_order_image($photo['prepared'], false, 'chat:' . $chat, $error);
+                $warnings[] = 'Image for item ' . $photo['index'] . ' failed: ' . $error;
+            }
+            continue;
+        }
+
+        $media = [];
+        foreach ($group as $photo) {
+            $media[] = ['type' => 'photo', 'media' => $photo['url'], 'caption' => $photo['caption'], 'parse_mode' => 'HTML'];
+        }
+        $sent = sh_tg_send_media_group($media, $chat);
+        if (!empty($sent['ok'])) {
+            foreach ($group as $photo) { sh_notification_finish_order_image($photo['prepared'], true, 'chat:' . $chat); }
+            continue;
+        }
+        foreach ($group as $photo) {
+            $single = sh_tg_send_photo($photo['url'], $photo['caption'], $chat);
+            if (!empty($single['ok'])) {
+                sh_notification_finish_order_image($photo['prepared'], true, 'chat:' . $chat);
+            } else {
+                $error = (string)($single['error'] ?? $sent['error'] ?? 'Telegram rejected this product image.');
+                sh_notification_finish_order_image($photo['prepared'], false, 'chat:' . $chat, $error);
+                $warnings[] = 'Image for item ' . $photo['index'] . ' failed: ' . $error;
+            }
+        }
+    }
+
+    return [
+        'ok' => true,
+        'recipient' => 'chat:' . $chat,
+        'warning' => $warnings ? implode(' ', array_slice(array_values(array_unique($warnings)), 0, 8)) : null,
+    ];
+}
+
+/** Compatibility wrapper for the original payment-only integration. */
+function sh_tg_send_payment_submitted(array $data): array
+{
+    return sh_tg_send_order_event('payment_submitted', $data, !empty($data['retry_notification']));
 }
 
 /* ------------------------------------------------------------------ *

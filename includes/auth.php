@@ -9,6 +9,7 @@ function sh_login_user(int $userId): void
     session_regenerate_id(true);
     $_SESSION['user_id'] = $userId;
     $_SESSION['user_login_at'] = time();
+    unset($_SESSION['sh_auth_expired']);
     sh_query('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$userId]);
     sh_merge_guest_cart($userId);
 }
@@ -16,8 +17,16 @@ function sh_login_user(int $userId): void
 function sh_logout_user(): void
 {
     sh_session_start();
-    unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['sh_auth_expired']);
     session_regenerate_id(true);
+}
+
+/** Mark an invalid or expired browser session without exposing account details. */
+function sh_forget_customer_session(bool $expired = false): void
+{
+    sh_session_start();
+    unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    if ($expired) { $_SESSION['sh_auth_expired'] = 1; }
 }
 
 function sh_user(): ?array
@@ -29,11 +38,13 @@ function sh_user(): ?array
     sh_session_start();
     $id = (int)($_SESSION['user_id'] ?? 0);
     if ($id <= 0) { return null; }
-    // Server-side 24h session: the login expires automatically, after which the
-    // customer must sign in again with phone + OTP.
+
+    // Server-side 24h session: a missing timestamp is treated as expired too.
+    // That prevents a stale/partially-written session from reaching profile code
+    // with a null customer record.
     $loginAt = (int)($_SESSION['user_login_at'] ?? 0);
-    if ($loginAt > 0 && (time() - $loginAt) > sh_session_ttl()) {
-        unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    if ($loginAt <= 0 || $loginAt > time() || (time() - $loginAt) > sh_session_ttl()) {
+        sh_forget_customer_session(true);
         return null;
     }
     try {
@@ -44,7 +55,7 @@ function sh_user(): ?array
         return null;
     }
     if ($u === null || $u['status'] !== 'active') {
-        unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+        sh_forget_customer_session(true);
         return null;
     }
     $user = $u;
@@ -57,6 +68,42 @@ function sh_user_id(): int
     return $u ? (int)$u['id'] : 0;
 }
 
+/**
+ * Restrict a post-login destination to a customer-facing internal page.
+ * Authentication pages and admin/API endpoints are intentionally excluded to
+ * prevent loops and cross-surface redirects.
+ */
+function sh_customer_return_target(string $raw, string $fallback = 'account.php'): string
+{
+    $target = sh_safe_redirect($raw, '');
+    if ($target === '') { return $fallback; }
+
+    $path = (string)(parse_url($target, PHP_URL_PATH) ?? '');
+    // sh_safe_redirect() rejects dangerous decoded values, but preserve the
+    // encoded target itself for a legitimate customer URL. Decode here too so
+    // admin/login routes cannot bypass the allowlist as admin%2Forders.php.
+    for ($i = 0; $i < 2; $i++) {
+        $decoded = rawurldecode($path);
+        if ($decoded === $path) { break; }
+        $path = $decoded;
+    }
+    $path = strtolower(ltrim(explode('?', $path, 2)[0], '/'));
+    if ($path === '' || preg_match('~^(?:admin|api|install)(?:/|\.php$|$)~', $path) === 1) {
+        return $fallback;
+    }
+    $blocked = [
+        'login.php', 'register.php', 'logout.php', 'otp.php', 'forgot-password.php',
+        'reset-password.php', 'auth/google/login.php', 'auth/google/callback.php',
+    ];
+    return in_array($path, $blocked, true) ? $fallback : $target;
+}
+
+function sh_login_url(string $returnTo = 'account.php'): string
+{
+    $target = sh_customer_return_target($returnTo, 'account.php');
+    return 'login.php?redirect=' . rawurlencode($target);
+}
+
 function sh_require_login(string $redirectTo = ''): array
 {
     $u = sh_user();
@@ -64,8 +111,14 @@ function sh_require_login(string $redirectTo = ''): array
         if (sh_wants_json()) {
             sh_json(['success' => false, 'error' => 'Please sign in to continue.', 'auth_required' => true], 401);
         }
-        $target = $redirectTo !== '' ? $redirectTo : ($_SERVER['REQUEST_URI'] ?? '');
-        sh_redirect('login.php?redirect=' . urlencode($target));
+
+        sh_session_start();
+        if (!empty($_SESSION['sh_auth_expired'])) {
+            unset($_SESSION['sh_auth_expired']);
+            sh_flash('info', 'Your session has expired. Please sign in again.');
+        }
+        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        sh_redirect(sh_login_url($target));
     }
     return $u;
 }
