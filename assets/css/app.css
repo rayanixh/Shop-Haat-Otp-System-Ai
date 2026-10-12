@@ -507,29 +507,58 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 
 /* 13. PAYMENT ------------------------------------------------------------- */
 .sh-paylayout { display: grid; grid-template-columns: minmax(0, 1fr) 348px; gap: 14px; align-items: start; }
-.sh-payment-card { background: var(--sh-card); border-radius: var(--sh-radius); box-shadow: var(--sh-shadow); overflow: hidden; margin-bottom: 13px; }
-.sh-payment-card__head { background: var(--sh-accent); color: #fff; padding: 14px 17px; display: flex; align-items: center; gap: 11px; }
-.sh-payment-card__head h1, .sh-payment-card__head h2 { font-size: 15.5px; font-weight: 700; }
-.sh-payment-card__sub { font-size: 12.3px; opacity: .85; margin-top: 1px; }
-.sh-payment-card__body { padding: 17px; }
-.sh-amount-box { background: var(--sh-brand-soft); border: 1px dashed var(--sh-brand); border-radius: var(--sh-radius); padding: 15px; text-align: center; margin-bottom: 15px; }
-.sh-amount-box__label { font-size: 12px; color: var(--sh-ink-2); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; }
-.sh-amount-box__value { font-size: 31px; font-weight: 800; color: var(--sh-brand); letter-spacing: -.9px; margin-top: 3px; }
+.sh-paylayout > * { min-width: 0; }
+/* Let the card grow with its content. Payment details must wrap instead of
+   being clipped at the rounded card edge. */
+.sh-payment-card { background: var(--sh-card); border-radius: var(--sh-radius); box-shadow: var(--sh-shadow); overflow: visible; margin-bottom: 13px; min-width: 0; }
+.sh-payment-card__head {
+  background: var(--sh-accent); color: var(--sh-on-accent); padding: 14px 17px; display: flex;
+  align-items: flex-start; gap: 12px; min-width: 0; border-radius: var(--sh-radius) var(--sh-radius) 0 0;
+}
+/* These logos include dark artwork (notably bKash), so the light badge keeps
+   the official asset readable without changing, recolouring or distorting it. */
+.sh-payment-card__provider-logo {
+  display: block; width: auto; height: clamp(48px, 7vw, 60px); max-width: min(160px, 38vw);
+  object-fit: contain; object-position: center; flex: 0 1 auto; padding: 5px 7px;
+  background: #fff; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.18);
+}
+.sh-payment-card__heading { flex: 1 1 auto; min-width: 0; }
+.sh-payment-card__head h1, .sh-payment-card__head h2 {
+  color: var(--sh-on-accent); font-size: 15.5px; font-weight: 700; line-height: 1.3; overflow-wrap: break-word;
+}
+.sh-payment-card__sub { color: var(--sh-on-accent); font-size: 12.3px; line-height: 1.45; opacity: .93; margin-top: 2px; overflow-wrap: anywhere; }
+.sh-payment-card__body { padding: 17px; min-width: 0; }
+.sh-payment-card__body:last-child { border-radius: 0 0 var(--sh-radius) var(--sh-radius); }
+.sh-payment-card .sh-alert > div, .sh-payment-card .sh-field, .sh-payment-card form { min-width: 0; }
+.sh-payment-card .sh-alert p, .sh-payment-card .sh-field__hint { overflow-wrap: anywhere; }
+.sh-amount-box { background: var(--sh-brand-soft); border: 1px dashed var(--sh-brand); border-radius: var(--sh-radius); padding: 15px; text-align: center; margin-bottom: 15px; min-width: 0; }
+.sh-amount-box__label { font-size: 12px; color: var(--sh-ink-2); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; overflow-wrap: break-word; }
+.sh-amount-box__value { font-size: clamp(25px, 5vw, 31px); font-weight: 800; color: var(--sh-brand); letter-spacing: -.9px; margin-top: 3px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .sh-merchant {
   display: flex; align-items: center; gap: 11px; background: #fafbfc; border: 1px solid var(--sh-line);
-  border-radius: var(--sh-radius); padding: 12px 14px; margin-bottom: 14px; flex-wrap: wrap;
+  border-radius: var(--sh-radius); padding: 12px 14px; margin-bottom: 14px; flex-wrap: wrap; min-width: 0;
 }
-.sh-merchant__label { font-size: 11.5px; color: var(--sh-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 700; }
-.sh-merchant__number { font-size: 20px; font-weight: 800; letter-spacing: .8px; font-variant-numeric: tabular-nums; }
-.sh-merchant__type { font-size: 12px; color: var(--sh-muted); }
-.sh-copy { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; background: var(--sh-ink); color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 12.8px; font-weight: 700; }
+.sh-merchant > div { flex: 1 1 180px; min-width: 0; }
+.sh-merchant__label { font-size: 11.5px; color: var(--sh-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 700; overflow-wrap: break-word; }
+.sh-merchant__number { font-size: clamp(17px, 3.2vw, 20px); font-weight: 800; letter-spacing: .8px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.sh-merchant__type { font-size: 12px; color: var(--sh-muted); overflow-wrap: anywhere; }
+.sh-copy { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; max-width: 100%; background: var(--sh-ink); color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 12.8px; font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
 .sh-copy:hover { background: #000; }
 .sh-copy--done { background: var(--sh-ok); }
-.sh-instructions { background: var(--sh-accent-soft); border-radius: var(--sh-radius); padding: 13px 15px; margin-bottom: 15px; }
-.sh-instructions__title { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--sh-accent); margin-bottom: 7px; }
-.sh-instructions__list { font-size: 13.2px; line-height: 1.75; color: var(--sh-ink-2); white-space: pre-line; }
-.sh-secure-note { display: flex; gap: 9px; align-items: flex-start; background: var(--sh-ok-soft); border-radius: var(--sh-radius); padding: 11px 13px; font-size: 12.3px; color: #14603a; margin-top: 13px; }
+.sh-instructions { background: var(--sh-accent-soft); border-radius: var(--sh-radius); padding: 13px 15px; margin-bottom: 15px; min-width: 0; }
+.sh-instructions__title { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--sh-accent); margin-bottom: 7px; overflow-wrap: break-word; }
+.sh-instructions__list { font-size: 13.2px; line-height: 1.75; color: var(--sh-ink-2); white-space: pre-line; overflow-wrap: anywhere; }
+.sh-payment-card .sh-pdp__row { min-width: 0; flex-wrap: wrap; }
+.sh-payment-card .sh-pdp__row dt { flex: 0 1 108px; }
+.sh-payment-card .sh-pdp__row dd { min-width: 0; overflow-wrap: anywhere; }
+.sh-paylayout .sh-mini-item { align-items: flex-start; min-width: 0; }
+.sh-paylayout .sh-mini-item__name { display: block; min-width: 0; overflow: visible; overflow-wrap: anywhere; }
+.sh-paylayout .sh-mini-item__price { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; }
+.sh-paylayout .sh-summary__row, .sh-paylayout .sh-summary__total { align-items: baseline; flex-wrap: wrap; }
+.sh-paylayout .sh-summary__row > span, .sh-paylayout .sh-summary__total > span { min-width: 0; overflow-wrap: anywhere; }
+.sh-secure-note { display: flex; gap: 9px; align-items: flex-start; background: var(--sh-ok-soft); border-radius: var(--sh-radius); padding: 11px 13px; font-size: 12.3px; color: #14603a; margin-top: 13px; min-width: 0; }
 .sh-secure-note .sh-icon { flex: none; margin-top: 1px; }
+.sh-secure-note span { min-width: 0; overflow-wrap: anywhere; }
 .sh-paytabs { display: flex; gap: 7px; padding: 12px 17px 0; flex-wrap: wrap; }
 .sh-paytab {
   display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--sh-line); background: #fff;
@@ -872,16 +901,32 @@ body.sh-modal-open { overflow: hidden; }
   .sh-cart-item { grid-template-columns: 66px minmax(0, 1fr); }
   .sh-cart-item__img { width: 66px; height: 66px; }
   .sh-cart-item__side { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
+  .sh-payment-card__head { padding: 13px 14px; gap: 10px; }
+  .sh-payment-card__body { padding: 14px; }
+  .sh-payment-card__provider-logo { height: 52px; max-width: min(150px, 42vw); }
+  .sh-amount-box { padding: 13px 11px; }
   .sh-amount-box__value { font-size: 25px; }
-  .sh-merchant { gap: 8px; }
+  .sh-merchant { align-items: stretch; gap: 8px; padding: 11px; }
+  .sh-merchant > div { flex-basis: 100%; }
   .sh-merchant__number { font-size: 17px; }
-  .sh-copy { margin-left: 0; width: 100%; justify-content: center; }
+  .sh-copy { margin-left: 0; width: 100%; flex-basis: 100%; justify-content: center; }
+  .sh-instructions { padding: 12px; }
+  .sh-paylayout .sh-summary__row, .sh-paylayout .sh-summary__total { gap: 7px 12px; }
   .sh-auth { margin: 16px auto; padding: 19px; border-radius: 8px; }
   .sh-footer__grid { grid-template-columns: 1fr; gap: 17px; }
   .sh-admin-body { padding: 12px 11px 40px; }
   .sh-admin-card__body { padding: 12px; }
   .sh-modal__box { border-radius: 9px; }
   .sh-track__step { min-width: 92px; }
+}
+@media (max-width: 420px) {
+  .sh-payment-card__head { flex-direction: column; align-items: stretch; }
+  .sh-payment-card__provider-logo { align-self: flex-start; max-width: min(160px, 58vw); }
+  .sh-payment-card__head h1 { font-size: 15px; }
+  .sh-payment-card__sub { font-size: 12px; }
+  .sh-payment-card .sh-pdp__row dt { flex-basis: 100%; }
+  .sh-paylayout .sh-mini-item { flex-wrap: wrap; }
+  .sh-paylayout .sh-mini-item__price { margin-left: 54px; text-align: left; }
 }
 @media (max-width: 380px) {
   .sh-catgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1490,13 +1535,24 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 }
 
 /* Customer Verification (admin) */
+/* The order page uses a two-column grid. Grid items stretch by default, which
+   left an unnecessarily tall right-hand column when the order detail was
+   longer. Keep each column and the verification panel content-sized. */
+.sh-ordgrid { align-items: start; }
+#customer-verification { flex: 0 0 auto; width: 100%; max-width: 100%; height: auto; min-height: 0; overflow: visible; }
+#customer-verification .sh-cv__head { min-height: 0; padding-bottom: 10px; }
+#customer-verification .sh-cv__controls { padding: 9px 15px; border-bottom: 1px solid var(--sh-line); min-height: 0; }
+#customer-verification [data-cv-body] { padding-top: 13px; padding-bottom: 14px; min-height: 0; }
+#customer-verification .sh-cv__manualbox { padding-top: 13px; padding-bottom: 14px; }
 .sh-cv__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.sh-cv__tools { display: flex; gap: 6px; flex-wrap: wrap; }
-.sh-cv { display: flex; flex-direction: column; gap: 16px; font-size: 13.2px; min-width: 0; }
-.sh-cv__group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.sh-cv__group + .sh-cv__group { padding-top: 14px; border-top: 1px solid var(--sh-line); }
+.sh-cv__tools { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.sh-cv__tools .sh-btn { flex: 0 1 auto; min-width: 0; white-space: normal; }
+.sh-cv { display: flex; flex-direction: column; gap: 12px; font-size: 13.2px; min-width: 0; }
+.sh-cv__group { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.sh-cv__group + .sh-cv__group { padding-top: 12px; border-top: 1px solid var(--sh-line); }
 .sh-cv__label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--sh-muted); }
-.sh-cv__who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sh-cv__who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.sh-cv__who > * { min-width: 0; overflow-wrap: anywhere; }
 .sh-cv__who strong { font-size: 14px; }
 .sh-cv__muted { color: var(--sh-muted); margin: 0; }
 .sh-cv__ok { color: var(--sh-ok); font-style: normal; font-weight: 700; }
@@ -1539,6 +1595,12 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-cv__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-cv__kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .sh-cv__manualrow { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  #customer-verification .sh-cv__head { padding: 11px 12px 9px; }
+  #customer-verification .sh-cv__controls { padding: 8px 12px; }
+  #customer-verification .sh-cv__tools { width: 100%; flex-direction: column; }
+  #customer-verification .sh-cv__tools .sh-btn { width: 100%; justify-content: center; }
 }
 
 /* Account verification card (customer profile) */

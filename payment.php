@@ -101,11 +101,10 @@ require_once SH_ROOT . '/includes/header.php';
     <div>
       <div class="sh-payment-card">
         <div class="sh-payment-card__head">
-          <?= sh_icon('credit-card', 21) ?>
           <?php if ($methodLogo !== ''): ?>
-            <img src="<?= e($methodLogo) ?>" alt="<?= e($selectedMethodName) ?>" style="width:32px;height:32px;object-fit:contain">
+            <img class="sh-payment-card__provider-logo" src="<?= e($methodLogo) ?>" alt="<?= e($selectedMethodName) ?>">
           <?php endif; ?>
-          <div>
+          <div class="sh-payment-card__heading">
             <h1>Pay with <?= e($selectedMethodName) ?></h1>
             <p class="sh-payment-card__sub">Order <?= e($order['order_number']) ?> · <?= e($selectedMethodName) ?> · placed <?= e(date('d M Y, h:i A', strtotime($order['created_at']))) ?></p>
           </div>

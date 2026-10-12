@@ -290,6 +290,8 @@ if ($viewId > 0) {
         <div class="sh-panel" id="customer-verification">
           <div class="sh-panel__head sh-cv__head">
             <h2 class="sh-panel__title"><?= sh_icon('shield', 17) ?> Customer Verification</h2>
+          </div>
+          <div class="sh-panel__body sh-cv__controls">
             <div class="sh-cv__tools">
               <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-cv-refresh="courier" data-id="<?= (int)$order['id'] ?>" <?= $vb['courier']['configured'] ? '' : 'disabled' ?>><?= sh_icon('refresh', 13) ?> Refresh courier history</button>
               <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-cv-refresh="ip" data-id="<?= (int)$order['id'] ?>" <?= ($vb['ip'] !== '' && $vb['ip_configured']) ? '' : 'disabled' ?>><?= sh_icon('refresh', 13) ?> Refresh IP information</button>
