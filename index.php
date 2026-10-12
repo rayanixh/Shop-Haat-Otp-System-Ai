@@ -57,16 +57,18 @@ require_once SH_ROOT . '/includes/header.php';
           <span class="sh-slide__scrim" aria-hidden="true"
                 style="opacity:<?= e(number_format(max(0, min(100, (int)$sl['overlay'])) / 100, 2)) ?>"></span>
           <div class="sh-slide__inner">
-            <?php if (trim((string)$sl['tag']) !== ''): ?>
-              <span class="sh-slide__tag"><?= e($sl['tag']) ?></span>
-            <?php endif; ?>
-            <h2 class="sh-slide__title"><?= e($sl['title']) ?></h2>
-            <?php if (trim((string)$sl['subtitle']) !== ''): ?>
-              <p class="sh-slide__text"><?= e($sl['subtitle']) ?></p>
-            <?php endif; ?>
-            <?php if (trim((string)$sl['button_text']) !== '' && trim((string)$sl['button_url']) !== ''): ?>
-              <a class="sh-slide__btn" href="<?= e(sh_url($sl['button_url'])) ?>"><?= e($sl['button_text']) ?></a>
-            <?php endif; ?>
+            <div class="sh-slide__copy">
+              <?php if (trim((string)$sl['tag']) !== ''): ?>
+                <span class="sh-slide__tag"><?= e($sl['tag']) ?></span>
+              <?php endif; ?>
+              <h2 class="sh-slide__title"><?= e($sl['title']) ?></h2>
+              <?php if (trim((string)$sl['subtitle']) !== ''): ?>
+                <p class="sh-slide__text"><?= e($sl['subtitle']) ?></p>
+              <?php endif; ?>
+              <?php if (trim((string)$sl['button_text']) !== '' && trim((string)$sl['button_url']) !== ''): ?>
+                <a class="sh-slide__btn" href="<?= e(sh_url($sl['button_url'])) ?>"><?= e($sl['button_text']) ?></a>
+              <?php endif; ?>
+            </div>
           </div>
         </div>
       <?php endforeach; ?>
@@ -93,13 +95,15 @@ require_once SH_ROOT . '/includes/header.php';
           <?php endif; ?>
           <span class="sh-sidecard__scrim" aria-hidden="true"
                 style="opacity:<?= e(number_format(max(0, min(100, (int)$c['overlay'])) / 100, 2)) ?>"></span>
-          <p class="sh-sidecard__title"><?= e($c['title']) ?></p>
-          <?php if (trim((string)$c['subtitle']) !== ''): ?>
-            <p class="sh-sidecard__text"><?= e($c['subtitle']) ?></p>
-          <?php endif; ?>
-          <?php if (trim((string)$c['button_text']) !== '' && trim((string)$c['button_url']) !== ''): ?>
-            <a class="sh-sidecard__link" href="<?= e(sh_url($c['button_url'])) ?>"><?= e($c['button_text']) ?> <?= sh_icon('chevron-right', 13) ?></a>
-          <?php endif; ?>
+          <div class="sh-sidecard__copy">
+            <p class="sh-sidecard__title"><?= e($c['title']) ?></p>
+            <?php if (trim((string)$c['subtitle']) !== ''): ?>
+              <p class="sh-sidecard__text"><?= e($c['subtitle']) ?></p>
+            <?php endif; ?>
+            <?php if (trim((string)$c['button_text']) !== '' && trim((string)$c['button_url']) !== ''): ?>
+              <a class="sh-sidecard__link" href="<?= e(sh_url($c['button_url'])) ?>"><?= e($c['button_text']) ?> <?= sh_icon('chevron-right', 13) ?></a>
+            <?php endif; ?>
+          </div>
         </div>
       <?php endforeach; ?>
     </div>
@@ -196,17 +200,17 @@ require_once SH_ROOT . '/includes/header.php';
 
   <!-- Promotional banner strip -->
   <section class="sh-banner" aria-label="Offers">
-    <div class="sh-banner__item" style="background:linear-gradient(135deg,#1d4ed8,#38bdf8)">
+    <div class="sh-banner__item" style="background:linear-gradient(135deg,#1d4ed8,#0369a1)">
       <p class="sh-banner__title">Free delivery over <?= e(sh_money(sh_setting('free_delivery_over', '3000'))) ?></p>
       <p class="sh-banner__text">On eligible orders inside the city</p>
       <a class="sh-banner__link" href="<?= e(sh_url('products.php')) ?>">Shop now <?= sh_icon('chevron-right', 13) ?></a>
     </div>
-    <div class="sh-banner__item" style="background:linear-gradient(135deg,#b45309,#fbbf24)">
+    <div class="sh-banner__item" style="background:linear-gradient(135deg,#9a3412,#c2410c)">
       <p class="sh-banner__title">Save with coupon WELCOME10</p>
       <p class="sh-banner__text">10% off your first qualifying order</p>
       <a class="sh-banner__link" href="<?= e(sh_url('products.php?discount=10')) ?>">Grab the deal <?= sh_icon('chevron-right', 13) ?></a>
     </div>
-    <div class="sh-banner__item" style="background:linear-gradient(135deg,#0f766e,#34d399)">
+    <div class="sh-banner__item" style="background:linear-gradient(135deg,#0f766e,#047857)">
       <p class="sh-banner__title">Instant digital delivery</p>
       <p class="sh-banner__text">Codes issued right after payment approval</p>
       <a class="sh-banner__link" href="<?= e(sh_url('products.php?q=' . urlencode('code'))) ?>">See products <?= sh_icon('chevron-right', 13) ?></a>

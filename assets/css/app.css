@@ -233,21 +233,26 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-slide__scrim { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(15,18,28,.82) 0%, rgba(15,18,28,.66) 38%,
               rgba(15,18,28,.28) 62%, rgba(15,18,28,.10) 100%); }
-.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; height: 100%;
+.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; height: 100%; min-width: 0;
   display: flex; flex-direction: column; justify-content: center; padding: 34px 40px; }
+/* The admin-configurable slide overlay may be very light. Keep contrast reliable
+   for every image with a compact backdrop behind only the text, not the artwork. */
+.sh-slide__copy { width: min(100%, 520px); min-width: 0; padding: 16px 18px 17px; border-radius: 10px;
+  background: linear-gradient(100deg, rgba(10,17,29,.88) 0%, rgba(10,17,29,.76) 72%, rgba(10,17,29,.64) 100%);
+  border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 24px rgba(0,0,0,.18); backdrop-filter: blur(2px); }
 @keyframes sh-fade { from { opacity: .35; } to { opacity: 1; } }
-.sh-slide__tag { display: inline-block; align-self: flex-start; background: rgba(255,255,255,.18);
-  border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px); padding: 4px 11px; border-radius: 20px;
+.sh-slide__tag { display: inline-flex; align-items: center; color: #fff; background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.42); padding: 4px 11px; border-radius: 20px;
   font-size: 11.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; margin-bottom: 12px; }
-.sh-slide__title { font-size: 31px; line-height: 1.18; font-weight: 800; max-width: 460px; letter-spacing: -.5px;
-  text-shadow: 0 2px 12px rgba(0,0,0,.35); }
-.sh-slide__text { margin-top: 9px; font-size: 14.5px; max-width: 420px; opacity: .95;
-  text-shadow: 0 1px 8px rgba(0,0,0,.3); }
-.sh-slide__btn { align-self: flex-start; margin-top: 18px; background: #fff; color: var(--sh-ink);
-  padding: 10px 22px; border-radius: 6px; font-weight: 700; font-size: 14px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.22); transition: transform .14s ease, background .14s ease; }
+.sh-slide__title { color: #fff; font-size: 31px; line-height: 1.18; font-weight: 800; max-width: 460px; letter-spacing: -.5px;
+  overflow-wrap: break-word; text-shadow: 0 2px 12px rgba(0,0,0,.42); }
+.sh-slide__text { color: rgba(255,255,255,.96); margin-top: 9px; font-size: 14.5px; line-height: 1.5; max-width: 420px;
+  opacity: 1; overflow-wrap: break-word; text-shadow: 0 1px 8px rgba(0,0,0,.38); }
+.sh-slide__btn { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; min-width: 0; margin-top: 18px; background: #fff; color: var(--sh-ink);
+  padding: 10px 22px; border: 1px solid #fff; border-radius: 6px; font-weight: 700; font-size: 14px; line-height: 1.3; text-align: center; overflow-wrap: anywhere;
+  box-shadow: 0 4px 14px rgba(0,0,0,.22); transition: transform .14s ease, background .14s ease, color .14s ease; }
 .sh-slide__btn:active { transform: translateY(1px); }
-.sh-slide__btn:hover { background: #f1f2f5; }
+.sh-slide__btn:hover { background: #fff7f2; color: var(--sh-brand-dark); }
 .sh-carousel__dots { position: absolute; z-index: 2; bottom: 14px; left: 40px; display: flex; gap: 7px; }
 .sh-carousel__dot { cursor: pointer; }
 .sh-carousel__dot { width: 22px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.45); }
@@ -269,11 +274,13 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-sidecard:hover .sh-sidecard__img { transform: scale(1.045); }
 .sh-sidecard__scrim { position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: linear-gradient(90deg, rgba(15,18,28,.80) 0%, rgba(15,18,28,.60) 45%, rgba(15,18,28,.20) 100%); }
-.sh-sidecard__title { font-size: 15px; font-weight: 700; text-shadow: 0 1px 8px rgba(0,0,0,.4); }
-.sh-sidecard__text { font-size: 12.5px; opacity: .93; margin-top: 3px; text-shadow: 0 1px 6px rgba(0,0,0,.35); }
-.sh-sidecard__link { margin-top: 8px; font-size: 12.5px; font-weight: 700; display: inline-flex;
-  align-items: center; gap: 4px; text-shadow: 0 1px 6px rgba(0,0,0,.35); }
-.sh-sidecard__link:hover { gap: 7px; }
+.sh-sidecard__copy { position: relative; z-index: 1; width: 100%; min-width: 0; padding: 8px 10px; border-radius: 7px;
+  background: linear-gradient(90deg, rgba(10,17,29,.82), rgba(10,17,29,.66)); border: 1px solid rgba(255,255,255,.14); }
+.sh-sidecard__title { color: #fff; font-size: 15px; font-weight: 700; line-height: 1.3; overflow-wrap: break-word; text-shadow: 0 1px 8px rgba(0,0,0,.4); }
+.sh-sidecard__text { color: rgba(255,255,255,.94); font-size: 12.5px; line-height: 1.45; opacity: 1; margin-top: 3px; overflow-wrap: break-word; text-shadow: 0 1px 6px rgba(0,0,0,.35); }
+.sh-sidecard__link { color: #fff; margin-top: 8px; font-size: 12.5px; font-weight: 700; display: inline-flex;
+  align-items: center; gap: 4px; max-width: 100%; overflow-wrap: anywhere; text-shadow: 0 1px 6px rgba(0,0,0,.35); }
+.sh-sidecard__link:hover { color: #fff; gap: 7px; }
 
 /* 7. CATEGORIES ----------------------------------------------------------- */
 .sh-catgrid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
@@ -369,9 +376,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 /* Banner strip */
 .sh-banner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
 .sh-banner__item { border-radius: var(--sh-radius); padding: 20px; color: #fff; min-height: 118px; display: flex; flex-direction: column; justify-content: center; box-shadow: var(--sh-shadow); }
-.sh-banner__title { font-size: 17px; font-weight: 800; }
-.sh-banner__text { font-size: 12.5px; opacity: .92; margin-top: 4px; }
-.sh-banner__link { margin-top: 10px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+.sh-banner__title { color: #fff; font-size: 17px; font-weight: 800; line-height: 1.3; overflow-wrap: break-word; text-shadow: 0 1px 5px rgba(0,0,0,.24); }
+.sh-banner__text { color: rgba(255,255,255,.94); font-size: 12.5px; line-height: 1.45; opacity: 1; margin-top: 4px; overflow-wrap: break-word; text-shadow: 0 1px 4px rgba(0,0,0,.22); }
+.sh-banner__link { color: #fff; margin-top: 10px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow-wrap: anywhere; }
+.sh-banner__link:hover { color: #fff; text-decoration: underline; }
 
 /* 9. PRODUCT LISTING ------------------------------------------------------ */
 .sh-listing { display: grid; grid-template-columns: 232px 1fr; gap: 14px; align-items: start; }
@@ -487,16 +495,20 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-checkout-card { background: var(--sh-card); border-radius: var(--sh-radius); padding: 16px; box-shadow: var(--sh-shadow); margin-bottom: 13px; }
 .sh-checkout-card__title { font-size: 14.5px; font-weight: 800; margin-bottom: 13px; display: flex; align-items: center; gap: 8px; }
 .sh-checkout-card__title .sh-icon { color: var(--sh-brand); }
-.sh-pay-option {
-  display: flex; align-items: center; gap: 12px; padding: 12px 13px; border: 1.5px solid var(--sh-line);
-  border-radius: var(--sh-radius); cursor: pointer; margin-bottom: 9px; transition: border-color .12s, background .12s;
+/* Checkout payment selector: every label is a full-width tap target. The
+   combined selector intentionally wins over the generic .sh-check spacing. */
+.sh-check.sh-pay-option {
+  display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; min-height: 72px;
+  padding: 13px 14px; margin: 9px 0; border: 1.5px solid var(--sh-line); border-radius: var(--sh-radius);
+  background: #fff; cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s;
 }
-.sh-pay-option:hover { border-color: var(--sh-brand); }
-.sh-pay-option--on { border-color: var(--sh-brand); background: var(--sh-brand-soft); }
-.sh-pay-option input { accent-color: var(--sh-brand); flex: none; }
-.sh-pay-option__logo { width: 44px; height: 30px; object-fit: contain; flex: none; }
-.sh-pay-option__fallback { width: 44px; height: 30px; border-radius: 5px; background: var(--sh-accent-soft); color: var(--sh-accent); display: grid; place-items: center; flex: none; }
-.sh-pay-option__name { font-size: 13.8px; font-weight: 700; }
+.sh-pay-option:hover { border-color: var(--sh-brand); background: #fffaf7; }
+.sh-pay-option:focus-within { border-color: var(--sh-brand); box-shadow: 0 0 0 3px var(--sh-focus-ring); }
+.sh-pay-option--on, .sh-pay-option:has(input:checked) { border-color: var(--sh-brand); background: var(--sh-brand-soft); box-shadow: 0 1px 3px rgba(232,80,27,.10); }
+.sh-pay-option input[type="radio"] { width: 24px; height: 24px; margin: 0; accent-color: var(--sh-brand); flex: 0 0 24px; cursor: pointer; }
+.sh-pay-option__logo { width: clamp(76px, 24vw, 96px); height: 44px; max-width: 96px; max-height: 44px; object-fit: contain; object-position: center; flex: 0 1 auto; }
+.sh-pay-option__fallback { width: clamp(76px, 24vw, 96px); height: 44px; max-width: 96px; border-radius: 6px; background: var(--sh-accent-soft); color: var(--sh-accent); display: grid; place-items: center; flex: 0 1 auto; }
+.sh-pay-option__name { flex: 1 1 auto; min-width: 0; color: var(--sh-ink); font-size: clamp(16px, 1.7vw, 17px); font-weight: 700; line-height: 1.3; overflow-wrap: break-word; }
 .sh-pay-option__desc { font-size: 12px; color: var(--sh-muted); margin-top: 1px; }
 .sh-mini-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--sh-line-2); }
 .sh-mini-item:last-child { border-bottom: 0; }
@@ -828,6 +840,14 @@ body.sh-modal-open { overflow: hidden; }
   .sh-admin-scrim { position: fixed; inset: 0; background: rgba(15,20,32,.5); z-index: 110; border: 0; }
   .sh-admin-scrim[hidden] { display: none; }
 }
+/* At tablet widths the checkout summary remains a narrow side column. Keep its
+   official logos large enough to recognise while reserving a full label line. */
+@media (min-width: 901px) and (max-width: 1100px) {
+  .sh-check.sh-pay-option { gap: 9px; padding: 12px; }
+  .sh-pay-option input[type="radio"] { width: 22px; height: 22px; flex-basis: 22px; }
+  .sh-pay-option__logo, .sh-pay-option__fallback { width: 78px; height: 40px; max-width: 78px; max-height: 40px; }
+  .sh-pay-option__name { font-size: 16px; }
+}
 @media (max-width: 900px) {
   .sh-utility, .sh-main-header, .sh-nav { display: none; }
   .sh-mheader { display: block; }
@@ -920,6 +940,10 @@ body.sh-modal-open { overflow: hidden; }
   .sh-track__step { min-width: 92px; }
 }
 @media (max-width: 420px) {
+  .sh-check.sh-pay-option { gap: 9px; min-height: 68px; padding: 11px 12px; }
+  .sh-pay-option input[type="radio"] { width: 22px; height: 22px; flex-basis: 22px; }
+  .sh-pay-option__logo, .sh-pay-option__fallback { width: 78px; height: 40px; max-width: 78px; max-height: 40px; }
+  .sh-pay-option__name { font-size: 16px; }
   .sh-payment-card__head { flex-direction: column; align-items: stretch; }
   .sh-payment-card__provider-logo { align-self: flex-start; max-width: min(160px, 58vw); }
   .sh-payment-card__head h1 { font-size: 15px; }
@@ -1195,6 +1219,7 @@ body.sh-modal-open { overflow: hidden; }
   .sh-carousel__arrow { display: none; }
   .sh-carousel, .sh-slide, .sh-slide__inner { min-height: 268px; }
   .sh-slide__inner { padding: 22px 20px 34px; }
+  .sh-slide__copy { width: 100%; padding: 14px; border-radius: 8px; }
   .sh-slide__title { font-size: 22px; max-width: none; }
   .sh-slide__text { font-size: 13.2px; max-width: none; }
   .sh-carousel__dots { left: 20px; bottom: 12px; }
@@ -1311,8 +1336,7 @@ body.sh-modal-open { overflow: hidden; }
 .sh-paycard__edit:hover { color: var(--sh-ink); }
 @media (max-width: 420px) { .sh-paycard__head { flex-direction: column; align-items: flex-start; } .sh-paycard__logo { max-width: 100%; } .sh-paycard__edit { margin-left: 0; } }
 
-/* Storefront payment logos: full logo, contain. */
-.sh-pay-option__logo { width: auto; height: auto; max-width: 84px; max-height: 34px; object-fit: contain; flex: 0 0 auto; }
+/* Storefront payment tabs: full official logo, contain. */
 .sh-paytab { align-items: center; }
 .sh-paytab img { width: auto; height: 22px; max-width: 64px; max-height: 22px; object-fit: contain; flex: 0 0 auto; }
 .sh-paychip img { width: auto; height: 18px; max-width: 60px; max-height: 18px; object-fit: contain; background: #fff; border-radius: 3px; padding: 1px 3px; }

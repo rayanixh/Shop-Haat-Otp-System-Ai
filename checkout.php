@@ -144,13 +144,23 @@ if ($retryOrderId > 0) {
             <?php elseif ($retryMethods): ?>
               <div class="sh-field" style="margin:14px 0 2px">
                 <span class="sh-field__label">Choose replacement method <span class="sh-field__req">*</span></span>
-                <?php foreach ($retryMethods as $retryMethod): $retryLogo = sh_payment_logo_url($retryMethod); ?>
-                  <label class="sh-check" style="align-items:center;margin:8px 0">
+                <?php foreach ($retryMethods as $retryMethod):
+                  $retryLogo = sh_payment_logo_url($retryMethod);
+                  $retrySelected = (int)$retryMethod['id'] === $retrySelectedId;
+                  // The saved method name is canonical for online methods. COD has
+                  // one customer-facing label so it cannot be repeated in the row.
+                  $retryPaymentLabel = $retryMethod['type'] === 'cod' ? 'Cash on Delivery' : trim((string)$retryMethod['name']);
+                  if ($retryPaymentLabel === '') { $retryPaymentLabel = 'Payment method'; }
+                ?>
+                  <label class="sh-check sh-pay-option<?= $retrySelected ? ' sh-pay-option--on' : '' ?>">
                     <input type="radio" name="payment_method_id" value="<?= (int)$retryMethod['id'] ?>"
-                           <?= (int)$retryMethod['id'] === $retrySelectedId ? 'checked' : '' ?> required>
-                    <?php if ($retryLogo !== ''): ?><img src="<?= e($retryLogo) ?>" alt="" style="width:25px;height:25px;object-fit:contain;margin:0 5px">
-                    <?php else: ?><?= sh_icon($retryMethod['type'] === 'cod' ? 'truck' : 'credit-card', 15) ?><?php endif; ?>
-                    <span><?= e($retryMethod['name']) ?><?= $retryMethod['type'] === 'cod' ? ' — Cash on Delivery' : '' ?></span>
+                           <?= $retrySelected ? 'checked' : '' ?> required>
+                    <?php if ($retryLogo !== ''): ?>
+                      <img class="sh-pay-option__logo" src="<?= e($retryLogo) ?>" alt="">
+                    <?php else: ?>
+                      <span class="sh-pay-option__fallback" aria-hidden="true"><?= sh_icon($retryMethod['type'] === 'cod' ? 'truck' : 'credit-card', 19) ?></span>
+                    <?php endif; ?>
+                    <span class="sh-pay-option__name"><?= e($retryPaymentLabel) ?></span>
                   </label>
                 <?php endforeach; ?>
               </div>
@@ -432,13 +442,23 @@ require_once SH_ROOT . '/includes/header.php';
         <?php if ($methods): ?>
           <div class="sh-field" style="margin:14px 0 2px">
             <span class="sh-field__label">Payment method <span class="sh-field__req">*</span></span>
-            <?php foreach ($methods as $paymentMethod): $paymentLogo = sh_payment_logo_url($paymentMethod); ?>
-              <label class="sh-check" style="align-items:center;margin:8px 0">
+            <?php foreach ($methods as $paymentMethod):
+              $paymentLogo = sh_payment_logo_url($paymentMethod);
+              $paymentSelected = (int)$paymentMethod['id'] === $selectedMethodId;
+              // Render one canonical customer-facing label. This leaves the stored
+              // payment-method ID and the server-side routing untouched.
+              $paymentLabel = $paymentMethod['type'] === 'cod' ? 'Cash on Delivery' : trim((string)$paymentMethod['name']);
+              if ($paymentLabel === '') { $paymentLabel = 'Payment method'; }
+            ?>
+              <label class="sh-check sh-pay-option<?= $paymentSelected ? ' sh-pay-option--on' : '' ?>">
                 <input type="radio" name="payment_method_id" value="<?= (int)$paymentMethod['id'] ?>"
-                       <?= (int)$paymentMethod['id'] === $selectedMethodId ? 'checked' : '' ?> required>
-                <?php if ($paymentLogo !== ''): ?><img src="<?= e($paymentLogo) ?>" alt="" style="width:25px;height:25px;object-fit:contain;margin:0 5px">
-                <?php else: ?><?= sh_icon($paymentMethod['type'] === 'cod' ? 'truck' : 'credit-card', 15) ?><?php endif; ?>
-                <span><?= e($paymentMethod['name']) ?><?= $paymentMethod['type'] === 'cod' ? ' — Cash on Delivery' : '' ?></span>
+                       <?= $paymentSelected ? 'checked' : '' ?> required>
+                <?php if ($paymentLogo !== ''): ?>
+                  <img class="sh-pay-option__logo" src="<?= e($paymentLogo) ?>" alt="">
+                <?php else: ?>
+                  <span class="sh-pay-option__fallback" aria-hidden="true"><?= sh_icon($paymentMethod['type'] === 'cod' ? 'truck' : 'credit-card', 19) ?></span>
+                <?php endif; ?>
+                <span class="sh-pay-option__name"><?= e($paymentLabel) ?></span>
               </label>
             <?php endforeach; ?>
           </div>
