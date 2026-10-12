@@ -17,6 +17,7 @@
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/payment.php';
+require_once __DIR__ . '/reporting.php';
 require_once __DIR__ . '/notifications.php';
 
 /* ------------------------------------------------------------------ *
@@ -1054,11 +1055,15 @@ function sh_tg_handle_message(array $msg): void
             return;
 
         case 'today':
-            $n = (int)sh_val('SELECT COUNT(*) FROM orders WHERE DATE(created_at) = CURDATE()', [], 0);
-            $sum = (float)sh_val("SELECT COALESCE(SUM(total),0) FROM orders
-                                  WHERE DATE(created_at) = CURDATE() AND payment_status = 'verified'", [], 0);
+            $todayDates = sh_reporting_presets()['today'];
+            $todayRange = sh_reporting_range($todayDates['from'], $todayDates['to']);
+            $todayWhere = sh_reporting_date_condition('o');
+            $todayParams = sh_reporting_date_params($todayRange);
+            $n = (int)sh_val('SELECT COUNT(*) FROM orders o WHERE ' . $todayWhere, $todayParams, 0);
+            $sum = (float)sh_val('SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE ' . $todayWhere
+                . ' AND ' . sh_reporting_paid_order_condition('o'), $todayParams, 0);
             $pend = (int)sh_val("SELECT COUNT(*) FROM orders WHERE payment_status = 'submitted'", [], 0);
-            sh_tg_send("<b>📊 Today</b>\n\nOrders: " . $n . "\nVerified revenue: "
+            sh_tg_send("<b>📊 Today</b>\n\nOrders: " . $n . "\nNet paid revenue: "
                 . sh_tg_esc(sh_money($sum)) . "\nAwaiting verification: " . $pend, null, $chatId);
             return;
     }

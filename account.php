@@ -4,6 +4,7 @@ require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/firebase.php';
+require_once SH_ROOT . '/includes/reporting.php';
 
 sh_session_start();
 $user = sh_require_login();
@@ -97,10 +98,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $stats = ['orders' => 0, 'pending' => 0, 'completed' => 0, 'spent' => 0];
 try {
     $row = sh_one('SELECT COUNT(*) AS c,
-        SUM(status IN (\'pending\',\'awaiting_payment\',\'payment_submitted\',\'processing\')) AS p,
-        SUM(status = \'completed\') AS d,
-        COALESCE(SUM(CASE WHEN payment_status = \'verified\' OR status = \'completed\' THEN total ELSE 0 END),0) AS s
-        FROM orders WHERE user_id = ?', [(int)$user['id']]);
+        SUM(o.status IN (\'pending\',\'awaiting_payment\',\'payment_submitted\',\'processing\')) AS p,
+        SUM(o.status = \'completed\') AS d,
+        COALESCE(SUM(CASE WHEN ' . sh_reporting_paid_order_condition('o') . ' THEN o.total ELSE 0 END),0) AS s
+        FROM orders o WHERE o.user_id = ?', [(int)$user['id']]);
     $stats = ['orders' => (int)$row['c'], 'pending' => (int)$row['p'], 'completed' => (int)$row['d'], 'spent' => (float)$row['s']];
 } catch (Throwable $e) { sh_log_exception($e, 'account-stats'); }
 
@@ -121,7 +122,7 @@ require_once SH_ROOT . '/includes/header.php';
         <div class="sh-stat sh-stat--ok"><span class="sh-stat__icon"><?= sh_icon('check-circle', 19) ?></span>
           <div><p class="sh-stat__value"><?= $stats['completed'] ?></p><p class="sh-stat__label">Completed</p></div></div>
         <div class="sh-stat sh-stat--info"><span class="sh-stat__icon"><?= sh_icon('dollar', 19) ?></span>
-          <div><p class="sh-stat__value" style="font-size:16px"><?= e(sh_money($stats['spent'])) ?></p><p class="sh-stat__label">Total spent</p></div></div>
+          <div><p class="sh-stat__value" style="font-size:16px"><?= e(sh_money($stats['spent'])) ?></p><p class="sh-stat__label">Net paid spend</p></div></div>
       </div>
 
       <div class="sh-section">

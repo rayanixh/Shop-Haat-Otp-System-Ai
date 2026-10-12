@@ -7,6 +7,7 @@ require_once SH_ROOT . '/includes/firebase.php';
 sh_fb_schema_ensure();
 require_once SH_ROOT . '/includes/payment.php';
 require_once SH_ROOT . '/includes/admin-tools.php';
+require_once SH_ROOT . '/includes/reporting.php';
 
 sh_session_start();
 $admin = sh_require_admin();
@@ -72,7 +73,7 @@ if ($viewId > 0) {
         exit;
     }
     $orders = sh_all('SELECT * FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 40', [$viewId]);
-    $spent = (float)sh_val("SELECT COALESCE(SUM(total),0) FROM orders WHERE user_id = ? AND (payment_status = 'verified' OR status IN ('completed','delivered'))", [$viewId], 0);
+    $spent = (float)sh_val('SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.user_id = ? AND ' . sh_reporting_paid_order_condition('o'), [$viewId], 0);
     $cs = sh_one("SELECT COUNT(*) total, SUM(status IN ('completed','delivered')) done, SUM(status = 'cancelled') canc, SUM(status = 'returned') ret, MAX(created_at) last_at FROM orders WHERE user_id = ?", [$viewId]) ?? [];
     $custAudit = sh_audit_for('customer', $viewId, 10);
     $addresses = sh_all('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC', [$viewId]);
@@ -87,7 +88,7 @@ if ($viewId > 0) {
 
     <div class="sh-stats">
       <div class="sh-stat"><span class="sh-stat__icon sh-stat__icon--green"><?= sh_icon('dollar', 20) ?></span>
-        <div><div class="sh-stat__value"><?= e(sh_money($spent)) ?></div><div class="sh-stat__label">Verified spend</div></div></div>
+        <div><div class="sh-stat__value"><?= e(sh_money($spent)) ?></div><div class="sh-stat__label">Net paid spend</div></div></div>
       <div class="sh-stat"><span class="sh-stat__icon sh-stat__icon--blue"><?= sh_icon('package', 20) ?></span>
         <div><div class="sh-stat__value"><?= (int)($cs['total'] ?? 0) ?></div><div class="sh-stat__label">Total orders</div></div></div>
       <div class="sh-stat"><span class="sh-stat__icon"><?= sh_icon('map-pin', 20) ?></span>
@@ -215,7 +216,7 @@ $page = min($page, $pages);
 $rows = sh_all(
     "SELECT u.*,
         (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS order_count,
-        (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.user_id = u.id AND o.payment_status = 'verified') AS spend
+        (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.user_id = u.id AND " . sh_reporting_paid_order_condition('o') . ") AS spend
      FROM users u WHERE $whereSql ORDER BY u.id DESC LIMIT $per OFFSET " . (($page - 1) * $per),
     $args
 );
@@ -235,7 +236,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table">
-      <thead><tr><th>Customer</th><th>Contact</th><th>Orders</th><th>Verified spend</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
+      <thead><tr><th>Customer</th><th>Contact</th><th>Orders</th><th>Net paid spend</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="6">No customers found.</td></tr>
       <?php else: foreach ($rows as $u): ?>

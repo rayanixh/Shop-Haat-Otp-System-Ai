@@ -221,21 +221,6 @@ function sh_low_stock_products(int $limit = 50): array
 }
 
 // ---------------------------------------------------------------------------
-// Sales analytics (real data only)
-// ---------------------------------------------------------------------------
-function sh_sales_period(string $from, ?string $to = null): array
-{
-    $to = $to ?? date('Y-m-d H:i:s');
-    try {
-        $r = sh_one("SELECT COUNT(*) c,
-                COALESCE(SUM(CASE WHEN payment_status = 'verified' OR status IN ('completed','delivered') THEN total ELSE 0 END),0) rev,
-                SUM(status IN ('completed','delivered')) done, SUM(status = 'cancelled') canc, SUM(status = 'returned') ret
-                FROM orders WHERE created_at >= ? AND created_at <= ?", [$from, $to]) ?? [];
-        return ['orders' => (int)($r['c'] ?? 0), 'revenue' => (float)($r['rev'] ?? 0), 'completed' => (int)($r['done'] ?? 0), 'cancelled' => (int)($r['canc'] ?? 0), 'returned' => (int)($r['ret'] ?? 0)];
-    } catch (Throwable $e) { return ['orders' => 0, 'revenue' => 0.0, 'completed' => 0, 'cancelled' => 0, 'returned' => 0]; }
-}
-
-// ---------------------------------------------------------------------------
 // Global admin search
 // ---------------------------------------------------------------------------
 function sh_admin_search(string $q, int $limit = 8): array
