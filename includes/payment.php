@@ -870,7 +870,7 @@ function sh_order_customer_username(array $order): string
     }
 }
 
-/** Latest persisted payment record for an order (used only for server-side notifications). */
+/** Latest persisted payment record for an order, used by server-side order flows and progress views. */
 function sh_order_latest_payment(int $orderId): ?array
 {
     if ($orderId <= 0) { return null; }
