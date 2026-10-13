@@ -591,8 +591,14 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-track__step--done .sh-track__dot { background: var(--sh-ok); border-color: var(--sh-ok); color: #fff; }
 .sh-track__step--done::before { background: var(--sh-ok); }
 .sh-track__step--on .sh-track__dot { background: var(--sh-brand); border-color: var(--sh-brand); color: #fff; }
-.sh-track__label { font-size: 11.8px; color: var(--sh-muted); padding: 0 4px; line-height: 1.35; }
+.sh-track__step--bad .sh-track__dot { background: var(--sh-bad); border-color: var(--sh-bad); color: #fff; }
+.sh-track__step--bad::before { background: var(--sh-bad); }
+.sh-track__step--not-required .sh-track__dot { background: var(--sh-bg); border-color: var(--sh-line); color: var(--sh-muted); }
+.sh-track__label { display:block; font-size: 11.8px; color: var(--sh-muted); padding: 0 4px; line-height: 1.35; overflow-wrap:anywhere; }
+.sh-track__meta { display:block; margin-top:2px; color:var(--sh-muted); font-size:10.5px; font-weight:500; line-height:1.3; }
 .sh-track__step--done .sh-track__label, .sh-track__step--on .sh-track__label { color: var(--sh-ink); font-weight: 700; }
+.sh-track__step--bad .sh-track__label { color:var(--sh-bad); font-weight:700; }
+.sh-track__step--not-required .sh-track__label { color:var(--sh-muted); }
 
 .sh-order-card { background: var(--sh-card); border-radius: var(--sh-radius); box-shadow: var(--sh-shadow); margin-bottom: 12px; overflow: hidden; }
 .sh-order-card__head { display: flex; align-items: center; gap: 12px; padding: 12px 15px; background: #fafbfc; border-bottom: 1px solid var(--sh-line-2); flex-wrap: wrap; }

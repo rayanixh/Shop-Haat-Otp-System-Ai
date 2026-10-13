@@ -644,8 +644,22 @@ function sh_order_number_prefix(): string
     return preg_match('/^[A-Z]{2}$/', $p) ? $p : 'SH';
 }
 
+/** Normalize legacy status display values without changing what is stored in the database. */
+function sh_status_key(string $status): string
+{
+    $key = strtolower(trim($status));
+    $key = preg_replace('/[\s-]+/', '_', $key) ?? '';
+    return [
+        'complete' => 'completed',
+        'approved' => 'verified',
+        'payment_approved' => 'payment_verified',
+        'payment_failed' => 'failed',
+    ][$key] ?? $key;
+}
+
 function sh_status_label(string $status): string
 {
+    $status = sh_status_key($status);
     $map = [
         'pending'           => 'Order Placed',
         'awaiting_payment'  => 'Awaiting Payment',
@@ -680,6 +694,7 @@ function sh_order_item_variant(string $category, string $sku): string
 
 function sh_status_class(string $status): string
 {
+    $status = sh_status_key($status);
     $ok = ['completed', 'delivered', 'payment_verified', 'verified', 'sent'];
     $warn = ['pending', 'awaiting_payment', 'payment_submitted', 'processing', 'shipped', 'skipped'];
     $bad = ['payment_rejected', 'cancelled', 'returned', 'rejected', 'failed'];

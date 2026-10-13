@@ -18,6 +18,7 @@ $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 require_once dirname(__DIR__) . '/config/config.php';
 require_once SH_ROOT . '/includes/payment.php';
 require_once SH_ROOT . '/includes/reporting.php';
+require_once SH_ROOT . '/includes/order-timeline.php';
 
 /** @param mixed $actual @param mixed $expected */
 function reporting_assert_same($expected, $actual, string $message): void
@@ -39,6 +40,15 @@ function reporting_assert_money(float $expected, $actual, string $message): void
         throw new RuntimeException($message . ' (expected ' . number_format($expected, 2, '.', '')
             . ', got ' . number_format((float)$actual, 2, '.', '') . ')');
     }
+}
+
+/** @return array<string,mixed> */
+function reporting_timeline_step(array $timeline, string $key): array
+{
+    foreach (($timeline['steps'] ?? []) as $step) {
+        if (($step['key'] ?? '') === $key) { return $step; }
+    }
+    throw new RuntimeException('Timeline step not found: ' . $key);
 }
 
 /** @return int */
@@ -164,11 +174,18 @@ try {
     reporting_assert_same(0, $beforeApproval['paid_orders'], 'Pending checkout must not be a paid order');
     reporting_assert_money(0.00, $beforeApproval['paid_revenue'], 'Pending checkout must not add paid revenue');
     reporting_assert_same(0, $beforeApproval['items_sold'], 'Pending checkout items must not count as paid items');
+    $newOrderTimeline = sh_order_timeline(sh_order_get($manualOrderId), sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
+    reporting_assert_same('done', reporting_timeline_step($newOrderTimeline, 'order_placed')['state'], 'New order must retain its placed milestone');
+    reporting_assert_same('current', reporting_timeline_step($newOrderTimeline, 'payment_submitted')['state'], 'New prepaid order must await payment submission');
+    reporting_assert_same('pending', reporting_timeline_step($newOrderTimeline, 'payment_verified')['state'], 'Unpaid order must not show payment verified');
 
     $submitted = sh_submit_manual_payment($manualOrderId, 'REPORTTRX1001', '01700000001');
     reporting_assert(!empty($submitted['ok']), 'Manual payment submission must succeed');
     $payment = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$manualOrderId]);
     reporting_assert($payment !== null, 'Checkout must create a payment record');
+    $submittedTimeline = sh_order_timeline(sh_order_get($manualOrderId), $payment, sh_order_items($manualOrderId));
+    reporting_assert_same('done', reporting_timeline_step($submittedTimeline, 'payment_submitted')['state'], 'Submitted payment must complete its submission milestone');
+    reporting_assert_same('current', reporting_timeline_step($submittedTimeline, 'payment_verified')['state'], 'Submitted payment must await verification');
     $approved = sh_approve_payment((int)$payment['id'], $adminId, 'Reporting test approval');
     reporting_assert(!empty($approved['ok']), 'Manual payment approval must succeed');
 
@@ -179,6 +196,10 @@ try {
     reporting_assert_money(100.00, $verifiedManual['discount'], 'Checkout discount must be persisted');
     reporting_assert_money(60.00, $verifiedManual['delivery_fee'], 'Checkout delivery fee must be persisted');
     reporting_assert_money(960.00, $verifiedManual['total'], 'Checkout payable total must be persisted');
+    $processingTimeline = sh_order_timeline($verifiedManual, sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
+    reporting_assert_same('done', reporting_timeline_step($processingTimeline, 'payment_verified')['state'], 'Verified payment must complete its verification milestone');
+    reporting_assert_same('current', reporting_timeline_step($processingTimeline, 'processing')['state'], 'Verified processing order must highlight processing');
+    reporting_assert_same('pending', reporting_timeline_step($processingTimeline, 'delivery')['state'], 'Verified payment must not imply delivery');
 
     // A delivered COD order remains unpaid until its stored payment status is
     // verified. It must therefore increase all-order totals, not paid revenue.
@@ -197,6 +218,10 @@ try {
     reporting_assert(!empty($codCheckout['ok']), 'COD checkout must succeed');
     $codOrderId = (int)$codCheckout['order_id'];
     sh_query("UPDATE orders SET status = 'delivered' WHERE id = ?", [$codOrderId]);
+    $deliveredCodTimeline = sh_order_timeline(sh_order_get($codOrderId), sh_order_latest_payment($codOrderId), sh_order_items($codOrderId));
+    reporting_assert($deliveredCodTimeline['is_cod'], 'COD route must be determined from its persisted payment snapshot');
+    reporting_assert_same('not-required', reporting_timeline_step($deliveredCodTimeline, 'payment_not_required')['state'], 'COD must not require prepaid milestones');
+    reporting_assert_same('done', reporting_timeline_step($deliveredCodTimeline, 'delivery')['state'], 'Delivered COD must complete its delivery milestone');
 
     // Add persisted invalid and guest records to exercise the same production
     // status/payment fields that the reports read. Add a second payment record
@@ -345,6 +370,46 @@ try {
     reporting_assert_money(960.00, $registered[0]['paid_amount'], 'Registered customer paid amount must match sales rule');
     reporting_assert_same(1, count($guest), 'Guest records sharing a stored contact must aggregate once');
     reporting_assert_same(2, (int)$guest[0]['total_orders'], 'Guest aggregate must retain both guest orders');
+
+    $cancelledTimeline = sh_order_timeline(sh_order_get($cancelledId), sh_order_latest_payment($cancelledId), sh_order_items($cancelledId));
+    reporting_assert_same('Cancelled', (string)$cancelledTimeline['problem']['label'], 'Cancelled order must show a terminal cancellation state');
+    reporting_assert_same('pending', reporting_timeline_step($cancelledTimeline, 'delivery')['state'], 'Cancelled order must not mark delivery complete');
+
+    $rejectedId = reporting_test_insert_order([
+        'order_number' => 'SH-REPORT-REJECTED',
+        'customer_name' => 'Rejected Payment Customer',
+        'customer_email' => 'rejected@example.test',
+        'customer_phone' => '01700000008',
+        'payment_method_id' => (int)$manualMethod['id'],
+        'payment_method_name' => (string)$manualMethod['name'],
+        'subtotal' => 100.00,
+        'total' => 100.00,
+        'status' => 'payment_rejected',
+        'payment_status' => 'rejected',
+    ]);
+    sh_insert('payments', [
+        'order_id' => $rejectedId,
+        'payment_method_id' => (int)$manualMethod['id'],
+        'method_name' => (string)$manualMethod['name'],
+        'kind' => 'manual',
+        'amount' => 100.00,
+        'transaction_id' => 'REPORTREJECTED',
+        'status' => 'rejected',
+    ]);
+    $rejectedTimeline = sh_order_timeline(sh_order_get($rejectedId), sh_order_latest_payment($rejectedId), []);
+    reporting_assert_same('bad', reporting_timeline_step($rejectedTimeline, 'payment_verified')['state'], 'Rejected payment must not appear verified');
+    reporting_assert_same('Payment Rejected', (string)reporting_timeline_step($rejectedTimeline, 'payment_verified')['label'], 'Rejected payment must state its actual outcome');
+
+    sh_query("UPDATE orders SET status = 'delivered' WHERE id = ?", [$manualOrderId]);
+    $deliveredTimeline = sh_order_timeline(sh_order_get($manualOrderId), sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
+    foreach ($deliveredTimeline['steps'] as $step) {
+        reporting_assert_same('done', $step['state'], 'Delivered prepaid order must complete every applicable milestone');
+    }
+    $legacyStatusOrder = sh_order_get($manualOrderId);
+    $legacyStatusOrder['status'] = 'Delivered';
+    $legacyStatusOrder['payment_status'] = 'Verified';
+    $legacyTimeline = sh_order_timeline($legacyStatusOrder, sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
+    reporting_assert_same('done', reporting_timeline_step($legacyTimeline, 'delivery')['state'], 'Capitalized legacy delivered status must normalize safely');
 
     reporting_assert(!sh_reporting_date_valid('2026-02-30'), 'Invalid calendar dates must be rejected');
     $lastSeven = sh_reporting_presets()['last7'];

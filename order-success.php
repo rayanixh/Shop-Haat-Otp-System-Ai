@@ -6,6 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/payment.php';
+require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
 $orderId = sh_int($_GET['id'] ?? 0);
@@ -26,49 +27,18 @@ if ($order === null || !sh_order_can_view($order)) {
 
 $items = sh_order_items($orderId);
 $codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
-// Preserve the payment method that was saved with this order. A later admin
-// edit/disable of the live method must not turn an existing COD order into an
-// online-payment prompt on refresh or reopen.
+// Preserve the saved payment route and map progress from persisted order and
+// payment states. This is shared with Order Details and public tracking.
 $payment = sh_order_latest_payment($orderId);
-$isCod = (string)($payment['kind'] ?? '') === 'cod';
-if (!$isCod && $payment === null && $order['payment_method_id']) {
-    // Narrow legacy fallback for orders created before payment snapshots.
-    $m = sh_one('SELECT type FROM payment_methods WHERE id = ?', [(int)$order['payment_method_id']]);
-    $isCod = $m && $m['type'] === 'cod';
-}
+$timeline = sh_order_timeline($order, $payment, $items);
+$isCod = (bool)$timeline['is_cod'];
+$timelineProblem = is_array($timeline['problem'] ?? null) ? $timeline['problem'] : null;
+$rejected = $timelineProblem !== null && ($timelineProblem['severity'] ?? '') === 'error';
+$paymentDone = $isCod || in_array((string)$timeline['payment_status'], ['verified', 'refunded'], true);
 
 $pageTitle = 'Order ' . $order['order_number'];
 $pageDescription = 'Your order confirmation.';
 require_once SH_ROOT . '/includes/header.php';
-
-// Tracking steps
-$digital = (int)$order['has_digital'] === 1;
-$steps = $digital
-    ? ['Order Placed', 'Payment Submitted', 'Payment Verified', 'Code Delivered', 'Completed']
-    : ['Order Placed', 'Payment Submitted', 'Payment Verified', 'Processing', 'Completed'];
-$stateIndex = match ($order['status']) {
-    'pending', 'awaiting_payment' => 0,
-    'payment_submitted'           => 1,
-    'payment_verified'            => 2,
-    'processing'                  => $digital ? 2 : 3,
-    'completed'                   => 4,
-    default                       => 0,
-};
-if ($isCod && $order['status'] === 'processing') { $stateIndex = 3; }
-$rejected = in_array($order['status'], ['payment_rejected', 'cancelled', 'returned'], true);
-
-// Real completion signals from the order row (never assumed):
-//  - payment confirmed  → payment_status 'verified' (or the order already moved past verification)
-//  - codes delivered    → codes_delivered flag set by the delivery routine
-//  - order completed    → status 'completed'
-$orderDone     = $order['status'] === 'completed';
-$paymentDone   = $orderDone || $order['payment_status'] === 'verified'
-              || (!$isCod && in_array($order['status'], ['payment_verified', 'processing'], true));
-$codesDone     = $digital && ((int)($order['codes_delivered'] ?? 0) === 1 || $orderDone);
-if ($codesDone && $stateIndex < 3) { $stateIndex = 3; }
-// Every step up to and including the current one is "done" once the order is completed;
-// otherwise the current step stays in the pending (orange) state.
-$trackDoneUpTo = $orderDone ? count($steps) - 1 : $stateIndex - 1;
 ?>
 <div class="sh-wrap">
   <div class="sh-steps" style="margin-top:12px">
@@ -76,7 +46,11 @@ $trackDoneUpTo = $orderDone ? count($steps) - 1 : $stateIndex - 1;
     <span class="sh-steps__sep"></span>
     <span class="sh-steps__item sh-steps__item--done"><span class="sh-steps__num"><?= sh_icon('check-circle', 12) ?></span> Checkout</span>
     <span class="sh-steps__sep"></span>
-    <span class="sh-steps__item sh-steps__item--done"><span class="sh-steps__num"><?= sh_icon('check-circle', 12) ?></span> Payment</span>
+    <?php if ($isCod || (string)$timeline['payment_status'] !== 'unpaid'): ?>
+      <span class="sh-steps__item sh-steps__item--done"><span class="sh-steps__num"><?= sh_icon('check-circle', 12) ?></span> Payment</span>
+    <?php else: ?>
+      <span class="sh-steps__item sh-steps__item--on"><span class="sh-steps__num">3</span> Payment</span>
+    <?php endif; ?>
     <span class="sh-steps__sep"></span>
     <?php if ($paymentDone && !$rejected): ?>
       <span class="sh-steps__item sh-steps__item--done"><span class="sh-steps__num"><?= sh_icon('check-circle', 12) ?></span> Confirmation</span>
@@ -92,16 +66,16 @@ $trackDoneUpTo = $orderDone ? count($steps) - 1 : $stateIndex - 1;
       <?= sh_icon($rejected ? 'x-circle' : 'check-circle', 30) ?>
     </span>
     <h1 style="font-size:21px;font-weight:800;margin-bottom:6px">
-      <?= $rejected ? 'There is an issue with your order' : 'Thank you — your order is confirmed' ?>
+      <?= $timelineProblem !== null ? e((string)$timelineProblem['label']) : 'Thank you — your order is confirmed' ?>
     </h1>
     <p style="font-size:14px;color:var(--sh-muted);max-width:520px;margin:0 auto 12px">
-      <?php if ($rejected): ?>
-        Your payment could not be verified. Please review the details below or contact our support team.
+      <?php if ($timelineProblem !== null): ?>
+        <?= e((string)$timelineProblem['detail']) ?>
       <?php elseif ($isCod): ?>
         Order <strong><?= e($order['order_number']) ?></strong> has been placed. Please keep <?= e(sh_money($order['total'])) ?> ready for the delivery agent.
-      <?php elseif ($order['payment_status'] === 'submitted'): ?>
+      <?php elseif (sh_order_timeline_payment_status((string)$order['payment_status']) === 'submitted'): ?>
         Order <strong><?= e($order['order_number']) ?></strong> has been placed and your payment is awaiting verification.
-      <?php elseif ($order['payment_status'] === 'verified'): ?>
+      <?php elseif (sh_order_timeline_payment_status((string)$order['payment_status']) === 'verified'): ?>
         Order <strong><?= e($order['order_number']) ?></strong> is paid and being processed.
       <?php else: ?>
         Order <strong><?= e($order['order_number']) ?></strong> has been created. Please complete the payment to continue.
@@ -109,26 +83,18 @@ $trackDoneUpTo = $orderDone ? count($steps) - 1 : $stateIndex - 1;
     </p>
     <div style="display:flex;gap:9px;justify-content:center;flex-wrap:wrap">
       <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('order-details.php?id=' . $orderId)) ?>"><?= sh_icon('eye', 15) ?> Order details</a>
-      <?php if ($order['payment_status'] === 'unpaid' && !$isCod): ?>
+      <?php if ((string)$timeline['payment_status'] === 'unpaid' && !$isCod): ?>
         <a class="sh-btn" href="<?= e(sh_url('payment.php?id=' . $orderId)) ?>"><?= sh_icon('credit-card', 15) ?> Complete payment</a>
       <?php endif; ?>
       <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('products.php')) ?>">Continue shopping</a>
     </div>
   </div>
 
-  <?php if (!$rejected): ?>
   <div class="sh-section">
     <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('truck', 18) ?> Order Progress</h2></div>
-    <div class="sh-track">
-      <?php foreach ($steps as $i => $label): ?>
-        <div class="sh-track__step <?= $i <= $trackDoneUpTo ? 'sh-track__step--done' : ($i === $stateIndex ? 'sh-track__step--on' : '') ?>">
-          <span class="sh-track__dot"><?= $i <= $stateIndex ? sh_icon('check-circle', 11) : '' ?></span>
-          <span class="sh-track__label"><?= e($label) ?></span>
-        </div>
-      <?php endforeach; ?>
-    </div>
+    <?= sh_order_timeline_problem_render($timeline) ?>
+    <div style="margin-top:<?= !empty($timeline['problem']) ? '14px' : '0' ?>"><?= sh_order_timeline_render($timeline) ?></div>
   </div>
-  <?php endif; ?>
 
   <?php if ($codes): ?>
   <div class="sh-section">

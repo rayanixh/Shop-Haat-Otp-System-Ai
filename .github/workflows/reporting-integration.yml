@@ -1,4 +1,4 @@
-name: Reporting integration
+name: Reporting and order timeline integration
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   reporting-integration:
-    name: PHP and MySQL reporting workflow
+    name: PHP and MySQL reports and timeline workflow
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -50,5 +50,5 @@ jobs:
           ];
           PHP
           touch config/installed.lock
-      - name: Exercise checkout, payment verification, and reports
+      - name: Exercise checkout, payment verification, reports, and order timelines
         run: php tests/reporting-integration.php

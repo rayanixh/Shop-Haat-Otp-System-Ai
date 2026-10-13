@@ -4,6 +4,7 @@ require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/payment.php';
+require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
 $user = sh_require_login();
@@ -63,7 +64,7 @@ require_once SH_ROOT . '/includes/header.php';
               <span class="sh-badge <?= e(sh_status_class($o['payment_status'])) ?>"><?= e(sh_status_label($o['payment_status'])) ?></span>
               <strong style="margin-left:auto;font-size:15px"><?= e(sh_money($o['total'])) ?></strong>
               <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('order-details.php?id=' . (int)$o['id'])) ?>">Details</a>
-              <?php if ($o['payment_status'] === 'unpaid' && $o['status'] === 'awaiting_payment'): ?>
+              <?php if (sh_order_timeline_payment_status((string)$o['payment_status']) === 'unpaid' && sh_order_timeline_order_status((string)$o['status']) === 'awaiting_payment'): ?>
                 <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('payment.php?id=' . (int)$o['id'])) ?>">Pay now</a>
               <?php endif; ?>
             </div>

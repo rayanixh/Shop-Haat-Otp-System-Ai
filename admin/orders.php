@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/payment.php';
+require_once SH_ROOT . '/includes/order-timeline.php';
 require_once SH_ROOT . '/includes/notifications.php';
 require_once SH_ROOT . '/includes/courier.php';
 require_once SH_ROOT . '/includes/verification.php';
@@ -126,6 +127,8 @@ if ($viewId > 0) {
         // Courier tables not present on an install that predates this feature.
     }
 
+    $customerTimeline = sh_order_timeline($order, $payments[0] ?? null, $items);
+
     $adminTitle = 'Order ' . $order['order_number'];
     require __DIR__ . '/_layout.php';
     ?>
@@ -158,6 +161,14 @@ if ($viewId > 0) {
       </div>
     </section>
     <?php endif; ?>
+
+    <section class="sh-panel" aria-label="Customer tracking progress">
+      <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('history', 17) ?> Customer tracking progress</h2></div>
+      <div class="sh-panel__body">
+        <?= sh_order_timeline_problem_render($customerTimeline) ?>
+        <div style="margin-top:<?= !empty($customerTimeline['problem']) ? '14px' : '0' ?>"><?= sh_order_timeline_render($customerTimeline) ?></div>
+      </div>
+    </section>
 
     <div class="sh-ordgrid">
       <div class="sh-ordgrid__main">
