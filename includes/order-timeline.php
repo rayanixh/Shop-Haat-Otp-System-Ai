@@ -131,12 +131,13 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
     );
     $paymentSubmitted = !$isCod && (
         in_array($paymentStatus, ['submitted', 'verified', 'refunded'], true)
+        || in_array($paymentRecordStatus, ['submitted', 'verified', 'refunded'], true)
         || $hasReference
         || in_array($orderStatus, ['payment_submitted', 'payment_verified', 'payment_rejected'], true)
     );
     $paymentVerified = !$isCod && (
         in_array($paymentStatus, ['verified', 'refunded'], true)
-        || $paymentRecordStatus === 'verified'
+        || in_array($paymentRecordStatus, ['verified', 'refunded'], true)
         || $orderStatus === 'payment_verified'
     );
     $paymentFailed = !$isCod && (
@@ -145,6 +146,7 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
         || (!$paymentVerified && in_array($paymentRecordStatus, ['rejected', 'failed', 'cancelled'], true))
     );
     if ($paymentFailed) { $paymentSubmitted = true; }
+    $failedAt = $paymentFailed ? $verifiedAt : null;
 
     $processingReached = in_array($orderStatus, ['processing', 'shipped', 'delivered', 'completed'], true);
     $deliveryReached = in_array($orderStatus, ['delivered', 'completed'], true);
@@ -173,7 +175,7 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
             'label' => 'Payment rejected',
             'detail' => 'The saved payment record was rejected or failed. It has not been verified.',
             'severity' => 'error',
-            'at' => null,
+            'at' => $failedAt,
         ];
     } elseif ($refunded) {
         $problem = [
@@ -236,7 +238,7 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
         $verifiedLabel = $paymentFailed ? 'Payment Rejected' : 'Payment Verified';
         $verifiedState = $paymentFailed ? 'bad' : $state('payment_verified', $paymentVerified);
         $steps[] = sh_order_timeline_step('payment_submitted', 'Payment Submitted', $state('payment_submitted', $paymentSubmitted), $submittedAt);
-        $steps[] = sh_order_timeline_step('payment_verified', $verifiedLabel, $verifiedState, $paymentVerified ? $verifiedAt : null);
+        $steps[] = sh_order_timeline_step('payment_verified', $verifiedLabel, $verifiedState, $paymentVerified ? $verifiedAt : ($paymentFailed ? $failedAt : null));
     }
 
     if ($isDigitalOnly) {
