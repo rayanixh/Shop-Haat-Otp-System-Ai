@@ -9,6 +9,10 @@ define('SH_BOOTSTRAPPED', true);
 
 define('SH_ROOT', dirname(__DIR__));
 define('SH_CONFIG_DIR', SH_ROOT . '/config');
+
+// ShopHaat's order lifecycle and reports use the Bangladesh business calendar.
+// Keep PHP-generated timestamps and report presets aligned with persisted orders.
+date_default_timezone_set('Asia/Dhaka');
 define('SH_LOG_DIR', SH_ROOT . '/logs');
 define('SH_UPLOAD_DIR', SH_ROOT . '/uploads');
 define('SH_DB_CONFIG_FILE', SH_CONFIG_DIR . '/database.php');

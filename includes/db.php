@@ -31,13 +31,26 @@ function sh_db_connect(string $host, ?string $dbname, string $user, string $pass
     $dsn = "mysql:host={$host};port={$port};charset={$charset}";
     if ($dbname !== null && $dbname !== '') { $dsn .= ";dbname={$dbname}"; }
 
-    return new PDO($dsn, $user, $pass, [
+    $pdo = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
         PDO::ATTR_STRINGIFY_FETCHES  => false,
         PDO::ATTR_TIMEOUT            => 8,
     ]);
+
+    // Schema timestamps use DATETIME/CURRENT_TIMESTAMP. A fixed session offset
+    // avoids host-default UTC dates splitting a Bangladesh business day at the
+    // wrong time, and works on MySQL/MariaDB without timezone-table imports.
+    try {
+        $pdo->exec("SET time_zone = '+06:00'");
+    } catch (PDOException $e) {
+        // Do not expose a PDO message or prevent a legacy host from connecting;
+        // retain an actionable server-side signal for the host administrator.
+        error_log('ShopHaat: could not set the database session timezone to +06:00.');
+    }
+
+    return $pdo;
 }
 
 /** Execute a prepared statement with safe logging on failure. */
