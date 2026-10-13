@@ -410,6 +410,10 @@ try {
     $legacyStatusOrder['payment_status'] = 'Verified';
     $legacyTimeline = sh_order_timeline($legacyStatusOrder, sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
     reporting_assert_same('done', reporting_timeline_step($legacyTimeline, 'delivery')['state'], 'Capitalized legacy delivered status must normalize safely');
+    $legacyCompleteOrder = $legacyStatusOrder;
+    $legacyCompleteOrder['status'] = 'Complete';
+    $completedTimeline = sh_order_timeline($legacyCompleteOrder, sh_order_latest_payment($manualOrderId), sh_order_items($manualOrderId));
+    reporting_assert_same('done', reporting_timeline_step($completedTimeline, 'delivery')['state'], 'Legacy completed status must complete final delivery safely');
 
     reporting_assert(!sh_reporting_date_valid('2026-02-30'), 'Invalid calendar dates must be rejected');
     $lastSeven = sh_reporting_presets()['last7'];
