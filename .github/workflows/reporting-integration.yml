@@ -1,6 +1,7 @@
 name: Reporting integration
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - arena/9fe3cb2b-shop-haat-otp-system-ai
