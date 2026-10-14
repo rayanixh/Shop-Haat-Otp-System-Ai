@@ -41,6 +41,13 @@ function sh_csrf_login_url(string $returnTo): string
     return 'login.php?redirect=' . rawurlencode(sh_safe_redirect($returnTo, 'account.php'));
 }
 
+/** Customer expiry markers must never reroute an admin form through customer Login. */
+function sh_csrf_is_admin_request(): bool
+{
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    return preg_match('~/(?:admin)(?:/|$)~i', $script) === 1;
+}
+
 /** Store a one-time expiry notice even on public pages that did not load auth.php. */
 function sh_csrf_consume_expired_customer_session(): void
 {
@@ -92,7 +99,10 @@ function sh_csrf_require(): void
 
     sh_log_line('security', 'CSRF token rejected');
     $returnTo = sh_csrf_return_target();
-    $sessionExpired = sh_customer_session_expired();
+    // The expiry hint belongs only to customer Login recovery. Admin guards
+    // maintain their own timeout path, so a stale customer cookie cannot send
+    // an admin login/form submission to the storefront.
+    $sessionExpired = !sh_csrf_is_admin_request() && sh_customer_session_expired();
 
     if (sh_wants_json()) {
         // The frontend reloads a stale form without retrying it. Carry a normal
