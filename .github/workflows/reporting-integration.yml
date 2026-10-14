@@ -50,5 +50,7 @@ jobs:
           ];
           PHP
           touch config/installed.lock
-      - name: Exercise checkout, payment verification, reports, and order timelines
+      - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
+      - name: Exercise session expiry through customer HTTP routes
+        run: bash tests/session-expiration-http.sh

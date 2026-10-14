@@ -141,8 +141,49 @@ try {
     $codMethod = sh_one("SELECT * FROM payment_methods WHERE code = 'cod' LIMIT 1");
     reporting_assert($manualMethod !== null && $codMethod !== null, 'Seeded payment methods are required');
 
-    // Place a real cart-backed checkout with two item lines and a persisted coupon.
+    // Session-expiry recovery: auth is never trusted after its TTL, a harmless
+    // browser hint turns a host-purged session into a Login notice, CSRF rotates
+    // at login, and the independent cart token survives recovery.
     sh_session_start();
+    $_SESSION = [];
+    $_SESSION['cart_token'] = str_repeat('a', 64);
+    $_SESSION['csrf_token'] = 'old-form-token';
+    sh_login_user($userId);
+    reporting_assert(sh_customer_auth_hint_present(), 'Login must set only the non-authentication expiry hint cookie');
+    reporting_assert(!isset($_SESSION['csrf_token']), 'Login must rotate the prior CSRF token');
+    $freshCsrf = sh_csrf_token();
+    reporting_assert($freshCsrf !== '' && $freshCsrf !== 'old-form-token', 'A fresh CSRF token must be issued after login');
+    reporting_assert_same(str_repeat('a', 64), $_SESSION['cart_token'], 'Login must preserve the cart token');
+
+    $_SESSION['user_login_at'] = time() - sh_session_ttl() - 1;
+    reporting_assert(sh_customer_session_expired(), 'A customer login beyond its TTL must be treated as expired');
+    reporting_assert_same(null, sh_user(), 'Expired customer session must not resolve to an authenticated user');
+    reporting_assert_same(str_repeat('a', 64), $_SESSION['cart_token'], 'Automatic logout must not delete the cart token');
+    $expiredPayload = sh_customer_auth_required_payload('checkout.php', true);
+    reporting_assert_same(true, $expiredPayload['auth_required'], 'Expired API response must request sign-in');
+    reporting_assert_same(true, $expiredPayload['session_expired'], 'Expired API response must identify session expiration');
+    reporting_assert(str_contains($expiredPayload['login_url'], 'login.php?redirect=checkout.php'), 'Expired API response must preserve the checkout return target');
+    $expiredCsrf = sh_csrf_json_failure(true, 'checkout.php');
+    reporting_assert_same(401, $expiredCsrf['status'], 'Expired AJAX form must receive an authentication-required response');
+    reporting_assert_same(true, $expiredCsrf['payload']['session_expired'], 'Expired AJAX form must identify the expired session');
+    $staleCsrf = sh_csrf_json_failure(false, 'checkout.php');
+    reporting_assert_same(403, $staleCsrf['status'], 'Stale CSRF form must be rejected without an invalid-session status page');
+    reporting_assert_same(true, $staleCsrf['payload']['refresh_required'], 'Stale CSRF form must request a safe reload rather than replay');
+    reporting_assert(sh_consume_customer_session_expired_notice(), 'Expired customer notice must be consumable once');
+    $expiryFlash = sh_flash_pull();
+    reporting_assert_same('Your session has expired. Please log in again to continue.', (string)($expiryFlash[0]['message'] ?? ''), 'Login must receive the clean session-expired notice');
+    reporting_assert(!sh_customer_auth_hint_present(), 'Expiry hint must clear after the notice is prepared');
+
+    // Simulate server-side session garbage collection while the browser still
+    // has its non-authentication marker cookie.
+    sh_login_user($userId);
+    reporting_assert(sh_customer_auth_hint_present(), 'A renewed login must recreate the expiry hint');
+    $_SESSION = [];
+    reporting_assert(sh_customer_session_expired(), 'Lost server-side session must be detected from the browser expiry hint');
+    reporting_assert(sh_consume_customer_session_expired_notice(), 'Lost server-side session must still create a Login notice');
+    sh_flash_pull();
+
+    // Place a real cart-backed checkout with two item lines and a persisted coupon.
     $_SESSION['user_id'] = $userId;
     $_SESSION['user_login_at'] = time();
     $_SESSION['cart_token'] = str_repeat('a', 64);

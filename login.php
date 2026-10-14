@@ -12,6 +12,10 @@ require_once SH_ROOT . '/includes/auth.php';
 sh_session_start();
 $redirect = sh_customer_return_target(sh_get('redirect'), '');
 if (sh_user() !== null) { sh_redirect($redirect !== '' ? $redirect : 'account.php'); }
+// A server-side session can disappear through normal PHP garbage collection,
+// leaving only the harmless browser hint. Consume it here too for people who
+// navigate to Login directly rather than through a protected page.
+if (sh_customer_session_expired()) { sh_consume_customer_session_expired_notice(); }
 
 $mode = sh_auth_mode();
 

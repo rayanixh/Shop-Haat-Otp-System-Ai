@@ -18,6 +18,9 @@ require_once SH_ROOT . '/includes/cart.php';
 
 sh_session_start();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { sh_json(['success' => false, 'error' => 'POST required.'], 405); }
+// This endpoint only serves the authenticated Checkout page. Check auth first
+// so a lost login becomes a recoverable JSON redirect signal, never a raw error page.
+sh_require_login('checkout.php');
 sh_csrf_require();
 
 try {

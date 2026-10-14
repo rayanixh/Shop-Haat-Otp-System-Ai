@@ -9,6 +9,7 @@ if (sh_admin() !== null) { sh_redirect('admin/dashboard.php'); }
 
 $error = '';
 $email = '';
+$flash = sh_flash_pull();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
@@ -63,6 +64,9 @@ $token = sh_csrf_token();
     <div class="sh-adminlogin__brand"><span class="sh-brand__mark">SH</span> Admin Panel</div>
     <p class="sh-adminlogin__sub"><?= e(sh_setting('site_name', 'ShopHaat')) ?> store management</p>
 
+    <?php foreach ($flash as $message): ?>
+      <div class="sh-alert sh-alert--<?= e((string)($message['type'] ?? 'info')) ?>"><?= sh_icon((($message['type'] ?? '') === 'error') ? 'x-circle' : 'info', 16) ?><span><?= e((string)($message['message'] ?? '')) ?></span></div>
+    <?php endforeach; ?>
     <?php if ($error): ?>
       <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?><span><?= e($error) ?></span></div>
     <?php endif; ?>

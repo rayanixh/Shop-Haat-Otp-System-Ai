@@ -12,6 +12,12 @@ sh_session_start();
 $orderId = sh_int($_GET['id'] ?? 0);
 $order = $orderId > 0 ? sh_order_get($orderId) : null;
 
+// Keep a timed-out customer in the normal login/recovery flow. Guest-order
+// protection remains unchanged for URLs that were never authenticated.
+if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
+    sh_require_login('order-success.php?id=' . $orderId);
+}
+
 if ($order === null || !sh_order_can_view($order)) {
     http_response_code(404);
     $pageTitle = 'Order not found';

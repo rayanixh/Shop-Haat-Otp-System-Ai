@@ -9,7 +9,10 @@ function sh_login_user(int $userId): void
     session_regenerate_id(true);
     $_SESSION['user_id'] = $userId;
     $_SESSION['user_login_at'] = time();
-    unset($_SESSION['sh_auth_expired']);
+    // Rotate the form token at the authentication boundary. The next rendered
+    // page receives a fresh token; no state-changing request is replayed.
+    unset($_SESSION['csrf_token'], $_SESSION['sh_auth_expired']);
+    sh_customer_auth_hint_set();
     sh_query('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$userId]);
     sh_merge_guest_cart($userId);
 }
@@ -17,7 +20,8 @@ function sh_login_user(int $userId): void
 function sh_logout_user(): void
 {
     sh_session_start();
-    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['sh_auth_expired']);
+    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['sh_auth_expired'], $_SESSION['csrf_token']);
+    sh_customer_auth_hint_clear();
     session_regenerate_id(true);
 }
 
@@ -25,8 +29,21 @@ function sh_logout_user(): void
 function sh_forget_customer_session(bool $expired = false): void
 {
     sh_session_start();
-    unset($_SESSION['user_id'], $_SESSION['user_login_at']);
+    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['csrf_token']);
     if ($expired) { $_SESSION['sh_auth_expired'] = 1; }
+    else { unset($_SESSION['sh_auth_expired']); }
+}
+
+/** One-time customer-facing notice used after a real authentication timeout. */
+function sh_consume_customer_session_expired_notice(): bool
+{
+    if (!sh_customer_session_expired()) { return false; }
+    // Do not leave a stale identity usable in the new request while the login
+    // notice is being prepared. The hint is display-only and is cleared now.
+    unset($_SESSION['user_id'], $_SESSION['user_login_at'], $_SESSION['csrf_token'], $_SESSION['sh_auth_expired']);
+    sh_customer_auth_hint_clear();
+    sh_flash('info', 'Your session has expired. Please log in again to continue.');
+    return true;
 }
 
 function sh_user(): ?array
@@ -113,20 +130,32 @@ function sh_login_url(string $returnTo = 'account.php'): string
     return 'login.php?redirect=' . rawurlencode($target);
 }
 
+/** @return array{success:bool,error:string,auth_required:bool,session_expired:bool,login_url:string} */
+function sh_customer_auth_required_payload(string $returnTo = '', ?bool $expired = null): array
+{
+    $expired = $expired ?? sh_customer_session_expired();
+    return [
+        'success' => false,
+        'error' => $expired
+            ? 'Your session has expired. Please log in again to continue.'
+            : 'Please sign in to continue.',
+        'auth_required' => true,
+        'session_expired' => $expired,
+        'login_url' => sh_url(sh_login_url($returnTo)),
+    ];
+}
+
 function sh_require_login(string $redirectTo = ''): array
 {
     $u = sh_user();
     if ($u === null) {
+        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        $expired = sh_customer_session_expired();
         if (sh_wants_json()) {
-            sh_json(['success' => false, 'error' => 'Please sign in to continue.', 'auth_required' => true], 401);
+            sh_json(sh_customer_auth_required_payload($target, $expired), 401);
         }
 
-        sh_session_start();
-        if (!empty($_SESSION['sh_auth_expired'])) {
-            unset($_SESSION['sh_auth_expired']);
-            sh_flash('info', 'Your session has expired. Please sign in again.');
-        }
-        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        if ($expired) { sh_consume_customer_session_expired_notice(); }
         sh_redirect(sh_login_url($target));
     }
     return $u;
@@ -147,15 +176,9 @@ function sh_cart_token(): string
     $token = bin2hex(random_bytes(32));
     $_SESSION['cart_token'] = $token;
     if (!headers_sent()) {
-        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
-        setcookie('sh_cart', $token, [
-            'expires'  => time() + 86400 * 30,
-            'path'     => sh_base_url() . '/',
-            'httponly' => true,
-            'secure'   => $https,
-            'samesite' => 'Lax',
-        ]);
+        // Cart ownership is deliberately independent of authentication so an
+        // automatic logout never discards a customer's selected items.
+        setcookie('sh_cart', $token, sh_site_cookie_options(time() + 86400 * 30));
     }
     return $token;
 }
