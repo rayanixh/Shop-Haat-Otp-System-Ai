@@ -61,10 +61,10 @@ try {
             break;
 
         case 'wishlist':
-            $u = sh_user();
-            if ($u === null) {
-                sh_json(['success' => false, 'auth_required' => true, 'error' => 'Please sign in to use your wishlist.'], 401);
-            }
+            // This action is authenticated even though the surrounding cart
+            // endpoint also supports guests. The guard returns a proper JSON
+            // login URL when a customer session has expired.
+            $u = sh_require_login('wishlist.php');
             if ($productId <= 0) { sh_json(['success' => false, 'error' => 'Invalid product.'], 400); }
             $exists = sh_one('SELECT id FROM wishlist WHERE user_id = ? AND product_id = ?', [(int)$u['id'], $productId]);
             if ($exists) {

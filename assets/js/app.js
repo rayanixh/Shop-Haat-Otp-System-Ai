@@ -11,6 +11,37 @@
   function $(s, c) { return (c || document).querySelector(s); }
   function $$(s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); }
 
+  /* ---------- Session / CSRF recovery -------------------------------- */
+  function currentReturnPath() {
+    return window.location.pathname + window.location.search + window.location.hash;
+  }
+  function safeLoginUrl(payload) {
+    var fallback = url('login.php?redirect=' + encodeURIComponent(currentReturnPath()));
+    if (!payload || typeof payload.login_url !== 'string' || !payload.login_url) { return fallback; }
+    try {
+      var candidate = new URL(payload.login_url, window.location.href);
+      return candidate.origin === window.location.origin ? candidate.href : fallback;
+    } catch (e) { return fallback; }
+  }
+  function handleSessionExpired(payload) {
+    if (!payload || (!payload.auth_required && !payload.session_expired)) { return false; }
+    var destination = safeLoginUrl(payload);
+    // A stale form on Login itself should receive a new token rather than add
+    // redirect parameters forever. Other pages retain their safe return path.
+    if (/\/login\.php$/i.test(window.location.pathname)) { window.location.reload(); }
+    else { window.location.assign(destination); }
+    return true;
+  }
+  function handleCsrfFailure(payload) {
+    if (!payload || (!payload.csrf_failed && !payload.refresh_required)) { return false; }
+    // Never retry a state-changing request automatically. A reload obtains a
+    // fresh token and lets the customer decide whether to submit again.
+    window.setTimeout(function () { window.location.reload(); }, 30);
+    return true;
+  }
+  window.shHandleSessionExpired = handleSessionExpired;
+  window.shHandleCsrfFailure = handleCsrfFailure;
+
   /* ---------- Toasts -------------------------------------------------- */
   var ICONS = {
     success: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.8 10A10 10 0 1 1 17 3.34"/><path d="m9 11 3 3L22 4"/></svg>',
@@ -50,6 +81,16 @@
         var j;
         try { j = JSON.parse(t); }
         catch (e) { throw new Error('The server returned an unexpected response.'); }
+        if (handleSessionExpired(j)) {
+          var expired = new Error(j.error || 'Your session has expired.');
+          expired.sessionExpired = true;
+          throw expired;
+        }
+        if (handleCsrfFailure(j)) {
+          var stale = new Error(j.error || 'This form has expired.');
+          stale.csrfFailed = true;
+          throw stale;
+        }
         if (!r.ok && !j.error) { throw new Error('Request failed (' + r.status + ').'); }
         return j;
       });
@@ -545,6 +586,8 @@
           var j;
           try { j = JSON.parse(t); }
           catch (e) { throw new Error('Unexpected server response.'); }
+          if (window.shHandleSessionExpired && window.shHandleSessionExpired(j)) { return; }
+          if (window.shHandleCsrfFailure && window.shHandleCsrfFailure(j)) { return; }
 
           var ok = !!j.success;
           var msg = ok
@@ -647,6 +690,16 @@
         var j;
         try { j = JSON.parse(t); }
         catch (e) { throw new Error('The server returned an unexpected response.'); }
+        if (window.shHandleSessionExpired && window.shHandleSessionExpired(j)) {
+          var expired = new Error(j.error || 'Your session has expired.');
+          expired.sessionExpired = true;
+          throw expired;
+        }
+        if (window.shHandleCsrfFailure && window.shHandleCsrfFailure(j)) {
+          var stale = new Error(j.error || 'This form has expired.');
+          stale.csrfFailed = true;
+          throw stale;
+        }
         if (!j.success) { throw new Error(j.error || 'The request failed.'); }
         return j;
       });
@@ -1468,9 +1521,21 @@
     }
     fetch((window.SH_BASE || '/') + 'admin/verification-fetch.php', {
       method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function (r) { return r.text(); }).then(function (html) {
+    }).then(function (r) {
+      // fetch follows the admin guard's redirect. Send the browser there rather
+      // than placing a login document inside the verification card.
+      if (r.status === 401 || /\/admin\/login\.php(?:$|[?#])/i.test(r.url || '')) {
+        window.location.assign(r.url || ((window.SH_BASE || '/') + 'admin/login.php'));
+        return '';
+      }
+      if (r.headers.get('X-ShopHaat-CSRF-Refresh') === '1') {
+        window.location.reload();
+        return '';
+      }
+      return r.text();
+    }).then(function (html) {
       if (html && html.indexOf('data-cv') !== -1) box.innerHTML = html;
-      else if (refresh) window.shToast && window.shToast('Verification could not be refreshed.', 'error');
+      else if (refresh && html) window.shToast && window.shToast('Verification could not be refreshed.', 'error');
     }).catch(function () {
       if (refresh && window.shToast) window.shToast('Verification could not be refreshed.', 'error');
     }).finally(function () {

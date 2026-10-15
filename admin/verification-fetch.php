@@ -16,7 +16,16 @@ require_once SH_ROOT . '/includes/admin-perms.php';
 if (!sh_admin_can('verification.courier', 'verification.ip', 'verification.location')) { http_response_code(403); echo '<p class="sh-cv__muted">Access denied: your role cannot view customer verification.</p>'; exit; }
 header('Content-Type: text/html; charset=utf-8');
 header('Cache-Control: no-store');
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !sh_csrf_valid()) { http_response_code(419); echo '<p class="sh-cv__muted">Session expired. Refresh the page.</p>'; exit; }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo '<p class="sh-cv__muted">POST required.</p>'; exit; }
+if (!sh_csrf_valid()) {
+    // This fragment is inserted by fetch(), so never return a standalone error page.
+    // The client reloads the admin page to obtain a fresh token without retrying
+    // a courier/IP request automatically.
+    http_response_code(403);
+    header('X-ShopHaat-CSRF-Refresh: 1');
+    echo '<p class="sh-cv__muted">This page form has expired. Refresh the page and try again.</p>';
+    exit;
+}
 
 $order = sh_order_get(sh_int($_POST['id'] ?? 0));
 if ($order === null) { http_response_code(404); echo '<p class="sh-cv__muted">Order not found.</p>'; exit; }

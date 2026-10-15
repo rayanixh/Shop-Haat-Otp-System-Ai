@@ -205,31 +205,40 @@ function sh_cart_clear(): array
 // ---------------------------------------------------------------------------
 // Coupons
 // ---------------------------------------------------------------------------
+/**
+ * Evaluate one already-loaded coupon row. The checkout transaction uses this
+ * after SELECT ... FOR UPDATE so a usage-limited coupon cannot be oversold by
+ * two concurrent orders.
+ */
+function sh_coupon_evaluate_record(?array $c, float $subtotal): array
+{
+    if ($c === null || (int)($c['status'] ?? 0) !== 1) {
+        return ['valid' => false, 'error' => 'This coupon code is not valid.', 'discount' => 0.0];
+    }
+    $now = time();
+    if (!empty($c['starts_at']) && strtotime((string)$c['starts_at']) > $now) {
+        return ['valid' => false, 'error' => 'This coupon is not active yet.', 'discount' => 0.0];
+    }
+    if (!empty($c['expires_at']) && strtotime((string)$c['expires_at']) < $now) {
+        return ['valid' => false, 'error' => 'This coupon has expired.', 'discount' => 0.0];
+    }
+    if ((int)($c['usage_limit'] ?? 0) > 0 && (int)($c['used_count'] ?? 0) >= (int)$c['usage_limit']) {
+        return ['valid' => false, 'error' => 'This coupon has reached its usage limit.', 'discount' => 0.0];
+    }
+    if ($subtotal < (float)($c['min_order'] ?? 0)) {
+        return ['valid' => false, 'error' => 'This coupon requires a minimum order of ' . sh_money($c['min_order']) . '.', 'discount' => 0.0];
+    }
+    $discount = ($c['type'] ?? '') === 'percent'
+        ? $subtotal * ((float)($c['value'] ?? 0) / 100)
+        : (float)($c['value'] ?? 0);
+    if ((float)($c['max_discount'] ?? 0) > 0) { $discount = min($discount, (float)$c['max_discount']); }
+    $discount = round(min($discount, $subtotal), 2);
+    return ['valid' => true, 'error' => '', 'discount' => $discount, 'coupon' => $c];
+}
+
 function sh_coupon_evaluate(string $code, float $subtotal): array
 {
     $code = strtoupper(trim($code));
     if ($code === '') { return ['valid' => false, 'error' => 'Enter a coupon code.', 'discount' => 0.0]; }
-    $c = sh_one('SELECT * FROM coupons WHERE code = ? LIMIT 1', [$code]);
-    if ($c === null || (int)$c['status'] !== 1) {
-        return ['valid' => false, 'error' => 'This coupon code is not valid.', 'discount' => 0.0];
-    }
-    $now = time();
-    if (!empty($c['starts_at']) && strtotime($c['starts_at']) > $now) {
-        return ['valid' => false, 'error' => 'This coupon is not active yet.', 'discount' => 0.0];
-    }
-    if (!empty($c['expires_at']) && strtotime($c['expires_at']) < $now) {
-        return ['valid' => false, 'error' => 'This coupon has expired.', 'discount' => 0.0];
-    }
-    if ((int)$c['usage_limit'] > 0 && (int)$c['used_count'] >= (int)$c['usage_limit']) {
-        return ['valid' => false, 'error' => 'This coupon has reached its usage limit.', 'discount' => 0.0];
-    }
-    if ($subtotal < (float)$c['min_order']) {
-        return ['valid' => false, 'error' => 'This coupon requires a minimum order of ' . sh_money($c['min_order']) . '.', 'discount' => 0.0];
-    }
-    $discount = $c['type'] === 'percent'
-        ? $subtotal * ((float)$c['value'] / 100)
-        : (float)$c['value'];
-    if ((float)$c['max_discount'] > 0) { $discount = min($discount, (float)$c['max_discount']); }
-    $discount = round(min($discount, $subtotal), 2);
-    return ['valid' => true, 'error' => '', 'discount' => $discount, 'coupon' => $c];
+    return sh_coupon_evaluate_record(sh_one('SELECT * FROM coupons WHERE code = ? LIMIT 1', [$code]), $subtotal);
 }

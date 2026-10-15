@@ -5,6 +5,7 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/payment.php';
 require_once SH_ROOT . '/includes/admin-tools.php';
+require_once SH_ROOT . '/includes/reporting.php';
 
 sh_session_start();
 sh_require_admin();
@@ -14,8 +15,9 @@ sh_admin_schema_ensure();
 // Fallback scheduler for hosts without cron: runs only when a backup is due.
 try { $autoBackup = sh_backup_run_scheduled(); if ($autoBackup && !empty($autoBackup['ok'])) { sh_admin_notify('backup', 'Scheduled backup completed', $autoBackup['file'] . ' · ' . sh_bytes_human((int)$autoBackup['size']), 'admin/backups.php', 'backup-' . date('Ymd')); } } catch (Throwable $e) {}
 
-$todayStart = date('Y-m-d 00:00:00');
-$today = sh_sales_period($todayStart);
+$reportPresets = sh_reporting_presets();
+$todayRange = sh_reporting_range($reportPresets['today']['from'], $reportPresets['today']['to']);
+$today = sh_reporting_sales_summary($todayRange);
 $pendingOrders = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status IN ('pending','awaiting_payment','payment_submitted','processing')", [], 0);
 $completed    = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status IN ('completed','delivered')", [], 0);
 $cancelled    = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status = 'cancelled'", [], 0);
@@ -23,12 +25,10 @@ $returned     = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status = 'returne
 $pendingPay   = (int)sh_val("SELECT COUNT(*) FROM payments WHERE status = 'pending' AND transaction_id IS NOT NULL", [], 0);
 $customers    = (int)sh_val('SELECT COUNT(*) FROM users', [], 0);
 
-$periods = [
-    'Today'      => sh_sales_period($todayStart),
-    'Last 7 days' => sh_sales_period(date('Y-m-d 00:00:00', time() - 6 * 86400)),
-    'Last 30 days' => sh_sales_period(date('Y-m-d 00:00:00', time() - 29 * 86400)),
-    'This month' => sh_sales_period(date('Y-m-01 00:00:00')),
-];
+$periods = [];
+foreach (['today' => 'Today', 'last7' => 'Last 7 days', 'last30' => 'Last 30 days', 'this_month' => 'This month'] as $key => $label) {
+    $periods[$label] = sh_reporting_sales_summary(sh_reporting_range($reportPresets[$key]['from'], $reportPresets[$key]['to']));
+}
 
 $recentOrders = sh_all('SELECT o.id, o.order_number, o.customer_name, o.customer_phone, o.total, o.status, o.payment_status, o.created_at FROM orders o ORDER BY o.id DESC LIMIT 8');
 $waitingProcessing = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status = 'processing'", [], 0);
@@ -39,14 +39,12 @@ $lowStockCount = (int)sh_val("SELECT COUNT(*) FROM products WHERE product_type =
 $outStockCount = (int)sh_val("SELECT COUNT(*) FROM products WHERE product_type = 'physical' AND status = 1 AND stock <= 0", [], 0);
 $failedNotices = (int)sh_val("SELECT COUNT(*) FROM notification_logs WHERE status = 'failed' AND created_at >= ?", [date('Y-m-d H:i:s', time() - 86400)], 0);
 
-// 30-day revenue chart (verified / fulfilled orders only — no synthetic data)
-$series = sh_all("SELECT DATE(created_at) AS d, COUNT(*) AS c,
-      COALESCE(SUM(CASE WHEN payment_status = 'verified' OR status IN ('completed','delivered') THEN total ELSE 0 END),0) AS amt
-      FROM orders WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY d ASC", [date('Y-m-d 00:00:00', time() - 29 * 86400)]);
-$byDay = [];
-foreach ($series as $r) { $byDay[$r['d']] = $r; }
+// 30-day chart uses the same paid-sale rule and fills real zero-order dates.
+$chartRange = sh_reporting_range($reportPresets['last30']['from'], $reportPresets['last30']['to']);
 $days = [];
-for ($i = 29; $i >= 0; $i--) { $d = date('Y-m-d', time() - $i * 86400); $days[] = ['d' => $d, 'c' => (int)($byDay[$d]['c'] ?? 0), 'amt' => (float)($byDay[$d]['amt'] ?? 0)]; }
+foreach (sh_reporting_daily_sales($chartRange) as $row) {
+    $days[] = ['d' => (string)$row['day'], 'c' => (int)$row['orders'], 'amt' => (float)$row['paid_revenue']];
+}
 $maxAmt = max(1.0, max(array_column($days, 'amt')));
 $chartTotal = array_sum(array_column($days, 'amt'));
 $chartOrders = array_sum(array_column($days, 'c'));
@@ -56,7 +54,7 @@ $adminTitle = 'Dashboard';
 require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-dash-cards">
-  <div class="sh-stat sh-stat--ok"><span class="sh-stat__icon"><?= sh_icon('dollar', 20) ?></span><div><div class="sh-stat__value"><?= e(sh_money($today['revenue'])) ?></div><div class="sh-stat__label">Today's sales</div></div></div>
+  <div class="sh-stat sh-stat--ok"><span class="sh-stat__icon"><?= sh_icon('dollar', 20) ?></span><div><div class="sh-stat__value"><?= e(sh_money((float)$today['paid_revenue'])) ?></div><div class="sh-stat__label">Today's paid sales</div></div></div>
   <div class="sh-stat sh-stat--brand"><span class="sh-stat__icon"><?= sh_icon('package', 20) ?></span><div><div class="sh-stat__value"><?= number_format($today['orders']) ?></div><div class="sh-stat__label">Today's orders</div></div></div>
   <div class="sh-stat sh-stat--warn"><span class="sh-stat__icon"><?= sh_icon('clock', 20) ?></span><div><div class="sh-stat__value"><?= number_format($pendingOrders) ?></div><div class="sh-stat__label">Pending orders</div></div></div>
   <div class="sh-stat sh-stat--ok"><span class="sh-stat__icon"><?= sh_icon('check-circle', 20) ?></span><div><div class="sh-stat__value"><?= number_format($completed) ?></div><div class="sh-stat__label">Completed orders</div></div></div>
@@ -75,14 +73,14 @@ require __DIR__ . '/_layout.php';
 <div class="sh-dash-grid">
   <div class="sh-panel">
     <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon('bar-chart', 17) ?> Revenue — last 30 days</h2>
+      <h2 class="sh-panel__title"><?= sh_icon('bar-chart', 17) ?> Net paid revenue — last 30 days</h2>
       <div class="sh-panel__actions"><span class="sh-panel__note"><?= e(sh_money($chartTotal)) ?> · <?= number_format($chartOrders) ?> orders</span></div>
     </div>
     <div class="sh-panel__body">
       <?php if ($chartOrders === 0): ?>
         <div class="sh-admin-empty"><?= sh_icon('bar-chart', 26) ?><p>No data available for this period.</p></div>
       <?php else: ?>
-        <div class="sh-chart" role="img" aria-label="Daily revenue for the last 30 days">
+        <div class="sh-chart" role="img" aria-label="Daily net paid revenue for the last 30 days">
           <?php foreach ($days as $d): $h = $d['amt'] > 0 ? max(3, (int)round(($d['amt'] / $maxAmt) * 100)) : 1; ?>
             <div class="sh-chart__bar"><b><?= e(date('d M', strtotime($d['d']))) ?> · <?= e(sh_money($d['amt'])) ?> · <?= (int)$d['c'] ?> order<?= $d['c'] === 1 ? '' : 's' ?></b><i style="height:<?= $h ?>%;<?= $d['amt'] > 0 ? '' : 'background:var(--sh-line)' ?>"></i></div>
           <?php endforeach; ?>
@@ -95,15 +93,15 @@ require __DIR__ . '/_layout.php';
     <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('trending-up', 17) ?> Sales analytics</h2></div>
     <div class="sh-tablewrap">
       <table class="sh-period">
-        <thead><tr><th>Period</th><th>Revenue</th><th>Orders</th><th>Completed</th><th>Cancelled</th></tr></thead>
+        <thead><tr><th>Period</th><th>Net paid revenue</th><th>Orders</th><th>Completed</th><th>Cancelled</th></tr></thead>
         <tbody>
         <?php foreach ($periods as $label => $p): ?>
-          <tr><td><strong><?= e($label) ?></strong></td><td><?= e(sh_money($p['revenue'])) ?></td><td><?= number_format($p['orders']) ?></td><td><?= number_format($p['completed']) ?></td><td><?= number_format($p['cancelled']) ?></td></tr>
+          <tr><td><strong><?= e($label) ?></strong></td><td><?= e(sh_money((float)$p['paid_revenue'])) ?></td><td><?= number_format((int)$p['orders']) ?></td><td><?= number_format((int)$p['completed_orders']) ?></td><td><?= number_format((int)$p['cancelled_orders']) ?></td></tr>
         <?php endforeach; ?>
         </tbody>
       </table>
     </div>
-    <div class="sh-panel__body" style="border-top:1px solid var(--sh-line)"><p class="sh-muted" style="margin:0">Revenue counts verified payments and delivered or completed orders only.</p></div>
+    <div class="sh-panel__body" style="border-top:1px solid var(--sh-line)"><p class="sh-muted" style="margin:0">Net paid revenue counts verified payments only and excludes cancelled, returned and refunded orders. A delivered or completed Cash on Delivery order is not treated as paid until its payment status is verified.</p></div>
   </div>
 </div>
 

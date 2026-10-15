@@ -10,15 +10,18 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 
 sh_session_start();
-$redirect = sh_get('redirect');
-if (sh_user() !== null) { sh_redirect(sh_safe_redirect($redirect, 'account.php')); }
+$redirect = sh_customer_return_target(sh_get('redirect'), '');
+if (sh_user() !== null) { sh_redirect($redirect !== '' ? $redirect : 'account.php'); }
+// A server-side session can disappear through normal PHP garbage collection,
+// leaving only the harmless browser hint. Consume it here too for people who
+// navigate to Login directly rather than through a protected page.
+if (sh_customer_session_expired()) { sh_consume_customer_session_expired_notice(); }
 
 $mode = sh_auth_mode();
 
 // A guest who clicked "Proceed to Checkout" is sent here with ?redirect=checkout.php.
 // Show a clear message; the cart is untouched and they return to checkout after login.
-$checkoutNotice = sh_safe_redirect($redirect, '') !== ''
-    && str_starts_with(sh_safe_redirect($redirect, ''), 'checkout.php');
+$checkoutNotice = $redirect !== '' && str_starts_with($redirect, 'checkout.php');
 
 $error = '';
 $email = '';
@@ -31,7 +34,7 @@ $otpMasked = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
-    $redirect = sh_post('redirect', $redirect);
+    $redirect = sh_customer_return_target(sh_post('redirect', $redirect), '');
 
     if ($mode === 'email_password') {
         $email = trim(sh_post('email'));
@@ -53,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     sh_login_reset('user_login');
                     $uid = (int)$u['id'];
-                    $target = sh_safe_redirect($redirect, 'account.php');
+                    $target = sh_customer_return_target($redirect, 'account.php');
                     sh_login_user($uid);
                     sh_security_log('login_success', $uid, ['email' => mb_substr($email, 0, 3) . '***']);
                     sh_flash('success', 'Welcome back.');
@@ -95,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         sh_security_log('login_failed', (int)$u['id'], ['phone' => sh_phone_mask($phone), 'reason' => 'blocked']);
                         $error = 'This account has been blocked. Please contact customer support.';
                     } else {
-                        $target = sh_safe_redirect($redirect, 'account.php');
+                        $target = sh_customer_return_target($redirect, 'account.php');
                         $uid = (int)$u['id'];
                         $canonical = sh_phone_normalize((string)$u['phone']);
 

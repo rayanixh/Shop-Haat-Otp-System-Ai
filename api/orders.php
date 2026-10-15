@@ -18,10 +18,16 @@ require_once SH_ROOT . '/includes/payment.php';
 
 sh_session_start();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { sh_json(['success' => false, 'error' => 'POST required.'], 405); }
+$action = sh_post('action', 'status');
+// Public tracking stays deliberately limited to order number + phone. Every
+// other action is customer-only and must identify a lost login before CSRF.
+if ($action !== 'track') {
+    $requestedOrderId = sh_int($_POST['order_id'] ?? 0);
+    sh_require_login($requestedOrderId > 0 ? 'order-details.php?id=' . $requestedOrderId : 'orders.php');
+}
 sh_csrf_require();
 
 try {
-    $action = sh_post('action', 'status');
     if ($action === 'track') {
         $number = strtoupper(sh_post('order_number'));
         $phone  = sh_post('phone');

@@ -315,6 +315,8 @@ function sh_schema_sql(): array
         gateway_reference VARCHAR(190) DEFAULT NULL,
         gateway_payload TEXT,
         status ENUM('pending','verified','rejected','failed','cancelled') NOT NULL DEFAULT 'pending',
+        submitted_at DATETIME DEFAULT NULL,
+        submission_version INT UNSIGNED NOT NULL DEFAULT 0,
         admin_note VARCHAR(255) DEFAULT NULL,
         verified_by INT UNSIGNED DEFAULT NULL,
         verified_at DATETIME DEFAULT NULL,
@@ -323,6 +325,7 @@ function sh_schema_sql(): array
         PRIMARY KEY (id),
         KEY idx_payments_order (order_id),
         KEY idx_payments_status (status),
+        KEY idx_payments_transaction_id (transaction_id),
         UNIQUE KEY uq_payments_gwref (gateway_id, gateway_reference),
         CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways (id) ON DELETE SET NULL
@@ -490,14 +493,18 @@ function sh_schema_sql(): array
         order_id INT UNSIGNED DEFAULT NULL,
         channel VARCHAR(30) NOT NULL,
         event VARCHAR(60) NOT NULL,
+        idempotency_key VARCHAR(100) DEFAULT NULL,
         recipient VARCHAR(190) DEFAULT NULL,
         status ENUM('sent','failed','skipped') NOT NULL DEFAULT 'sent',
+        attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
         error_message VARCHAR(500) DEFAULT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         KEY idx_nlogs_order (order_id),
         KEY idx_nlogs_channel (channel, status),
-        KEY idx_nlogs_created (created_at)
+        KEY idx_nlogs_created (created_at),
+        UNIQUE KEY uq_notification_idempotency (channel, event, idempotency_key)
     ) $E";
 
     $sql[] = "CREATE TABLE IF NOT EXISTS app_logs (

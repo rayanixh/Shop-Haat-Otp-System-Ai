@@ -23,6 +23,12 @@ function sh_verify_schema_ensure(): void
     try {
         if (sh_setting('verify_schema_v', '') === '2') { return; } // already migrated
         $pdo = sh_db();
+        // CREATE/ALTER/DROP implicitly commit in MySQL/MariaDB. A lazy schema
+        // upgrade must never interrupt an order/payment transaction.
+        if ($pdo->inTransaction()) {
+            sh_log_line('verify-schema', 'Deferred verification schema migration because a transaction is active.');
+            return;
+        }
         $pdo->exec("CREATE TABLE IF NOT EXISTS verify_providers (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,
             name VARCHAR(80) NOT NULL,
@@ -607,10 +613,19 @@ function sh_verify_ip_location_text(?array $geo): string
 // ---------------------------------------------------------------------------
 // Order helpers
 // ---------------------------------------------------------------------------
-/** Values to store with a new order (called server-side inside sh_create_order). */
+/**
+ * Values to store with a new order. Schema preparation happens before the
+ * checkout transaction; MySQL/MariaDB schema DDL must never run after that
+ * transaction starts because DDL performs an implicit commit.
+ */
 function sh_verify_order_ip_fields(): array
 {
     sh_verify_schema_ensure();
+    // Verification is optional. If an older/locked-down installation cannot
+    // add these columns, do not break or partially commit a customer order.
+    if (!sh_table_has_column('orders', 'order_ip') || !sh_table_has_column('orders', 'order_ip_version')) {
+        return [];
+    }
     $ip = sh_verify_client_ip();
     $v = sh_verify_ip_version($ip);
     return $v === 0 ? [] : ['order_ip' => $ip, 'order_ip_version' => $v];

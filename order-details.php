@@ -4,10 +4,18 @@ require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/payment.php';
+require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
 $orderId = sh_int($_GET['id'] ?? 0);
 $order = $orderId > 0 ? sh_order_get($orderId) : null;
+
+// A customer-owned order opened after automatic logout should resume through
+// Login, not look like an unknown order. Deliberately logged-out/guessed IDs
+// still take the ordinary IDOR-safe 404 path below.
+if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
+    sh_require_login('order-details.php?id=' . $orderId);
+}
 
 // IDOR protection: only the owner (or the guest session that created it) may view.
 if ($order === null || !sh_order_can_view($order)) {
@@ -24,22 +32,9 @@ if ($order === null || !sh_order_can_view($order)) {
 }
 
 $items = sh_order_items($orderId);
-$payment = sh_one('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$orderId]);
+$payment = sh_order_latest_payment($orderId);
 $codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
-
-$digital = (int)$order['has_digital'] === 1;
-$steps = $digital
-    ? ['Order Placed', 'Payment Submitted', 'Payment Verified', 'Code Delivered', 'Delivery']
-    : ['Order Placed', 'Payment Submitted', 'Payment Verified', 'Processing', 'Delivery'];
-$stateIndex = match ($order['status']) {
-    'pending', 'awaiting_payment' => 0,
-    'payment_submitted'           => 1,
-    'payment_verified'            => 2,
-    'processing'                  => $digital ? 2 : 3,
-    'completed'                   => 4,
-    default                       => 0,
-};
-$rejected = in_array($order['status'], ['payment_rejected', 'cancelled', 'returned'], true);
+$timeline = sh_order_timeline($order, $payment, $items);
 
 $accountPage = 'orders';
 $pageTitle = 'Order ' . $order['order_number'];
@@ -59,30 +54,11 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
     <p style="font-size:13px;color:var(--sh-muted)">Placed on <?= e(date('d M Y \a\t h:i A', strtotime($order['created_at']))) ?></p>
 
-    <?php if ($rejected): ?>
-      <div class="sh-alert sh-alert--error" style="margin-top:12px">
-        <?= sh_icon('x-circle', 16) ?>
-        <div><strong><?= e(sh_status_label($order['status'])) ?></strong>
-          <?php if (!empty($payment['admin_note'])): ?><p style="margin-top:3px"><?= e($payment['admin_note']) ?></p><?php endif; ?></div>
-      </div>
-    <?php else: ?>
-      <?php
-        // A finished order has no "in progress" step: everything reached is done.
-        $trackFinished = $order['status'] === 'completed';
-      ?>
-      <div class="sh-track" style="margin-top:14px">
-        <?php foreach ($steps as $i => $label):
-          if ($i < $stateIndex || ($trackFinished && $i <= $stateIndex)) { $stepClass = 'sh-track__step--done'; }
-          elseif ($i === $stateIndex) { $stepClass = 'sh-track__step--on'; }
-          else { $stepClass = ''; }
-        ?>
-          <div class="sh-track__step <?= $stepClass ?>">
-            <span class="sh-track__dot"><?= $i <= $stateIndex ? sh_icon('check-circle', 11) : '' ?></span>
-            <span class="sh-track__label"><?= e($label) ?></span>
-          </div>
-        <?php endforeach; ?>
-      </div>
+    <?= sh_order_timeline_problem_render($timeline) ?>
+    <?php if (!empty($payment['admin_note']) && !empty($timeline['problem']) && ($timeline['problem']['label'] ?? '') === 'Payment rejected'): ?>
+      <p class="sh-panel__note" style="margin:8px 0 0"><strong>Payment review note:</strong> <?= e((string)$payment['admin_note']) ?></p>
     <?php endif; ?>
+    <div style="margin-top:14px"><?= sh_order_timeline_render($timeline) ?></div>
   </div>
 
   <?php if ($codes): ?>
@@ -144,7 +120,7 @@ require_once SH_ROOT . '/includes/header.php';
       <?php endif; ?>
       <div class="sh-summary__row"><span>Delivery</span><span><?= (float)$order['delivery_fee'] > 0 ? e(sh_money($order['delivery_fee'])) : 'Free' ?></span></div>
       <div class="sh-summary__total"><span>Total</span><span><?= e(sh_money($order['total'])) ?></span></div>
-      <?php if ($order['payment_status'] === 'unpaid' && $order['status'] === 'awaiting_payment'): ?>
+      <?php if ((string)$timeline['payment_status'] === 'unpaid' && (string)$timeline['order_status'] === 'awaiting_payment' && empty($timeline['is_cod'])): ?>
         <a class="sh-btn sh-btn--block" style="margin-top:12px" href="<?= e(sh_url('payment.php?id=' . $orderId)) ?>">
           <?= sh_icon('credit-card', 15) ?> Complete payment</a>
       <?php endif; ?>

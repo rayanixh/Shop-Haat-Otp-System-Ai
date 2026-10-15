@@ -1,0 +1,56 @@
+name: Reporting and order timeline integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/9fe3cb2b-shop-haat-otp-system-ai
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  reporting-integration:
+    name: PHP and MySQL reports and timeline workflow
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: shophaat_reporting_test
+          MYSQL_USER: shophaat_test
+          MYSQL_PASSWORD: shophaat_test_password
+          MYSQL_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql
+          coverage: none
+      - name: Configure the isolated test database
+        run: |
+          cat > config/database.php <<'PHP'
+          <?php
+          return [
+              'host' => '127.0.0.1',
+              'name' => 'shophaat_reporting_test',
+              'user' => 'shophaat_test',
+              'pass' => 'shophaat_test_password',
+              'port' => 3306,
+              'charset' => 'utf8mb4',
+          ];
+          PHP
+          touch config/installed.lock
+      - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
+        run: php tests/reporting-integration.php
+      - name: Exercise session expiry through customer HTTP routes
+        run: bash tests/session-expiration-http.sh

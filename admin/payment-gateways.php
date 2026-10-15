@@ -137,17 +137,21 @@ require __DIR__ . '/_layout.php';
         <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="6">No gateways registered yet.</td></tr>
         <?php else: foreach ($rows as $g):
           $ok = sh_gateway_is_configured($g);
-          $canVerify = in_array($g['driver'], $verifiable, true); ?>
+          $canVerify = in_array($g['driver'], $verifiable, true);
+          $canInitiate = sh_gateway_can_initiate($g); ?>
           <tr>
             <td><div class="sh-table__name"><?= e($g['name']) ?></div>
               <div class="sh-table__meta"><?= e($g['code']) ?></div></td>
             <td><?= e($drivers[$g['driver']] ?? $g['driver']) ?></td>
             <td><span class="sh-badge <?= $g['mode'] === 'live' ? 'sh-badge--ok' : 'sh-badge--warn' ?>"><?= e(ucfirst($g['mode'])) ?></span></td>
             <td class="sh-table__meta" style="max-width:250px">
-              <?= $canVerify ? 'Server-side validation implemented' : 'No verifier — cannot settle orders' ?></td>
+              <div><?= $canVerify ? 'Server-side validation implemented' : 'No verifier — cannot settle orders' ?></div>
+              <div><?= $canInitiate ? 'Customer checkout initiation implemented' : 'Customer checkout unavailable: no initiation driver' ?></div>
+            </td>
             <td>
               <?php if (!$ok): ?><span class="sh-statuspill sh-statuspill--off">Not configured</span>
-              <?php elseif ((int)$g['status'] === 1): ?><span class="sh-statuspill sh-statuspill--on">Enabled</span>
+              <?php elseif ((int)$g['status'] === 1 && $canInitiate): ?><span class="sh-statuspill sh-statuspill--on">Checkout enabled</span>
+              <?php elseif ((int)$g['status'] === 1): ?><span class="sh-statuspill sh-statuspill--off">Callback only</span>
               <?php else: ?><span class="sh-statuspill sh-statuspill--off">Disabled</span><?php endif; ?>
             </td>
             <td><div class="sh-table__actions">
@@ -163,8 +167,9 @@ require __DIR__ . '/_layout.php';
     </div>
     <?php if ($rows): ?>
       <div class="sh-panel__body" style="border-top:1px solid var(--sh-line)">
-        <p class="sh-panel__note"><strong>Callback / webhook URL to register with your provider:</strong><br>
-          <code style="word-break:break-all"><?= e(sh_base_url()) ?>/api/payment.php?action=callback&amp;gateway=<em>CODE</em></code></p>
+        <p class="sh-panel__note"><strong>Callback / webhook URL for a future official initiation driver:</strong><br>
+          <code style="word-break:break-all"><?= e(sh_base_url()) ?>/api/payment.php?action=callback&amp;gateway=<em>CODE</em></code><br>
+          A callback is accepted only for a transaction reference that a real server-side initiator pre-bound to the selected order. Saving credentials or enabling this row alone does not create customer checkout.</p>
       </div>
     <?php endif; ?>
   </div>

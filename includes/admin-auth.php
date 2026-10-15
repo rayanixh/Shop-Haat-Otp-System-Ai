@@ -20,7 +20,7 @@ function sh_admin(): ?array
     if ($id <= 0) { return null; }
     $last = (int)($_SESSION['admin_seen'] ?? 0);
     if ($last > 0 && (time() - $last) > SH_ADMIN_IDLE_TIMEOUT) {
-        sh_admin_logout();
+        sh_admin_logout(true);
         return null;
     }
     $_SESSION['admin_seen'] = time();
@@ -49,13 +49,16 @@ function sh_admin_login(int $adminId): void
     session_regenerate_id(true);
     $_SESSION['admin_id'] = $adminId;
     $_SESSION['admin_seen'] = time();
+    unset($_SESSION['csrf_token'], $_SESSION['sh_admin_expired']);
     sh_query('UPDATE admins SET last_login_at = NOW() WHERE id = ?', [$adminId]);
 }
 
-function sh_admin_logout(): void
+function sh_admin_logout(bool $expired = false): void
 {
     sh_session_start();
-    unset($_SESSION['admin_id'], $_SESSION['admin_seen']);
+    unset($_SESSION['admin_id'], $_SESSION['admin_seen'], $_SESSION['csrf_token']);
+    if ($expired) { $_SESSION['sh_admin_expired'] = 1; }
+    else { unset($_SESSION['sh_admin_expired']); }
     session_regenerate_id(true);
 }
 
@@ -64,10 +67,24 @@ function sh_require_admin(): array
 {
     $a = sh_admin();
     if ($a === null) {
+        $redirect = (string)($_SERVER['REQUEST_URI'] ?? 'admin/dashboard.php');
+        $loginUrl = 'admin/login.php?redirect=' . urlencode($redirect);
+        $expired = !empty($_SESSION['sh_admin_expired']);
         if (sh_wants_json()) {
-            sh_json(['success' => false, 'error' => 'Admin authentication required.'], 401);
+            sh_json([
+                'success' => false,
+                'error' => $expired ? 'Your admin session has expired. Please sign in again.' : 'Admin authentication required.',
+                'auth_required' => true,
+                'session_expired' => $expired,
+                'admin_required' => true,
+                'login_url' => sh_url($loginUrl),
+            ], 401);
         }
-        sh_redirect('admin/login.php?redirect=' . urlencode($_SERVER['REQUEST_URI'] ?? ''));
+        if ($expired) {
+            unset($_SESSION['sh_admin_expired']);
+            sh_flash('info', 'Your admin session has expired. Please sign in again.');
+        }
+        sh_redirect($loginUrl);
     }
     return $a;
 }

@@ -9,6 +9,8 @@ sh_session_start();
 sh_require_admin();
 require_once SH_ROOT . '/includes/admin-perms.php';
 sh_require_perm('integrations.manage');
+// Safe additive migration for idempotent initial-order summary and image deliveries.
+sh_notification_log_schema_ensure();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
@@ -16,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $on = $_POST['on'] ?? [];
         $on = is_array($on) ? $on : [];
         try {
-            foreach (SH_EVENTS as $event) {
+            foreach (SH_EVENTS as $event => $_label) {
                 foreach (SH_CHANNELS as $channel) {
                     $enabled = isset($on[$event][$channel]) ? 1 : 0;
                     $exists = sh_one('SELECT id FROM notifications WHERE event = ? AND channel = ? LIMIT 1', [$event, $channel]);
@@ -36,6 +38,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_query('DELETE FROM notification_logs WHERE created_at < ?', [date('Y-m-d H:i:s', time() - 30 * 86400)]);
         sh_flash('success', 'Log entries older than 30 days were removed.');
         sh_redirect('admin/notifications.php');
+    }
+    if (sh_post('form') === 'retry_order_notification') {
+        $logId = sh_int($_POST['log_id'] ?? 0);
+        $retry = sh_retry_order_notification($logId);
+        sh_log_line('admin', 'Order notification retry requested for notification log ' . $logId);
+        if (!empty($retry['ok'])) {
+            $detail = trim((string)($retry['error'] ?? ''));
+            sh_flash('success', $detail === ''
+                ? 'The failed notification was retried.'
+                : 'The provider accepted the retry. Note: ' . $detail);
+        } else {
+            sh_flash('error', (string)($retry['error'] ?? 'The notification could not be retried.'));
+        }
+        sh_redirect('admin/notifications.php?status=failed');
     }
 }
 
@@ -176,9 +192,9 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table sh-notif-log__table">
-      <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead>
+      <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th><th style="text-align:right">Action</th></tr></thead>
       <tbody>
-      <?php if (!$logs): ?><tr class="sh-table--empty"><td colspan="6">No log entries.</td></tr>
+      <?php if (!$logs): ?><tr class="sh-table--empty"><td colspan="7">No log entries.</td></tr>
       <?php else: foreach ($logs as $l): ?>
         <tr>
           <td data-label="Order"><?php if ($l['order_number']): ?>
@@ -187,8 +203,26 @@ require __DIR__ . '/_layout.php';
           <td data-label="Event"><?= e(str_replace('_', ' ', $l['event'])) ?></td>
           <td data-label="Channel"><?= e($channelLabels[$l['channel']] ?? ucfirst($l['channel'])) ?></td>
           <td data-label="Status"><span class="sh-badge <?= $l['status'] === 'sent' ? 'sh-badge--ok' : ($l['status'] === 'failed' ? 'sh-badge--bad' : '') ?>"><?= e($l['status']) ?></span></td>
-          <td data-label="Detail" class="sh-table__meta" style="max-width:360px"><?= e((string)($l['error_message'] ?? '')) ?></td>
+          <td data-label="Detail" class="sh-table__meta" style="max-width:360px">
+            <?= e((string)($l['error_message'] ?? '')) ?>
+            <?php if ((int)($l['attempts'] ?? 0) > 1): ?><div>Attempts: <?= (int)$l['attempts'] ?></div><?php endif; ?>
+          </td>
           <td data-label="Time" class="sh-table__meta"><?= e(date('d M, H:i', strtotime($l['created_at']))) ?></td>
+          <td data-label="Action" style="text-align:right">
+            <?php
+              $retryableEvents = ['order_created', 'payment_submitted', 'order_created_image', 'payment_submitted_image'];
+              $retryable = $l['status'] === 'failed'
+                && in_array($l['channel'], ['telegram', 'whatsapp', 'messenger'], true)
+                && in_array($l['event'], $retryableEvents, true)
+                && !empty($l['idempotency_key']);
+            ?>
+            <?php if ($retryable): ?>
+              <form method="post" style="display:inline" data-confirm="Retry this failed <?= e(str_replace('_', ' ', $l['event'])) ?> delivery?">
+                <?= sh_csrf_field() ?><input type="hidden" name="form" value="retry_order_notification"><input type="hidden" name="log_id" value="<?= (int)$l['id'] ?>">
+                <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= sh_icon('refresh', 13) ?> Retry<?= str_ends_with((string)$l['event'], '_image') ? ' image' : '' ?></button>
+              </form>
+            <?php else: ?><span class="sh-table__meta">—</span><?php endif; ?>
+          </td>
         </tr>
       <?php endforeach; endif; ?>
       </tbody>
