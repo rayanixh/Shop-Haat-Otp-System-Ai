@@ -6,6 +6,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/catalog.php';
+// The SEO helpers are used while this page builds its metadata, before
+// includes/header.php is loaded, so the engine must be required here.
+require_once SH_ROOT . '/includes/seo.php';
 
 $slug = sh_get('slug');
 $category = $slug !== '' ? sh_category_by_slug($slug) : null;

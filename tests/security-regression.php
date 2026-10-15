@@ -867,6 +867,29 @@ sh_t('private routes are never published in the sitemap', function () {
     return true;
 });
 
+sh_t('every file that uses an SEO helper loads the engine first', function () {
+    // Regression: product.php called sh_seo_product_image() while the engine was
+    // only loaded later by includes/header.php, so the page died with "Call to
+    // undefined function" on a real install. The include order is now asserted.
+    $offenders = [];
+    foreach (sh_markup_files() as [$rel, $path]) {
+        // The engine defines the helpers; an underscore-prefixed partial is an
+        // include that the page it belongs to loads the engine for.
+        if ($rel === 'includes/seo.php' || preg_match('~^(includes|admin)/_~', $rel) === 1) { continue; }
+        $src = (string)file_get_contents($path);
+        if (!str_contains($src, 'sh_seo_')) { continue; }
+        if (str_contains($src, "includes/seo.php")) { continue; }
+        // header.php loads the engine for every page that includes it, so a file
+        // that only uses the helpers after that point is fine.
+        $headerAt = strpos($src, "require_once SH_ROOT . '/includes/header.php'");
+        $firstUse = strpos($src, 'sh_seo_');
+        if ($headerAt !== false && $firstUse !== false && $firstUse > $headerAt) { continue; }
+        $offenders[] = $rel;
+    }
+    return sh_assert($offenders === [],
+        'files using SEO helpers without requiring includes/seo.php: ' . implode(', ', $offenders));
+});
+
 sh_t('SEO settings and fields are guarded like any other admin data', function () {
     require_once SH_ROOT . '/includes/admin-perms.php';
     $perms = sh_perms_catalog();
