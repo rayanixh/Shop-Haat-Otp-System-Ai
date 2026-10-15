@@ -30,6 +30,20 @@ fail() {
   exit 1
 }
 
+# Surface the application log through an annotation: the raw exception is what
+# makes a 500 diagnosable, and the log is already scrubbed of credentials by the
+# application itself. Newlines are folded so the workflow command stays on one
+# line, and % is escaped because the runner treats it as an escape character.
+dump_app_log() {
+  local label="$1" file=""
+  file="$(ls -1t logs/app-*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$file" && -f "$file" ]]; then
+    echo "::error title=App log tail (${label})::$(tail -c 2000 "$file" | tr '\n' '|' | sed 's/%/%25/g')"
+  else
+    echo "::warning title=App log (${label})::no application log was found under logs/"
+  fi
+}
+
 # Parse an XML file. SimpleXML is what CI installs; if a host lacks it, the
 # check falls back to a structural assertion and says so, rather than passing
 # silently on an unchecked file.
@@ -312,7 +326,11 @@ assert_valid_xml "$TMP_DIR/sitemap-999.xml" 'the out-of-range sitemap chunk'
 
 # A product page must carry exactly one of each metadata tag.
 if [[ -n "$slug" ]]; then
-  [[ "$product_code" == '200' ]] || fail "GET /product.php?slug=${slug} returned HTTP ${product_code}"
+  if [[ "$product_code" != '200' ]]; then
+    dump_app_log "product page HTTP ${product_code}"
+    echo "::notice title=Product page body::$(head -c 400 "$TMP_DIR/product.html" | tr '\n' ' ' | sed 's/%/%25/g')"
+    fail "GET /product.php?slug=${slug} returned HTTP ${product_code}"
+  fi
   [[ "$title_count" == '1' ]] || fail "the product page has ${title_count} <title> tags, expected 1"
   [[ "$canonical_count" == '1' ]] || fail "the product page has ${canonical_count} canonical links, expected 1"
   [[ "$description_count" == '1' ]] || fail "the product page has ${description_count} meta descriptions, expected 1"
