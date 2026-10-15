@@ -1,0 +1,12 @@
+# ShopHaat — configuration must never be reachable over HTTP.
+#
+# This folder holds config/database.php (database credentials), mail.php (SMTP
+# credentials) and installed.lock. Nothing in it is meant to be requested by a
+# browser, and PHP pages only ever read these files from disk.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>
