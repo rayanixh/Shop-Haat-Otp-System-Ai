@@ -1080,7 +1080,9 @@ sh_t('the storefront layout is balanced for two banner cards and no code box', f
     if (preg_match('~\.sh-banner\s*\{[^}]*repeat\(2, 1fr\)~', $css) !== 1) {
         return '.sh-banner is not a two-card grid';
     }
-    if (str_contains($css, '.sh-codebox')) { return 'the unused .sh-codebox rules are still shipped'; }
+    foreach (['.sh-codebox', '.sh-cart-item__tag'] as $dead) {
+        if (str_contains($css, $dead)) { return 'the unused ' . $dead . ' rules are still shipped'; }
+    }
     // The homepage strip must render exactly the two surviving cards: a third
     // card in the markup would sit alone on the second row of a 2-column grid.
     $index = (string)file_get_contents(SH_ROOT . '/index.php');

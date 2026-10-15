@@ -460,7 +460,6 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-cart-item:last-child { border-bottom: 0; }
 .sh-cart-item__img { width: 84px; height: 84px; object-fit: contain; background: #f7f8fa; border-radius: 6px; padding: 5px; }
 .sh-cart-item__name { font-size: 13.8px; font-weight: 600; line-height: 1.4; color: var(--sh-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.sh-cart-item__tag { display: inline-block; font-size: 11px; background: var(--sh-accent-soft); color: var(--sh-accent); padding: 1.5px 7px; border-radius: 3px; margin-top: 5px; font-weight: 600; }
 .sh-cart-item__price { font-size: 15px; font-weight: 800; color: var(--sh-brand); margin-top: 6px; }
 .sh-cart-item__side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 9px; }
 .sh-cart-item__total { font-size: 15px; font-weight: 800; white-space: nowrap; }
