@@ -342,6 +342,59 @@ else
   echo '::notice title=SEO routes observed::no published product in the test database, product page metadata not checked'
 fi
 
+# ---------------------------------------------------------------------------
+# Phase 11 — the Digital Codes feature is removed.
+#
+# A row that still carries product_type = 'digital' is deliberately left in
+# place for the owner to decide about, but the store must not sell it (there is
+# no fulfilment path any more) and the page must say so honestly instead of
+# offering a buy button or promising a code. A disposable probe row is created,
+# rendered, asserted and removed.
+# ---------------------------------------------------------------------------
+digital_slug='legacy-digital-removal-probe'
+digital_id="$(php -r '
+$cfg = require "config/database.php";
+$slug = "legacy-digital-removal-probe";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM products WHERE slug = ?")->execute([$slug]);
+    $pdo->prepare("INSERT INTO products (name, slug, sku, price, stock, product_type, image, status, rating, review_count, sold_count, view_count, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,0,0,0,0,NOW())")
+        ->execute(["Legacy Digital Removal Probe", $slug, "PROBE-DIGITAL", 300, 25, "digital", null, 1]);
+    echo (string)(int)$pdo->lastInsertId();
+} catch (Throwable $e) { echo ""; }')"
+
+digital_code='(probe row not created)'
+if [[ -n "$digital_id" ]]; then
+  digital_body="$TMP_DIR/legacy-digital.html"
+  digital_code="$(curl -sS -A "$DESKTOP_UA" -o "$digital_body" -w '%{http_code}' --get --data-urlencode "slug=${digital_slug}" "${BASE}/product.php")"
+  digital_orderable='unknown'
+  grep -q "data-add-cart=\"${digital_id}\"" "$digital_body" 2>/dev/null && digital_orderable='button present'
+  grep -q "data-add-cart=\"${digital_id}\" data-qty-source=\"sh-pdp-qty\" disabled" "$digital_body" 2>/dev/null && digital_orderable='disabled'
+  echo "::notice title=Phase 11 probe::legacy digital product page ${digital_code} id=${digital_id} buy_state=${digital_orderable}"
+
+  [[ "$digital_code" == '200' ]] || {
+    head -c 400 "$digital_body" >&2
+    fail "GET /product.php?slug=${digital_slug} returned HTTP ${digital_code}"
+  }
+  grep -q 'can no longer be ordered online' "$digital_body" || fail 'a legacy digital product page does not explain that it can no longer be ordered'
+  grep -q 'Not orderable online' "$digital_body" || fail 'a legacy digital product page does not show its availability honestly'
+  [[ "$digital_orderable" == 'disabled' ]] || fail "a legacy digital product page offers a live buy button (state: ${digital_orderable})"
+  if grep -qE 'Digital Delivery|Your Digital Codes|digital codes will appear' "$digital_body"; then
+    fail 'a legacy digital product page still advertises code delivery'
+  fi
+
+  php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM products WHERE slug = ?")->execute(["legacy-digital-removal-probe"]);
+} catch (Throwable $e) {}'
+  echo 'Legacy digital product probe passed'
+else
+  echo '::notice title=Phase 11 probe::probe row could not be created, legacy digital product page not checked'
+fi
+
 echo 'SEO route integration passed'
 
 echo 'Session expiration HTTP integration passed'
