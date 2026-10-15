@@ -13,8 +13,13 @@ $faqs = [
     ['Is my payment information safe?', 'We never ask for your PIN or OTP and we do not store card details. Only the transaction ID is recorded so that we can verify your payment.'],
 ];
 
+// SEO: an owner-overridable page key, a real canonical and a breadcrumb.
+$pageSeoKey = 'help';
 $pageTitle = 'Help Centre';
-$pageDescription = 'Answers to common questions about ordering, delivery, payment and returns.';
+$pageDescription = 'Answers to common questions about ordering, delivery, payment and returns at '
+    . sh_setting('site_name', 'ShopHaat') . '.';
+$pageCanonical = 'help.php';
+$pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php'], ['name' => 'Help Centre', 'url' => '']];
 require_once SH_ROOT . '/includes/header.php';
 ?>
 <div class="sh-wrap">

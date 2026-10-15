@@ -5,6 +5,18 @@
  *
  * Pages may set $pageTitle, $pageDescription, $pageCanonical, $bodyClass,
  * $structuredData before including this file.
+ *
+ * A page may also identify itself to the SEO engine, which then owns every
+ * search-engine tag in <head> (title, description, canonical, robots, social
+ * cards, JSON-LD):
+ *   $pageSeoKey      string  key in sh_seo_pages_catalog() for an admin override
+ *   $pageImage       string  relative or absolute social sharing image
+ *   $pageOgType      string  'website' | 'product' | 'article'
+ *   $pageRobots      string  robots directive for this page
+ *   $pageBreadcrumbs array   [['name' => ..., 'url' => ...], ...]
+ *   $pageKeywords    string  keywords from real page data
+ *   $pageSeoEntity   array   product/category row carrying SEO columns
+ *   $pageNoSuffix    bool    true when the title must not receive the suffix
  */
 if (!defined('SH_BOOTSTRAPPED')) {
     require_once dirname(__DIR__) . '/config/config.php';
@@ -16,10 +28,39 @@ require_once SH_ROOT . '/includes/transition.php';
 
 sh_session_start();
 
-$shSiteName   = (string)sh_setting('site_name', 'ShopHaat');
-$shTitle      = isset($pageTitle) && $pageTitle !== '' ? $pageTitle . ' | ' . $shSiteName : $shSiteName . ' — ' . sh_setting('site_tagline', 'Online Marketplace');
-$shDesc       = isset($pageDescription) && $pageDescription !== '' ? $pageDescription : (string)sh_setting('site_description', '');
-$shCanonical  = $pageCanonical ?? '';
+require_once SH_ROOT . '/includes/seo.php';
+// Self-healing migration for the SEO columns. A no-op once stamped, and it
+// never runs inside an active transaction (see sh_seo_schema_ensure).
+sh_seo_schema_ensure();
+
+$shSiteName = (string)sh_setting('site_name', 'ShopHaat');
+
+/*
+ * Resolve this page's metadata exactly once. Everything below is generated from
+ * what the page supplied plus what the owner configured, and sh_seo_head_html()
+ * is the only code that writes these tags — which is what prevents a page from
+ * emitting two titles or two canonical links.
+ */
+$shSeo = sh_seo_meta([
+    'key'          => (string)($pageSeoKey ?? ''),
+    'fallback_title' => isset($pageTitle) ? (string)$pageTitle : '',
+    'fallback_desc'  => isset($pageDescription) ? (string)$pageDescription : '',
+    'canonical'    => (string)($pageCanonical ?? ''),
+    'image'        => (string)($pageImage ?? ''),
+    'type'         => (string)($pageOgType ?? 'website'),
+    'robots'       => (string)($pageRobots ?? ''),
+    'keywords'     => (string)($pageKeywords ?? ''),
+    'entity'       => is_array($pageSeoEntity ?? null) ? $pageSeoEntity : [],
+    'breadcrumbs'  => is_array($pageBreadcrumbs ?? null) ? $pageBreadcrumbs : [],
+    'schema'       => is_array($structuredData ?? null) ? $structuredData : [],
+    'title_exact'  => !empty($pageNoSuffix),
+]);
+
+// Kept for any template that reads them; the tags themselves now come from the
+// SEO engine so there is a single source of truth.
+$shTitle     = (string)$shSeo['title'];
+$shDesc      = (string)$shSeo['description'];
+$shCanonical = (string)$shSeo['canonical'];
 $shCategories = sh_categories();
 $shCartCount  = sh_cart_count();
 $shUser       = sh_user();
@@ -33,16 +74,11 @@ $shSearchQ    = sh_get('q');
 $shTransition = sh_transition_config();
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e((string)$shSeo['lang']) ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title><?= e($shTitle) ?></title>
-<meta name="description" content="<?= e(sh_excerpt($shDesc, 158)) ?>">
-<?php if ($shCanonical !== ''): ?><link rel="canonical" href="<?= e($shCanonical) ?>"><?php endif; ?>
-<meta property="og:title" content="<?= e($shTitle) ?>">
-<meta property="og:description" content="<?= e(sh_excerpt($shDesc, 158)) ?>">
-<meta property="og:type" content="website">
+<?= sh_seo_head_html($shSeo) ?>
 <meta name="theme-color" content="<?= e(sh_theme_colors()['primary']) ?>">
 <?php if ($shFavicon !== ''): ?>
 <link rel="icon" href="<?= e($shFavicon) ?>">
@@ -52,9 +88,6 @@ $shTransition = sh_transition_config();
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
 <?= sh_theme_style_tag() ?>
 <script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
-<?php if (!empty($structuredData)): ?>
-<script type="application/ld+json"<?= sh_csp_nonce_attr() ?>><?= json_encode($structuredData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
-<?php endif; ?>
 <?= sh_transition_head($shTransition) ?>
 </head>
 <body class="<?= e($bodyClass ?? '') ?>"<?= sh_transition_body_attrs($shTransition) ?>>

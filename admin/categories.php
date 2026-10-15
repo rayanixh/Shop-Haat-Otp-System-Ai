@@ -4,6 +4,10 @@ require_once dirname(__DIR__) . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/catalog.php';
+// SEO columns: the save handler below writes to them, so ensure they exist before
+// any request body is processed.
+require_once SH_ROOT . '/includes/seo.php';
+sh_seo_schema_ensure();
 
 sh_session_start();
 sh_require_admin();
@@ -100,6 +104,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'description' => sh_post('description') ?: null,
                 'sort_order' => sh_int($_POST['sort_order'] ?? 0),
                 'status' => !empty($_POST['status']) ? 1 : 0,
+                // SEO columns. Each value is validated rather than stored raw:
+                // URLs must be http(s) or a site path, and the flag is a 0/1.
+                'meta_title'           => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
+                'meta_description'     => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+                'meta_keywords'        => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
+                'seo_focus_keyword'    => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
+                'seo_related_phrases'  => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
+                'seo_og_image'         => mb_substr(sh_seo_clean_url(sh_post('seo_og_image')), 0, 190) ?: null,
+                'seo_canonical'        => mb_substr(sh_seo_clean_url(sh_post('seo_canonical')), 0, 255) ?: null,
+                'seo_noindex'          => !empty($_POST['seo_noindex']) ? 1 : 0,
             ];
             try {
                 if ($id > 0) {
@@ -110,6 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sh_flash('success', 'Category updated.');
                 }
                 else { sh_insert('categories', $data); sh_flash('success', 'Category created.'); }
+                // The sitemap and its cached copy both depend on this row.
+                sh_seo_cache_invalidate();
                 sh_redirect('admin/categories.php');
             } catch (Throwable $e) {
                 sh_log_exception($e, 'category-save');
@@ -235,6 +251,16 @@ require __DIR__ . '/_layout.php';
           <span class="sh-field__hint">Used for the small navigation menus. Category cards use the image above.</span></div>
         <div class="sh-field"><label class="sh-field__label" for="c-desc">Description</label>
           <textarea class="sh-textarea" id="c-desc" name="description" rows="3"><?= e($val('description')) ?></textarea></div>
+        <?php
+        // SEO fields for this category. $editing holds the saved row, so an
+        // existing value always wins over the generated placeholder.
+        $seoPrefix  = 'cat-seo';
+        $seoRow     = $editing ?: ['name' => (string)$val('name'), 'slug' => (string)$val('slug')];
+        $seoLabel   = 'category';
+        $seoBaseUrl = sh_seo_base();
+        $seoPath    = 'category.php?slug={slug}';
+        require __DIR__ . '/_seo-fields.php';
+        ?>
         <div class="sh-field"><label class="sh-field__label" for="c-sort">Sort order</label>
           <input class="sh-input" id="c-sort" name="sort_order" type="number" value="<?= e($val('sort_order', '0')) ?>"></div>
         <label class="sh-check" style="margin-bottom:12px">

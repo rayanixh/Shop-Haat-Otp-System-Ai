@@ -46,8 +46,58 @@ elseif ($discount !== ''){ $heading = 'Offers — ' . (int)$discount . '% off or
 elseif ($sort === 'newest')  { $heading = 'New Arrivals'; }
 elseif ($sort === 'popular') { $heading = 'Best Sellers'; }
 
-$pageTitle = $heading;
-$pageDescription = 'Browse ' . $result['total'] . ' products' . ($activeCat ? ' in ' . $activeCat['name'] : '') . ' with fast delivery and secure payment.';
+/*
+ * SEO for a listing page.
+ *
+ * Three different kinds of page share this route and must not compete for the
+ * same index entry:
+ *   - the plain catalogue (and category listings): indexable, with a canonical
+ *     that strips sort and filter parameters so one listing has one URL;
+ *   - an internal search result (?q=...): never indexable, because it is
+ *     infinite and duplicates the catalogue;
+ *   - page 2 and beyond: indexable content, canonical still points at the
+ *     unfiltered page-1 URL, which is what the paginated view really is.
+ */
+$isSearchView = $q !== '';
+$hasFilters = $isSearchView
+    || $minPrice !== '' || $maxPrice !== '' || $rating !== '' || $discount !== ''
+    || $inStock || $flashOnly || $featured || $brandIds !== [] || $sort !== 'popular';
+
+$pageTitle       = $heading;
+$pageDescription = 'Browse ' . $result['total'] . ' products'
+    . ($activeCat ? ' in ' . $activeCat['name'] : '')
+    . ' at ' . sh_setting('site_name', 'ShopHaat') . ' — cash on delivery, mobile banking and nationwide shipping.';
+
+if ($activeCat) {
+    // A filtered category view still describes the category, so the category's
+    // own SEO fields apply to it.
+    $pageSeoEntity = $activeCat;
+    $pageSeoKey = '';
+    $pageCanonical = 'category.php?slug=' . rawurlencode((string)$activeCat['slug']);
+    $pageImage = sh_seo_category_image($activeCat);
+} else {
+    $pageSeoKey = 'products';
+    $pageCanonical = 'products.php';
+}
+
+// A filtered or searched view is the same catalogue sliced differently: point it
+// at the clean URL and keep it out of the index rather than letting thousands of
+// near-identical URLs compete with the pages that should rank.
+if ($isSearchView) {
+    $pageRobots = 'noindex,follow';
+    $pageCanonical = 'products.php';
+} elseif ($hasFilters && $page === 1) {
+    $pageRobots = 'noindex,follow';
+}
+
+$pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php']];
+if ($activeCat) {
+    $pageBreadcrumbs[] = ['name' => 'Products', 'url' => 'products.php'];
+    $pageBreadcrumbs[] = ['name' => (string)$activeCat['name'], 'url' => ''];
+} else {
+    $pageBreadcrumbs[] = ['name' => (string)$heading, 'url' => ''];
+}
+
 $shWishlist = sh_wishlist_ids();
 $brands = sh_brands();
 

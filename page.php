@@ -42,6 +42,9 @@ $key = sh_get('p', 'about');
 if (!isset($pages[$key])) {
     http_response_code(404);
     $pageTitle = 'Page not found';
+    // Belt and braces on top of the 404 status: a search engine that reaches
+    // this URL through an old link is told explicitly not to keep it.
+    $pageRobots = 'noindex,follow';
     require_once SH_ROOT . '/includes/header.php';
     echo '<div class="sh-wrap"><div class="sh-empty" style="margin-top:20px">'
         . '<span class="sh-empty__icon">' . sh_icon('info', 26) . '</span>'
@@ -54,7 +57,16 @@ if (!isset($pages[$key])) {
 
 [$title, $sections] = $pages[$key];
 $pageTitle = $title;
-$pageDescription = $title . ' — ' . $site;
+$pageDescription = $title . ' at ' . $site . ' — '
+    . sh_excerpt((string)reset($sections), 120);
+// The key doubles as the SEO page key, so the owner can override this page's
+// title, description, canonical and indexing from the SEO Manager.
+$pageSeoKey = $key;
+$pageCanonical = 'page.php?p=' . rawurlencode($key);
+$pageBreadcrumbs = [
+    ['name' => 'Home', 'url' => 'index.php'],
+    ['name' => $title, 'url' => ''],
+];
 require_once SH_ROOT . '/includes/header.php';
 ?>
 <div class="sh-wrap">

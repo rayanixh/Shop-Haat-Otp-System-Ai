@@ -77,35 +77,55 @@ $off = sh_discount_percent($product['price'], $product['compare_price']);
 $stock = (int)$product['stock'];
 $isDigital = $product['product_type'] === 'digital';
 
-$pageTitle = $product['meta_title'] ?: $product['name'];
-$pageDescription = $product['meta_description'] ?: sh_excerpt($product['short_description'] ?: $product['description'], 158);
-$pageCanonical = rtrim(sh_site_url(), '/') . '/product.php?slug=' . urlencode($product['slug']);
+/*
+ * SEO. The product row carries the owner's custom title, description, keywords,
+ * social image, canonical override and noindex flag, so the whole row is handed
+ * to the SEO engine and the generated values below are only fallbacks.
+ *
+ * The canonical always uses the slug form. Filter, sort and tracking parameters
+ * are dropped by sh_seo_canonical_url(), so one product has exactly one indexable
+ * URL no matter how a shopper arrived at it.
+ */
+$pageSeoKey     = 'product';
+$pageSeoEntity  = $product;
+$pageOgType     = 'product';
+$pageImage      = sh_seo_product_image($product);
+$pageTitle      = (string)$product['name'];
+$pageDescription = sh_seo_plain((string)($product['short_description'] ?: $product['description']));
+$pageCanonical  = 'product.php?slug=' . rawurlencode((string)$product['slug']);
+$pageKeywords   = trim((string)($product['seo_focus_keyword'] ?? '') . ',' . (string)($product['meta_keywords'] ?? ''), ',');
 
-$structuredData = [
-    '@context' => 'https://schema.org',
-    '@type' => 'Product',
-    'name' => $product['name'],
-    'description' => sh_excerpt($product['short_description'] ?: $product['description'], 300),
-    'sku' => $product['sku'] ?: ('SH-' . $pid),
-    'image' => [rtrim(sh_site_url(), '/') . '/' . ltrim(str_replace(sh_base_url() . '/', '', sh_product_image($product['image'])), '/')],
-    'offers' => [
-        '@type' => 'Offer',
-        'price' => number_format((float)$product['price'], 2, '.', ''),
-        'priceCurrency' => (string)sh_setting('currency_code', 'BDT'),
-        'availability' => $stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-        'url' => $pageCanonical,
-    ],
-];
-if ($product['brand_name']) {
-    $structuredData['brand'] = ['@type' => 'Brand', 'name' => $product['brand_name']];
-}
-if ((int)$product['review_count'] > 0 && (float)$product['rating'] > 0) {
-    $structuredData['aggregateRating'] = [
-        '@type' => 'AggregateRating',
-        'ratingValue' => number_format((float)$product['rating'], 1),
-        'reviewCount' => (int)$product['review_count'],
+// Breadcrumbs mirror the navigation the shopper actually sees on the page.
+$pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php']];
+if (!empty($product['category_name']) && !empty($product['category_slug'])) {
+    $pageBreadcrumbs[] = [
+        'name' => (string)$product['category_name'],
+        'url'  => 'category.php?slug=' . rawurlencode((string)$product['category_slug']),
     ];
 }
+$pageBreadcrumbs[] = ['name' => (string)$product['name'], 'url' => ''];
+
+// Gallery images join the structured data so image results show the real
+// product photography rather than a stock placeholder.
+$galleryImages = [];
+foreach ($images as $imgRow) {
+    $galleryImages[] = 'uploads/products/' . rawurlencode(basename((string)$imgRow['image']));
+}
+
+// Resolve the metadata first, then build the Product node against the final
+// canonical URL so the JSON-LD and the <link rel="canonical"> can never disagree.
+$shProductMeta = sh_seo_meta([
+    'key' => 'product',
+    'entity' => $product,
+    'fallback_title' => (string)$product['name'],
+    'fallback_desc' => $pageDescription,
+    'canonical' => $pageCanonical,
+    'image' => $pageImage,
+    'type' => 'product',
+    'keywords' => $pageKeywords,
+    'breadcrumbs' => $pageBreadcrumbs,
+]);
+$structuredData = sh_seo_product_schema($product, $shProductMeta, $galleryImages);
 
 require_once SH_ROOT . '/includes/header.php';
 ?>

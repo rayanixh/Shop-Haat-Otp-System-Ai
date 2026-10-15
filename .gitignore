@@ -23,6 +23,11 @@
 /logs/*.log
 /logs/limits/
 /logs/csp/
+# Nothing else in logs/ belongs in version control either: the directory holds
+# request logs, security events and the SEO cache. Only the directory guard is
+# source code. (The SEO sitemap cache is written under logs/seo/.)
+/logs/*
+!/logs/.htaccess
 
 # Uploaded content (product images, payment proof screenshots, logos) is store
 # data, not source code. The directory guard itself stays tracked.

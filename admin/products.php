@@ -6,6 +6,9 @@ require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/catalog.php';
 
 require_once SH_ROOT . '/includes/admin-tools.php';
+// SEO columns: the save handler writes to them, so ensure they exist first.
+require_once SH_ROOT . '/includes/seo.php';
+sh_seo_schema_ensure();
 
 sh_session_start();
 sh_require_admin();
@@ -34,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($delTarget) { sh_audit('product_deleted', 'product', $id, (string)$delTarget['name'], ['price' => $delTarget['price'], 'stock' => (int)$delTarget['stock']], null); }
             sh_flash('success', 'Product deleted.');
         }
+        sh_seo_cache_invalidate();
         sh_redirect('admin/products.php');
     }
 
@@ -43,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $tg = sh_one('SELECT name, status FROM products WHERE id = ?', [$id]);
         sh_query('UPDATE products SET status = 1 - status WHERE id = ?', [$id]);
         if ($tg) { sh_audit('product_updated', 'product', $id, (string)$tg['name'], ['visible' => (int)$tg['status']], ['visible' => 1 - (int)$tg['status']]); }
+        sh_seo_cache_invalidate();
         sh_flash('success', 'Product visibility updated.');
         sh_redirect('admin/products.php?' . http_build_query(array_diff_key($_GET, ['edit' => 1])));
     }
@@ -93,8 +98,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'is_flash_sale' => !empty($_POST['is_flash_sale']) ? 1 : 0,
                 'flash_sale_ends_at' => sh_post('flash_sale_ends_at') !== '' ? str_replace('T', ' ', sh_post('flash_sale_ends_at')) . ':00' : null,
                 'status' => !empty($_POST['status']) ? 1 : 0,
-                'meta_title' => sh_post('meta_title') ?: null,
-                'meta_description' => sh_post('meta_description') ?: null,
+                // SEO. Values are validated here rather than trusted: URLs must
+                // be http(s) or a site path, and the indexing flag is a 0/1.
+                'meta_title'          => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
+                'meta_description'    => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+                'meta_keywords'       => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
+                'seo_focus_keyword'   => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
+                'seo_related_phrases' => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
+                'seo_og_image'        => mb_substr(sh_seo_clean_url(sh_post('seo_og_image')), 0, 190) ?: null,
+                'seo_canonical'       => mb_substr(sh_seo_clean_url(sh_post('seo_canonical')), 0, 255) ?: null,
+                'seo_noindex'         => !empty($_POST['seo_noindex']) ? 1 : 0,
             ];
             try {
                 if ($id > 0) {
@@ -123,6 +136,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ((int)$data['stock'] > 0) { sh_stock_adjust($id, (int)$data['stock'], 'Initial stock', 'initial'); }
                     sh_flash('success', 'Product "' . $data['name'] . '" created.');
                 }
+                // The product list, its slugs and the sitemap all just changed.
+                sh_seo_cache_invalidate();
                 sh_redirect('admin/products.php?edit=' . $id);
             } catch (Throwable $e) {
                 sh_log_exception($e, 'product-save');
@@ -297,12 +312,22 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
         <div class="sh-field"><label class="sh-field__label" for="p-spec">Specifications</label>
           <textarea class="sh-textarea" id="p-spec" name="specifications" rows="4" placeholder="One per line: Label: Value"><?= e($val('specifications')) ?></textarea></div>
 
-        <div class="sh-grid2">
-          <div class="sh-field"><label class="sh-field__label" for="p-mt">Meta title</label>
-            <input class="sh-input" id="p-mt" name="meta_title" maxlength="190" value="<?= e($val('meta_title')) ?>"></div>
-          <div class="sh-field"><label class="sh-field__label" for="p-md">Meta description</label>
-            <input class="sh-input" id="p-md" name="meta_description" maxlength="255" value="<?= e($val('meta_description')) ?>"></div>
-        </div>
+        <?php
+        // The full SEO editor: title, description, focus keyword, related
+        // phrases, keywords, canonical, sharing image, indexing flag and a live
+        // preview. $editing holds the saved row on an update.
+        $seoPrefix  = 'prod-seo';
+        $seoRow     = $editing ?: [
+            'name' => (string)$val('name'),
+            'slug' => (string)$val('slug'),
+            'short_description' => (string)$val('short_description'),
+            'description' => (string)$val('description'),
+        ];
+        $seoLabel   = 'product';
+        $seoBaseUrl = sh_seo_base();
+        $seoPath    = 'product.php?slug={slug}';
+        require __DIR__ . '/_seo-fields.php';
+        ?>
         <div class="sh-grid3">
           <label class="sh-check"><input type="checkbox" name="status" value="1" <?= $chk('status', true) ? 'checked' : '' ?>><span>Visible on store</span></label>
           <label class="sh-check"><input type="checkbox" name="is_featured" value="1" <?= $chk('is_featured') ? 'checked' : '' ?>><span>Featured product</span></label>

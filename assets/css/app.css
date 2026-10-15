@@ -2040,3 +2040,9 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-admin-body .sh-notif-log .sh-table--empty { width: auto; margin: 0; padding: 0; border: 0; }
   .sh-admin-body .sh-notif-log .sh-table--empty td { padding: 18px 12px; }
 }
+
+/* --- SEO fields (admin product / category forms and the SEO Manager) --------
+   Only the live character counters need styling; the preview boxes are laid out
+   inline in the partial so they keep working with JavaScript switched off. */
+.sh-seo-count--near { color: var(--sh-warn); font-weight: 600; }
+.sh-seo-count--over { color: var(--sh-bad); font-weight: 700; }

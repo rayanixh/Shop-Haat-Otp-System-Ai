@@ -74,6 +74,7 @@ $nav = [
         ['homepage',   'homepage.php',   'image',    'Homepage Images', 0, 'storefront.manage'],
         ['theme',      'theme.php',      'settings', 'Theme Customization', 0, 'storefront.manage'],
         ['transition', 'transition.php', 'zap',      'Page Transition', 0, 'storefront.manage'],
+        ['seo',        'seo.php',        'search',   'SEO Manager', 0, 'seo.manage'],
     ],
     'Settings' => [
         ['settings',     'settings.php',         'settings', 'General Settings', 0, 'settings.view'],

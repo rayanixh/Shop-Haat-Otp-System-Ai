@@ -8,9 +8,16 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/catalog.php';
 require_once SH_ROOT . '/includes/payment.php';
 
-$pageTitle = '';
-$pageCanonical = rtrim(sh_site_url(), '/') . '/';
+/*
+ * SEO. The title is left empty on purpose: the SEO engine then builds the
+ * homepage title from the store name and tagline, and the owner can override it
+ * from the SEO Manager without touching this file.
+ */
+$pageSeoKey      = 'home';
+$pageTitle       = '';
+$pageCanonical   = '/';
 $pageDescription = (string)sh_setting('site_description', '');
+$pageBreadcrumbs = [['name' => (string)sh_setting('site_name', 'ShopHaat'), 'url' => '']];
 
 $cats        = sh_categories();
 $flash       = sh_products_flash(12);

@@ -38,9 +38,32 @@ $result = sh_product_search([
     'rating' => $rating, 'in_stock' => $inStock, 'brand_ids' => $brandIds,
 ]);
 
-$pageTitle = $category['name'];
-$pageDescription = $category['description'] ?: ('Shop ' . $category['name'] . ' online with fast delivery and secure payment.');
-$pageCanonical = rtrim(sh_site_url(), '/') . '/category.php?slug=' . urlencode($category['slug']);
+/*
+ * SEO. Categories gained the same editable columns as products, so the row is
+ * handed to the SEO engine; the generated description below is only a fallback
+ * for a category the owner has not written one for yet.
+ *
+ * Sorted and filtered views of this page are the same content, so the canonical
+ * always points at the plain slug URL with the browsing parameters stripped.
+ */
+$pageSeoKey      = 'category';
+$pageSeoEntity   = $category;
+$pageTitle       = (string)$category['name'];
+$pageDescription = sh_seo_plain((string)$category['description']);
+if ($pageDescription === '') {
+    // Built from the real category name and the store's own delivery promises
+    // rather than a generic sentence repeated on every category.
+    $pageDescription = 'Shop ' . $category['name'] . ' at ' . sh_setting('site_name', 'ShopHaat')
+        . '. ' . (int)($category['product_count'] ?? 0) . ' products with delivery across Bangladesh and secure payment.';
+}
+$pageCanonical   = 'category.php?slug=' . rawurlencode((string)$category['slug']);
+$pageKeywords    = trim((string)($category['seo_focus_keyword'] ?? '') . ',' . (string)($category['meta_keywords'] ?? ''), ',');
+// Prefer an image the owner set for sharing, then the category's own image.
+$pageImage = sh_seo_category_image($category);
+$pageBreadcrumbs = [
+    ['name' => 'Home', 'url' => 'index.php'],
+    ['name' => (string)$category['name'], 'url' => ''],
+];
 $shWishlist = sh_wishlist_ids();
 $brands = sh_brands();
 

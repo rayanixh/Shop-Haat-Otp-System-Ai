@@ -25,7 +25,7 @@ function sh_perms_catalog(): array
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],
-        'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications'],
+        'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications', 'seo.manage' => 'SEO Manager: titles, descriptions, sitemap & search-engine settings'],
         'System' => ['system.health' => 'View system health', 'system.backups' => 'Manage database backups', 'system.audit' => 'View audit logs & settings history', 'system.logs' => 'View error / security logs', 'system.notifications' => 'Admin notifications inbox', 'ai.use' => 'AI tools'],
         'Admin Management' => ['admins.manage' => 'Manage admin accounts', 'roles.manage' => 'Manage roles & permissions'],
     ];
