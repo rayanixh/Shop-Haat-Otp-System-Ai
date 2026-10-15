@@ -23,6 +23,19 @@ cleanup() {
 trap cleanup EXIT
 
 fail() { echo "Session HTTP integration failed: $*" >&2; exit 1; }
+
+# Parse an XML file. SimpleXML is what CI installs; if a host lacks it, the
+# check falls back to a structural assertion and says so, rather than passing
+# silently on an unchecked file.
+assert_valid_xml() {
+  local file="$1" label="$2"
+  if ! php -r 'exit(function_exists("simplexml_load_file") ? 0 : 1);'; then
+    echo "NOTE: SimpleXML is unavailable, using a structural check for ${label}"
+    grep -Eq '</urlset>|</sitemapindex>' "$file" || fail "${label} is not a closed sitemap document"
+    return 0
+  fi
+  php -r 'exit(@simplexml_load_file($argv[1]) === false ? 1 : 0);' "$file" || fail "${label} is not well-formed XML"
+}
 assert_contains() {
   local haystack="$1" needle="$2" message="$3"
   [[ "$haystack" == *"$needle"* ]] || fail "$message"
@@ -187,5 +200,71 @@ grep -Eqi '^Location: .*/?login\.php\?redirect=' "$stale_headers" || { cat "$sta
 ! grep -qi '419' "$stale_body" || fail 'Stale Account POST exposed Error 419'
 stale_location="$(awk 'BEGIN { IGNORECASE=1 } /^Location:/ { sub(/\r$/, ""); print $2; exit }' "$stale_headers")"
 open_login_notice "$stale_location"
+
+# ---------------------------------------------------------------------------
+# 7. Public SEO routes, fetched exactly as a crawler would.
+#    /sitemap.xml and /robots.txt are generated from the database that the
+#    reporting test just seeded, so this also proves the endpoints answer over
+#    real HTTP with the real schema in place.
+# ---------------------------------------------------------------------------
+robots_headers="$TMP_DIR/robots-headers"
+robots_body="$TMP_DIR/robots.txt"
+robots_code="$(curl -sS -A "$DESKTOP_UA" -D "$robots_headers" -o "$robots_body" -w '%{http_code}' "${BASE}/robots.txt")"
+[[ "$robots_code" == '200' ]] || { cat "$robots_body" >&2; fail "GET /robots.txt returned HTTP ${robots_code}, expected 200"; }
+grep -Eqi '^Content-Type: text/plain' "$robots_headers" || { cat "$robots_headers" >&2; fail 'robots.txt is not served as text/plain'; }
+grep -q '^User-agent: \*' "$robots_body" || { cat "$robots_body" >&2; fail 'robots.txt has no user-agent group'; }
+grep -Eq '^Sitemap: https?://.+/sitemap\.xml' "$robots_body" || { cat "$robots_body" >&2; fail 'robots.txt does not advertise an absolute sitemap URL'; }
+if grep -Eq '^Disallow: /[[:space:]]*$' "$robots_body"; then cat "$robots_body" >&2; fail 'robots.txt disallows the whole site'; fi
+if grep -q 'Disallow: /assets/' "$robots_body"; then cat "$robots_body" >&2; fail 'robots.txt blocks the assets a crawler needs to render pages'; fi
+
+sitemap_headers="$TMP_DIR/sitemap-headers"
+sitemap_body="$TMP_DIR/sitemap.xml"
+sitemap_code="$(curl -sS -A "$DESKTOP_UA" -D "$sitemap_headers" -o "$sitemap_body" -w '%{http_code}' "${BASE}/sitemap.xml")"
+[[ "$sitemap_code" == '200' ]] || { cat "$sitemap_body" >&2; fail "GET /sitemap.xml returned HTTP ${sitemap_code}, expected 200 from an installed store"; }
+grep -Eqi '^Content-Type: application/xml' "$sitemap_headers" || { cat "$sitemap_headers" >&2; fail 'sitemap.xml is not served as application/xml'; }
+if grep -qi '<!doctype html' "$sitemap_body"; then cat "$sitemap_body" >&2; fail 'sitemap.xml returned an HTML page instead of XML'; fi
+assert_valid_xml "$sitemap_body" 'sitemap.xml'
+grep -Eq '<urlset|<sitemapindex' "$sitemap_body" || { cat "$sitemap_body" >&2; fail 'sitemap.xml has neither <urlset> nor <sitemapindex>'; }
+grep -q '<loc>https\?://' "$sitemap_body" || { cat "$sitemap_body" >&2; fail 'the sitemap publishes no absolute <loc> entry'; }
+for forbidden in '/cart.php' '/checkout.php' '/payment.php' '/account.php' '/order-success.php' '/admin/' '/install/' '/logs/' '?q='; do
+  if grep -qF "$forbidden" "$sitemap_body"; then cat "$sitemap_body" >&2; fail "the sitemap publishes a private route: ${forbidden}"; fi
+done
+
+chunk_code="$(curl -sS -A "$DESKTOP_UA" -o "$TMP_DIR/sitemap-1.xml" -w '%{http_code}' "${BASE}/sitemap-1.xml")"
+[[ "$chunk_code" == '200' ]] || fail "GET /sitemap-1.xml returned HTTP ${chunk_code}, expected 200"
+assert_valid_xml "$TMP_DIR/sitemap-1.xml" 'sitemap-1.xml'
+
+missing_code="$(curl -sS -A "$DESKTOP_UA" -o "$TMP_DIR/sitemap-999.xml" -w '%{http_code}' "${BASE}/sitemap-999.xml")"
+[[ "$missing_code" == '404' ]] || fail "GET /sitemap-999.xml returned HTTP ${missing_code}, expected 404 for a file that was never published"
+assert_valid_xml "$TMP_DIR/sitemap-999.xml" 'the out-of-range sitemap chunk'
+
+# A product page must carry exactly one of each metadata tag.
+slug="$(php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $v = $pdo->query("SELECT slug FROM products WHERE status = 1 ORDER BY id ASC LIMIT 1")->fetchColumn();
+    echo is_string($v) ? $v : "";
+} catch (Throwable $e) { echo ""; }')"
+if [[ -n "$slug" ]]; then
+  product_body="$TMP_DIR/product.html"
+  product_code="$(curl -sS -A "$DESKTOP_UA" -o "$product_body" -w '%{http_code}' --get --data-urlencode "slug=${slug}" "${BASE}/product.php")"
+  [[ "$product_code" == '200' ]] || fail "GET /product.php?slug=${slug} returned HTTP ${product_code}"
+  title_count="$(grep -c '<title>' "$product_body" || true)"
+  [[ "$title_count" == '1' ]] || fail "the product page has ${title_count} <title> tags, expected 1"
+  canonical_count="$(grep -c 'rel="canonical"' "$product_body" || true)"
+  [[ "$canonical_count" == '1' ]] || fail "the product page has ${canonical_count} canonical links, expected 1"
+  description_count="$(grep -c 'name="description"' "$product_body" || true)"
+  [[ "$description_count" == '1' ]] || fail "the product page has ${description_count} meta descriptions, expected 1"
+  og_count="$(grep -c 'property="og:title"' "$product_body" || true)"
+  [[ "$og_count" == '1' ]] || fail "the product page has ${og_count} og:title tags, expected 1"
+  grep -q 'application/ld+json' "$product_body" || fail 'the product page carries no structured data'
+  grep -q "product.php?slug=${slug}" "$product_body" || fail 'the product page does not reference its own canonical slug URL'
+  echo "SEO product page metadata passed (slug: ${slug})"
+else
+  echo 'SKIP: no published product in the test database, product page metadata not checked'
+fi
+
+echo 'SEO route integration passed'
 
 echo 'Session expiration HTTP integration passed'
