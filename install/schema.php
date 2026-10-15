@@ -885,8 +885,8 @@ function sh_schema_seed(PDO $pdo, array $opts): void
 
     $settings = [
         'site_name'            => $siteName,
-        'site_tagline'         => 'Everyday essentials, electronics and digital products',
-        'site_description'     => $siteName . ' is an online marketplace for electronics, home essentials, fashion and instantly delivered digital products.',
+        'site_tagline'         => 'Everyday essentials, electronics and home products',
+        'site_description'     => $siteName . ' is an online marketplace for electronics, home essentials, fashion, groceries and beauty products.',
         'site_url'             => $siteUrl,
         'site_logo'            => $logo,
         'site_favicon'         => '',
@@ -961,9 +961,6 @@ function sh_schema_seed(PDO $pdo, array $opts): void
     $ps->execute(['slider', null, 'Flash Sale Live', 'Up to 40% off electronics and home essentials',
         'Limited stock on daily deals. New offers added every morning at 10:00 AM.',
         'Shop Flash Sale', 'products.php?flash=1', 'promo/slide-flash.jpg', 70, 1]);
-    $ps->execute(['slider', null, 'Instant Delivery', 'Digital codes delivered the moment payment clears',
-        'Gift cards, game top-ups and subscriptions - no waiting for a courier.',
-        'Browse Digital', 'products.php?q=gift+card', 'promo/slide-digital.jpg', 70, 2]);
     $ps->execute(['slider', null, 'Everyday Value', 'Groceries and daily essentials at honest prices',
         'Free delivery on orders over the qualifying amount inside the city.',
         'Start Shopping', 'products.php?sort=popular', 'promo/slide-grocery.jpg', 70, 3]);
@@ -976,7 +973,7 @@ function sh_schema_seed(PDO $pdo, array $opts): void
 
     // Notification event matrix
     $events = ['order_created', 'payment_submitted', 'payment_approved', 'payment_rejected',
-               'order_processing', 'order_completed', 'order_cancelled', 'code_delivered', 'low_stock'];
+               'order_processing', 'order_completed', 'order_cancelled', 'low_stock'];
     // Sensible defaults: every event is switched ON for all channels so a freshly
     // configured integration works immediately. A channel that has no credentials is
     // still skipped safely, so enabling these by default cannot break anything.

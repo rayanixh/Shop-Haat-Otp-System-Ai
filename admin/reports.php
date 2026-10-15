@@ -234,7 +234,7 @@ try {
                         $row['product_name'], $row['product_variant'], $row['sku'], $row['product_type'],
                         (int)$row['quantity_sold'], number_format($gross, 2, '.', ''), number_format($discount, 2, '.', ''),
                         number_format($gross - $discount, 2, '.', ''), (int)$row['order_count'],
-                        $row['product_type'] === 'digital' ? 'Digital' : ($row['stock'] === null ? 'Removed' : (string)(int)$row['stock']),
+                        $row['stock'] === null ? 'Removed' : (string)(int)$row['stock'],
                     ];
                 }
             }
@@ -470,7 +470,7 @@ require __DIR__ . '/_layout.php';
             <td data-label="Discounts"><?= e(sh_money($discount)) ?></td>
             <td data-label="Net item sales"><strong><?= e(sh_money($gross - $discount)) ?></strong></td>
             <td data-label="Orders"><?= number_format((int)$row['order_count']) ?></td>
-            <td data-label="Stock"><?= (string)$row['product_type'] === 'digital' ? 'Digital' : ($row['stock'] === null ? 'Removed' : (string)(int)$row['stock']) ?></td>
+            <td data-label="Stock"><?= $row['stock'] === null ? 'Removed' : (string)(int)$row['stock'] ?></td>
           </tr>
         <?php endforeach; endif; ?>
       </tbody></table></div>

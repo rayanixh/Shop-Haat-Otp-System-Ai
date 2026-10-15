@@ -200,7 +200,7 @@ require __DIR__ . '/_layout.php';
   <div class="sh-panel__body">
     <p class="sh-panel__note" style="margin-bottom:12px">
       With the webhook registered, every new order and payment arrives in Telegram as a card with real buttons —
-      verify or reject a payment, move to processing, deliver digital codes, complete or cancel. Each button performs the
+      verify or reject a payment, move to processing, complete or cancel. Each button performs the
       same database action as the admin panel, including duplicate protection.
     </p>
     <div class="sh-field">

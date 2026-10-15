@@ -169,10 +169,9 @@ function sh_admin_notification_icon(string $type): string
 // ---------------------------------------------------------------------------
 // Stock
 // ---------------------------------------------------------------------------
-/** in | low | out — digital products are tracked by codes, not stock. */
+/** in | low | out */
 function sh_stock_status(array $p): array
 {
-    if (($p['product_type'] ?? 'physical') === 'digital') { return ['key' => 'digital', 'label' => 'Digital', 'class' => 'sh-pill--info']; }
     $stock = (int)($p['stock'] ?? 0);
     $th = max(0, (int)($p['low_stock_threshold'] ?? 5));
     if ($stock <= 0) { return ['key' => 'out', 'label' => 'Out of stock', 'class' => 'sh-badge--bad']; }
@@ -203,8 +202,8 @@ function sh_stock_adjust(int $productId, int $newStock, string $reason, string $
 function sh_stock_check_alert(int $productId): void
 {
     try {
-        $p = sh_one('SELECT id, name, stock, low_stock_threshold, product_type FROM products WHERE id = ?', [$productId]);
-        if ($p === null || $p['product_type'] === 'digital') { return; }
+        $p = sh_one('SELECT id, name, stock, low_stock_threshold FROM products WHERE id = ?', [$productId]);
+        if ($p === null) { return; }
         $st = sh_stock_status($p);
         $url = 'admin/products.php?edit=' . $productId;
         if ($st['key'] === 'out') { sh_admin_notify('out_of_stock', $p['name'] . ' is out of stock', 'Stock reached 0.', $url, 'stock-out-' . $productId); }

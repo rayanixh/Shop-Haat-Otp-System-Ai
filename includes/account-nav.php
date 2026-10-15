@@ -6,7 +6,6 @@ $u = sh_user();
 $links = [
     'account'   => ['account.php',   'user',    'My Profile'],
     'orders'    => ['orders.php',    'package', 'My Orders'],
-    'digital'   => ['digital.php',   'key',     'Digital Purchases'],
     'wishlist'  => ['wishlist.php',  'heart',   'Wishlist'],
     'addresses' => ['addresses.php', 'map-pin', 'Addresses'],
 ];

@@ -367,7 +367,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-trust__text { font-size: 12px; color: var(--sh-muted); overflow-wrap: anywhere; }
 
 /* Banner strip */
-.sh-banner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.sh-banner { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
 .sh-banner__item { border-radius: var(--sh-radius); padding: 20px; color: #fff; min-height: 118px; display: flex; flex-direction: column; justify-content: center; box-shadow: var(--sh-shadow); }
 .sh-banner__title { color: #fff; font-size: 17px; font-weight: 800; }
 .sh-banner__text { color: rgba(255,255,255,.98); font-size: 12.5px; opacity: 1; margin-top: 4px; }
@@ -606,10 +606,6 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-order-card__date { font-size: 12px; color: var(--sh-muted); }
 .sh-order-card__body { padding: 13px 15px; }
 .sh-order-card__foot { display: flex; align-items: center; gap: 10px; padding: 11px 15px; border-top: 1px solid var(--sh-line-2); flex-wrap: wrap; }
-.sh-codebox { background: #101623; color: #d8f5e3; border-radius: var(--sh-radius); padding: 13px 15px; font-family: "Consolas", "Courier New", monospace; margin-top: 10px; }
-.sh-codebox__row { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
-.sh-codebox__label { font-size: 12px; color: #8fa3b8; flex: 1 1 auto; }
-.sh-codebox__code { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
 
 /* 15. ACCOUNT ------------------------------------------------------------- */
 .sh-account { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 14px; align-items: start; }

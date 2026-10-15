@@ -53,7 +53,6 @@ function sh_install_demo_data(PDO $pdo): void
         ['Fashion', 'tag', 'Clothing, footwear and accessories'],
         ['Groceries', 'package', 'Daily food and household supplies'],
         ['Beauty & Care', 'heart', 'Skincare, haircare and grooming'],
-        ['Digital Products', 'key', 'Gift cards, subscriptions and top-ups'],
         ['Books & Stationery', 'list', 'Books, notebooks and office supplies'],
         ['Sports & Outdoor', 'trending-up', 'Fitness gear and outdoor equipment'],
     ];
@@ -104,11 +103,6 @@ function sh_install_demo_data(PDO $pdo): void
         ['Lumira Daily Sunscreen SPF 50+', 'Beauty & Care', 'Lumira', 980, 1400, 91, 'physical', 0, 0, 289, 4.5, 132, 'Lightweight non-greasy broad-spectrum sunscreen for daily use.'],
         ['Lumira Argan Hair Repair Oil 100ml', 'Beauty & Care', 'Lumira', 690, 990, 110, 'physical', 0, 1, 401, 4.2, 98, 'Nourishing hair oil blend for dry and frizz-prone hair.'],
 
-        ['ShopHaat Gift Card 500', 'Digital Products', null, 500, 550, 0, 'digital', 1, 0, 620, 4.8, 210, 'Instantly delivered store credit code redeemable across the marketplace.'],
-        ['ShopHaat Gift Card 1000', 'Digital Products', null, 1000, 1100, 0, 'digital', 1, 1, 480, 4.8, 188, 'Instantly delivered store credit code worth 1000 in value.'],
-        ['Game Top-Up Voucher 1000 Coins', 'Digital Products', null, 850, 1200, 0, 'digital', 1, 1, 733, 4.6, 302, 'Digital top-up code delivered to your account within seconds of payment approval.'],
-        ['Streaming Subscription Code 1 Month', 'Digital Products', null, 450, 650, 0, 'digital', 0, 1, 528, 4.5, 174, 'One-month subscription activation code delivered instantly after verification.'],
-
         ['Papermill A5 Hardcover Notebook', 'Books & Stationery', 'Papermill', 320, 450, 180, 'physical', 0, 0, 297, 4.3, 66, '192-page ruled notebook with elastic closure and ribbon marker.'],
         ['Papermill Gel Pen Pack of 10', 'Books & Stationery', 'Papermill', 240, 350, 220, 'physical', 0, 1, 512, 4.1, 84, 'Smooth 0.5mm gel pens with quick-drying ink.'],
         ['Papermill Desk Organiser Set', 'Books & Stationery', 'Papermill', 890, 1250, 44, 'physical', 0, 0, 118, 4.2, 37, 'Five-piece desktop organiser for pens, notes and small stationery.'],
@@ -133,12 +127,8 @@ function sh_install_demo_data(PDO $pdo): void
         $desc = $short . "\n\n"
             . "Every item sold on our marketplace is sourced from verified suppliers and checked before dispatch. "
             . "Orders placed before 4:00 PM are usually handed to the courier the same working day.\n\n"
-            . ($type === 'digital'
-                ? "This is a digital product. Once your payment is verified, a unique code is reserved for your order and delivered to your account order page immediately. Codes are single-use and are never issued to more than one customer."
-                : "The product ships in its original manufacturer packaging with all standard accessories included. A seven-day replacement window applies to manufacturing defects.");
-        $specs = $type === 'digital'
-            ? "Delivery: Instant after payment verification\nFormat: Single-use alphanumeric code\nValidity: 12 months from issue\nRegion: Bangladesh\nSupport: 24/7 chat and email"
-            : "Brand: " . ($brand ?? 'ShopHaat') . "\nWarranty: 7-day replacement, 6-month service\nCountry of origin: As per manufacturer\nPackage contents: Product, manual, warranty card\nDelivery: 1-3 working days inside Dhaka";
+            . "The product ships in its original manufacturer packaging with all standard accessories included. A seven-day replacement window applies to manufacturing defects.";
+        $specs = "Brand: " . ($brand ?? 'ShopHaat') . "\nWarranty: 7-day replacement, 6-month service\nCountry of origin: As per manufacturer\nPackage contents: Product, manual, warranty card\nDelivery: 1-3 working days inside Dhaka";
         $ps->execute([
             $catIds[$cat] ?? null,
             $brand !== null ? ($brandIds[$brand] ?? null) : null,
@@ -149,19 +139,7 @@ function sh_install_demo_data(PDO $pdo): void
             mb_substr($name . ' | Buy online at the best price', 0, 185),
             mb_substr($short, 0, 290),
         ]);
-        $productIds[] = ['id' => (int)$pdo->lastInsertId(), 'type' => $type, 'name' => $name];
-    }
-
-    // Digital codes for digital products (stock derives from available codes)
-    $cds = $pdo->prepare('INSERT IGNORE INTO product_codes (product_id, code, status) VALUES (?,?,\'available\')');
-    foreach ($productIds as $p) {
-        if ($p['type'] !== 'digital') { continue; }
-        for ($i = 0; $i < 12; $i++) {
-            $code = strtoupper(bin2hex(random_bytes(2)) . '-' . bin2hex(random_bytes(2)) . '-' . bin2hex(random_bytes(2)));
-            $cds->execute([$p['id'], $code]);
-        }
-        $pdo->prepare('UPDATE products SET stock = (SELECT COUNT(*) FROM product_codes WHERE product_id = ? AND status = \'available\') WHERE id = ?')
-            ->execute([$p['id'], $p['id']]);
+        $productIds[] = ['id' => (int)$pdo->lastInsertId()];
     }
 
     // Reviews

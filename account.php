@@ -149,7 +149,7 @@ require_once SH_ROOT . '/includes/header.php';
           <div class="sh-field">
             <label class="sh-field__label" for="ac-email">Email address <span style="color:var(--sh-muted);font-weight:400">(optional)</span></label>
             <input class="sh-input" id="ac-email" type="email" name="email" value="<?= e($form['email']) ?>">
-            <p class="sh-field__hint">Only used for order updates and digital delivery receipts.</p>
+            <p class="sh-field__hint">Only used for order updates.</p>
           </div>
           <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save changes</button>
         </form>

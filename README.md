@@ -83,7 +83,6 @@ Sign in at `/admin/` with the administrator account you created.
 | Dashboard | Revenue, orders, payments awaiting review, low stock, 14-day chart |
 | Homepage Images | Slider slides and the three feature cards: upload images, edit text, links, order and visibility |
 | Products / Categories / Brands | Full catalogue management with image upload |
-| Digital Codes | Bulk-load codes for digital products; delivered codes are locked |
 | Coupons | Percentage or fixed discounts, minimums, caps, usage limits, date windows |
 | Orders | Full order detail, status control, notification history |
 | Parcels | Create parcels for physical orders, assign couriers, tracking numbers and a full status timeline |
@@ -107,10 +106,10 @@ Sign in at `/admin/` with the administrator account you created.
 The customer sends money to your merchant number, then submits the transaction ID and the number they
 sent from. The order is marked *payment submitted* and waits. **Nothing is auto-verified.** You compare
 the transaction ID with your merchant statement in *Admin → Payments* and approve or reject it.
-Approving moves the order to processing and, for digital products, releases the codes.
+Approving moves the order to processing, where it waits for packing and dispatch.
 
 **Cash on delivery**
-Available for physical products only; hidden automatically for digital-only carts.
+Available for physical products only; hidden automatically for carts with nothing to ship.
 
 **Automatic gateways**
 Gateways are modular. Credentials are stored server-side and are never sent to the browser.
@@ -183,13 +182,6 @@ fake or duplicated orders. It is governed by a **master switch** and per-rule to
 Existing installs create the new columns/tables automatically on the first request (stamped in
 `settings`), so no manual migration is needed. Fresh installs create them during setup.
 
-## Digital product delivery
-
-Codes are stored in `product_codes` and issued inside a locked database transaction
-(`SELECT … FOR UPDATE`). A code moves from `available` to `used` exactly once and is bound to one
-order item, so the same code can never reach two customers. Delivery only happens after a payment has
-been verified. Delivered codes cannot be deleted from the admin panel.
-
 ---
 
 ## Notifications
@@ -216,7 +208,7 @@ Key guarantees:
 - Passwords are hashed with `password_hash()` and re-hashed on sign-in when the algorithm improves.
 - OTP codes are likewise only ever stored as hashes, with server-side attempt/resend/rate limits.
 - Sign-in throttling on both the customer and admin login forms.
-- Orders, addresses and digital codes are ownership-checked on every read (IDOR protection).
+- Orders and addresses are ownership-checked on every read (IDOR protection).
 - Phone verification settings, SMS credentials, logs and manual verification are restricted to the
   superadmin role.
 - Errors are logged server-side; visitors only ever see a friendly message. No `@` suppression is
@@ -230,10 +222,10 @@ Key guarantees:
 index.php products.php product.php category.php cart.php checkout.php
 payment.php order-success.php login.php register.php logout.php
 account.php orders.php order-details.php addresses.php wishlist.php
-digital.php password.php track.php support.php help.php page.php
+password.php track.php support.php help.php page.php
 otp.php     phone-verification entry page (register/login/account/checkout)
 
-admin/      dashboard, products, categories, brands, digital-codes, coupons,
+admin/      dashboard, products, categories, brands, coupons,
             orders, payments, payment-methods, payment-gateways, customers,
             telegram, whatsapp, messenger, email, notifications, settings, logs,
             security (phone verification), otp-logs, security-logs
@@ -252,7 +244,7 @@ install/    the web installer
 
 The suites under `/home/user/tests` (not part of the deployable site) cover syntax, include
 dependencies, every storefront page, every admin page, and a full purchase → manual payment →
-admin approval → digital-code delivery cycle including IDOR and CSRF checks.
+admin approval → courier handover cycle including IDOR and CSRF checks.
 
 ```
 bash tests/run-all.sh

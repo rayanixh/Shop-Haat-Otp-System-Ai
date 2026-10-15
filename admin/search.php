@@ -71,7 +71,7 @@ require __DIR__ . '/_layout.php';
         <?php foreach ($results['products'] as $p): $st = sh_stock_status($p); ?>
           <tr><td><div class="sh-prodcell"><img src="<?= e(sh_product_image($p['image'])) ?>" alt="" loading="lazy"><a href="<?= e(sh_url('admin/products.php?edit=' . (int)$p['id'])) ?>"><strong><?= e($p['name']) ?></strong></a></div></td>
             <td class="sh-table__meta"><?= e((string)$p['sku']) ?: '—' ?></td><td><?= sh_money($p['price']) ?></td>
-            <td><?= $p['product_type'] === 'digital' ? '<span class="sh-badge sh-badge--muted">Digital</span>' : (int)$p['stock'] . ' <span class="sh-badge ' . e($st['class']) . '">' . e($st['label']) . '</span>' ?></td></tr>
+            <td><?= (int)$p['stock'] ?> <span class="sh-badge <?= e($st['class']) ?>"><?= e($st['label']) ?></span></td></tr>
         <?php endforeach; ?></tbody></table></div><?php endif; ?>
     </div>
     <div class="sh-panel">

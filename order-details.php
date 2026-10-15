@@ -33,7 +33,6 @@ if ($order === null || !sh_order_can_view($order)) {
 
 $items = sh_order_items($orderId);
 $payment = sh_order_latest_payment($orderId);
-$codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
 $timeline = sh_order_timeline($order, $payment, $items);
 
 $accountPage = 'orders';
@@ -60,21 +59,6 @@ require_once SH_ROOT . '/includes/header.php';
     <?php endif; ?>
     <div style="margin-top:14px"><?= sh_order_timeline_render($timeline) ?></div>
   </div>
-
-  <?php if ($codes): ?>
-    <div class="sh-section">
-      <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('key', 18) ?> Digital Codes</h2></div>
-      <div class="sh-codebox">
-        <?php foreach ($codes as $c): ?>
-          <div class="sh-codebox__row">
-            <span class="sh-codebox__label"><?= e($c['product_name']) ?></span>
-            <span class="sh-codebox__code"><?= e($c['code']) ?></span>
-            <button class="sh-btn sh-btn--sm" type="button" data-copy="<?= e($c['code']) ?>"><?= sh_icon('copy', 13) ?> <span data-copy-label>Copy</span></button>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  <?php endif; ?>
 
   <div class="sh-cartlayout">
     <div>

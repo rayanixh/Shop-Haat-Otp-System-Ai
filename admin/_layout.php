@@ -57,7 +57,6 @@ $nav = [
         ['brands',     'brands.php',            'tag',   'Brands', 0, 'catalog.manage'],
         ['stock',      'stock.php?view=all',    'list',  'Inventory', 0, 'products.stock'],
         ['stock:low',  'stock.php?view=alerts', 'alert', 'Low Stock', 0, 'products.stock'],
-        ['codes',      'digital-codes.php',     'key',   'Digital Codes', 0, 'catalog.manage'],
         ['coupons',    'coupons.php',           'tag',   'Coupons', 0, 'catalog.manage'],
     ],
     'Customers' => [

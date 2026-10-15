@@ -92,7 +92,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'compare_price' => sh_post('compare_price') !== '' ? (float)sh_post('compare_price') : 0,
                 'stock' => max(0, sh_int($_POST['stock'] ?? 0)),
                 'low_stock_threshold' => max(0, sh_int($_POST['low_stock_threshold'] ?? 5)),
-                'product_type' => sh_post('product_type') === 'digital' ? 'digital' : 'physical',
                 'image' => $image ?: null,
                 'is_featured' => !empty($_POST['is_featured']) ? 1 : 0,
                 'is_flash_sale' => !empty($_POST['is_flash_sale']) ? 1 : 0,
@@ -119,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sh_update('products', $applyData, 'id = ?', [$id]);
                     if ($stockChanged) { sh_stock_adjust($id, (int)$data['stock'], $stockReason !== '' ? $stockReason : 'Edited in product form', 'manual'); }
                     $diff = [];
-                    foreach (['name', 'sku', 'category_id', 'brand_id', 'product_type', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
+                    foreach (['name', 'sku', 'category_id', 'brand_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
                         if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) { $diff[$k] = [$before[$k], $data[$k]]; }
                     }
                     if (isset($before['price']) && abs((float)$before['price'] - (float)$data['price']) >= 0.005) {
@@ -132,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sh_flash('success', 'Product "' . $data['name'] . '" updated.');
                 } else {
                     $id = sh_insert('products', $data);
-                    sh_audit('product_created', 'product', $id, (string)$data['name'], null, ['price' => $data['price'], 'stock' => $data['stock'], 'type' => $data['product_type']]);
+                    sh_audit('product_created', 'product', $id, (string)$data['name'], null, ['price' => $data['price'], 'stock' => $data['stock'], 'type' => 'physical']);
                     if ((int)$data['stock'] > 0) { sh_stock_adjust($id, (int)$data['stock'], 'Initial stock', 'initial'); }
                     sh_flash('success', 'Product "' . $data['name'] . '" created.');
                 }
@@ -189,8 +188,7 @@ $total = (int)sh_val("SELECT COUNT(*) FROM products p WHERE $whereSql", $args, 0
 $pages = max(1, (int)ceil($total / $per));
 $page = min($page, $pages);
 $rows = sh_all(
-    "SELECT p.*, c.name AS category_name, b.name AS brand_name,
-            (SELECT COUNT(*) FROM product_codes pc WHERE pc.product_id = p.id AND pc.status = 'available') AS codes_left
+    "SELECT p.*, c.name AS category_name, b.name AS brand_name
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
      LEFT JOIN brands b ON b.id = p.brand_id
@@ -274,8 +272,7 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
             <input class="sh-input" id="p-cmp" name="compare_price" inputmode="decimal" value="<?= e($val('compare_price')) ?>">
             <span class="sh-field__hint">Shown struck through. Leave blank for no discount.</span></div>
           <div class="sh-field"><label class="sh-field__label" for="p-stock">Stock quantity</label>
-            <input class="sh-input" id="p-stock" name="stock" type="number" min="0" step="1" value="<?= e($val('stock', '0')) ?>">
-            <span class="sh-field__hint">Digital products use the codes pool instead.</span></div>
+            <input class="sh-input" id="p-stock" name="stock" type="number" min="0" step="1" value="<?= e($val('stock', '0')) ?>"></div>
         </div>
         <div class="sh-grid3">
           <div class="sh-field"><label class="sh-field__label" for="p-th">Low-stock threshold</label>
@@ -291,17 +288,10 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
               <a class="sh-table__meta" style="margin-left:8px" href="<?= e(sh_url('admin/stock.php?view=all&q=' . urlencode((string)$editing['name']))) ?>">Stock history</a></div></div>
           <?php endif; ?>
         </div>
-        <div class="sh-grid2">
-          <div class="sh-field"><label class="sh-field__label" for="p-type">Product type</label>
-            <select class="sh-select" id="p-type" name="product_type">
-              <option value="physical" <?= $val('product_type', 'physical') === 'physical' ? 'selected' : '' ?>>Physical — shipped to customer</option>
-              <option value="digital" <?= $val('product_type') === 'digital' ? 'selected' : '' ?>>Digital — delivered as a code</option>
-            </select></div>
-          <div class="sh-field"><label class="sh-field__label" for="p-img">Product image</label>
-            <input class="sh-input" id="p-img" type="file" name="image" accept="image/*">
-            <span class="sh-field__hint">PNG, JPG, WebP or GIF. Maximum <?= e(sh_bytes_label(sh_server_upload_limit())) ?> (your server's limit).</span>
-            <span class="sh-field__hint">JPG, PNG or WebP. Max 3 MB.</span></div>
-        </div>
+        <div class="sh-field"><label class="sh-field__label" for="p-img">Product image</label>
+          <input class="sh-input" id="p-img" type="file" name="image" accept="image/*">
+          <span class="sh-field__hint">PNG, JPG, WebP or GIF. Maximum <?= e(sh_bytes_label(sh_server_upload_limit())) ?> (your server's limit).</span>
+          <span class="sh-field__hint">JPG, PNG or WebP. Max 3 MB.</span></div>
         <?php if ($val('image') !== ''): ?>
           <p style="margin:-4px 0 12px"><img src="<?= e(sh_product_image($val('image'))) ?>" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:7px;border:1px solid var(--sh-line)"></p>
         <?php endif; ?>
@@ -382,8 +372,7 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
       <tbody>
       <?php if (!$rows): ?>
         <tr class="sh-table--empty"><td colspan="6">No products match these filters.</td></tr>
-      <?php else: foreach ($rows as $p):
-        $digital = $p['product_type'] === 'digital'; ?>
+      <?php else: foreach ($rows as $p): ?>
         <tr>
           <td>
             <div class="sh-table__cell">
@@ -391,7 +380,6 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
               <div style="min-width:0">
                 <div class="sh-table__name"><?= e($p['name']) ?></div>
                 <div class="sh-table__meta"><?= e($p['sku'] ?: 'No SKU') ?>
-                  <?php if ($digital): ?> · Digital<?php endif; ?>
                   <?php if ((int)$p['is_featured'] === 1): ?> · Featured<?php endif; ?>
                   <?php if ((int)$p['is_flash_sale'] === 1): ?> · Flash<?php endif; ?>
                 </div>
@@ -403,14 +391,9 @@ if (empty($shUploadCheck['ok']) && (int)$shUploadCheck['status'] !== 0): ?>
             <?php if ((float)$p['compare_price'] > (float)$p['price']): ?>
               <div class="sh-table__meta"><s><?= e(sh_money($p['compare_price'])) ?></s></div><?php endif; ?></td>
           <td>
-            <?php if ($digital): ?>
-              <strong style="color:<?= (int)$p['codes_left'] === 0 ? '#c33' : 'inherit' ?>"><?= (int)$p['codes_left'] ?></strong>
-              <div class="sh-table__meta">codes left</div>
-            <?php else: ?>
-              <?php $st = sh_stock_status($p); ?>
-              <strong><?= (int)$p['stock'] ?></strong>
-              <div><span class="sh-badge <?= e($st['class']) ?>" style="font-size:10.5px"><?= e(strtoupper($st['label'])) ?></span></div>
-            <?php endif; ?>
+            <?php $st = sh_stock_status($p); ?>
+            <strong><?= (int)$p['stock'] ?></strong>
+            <div><span class="sh-badge <?= e($st['class']) ?>" style="font-size:10.5px"><?= e(strtoupper($st['label'])) ?></span></div>
           </td>
           <td><span class="sh-statuspill <?= (int)$p['status'] === 1 ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>">
             <?= (int)$p['status'] === 1 ? 'Visible' : 'Hidden' ?></span></td>

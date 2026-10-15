@@ -45,14 +45,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sh_admin_notify('returned', 'Order returned · ' . $order['order_number'], $order['customer_name'] . ' · ' . sh_money($order['total']), 'admin/orders.php?id=' . $id, 'returned-' . $id);
                 }
 
-                // Deliver digital codes when an order reaches a fulfilled state.
-                if (in_array($new, ['processing', 'completed'], true)
-                    && (int)$order['has_digital'] === 1 && (int)$order['codes_delivered'] === 0
-                    && $order['payment_status'] === 'verified') {
-                    $d = sh_deliver_digital_codes($id);
-                    if (!empty($d['ok'])) { sh_flash('success', 'Digital codes delivered (' . count($d['codes'] ?? []) . ').'); }
-                    else { sh_flash('error', 'Codes could not be delivered: ' . ($d['error'] ?? 'unknown error')); }
-                }
                 $event = $new === 'completed' ? 'order_completed' : ($new === 'processing' ? 'order_processing' : null);
                 if ($event !== null) { sh_notify($event, sh_order_notify_payload(sh_order_get($id))); }
                 sh_flash('success', 'Order status updated to ' . sh_status_label($new) . '.');
@@ -113,7 +105,6 @@ if ($viewId > 0) {
         exit;
     }
     $items = sh_order_items($viewId);
-    $codes = sh_order_codes($viewId);
     $payments = sh_all('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC', [$viewId]);
     $shipments = [];
     try {
@@ -205,23 +196,6 @@ if ($viewId > 0) {
           </div>
         </div>
 
-        <?php if ($codes): ?>
-          <div class="sh-panel">
-            <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('key', 17) ?> Delivered digital codes</h2></div>
-            <div class="sh-panel__body" style="display:flex;flex-direction:column;gap:8px">
-              <?php foreach ($codes as $c): ?>
-                <div style="display:flex;gap:10px;align-items:center;background:var(--sh-bg);border-radius:7px;padding:9px 11px">
-                  <div style="flex:1 1 auto;min-width:0">
-                    <div class="sh-table__meta"><?= e((string)$c['product_name']) ?></div>
-                    <code style="font-size:13.5px;font-weight:700;word-break:break-all"><?= e($c['code']) ?></code>
-                  </div>
-                  <span class="sh-table__meta"><?= $c['delivered_at'] ? e(date('d M, h:i A', strtotime($c['delivered_at']))) : '' ?></span>
-                </div>
-              <?php endforeach; ?>
-            </div>
-          </div>
-        <?php endif; ?>
-
         <div class="sh-panel">
           <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Payment records</h2></div>
           <div class="sh-tablewrap">
@@ -253,9 +227,6 @@ if ($viewId > 0) {
         <div class="sh-panel">
           <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('refresh', 17) ?> Update status</h2></div>
           <div class="sh-panel__body">
-            <?php if ($order['payment_status'] !== 'verified' && (int)$order['has_digital'] === 1): ?>
-              <p class="sh-panel__note" style="margin-bottom:10px">Digital codes are only released once the payment is verified.</p>
-            <?php endif; ?>
             <form method="post">
               <?= sh_csrf_field() ?>
               <input type="hidden" name="form" value="status"><input type="hidden" name="id" value="<?= (int)$order['id'] ?>">
@@ -331,8 +302,8 @@ if ($viewId > 0) {
         <div class="sh-panel">
           <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('truck', 17) ?> Delivery</h2></div>
           <div class="sh-panel__body" style="font-size:13.2px;line-height:1.85">
-            <?php if ((int)$order['has_digital'] === 1 && !$order['shipping_address']): ?>
-              <span class="sh-table__meta">Digital order — no shipping required.</span>
+            <?php if (!trim((string)$order['shipping_address'])): ?>
+              <span class="sh-table__meta">No shipping address was recorded for this order.</span>
             <?php else: ?>
               <?= e((string)$order['shipping_address']) ?><br>
               <?= e(trim((string)$order['shipping_area'] . ', ' . (string)$order['shipping_city'] . ' ' . (string)$order['shipping_postcode'], ', ')) ?>
@@ -347,8 +318,8 @@ if ($viewId > 0) {
         <div class="sh-panel">
           <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('truck', 17) ?> Parcels</h2></div>
           <div class="sh-panel__body" style="font-size:13.2px;line-height:1.7">
-            <?php if ((int)$order['has_digital'] === 1 && !$order['shipping_address']): ?>
-              <span class="sh-table__meta">Digital order — no shipping required.</span>
+            <?php if (!trim((string)$order['shipping_address'])): ?>
+              <span class="sh-table__meta">No shipping address was recorded for this order.</span>
             <?php else: ?>
               <?php if (!$shipments): ?>
                 <span class="sh-table__meta">No parcel created for this order yet.</span>

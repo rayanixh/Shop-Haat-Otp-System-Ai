@@ -213,11 +213,6 @@ require_once SH_ROOT . '/includes/header.php';
       <p class="sh-banner__text">10% off your first qualifying order</p>
       <a class="sh-banner__link" href="<?= e(sh_url('products.php?discount=10')) ?>">Grab the deal <?= sh_icon('chevron-right', 13) ?></a>
     </div>
-    <div class="sh-banner__item" style="background:linear-gradient(135deg,#0f766e,#34d399)">
-      <p class="sh-banner__title">Instant digital delivery</p>
-      <p class="sh-banner__text">Codes issued right after payment approval</p>
-      <a class="sh-banner__link" href="<?= e(sh_url('products.php?q=' . urlencode('code'))) ?>">See products <?= sh_icon('chevron-right', 13) ?></a>
-    </div>
   </section>
 
   <!-- New arrivals -->

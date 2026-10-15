@@ -78,7 +78,11 @@ $shWishlist = sh_wishlist_ids();
 
 $off = sh_discount_percent($product['price'], $product['compare_price']);
 $stock = (int)$product['stock'];
-$isDigital = $product['product_type'] === 'digital';
+// Digital products were fulfilled by the code-delivery feature that has been
+// removed. Their rows are left untouched, but they must not take an order the
+// store can no longer fill, so they are shown as not orderable online.
+$isPhysical = (string)($product['product_type'] ?? 'physical') === 'physical';
+$orderable  = $isPhysical && $stock > 0;
 
 /*
  * SEO. The product row carries the owner's custom title, description, keywords,
@@ -180,22 +184,21 @@ require_once SH_ROOT . '/includes/header.php';
 
       <dl class="sh-pdp__rows">
         <div class="sh-pdp__row"><dt>Availability</dt><dd>
-          <?php if ($stock <= 0): ?><span class="sh-badge sh-badge--bad"><?= sh_icon('x-circle', 13) ?> Out of stock</span>
+          <?php if (!$isPhysical): ?><span class="sh-badge sh-badge--warn"><?= sh_icon('info', 13) ?> Not orderable online</span>
+          <?php elseif ($stock <= 0): ?><span class="sh-badge sh-badge--bad"><?= sh_icon('x-circle', 13) ?> Out of stock</span>
           <?php elseif ($stock <= 10): ?><span class="sh-badge sh-badge--warn"><?= sh_icon('clock', 13) ?> Only <?= $stock ?> left</span>
           <?php else: ?><span class="sh-badge sh-badge--ok"><?= sh_icon('check-circle', 13) ?> In stock</span><?php endif; ?>
         </dd></div>
-        <div class="sh-pdp__row"><dt>Product type</dt><dd><?= $isDigital ? 'Digital — instant code delivery' : 'Physical — shipped to your address' ?></dd></div>
         <div class="sh-pdp__row"><dt>Delivery</dt><dd>
-          <?= $isDigital
-            ? 'Delivered to your account immediately after payment verification'
-            : 'Inside city ' . e(sh_money(sh_setting('delivery_fee_inside', '60'))) . ' · Outside city ' . e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?>
+          Inside city <?= e(sh_money(sh_setting('delivery_fee_inside', '60'))) ?> ·
+          Outside city <?= e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?>
         </dd></div>
         <?php if ($product['sku']): ?>
           <div class="sh-pdp__row"><dt>SKU</dt><dd><?= e($product['sku']) ?></dd></div>
         <?php endif; ?>
       </dl>
 
-      <?php if ($stock > 0): ?>
+      <?php if ($orderable): ?>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:700;color:var(--sh-ink-2)">Quantity</span>
           <div class="sh-qty">
@@ -208,10 +211,10 @@ require_once SH_ROOT . '/includes/header.php';
       <?php endif; ?>
 
       <div class="sh-pdp__buy">
-        <button class="sh-btn sh-btn--lg" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" <?= $stock <= 0 ? 'disabled' : '' ?>>
+        <button class="sh-btn sh-btn--lg" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" <?= $orderable ? '' : 'disabled' ?>>
           <?= sh_icon('shopping-cart', 17) ?> Add to Cart
         </button>
-        <button class="sh-btn sh-btn--lg sh-btn--dark" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" data-then-checkout <?= $stock <= 0 ? 'disabled' : '' ?>>
+        <button class="sh-btn sh-btn--lg sh-btn--dark" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" data-then-checkout <?= $orderable ? '' : 'disabled' ?>>
           <?= sh_icon('zap', 17) ?> Buy Now
         </button>
         <button class="sh-btn sh-btn--lg sh-btn--ghost" type="button" data-wishlist="<?= $pid ?>"
@@ -219,6 +222,11 @@ require_once SH_ROOT . '/includes/header.php';
           <?= sh_icon('heart', 17) ?> Wishlist
         </button>
       </div>
+
+      <?php if (!$isPhysical): ?>
+        <div class="sh-alert sh-alert--info"><?= sh_icon('info', 16) ?>
+          <span>This item can no longer be ordered online. Please contact our support team if you need it.</span></div>
+      <?php endif; ?>
 
       <div class="sh-secure-note">
         <?= sh_icon('shield', 16) ?>

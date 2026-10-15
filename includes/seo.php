@@ -810,9 +810,6 @@ function sh_seo_product_schema(array $product, array $meta, array $images = []):
             // The store's real policy, from the same settings the pages show.
             'seller' => ['@id' => sh_seo_base() . '/#organization'],
         ];
-        if (sh_table_has_column('products', 'product_type') && (string)($product['product_type'] ?? 'physical') === 'digital') {
-            $node['offers']['itemCondition'] = 'https://schema.org/NewCondition';
-        }
     }
 
     // AggregateRating only from reviews the store really holds and shows.

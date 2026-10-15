@@ -930,6 +930,172 @@ sh_t('SEO settings and fields are guarded like any other admin data', function (
 });
 
 // ===========================================================================
+// Phase 11 — the Digital Codes feature is gone, not merely hidden
+// ===========================================================================
+
+sh_section('Phase 11 — the "Digital Codes" feature is fully removed');
+
+/** Files that legitimately still name the kept-for-history schema pieces. */
+function sh_digital_schema_keepers(): array
+{
+    return ['install/schema.php', 'install/migrations/2026-10-remove-digital-codes.sql'];
+}
+
+/**
+ * Source with comments removed.
+ *
+ * The removal checks below must judge what a visitor or an admin actually sees
+ * and what the code actually does — not the explanation comments that describe
+ * the removal itself (this file's own subject matter would otherwise fail it).
+ */
+function sh_source_without_comments(string $src): string
+{
+    $out = '';
+    foreach (token_get_all($src) as $t) {
+        if (is_array($t)) {
+            if ($t[0] === T_COMMENT || $t[0] === T_DOC_COMMENT) { continue; }
+            $out .= $t[1];
+            continue;
+        }
+        $out .= $t;
+    }
+    return $out;
+}
+
+sh_t('the removed feature has no page and no admin route left', function () {
+    foreach (['digital.php', 'admin/digital-codes.php'] as $rel) {
+        if (is_file(SH_ROOT . '/' . $rel)) { return $rel . ' still exists'; }
+    }
+    return true;
+});
+
+sh_t('no shipped file still calls the code-delivery API', function () {
+    // The two functions that used to hand codes to a customer, and the order
+    // columns they wrote, must not be referenced by any shipped file. The
+    // schema keeps the columns, so only the schema/migration may name them.
+    $needles = ['sh_order_codes', 'sh_deliver_digital_codes', 'codes_delivered', 'has_digital', 'product_codes'];
+    $keepers = sh_digital_schema_keepers();
+    $offenders = [];
+    foreach (sh_markup_files() as [$rel, $path]) {
+        if (in_array($rel, $keepers, true)) { continue; }
+        $src = sh_source_without_comments((string)file_get_contents($path));
+        foreach ($needles as $n) {
+            if (str_contains($src, $n)) { $offenders[] = $rel . ' → ' . $n; }
+        }
+    }
+    return sh_assert($offenders === [], 'code-delivery references remain: ' . implode('; ', $offenders));
+});
+
+sh_t('no shipped page links to the removed pages', function () {
+    $offenders = [];
+    foreach (sh_markup_files() as [$rel, $path]) {
+        $src = sh_source_without_comments((string)file_get_contents($path));
+        // A link target or a redirect to the deleted routes.
+        if (preg_match('~digital\.php|digital-codes\.php~', $src) === 1) { $offenders[] = $rel; }
+    }
+    return sh_assert($offenders === [], 'links to a deleted page: ' . implode(', ', $offenders));
+});
+
+sh_t('no shipped page advertises instant digital delivery', function () {
+    // Copy check: the feature was customer-facing marketing, so the words must
+    // be gone from the storefront, the FAQ, the policy pages, the admin UI and
+    // the seeded notification matrix.
+    $keepers = sh_digital_schema_keepers();
+    $offenders = [];
+    foreach (sh_markup_files() as [$rel, $path]) {
+        if (in_array($rel, $keepers, true)) { continue; }
+        $src = sh_source_without_comments((string)file_get_contents($path));
+        if (preg_match('~digital delivery|digital product|digital code|browse digital|instant(ly)? digit|delivered digit|digital goods|digital purchases|q=code|gift\+card~i', $src, $m) === 1) {
+            $offenders[] = $rel . ' ("' . $m[0] . '")';
+        }
+    }
+    return sh_assert($offenders === [], 'marketing copy for the removed feature: ' . implode('; ', $offenders));
+});
+
+sh_t('the order timeline no longer promises a code-delivery step', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/order-timeline.php');
+    foreach (['code_delivered', 'codes_delivered', 'is_digital_only', 'Digital'] as $n) {
+        if (str_contains($src, $n)) { return 'order-timeline.php still references ' . $n; }
+    }
+    return true;
+});
+
+sh_t('the seeded notification matrix has no code_delivered event', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (str_contains($src, "'code_delivered'")) { return 'the installer still seeds the code_delivered event'; }
+    if (str_contains($src, 'slide-digital')) { return 'the installer still seeds the digital slider image'; }
+    return true;
+});
+
+sh_t('the removal migration is data-safe and idempotent', function () {
+    $rel = 'install/migrations/2026-10-remove-digital-codes.sql';
+    $path = SH_ROOT . '/' . $rel;
+    if (!is_file($path)) { return $rel . ' is missing'; }
+    $sql = (string)file_get_contents($path);
+    // Strip comments so the safety rules are judged on executable statements.
+    $code = preg_replace('~^\s*--.*$~m', '', $sql) ?? $sql;
+    $forbidden = [
+        'DROP TABLE'    => 'drops a table',
+        'DROP COLUMN'   => 'drops a column',
+        'TRUNCATE'      => 'truncates a table',
+        'DELETE FROM `product_codes`' => 'deletes stored codes',
+        'DELETE FROM `orders`'        => 'deletes orders',
+        'DELETE FROM `notification_logs`' => 'deletes delivery history',
+        'UPDATE `products`'  => 'modifies product rows',
+        'DELETE FROM `products`' => 'deletes product rows',
+    ];
+    foreach ($forbidden as $needle => $why) {
+        if (stripos($code, $needle) !== false) { return $rel . ' ' . $why . ' (' . $needle . ')'; }
+    }
+    if (stripos($code, 'DELETE FROM `promo_slides`') === false) { return $rel . ' does not remove the digital promo slide'; }
+    if (stripos($code, 'DELETE FROM `notifications`') === false) { return $rel . ' does not remove the code_delivered event row'; }
+    if (stripos($code, "'code_delivered'") === false) { return $rel . ' does not name the event it removes'; }
+    // The owner's decision list must be present, read-only.
+    if (stripos($sql, "product_type = 'digital'") === false) { return $rel . ' does not list the digital product rows for the owner'; }
+    if (stripos($sql, 'mysqldump') === false) { return $rel . ' does not tell the owner to take a backup'; }
+    return true;
+});
+
+sh_t('a legacy digital product cannot be sold', function () {
+    // The fulfilment path is gone, so the sale must be refused rather than
+    // accepted and left unfulfillable. Data is untouched: this is code only.
+    $cart = (string)file_get_contents(SH_ROOT . '/includes/cart.php');
+    if (preg_match('~function sh_cart_add~s', $cart) !== 1) { return 'sh_cart_add() is missing'; }
+    $add = substr($cart, (int)strpos($cart, 'function sh_cart_add'), 1400);
+    if (preg_match("~product_type~", $add) !== 1) { return 'sh_cart_add() does not look at product_type'; }
+    if (preg_match("~product_type.*?!==\s*'physical'~s", $add) !== 1) { return 'sh_cart_add() does not refuse a non-physical product'; }
+    $upd = substr($cart, (int)strpos($cart, 'function sh_cart_update'), 1200);
+    if (preg_match("~product_type.*?!==\s*'physical'~s", $upd) !== 1) { return 'sh_cart_update() does not refuse a non-physical product'; }
+    $sum = substr($cart, (int)strpos($cart, 'function sh_cart_summary'), 2600);
+    if (preg_match("~product_type.*?!==\s*'physical'~s", $sum) !== 1) { return 'sh_cart_summary() does not exclude a non-physical line'; }
+
+    $pdp = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (preg_match('~\$orderable\s*=~', $pdp) !== 1) { return 'product.php no longer derives an orderable flag'; }
+    if (strpos($pdp, '$orderable ? \'\' : \'disabled\'') === false) { return 'product.php does not disable the buy buttons for a non-orderable product'; }
+    return true;
+});
+
+sh_t('the storefront layout is balanced for two banner cards and no code box', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    if (preg_match('~\.sh-banner\s*\{[^}]*repeat\(2, 1fr\)~', $css) !== 1) {
+        return '.sh-banner is not a two-card grid';
+    }
+    if (str_contains($css, '.sh-codebox')) { return 'the unused .sh-codebox rules are still shipped'; }
+    // The homepage strip must render exactly the two surviving cards: a third
+    // card in the markup would sit alone on the second row of a 2-column grid.
+    $index = (string)file_get_contents(SH_ROOT . '/index.php');
+    if (preg_match_all('~class="sh-banner__item"~', $index) !== 2) {
+        return 'index.php does not render exactly two banner cards';
+    }
+    if (str_contains($index, 'q=code')) { return 'index.php still links to the removed code search'; }
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    foreach (['card_1', 'card_2', 'card_3'] as $slot) {
+        if (strpos($schema, $slot) === false) { return 'the installer no longer seeds ' . $slot; }
+    }
+    return true;
+});
+
+// ===========================================================================
 // Helpers used by the checks above
 // ===========================================================================
 

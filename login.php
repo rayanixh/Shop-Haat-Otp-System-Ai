@@ -147,7 +147,7 @@ require_once SH_ROOT . '/includes/header.php';
     <?php if ($mode === 'email_password'): ?>
       <div class="sh-auth__mark"><?= sh_icon('mail', 26) ?></div>
       <h1 class="sh-auth__title">Login</h1>
-      <p class="sh-auth__sub">Access your orders, wishlist and digital purchases.</p>
+      <p class="sh-auth__sub">Access your orders, wishlist and saved addresses.</p>
 
       <?php if ($error): ?>
         <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?><span><?= e($error) ?></span></div>

@@ -6,15 +6,14 @@ sh_require_installed();
 $site = (string)sh_setting('site_name', 'ShopHaat');
 $pages = [
     'about' => ['About Us', [
-        'Who we are' => $site . ' is an online marketplace built for shoppers across Bangladesh. We bring electronics, home essentials, fashion, groceries, beauty products and instantly delivered digital goods together in one place.',
+        'Who we are' => $site . ' is an online marketplace built for shoppers across Bangladesh. We bring electronics, home essentials, fashion, groceries and beauty products together in one place.',
         'What we stand for' => 'Every seller on our platform is verified before listing, and every product is checked before dispatch. We publish honest prices, show real customer reviews and never inflate discounts.',
-        'How we deliver' => 'Orders placed before 4:00 PM are usually handed to our courier partners the same working day. Digital products are delivered automatically the moment a payment is verified.',
+        'How we deliver' => 'Orders placed before 4:00 PM are usually handed to our courier partners the same working day. You can follow every stage from the Track Order page.',
     ]],
     'terms' => ['Terms & Conditions', [
         'Acceptance of terms' => 'By browsing or ordering from ' . $site . ' you agree to these terms. If you do not accept them, please do not use the service.',
         'Orders and pricing' => 'All prices are shown in the store currency and include applicable taxes unless stated otherwise. We reserve the right to cancel an order where a product is mispriced, unavailable, or where payment cannot be verified.',
         'Payments' => 'Manual mobile financial service payments are verified by our team before an order is processed. Submitting a transaction ID does not by itself confirm payment. Fraudulent or duplicate transaction IDs will result in the order being cancelled.',
-        'Digital products' => 'Digital codes are single-use and are issued to exactly one customer. Once a code has been delivered it cannot be returned, refunded or exchanged.',
         'Account responsibility' => 'You are responsible for keeping your account password confidential and for all activity carried out through your account.',
     ]],
     'privacy' => ['Privacy Policy', [
@@ -27,13 +26,13 @@ $pages = [
     'returns' => ['Returns & Refunds', [
         'Replacement window' => 'Physical products may be replaced within 7 days of delivery if they arrive damaged, defective or different from what was ordered.',
         'How to request' => 'Contact customer support with your order number and a photo of the item. Once approved, our courier will collect the product and a replacement will be dispatched.',
-        'Non-returnable items' => 'Digital codes, opened consumable goods and personal care products that have been used cannot be returned.',
+        'Non-returnable items' => 'Opened consumable goods and personal care products that have been used cannot be returned.',
         'Refund timing' => 'Where a refund is approved, the amount is returned through the original payment channel within 5 to 10 working days.',
     ]],
     'shipping' => ['Shipping Information', [
         'Delivery areas' => 'We deliver nationwide. Standard charges are ' . sh_money(sh_setting('delivery_fee_inside', '60')) . ' inside the city and ' . sh_money(sh_setting('delivery_fee_outside', '120')) . ' outside the city.',
         'Free delivery' => 'Orders above ' . sh_money(sh_setting('free_delivery_over', '3000')) . ' qualify for free delivery.',
-        'Delivery times' => 'Inside the city: 1–2 working days. Outside the city: 2–4 working days. Digital products: delivered instantly after payment verification.',
+        'Delivery times' => 'Inside the city: 1–2 working days. Outside the city: 2–4 working days.',
         'Order tracking' => 'You can check the current stage of your order at any time from the Track Order page or from My Orders.',
     ]],
 ];

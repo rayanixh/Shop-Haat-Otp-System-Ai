@@ -460,6 +460,51 @@ try {
     $lastSeven = sh_reporting_presets()['last7'];
     reporting_assert_same(7, sh_reporting_range($lastSeven['from'], $lastSeven['to'], 7)['days'], 'Range helper must preserve inclusive day counts');
 
+    // Phase 11 — the Digital Codes feature has been removed from the
+    // application. A row that still carries `product_type = 'digital'` is left
+    // untouched for the owner to decide about, but it must not be sellable:
+    // there is no longer any fulfilment path for it, so an order for one could
+    // never be completed. The refusal is code-level, not a data change.
+    $digitalProduct = sh_insert('products', [
+        'name' => 'Legacy Digital Code Product',
+        'slug' => 'legacy-digital-code-product',
+        'sku' => 'REP-DIGITAL',
+        'price' => 300.00,
+        // Deliberately in stock: stock is not what makes it unsellable.
+        'stock' => 25,
+        'product_type' => 'digital',
+        'image' => 'legacy-digital.jpg',
+        'status' => 1,
+    ]);
+    $digitalAdd = sh_cart_add($digitalProduct, 1);
+    reporting_assert(empty($digitalAdd['ok']), 'A legacy digital product must not be addable to the cart');
+    reporting_assert(
+        str_contains((string)($digitalAdd['error'] ?? ''), 'contact support'),
+        'The refusal must tell the shopper how to proceed'
+    );
+
+    // A line that was already sitting in a cart (added before the feature was
+    // removed, or written by hand) must never be priced into an order.
+    $digitalCartId = sh_cart_id(true);
+    sh_query(
+        'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,1)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)',
+        [$digitalCartId, $digitalProduct]
+    );
+    $digitalSummary = sh_cart_summary();
+    foreach ($digitalSummary['items'] as $line) {
+        reporting_assert(
+            (int)$line['product_id'] !== $digitalProduct,
+            'A legacy digital product line must not be included in the cart summary'
+        );
+    }
+    reporting_assert(
+        str_contains(implode(' | ', $digitalSummary['issues']), 'Legacy Digital Code Product'),
+        'The cart summary must explain why the legacy digital line was dropped'
+    );
+    sh_query('DELETE FROM cart_items WHERE product_id = ?', [$digitalProduct]);
+    sh_query('DELETE FROM products WHERE id = ?', [$digitalProduct]);
+
     echo "Reporting integration passed\n";
 } catch (Throwable $e) {
     fwrite(STDERR, "Reporting integration failed: " . $e->getMessage() . "\n");
