@@ -4,15 +4,42 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - arena/9fe3cb2b-shop-haat-otp-system-ai
+      - arena/403101d1-shop-haat-otp-system-ai
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  security-regression:
+    name: Security regression suite and static scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, gd
+          coverage: none
+      - name: PHP syntax check every file
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
+      - name: Static security scan (fails on high or critical)
+        run: php tools/security-scan.php --fail-on=high
+      - name: Security regression suite
+        run: php tests/security-regression.php
+      - name: Confirm no live credentials are tracked
+        run: |
+          if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
+            echo "::error::config/database.php is tracked by git"
+            exit 1
+          fi
+          echo "config/database.php is not tracked."
+
   reporting-integration:
     name: PHP and MySQL reports and timeline workflow
+    needs: security-regression
     runs-on: ubuntu-latest
     services:
       mysql:
