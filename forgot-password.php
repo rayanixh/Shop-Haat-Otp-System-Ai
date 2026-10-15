@@ -21,8 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $email = trim(sh_post('email'));
 
-    if (sh_login_throttled('forgot_password')) {
-        $error = 'Too many requests. Please wait a few minutes and try again.';
+    // Session limit plus an audit-table limit by IP: six reset requests per
+    // hour per connection. The per-account limit below stays in place too.
+    if (sh_login_throttled('forgot_password')
+        || sh_auth_action_count('password_reset_requested', 3600) >= 6) {
+        $error = 'Too many reset requests. Please wait a while and try again.';
     } elseif ($email === '' || !sh_valid_email($email)) {
         $error = 'Enter a valid email address.';
     } else {

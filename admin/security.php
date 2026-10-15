@@ -38,6 +38,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/security.php');
     }
 
+    if ($form === 'browser_protection') {
+        // Content Security Policy rollout switch. Report-only is the safe first
+        // step on a live store: the browser reports violations to
+        // api/csp-report.php without blocking anything. Move to "Enforce" only
+        // once Admin → Error Logs shows no CSP violations for normal browsing.
+        $cspMode = (string)sh_post('security_csp_mode');
+        if (!in_array($cspMode, ['off', 'report-only', 'enforce'], true)) { $cspMode = 'report-only'; }
+        $frame = trim((string)sh_post('security_frame_ancestors'));
+        if ($frame === '') { $frame = 'self'; }
+        $hsts = sh_post('security_hsts') === 'off' ? 'off' : 'on';
+
+        $old = [
+            'csp'   => sh_setting('security_csp_mode', 'report-only'),
+            'frame' => sh_setting('security_frame_ancestors', 'self'),
+            'hsts'  => sh_setting('security_hsts', 'on'),
+        ];
+        sh_setting_save('security_csp_mode', $cspMode);
+        sh_setting_save('security_frame_ancestors', mb_substr($frame, 0, 200));
+        sh_setting_save('security_hsts', $hsts);
+        sh_audit('security_headers_changed', 'setting', null, 'Browser protection policy', $old, [
+            'csp' => $cspMode, 'frame_ancestors' => $frame, 'hsts' => $hsts,
+        ]);
+        sh_security_log('security_headers_changed', null, ['csp' => $cspMode]);
+        sh_flash('success', 'Browser protection policy saved. It applies to the next page load.');
+        sh_redirect('admin/security.php');
+    }
+
     if ($form === 'general') {
         $num = [
             'otp_length'           => [4, 10],
@@ -165,6 +192,56 @@ require __DIR__ . '/_layout.php';
         <div class="sh-alert sh-alert--info" style="margin:0"><?= sh_icon('info', 17) ?>
           <span>Phone verification is currently disabled.</span></div>
       <?php endif; ?>
+    </div>
+  </div>
+</form>
+
+<!-- Browser protection: security headers and Content Security Policy -->
+<?php $cspMode = (string)sh_setting('security_csp_mode', 'report-only'); ?>
+<form method="post" novalidate>
+  <?= sh_csrf_field() ?>
+  <input type="hidden" name="form" value="browser_protection">
+  <div class="sh-panel">
+    <div class="sh-panel__head">
+      <h2 class="sh-panel__title"><?= sh_icon('shield', 17) ?> Browser protection</h2>
+      <span class="sh-badge" style="margin-left:auto">
+        <?= $cspMode === 'enforce' ? 'CSP: enforcing' : ($cspMode === 'off' ? 'CSP: off' : 'CSP: report only') ?>
+      </span>
+    </div>
+    <div class="sh-panel__body">
+      <p class="sh-panel__note">
+        These headers tell every browser how to handle this site. They are already active for
+        clickjacking, MIME sniffing and referrer leakage. The Content Security Policy is the part that
+        needs tuning, so it starts in <strong>report only</strong> mode: violations are recorded but
+        nothing is blocked.
+      </p>
+      <div class="sh-grid3">
+        <div class="sh-field">
+          <label class="sh-field__label" for="sc-csp">Content Security Policy</label>
+          <select class="sh-select" id="sc-csp" name="security_csp_mode">
+            <option value="report-only" <?= $cspMode === 'report-only' ? 'selected' : '' ?>>Report only (recommended first)</option>
+            <option value="enforce" <?= $cspMode === 'enforce' ? 'selected' : '' ?>>Enforce (block violations)</option>
+            <option value="off" <?= $cspMode === 'off' ? 'selected' : '' ?>>Off (troubleshooting only)</option>
+          </select>
+          <span class="sh-field__hint">Check Admin → Error Logs for <code>CSP violation</code> lines before enforcing.</span>
+        </div>
+        <div class="sh-field">
+          <label class="sh-field__label" for="sc-frame">Pages allowed to embed this site</label>
+          <input class="sh-input" id="sc-frame" name="security_frame_ancestors"
+                 value="<?= e((string)sh_setting('security_frame_ancestors', 'self')) ?>"
+                 placeholder="self">
+          <span class="sh-field__hint"><code>self</code> blocks clickjacking. Add an origin only if you embed the storefront elsewhere.</span>
+        </div>
+        <div class="sh-field">
+          <label class="sh-field__label" for="sc-hsts">HTTPS-only (HSTS)</label>
+          <select class="sh-select" id="sc-hsts" name="security_hsts">
+            <option value="on" <?= sh_setting('security_hsts', 'on') === 'on' ? 'selected' : '' ?>>On when the site is on HTTPS</option>
+            <option value="off" <?= sh_setting('security_hsts', 'off') === 'off' ? 'selected' : '' ?>>Off</option>
+          </select>
+          <span class="sh-field__hint">Tells browsers to keep using HTTPS for six months. Only applies over HTTPS.</span>
+        </div>
+      </div>
+      <button class="sh-btn" type="submit" style="margin-top:12px"><?= sh_icon('check', 15) ?> Save browser protection</button>
     </div>
   </div>
 </form>
@@ -420,7 +497,7 @@ require __DIR__ . '/_layout.php';
 </div>
 <?php endif; ?>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   // Phone Verification master switch: confirm, then submit the toggle form.
   var toggle = document.querySelector('[data-phone-verification-toggle]');

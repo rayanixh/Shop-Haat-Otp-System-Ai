@@ -171,7 +171,7 @@ function sh_product_search(array $f): array
     $offset = ($page - 1) * $perPage;
 
     $items = $total === 0 ? [] : sh_all(
-        'SELECT ' . SH_PRODUCT_SELECT . " FROM products p WHERE $whereSql ORDER BY $order LIMIT $perPage OFFSET $offset",
+        'SELECT ' . SH_PRODUCT_SELECT . " FROM products p WHERE $whereSql ORDER BY $order LIMIT $perPage OFFSET $offset", // @security-scan-ignore sql_interpolation_unproven — $order is a value of the literal $sortMap allowlist; $perPage is clamped to 4..60; $offset is derived from it
         $params
     );
 

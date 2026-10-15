@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim(sh_post('email'));
         $password = (string)($_POST['password'] ?? '');
 
-        if (sh_login_throttled('user_login')) {
+        if (sh_login_throttled('user_login') || sh_auth_throttle_blocked('login_failed', $email)) {
             $error = 'Too many failed attempts. Please wait a few minutes and try again.';
         } elseif ($email === '' || $password === '') {
             $error = 'Enter your email address and password.';
@@ -63,11 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sh_redirect($target);
                 }
                 if ($u !== null && $u['status'] !== 'active') {
+                    // A blocked account is not a password guessing signal, so it
+                    // is logged but does not consume the throttle budget.
                     sh_security_log('login_failed', (int)$u['id'], ['email' => mb_substr($email, 0, 3) . '***', 'reason' => 'blocked']);
                     $error = 'This account has been blocked. Please contact customer support.';
                 } else {
-                    sh_login_fail('user_login');
-                    sh_security_log('login_failed', null, ['email' => mb_substr($email, 0, 3) . '***']);
+                    sh_auth_failure_record('user_login', 'login_failed', $email);
                     $error = 'Invalid email or password.';
                 }
             } catch (Throwable $e) {
@@ -91,8 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $u = sh_find_user_by_phone($phone);
                     if ($u === null) {
-                        sh_login_fail('user_login');
-                        sh_security_log('login_failed', null, ['phone' => sh_phone_mask($phone), 'reason' => 'unknown']);
+                        sh_auth_failure_record('user_login', 'login_failed', '', null, ['phone' => sh_phone_mask($phone), 'reason' => 'unknown']);
                         $error = 'No account was found with this phone number. Please sign up instead.';
                     } elseif ($u['status'] !== 'active') {
                         sh_security_log('login_failed', (int)$u['id'], ['phone' => sh_phone_mask($phone), 'reason' => 'blocked']);

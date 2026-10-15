@@ -297,7 +297,7 @@ require __DIR__ . '/_layout.php';
   </div>
 </div>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   var input = document.getElementById('st-op');
   var form = input && input.closest('form');

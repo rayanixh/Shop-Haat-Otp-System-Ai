@@ -16,9 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = sh_post('email');
     $password = (string)($_POST['password'] ?? '');
 
-    if (sh_login_throttled('admin_login', 5, 900)) {
+    // Two independent limits: the session counter (fast) and the audit table
+    // (survives a discarded cookie, which is how brute force is normally done).
+    if (sh_login_throttled('admin_login', 5, 900)
+        || sh_auth_throttle_blocked('admin_login_failed', $email, 15, 5, 900)) {
         $error = 'Too many failed sign-in attempts. Please wait 15 minutes before trying again.';
-        sh_log_line('security', 'Admin login throttled for ' . $email);
+        sh_log_line('security', 'Admin login throttled for ' . mb_substr($email, 0, 3) . '***');
     } elseif ($email === '' || $password === '') {
         $error = 'Enter your email address and password.';
     } else {
@@ -32,8 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $r = sh_post('redirect', sh_get('redirect'));
                 sh_redirect($r !== '' && strpos($r, '//') === false ? ltrim($r, '/') : 'admin/dashboard.php');
             }
-            sh_login_fail('admin_login');
-            sh_log_line('security', 'Failed admin login for ' . $email);
+            sh_auth_failure_record('admin_login', 'admin_login_failed', $email);
+            sh_log_line('security', 'Failed admin login for ' . mb_substr($email, 0, 3) . '***');
             $error = 'Invalid email address or password.';
         } catch (Throwable $e) {
             sh_log_exception($e, 'admin-login');

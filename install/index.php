@@ -24,6 +24,36 @@ if ($shState['status'] === 'ok' && sh_is_locked()) {
     sh_redirect('index.php');
 }
 
+// ---------------------------------------------------------------------------
+// Installer access decision (see includes/install-guard.php for the rationale).
+//
+// A store that was installed before resolves to "repair" mode. In that mode the
+// installer will only re-create missing tables over the SAVED connection: it
+// ignores every database credential in the request, never modifies an existing
+// administrator account, and never rewrites config/database.php. Full setup
+// (or an administrator reset) additionally requires the owner's unlock token.
+// ---------------------------------------------------------------------------
+require_once SH_ROOT_INSTALL . '/includes/install-guard.php';
+
+$shUnlockGiven = (string)($_POST['install_unlock'] ?? '');
+$shUnlockOk = $shUnlockGiven !== '' && sh_install_unlock_matches($shUnlockGiven);
+$shAccess = sh_install_access(
+    sh_is_locked(),
+    sh_db_config() !== null,
+    $shUnlockOk,
+    sh_install_unlock_configured()
+);
+// Unlock attempts are rate limited per IP so the token cannot be brute forced
+// from the open internet.
+$shUnlockThrottled = !$shUnlockOk && $shUnlockGiven !== ''
+    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    sh_log_line('install', 'Installer accessed: mode=' . $shAccess['mode']
+        . ' state=' . (string)$shState['status']
+        . ' unlock_supplied=' . ($shUnlockGiven !== '' ? 'yes' : 'no'));
+}
+
 $errors = [];
 $notice = '';
 $done = false;
@@ -70,6 +100,109 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Your session expired. Please submit the form again.';
     } elseif (!$reqOk) {
         $errors[] = 'Please resolve the server requirement issues listed above before installing.';
+    } elseif (($_POST['form'] ?? '') === 'unlock') {
+        // A deliberate unlock attempt: give the owner explicit feedback instead
+        // of silently running a repair.
+        if ($shUnlockThrottled) {
+            $errors[] = 'Too many unlock attempts from this address. Please wait 15 minutes and try again.';
+        } elseif ($shUnlockOk) {
+            $notice = 'Installer unlocked. This applies to the submission you send next, so keep the page open and '
+                . 'complete the form below.';
+        } else {
+            $errors[] = 'That unlock text did not match the file on the server. '
+                . 'Check the file content — the whole line is compared, including case.';
+        }
+    } elseif ($shAccess['mode'] === 'repair') {
+        // ------------------------------------------------------------------
+        // Repair only. Nothing from the request body is used to reach the
+        // database, so an anonymous visitor cannot redirect this store at a
+        // database of their choosing or add themselves as an administrator.
+        // ------------------------------------------------------------------
+        if ($shAccess['can_repair'] === false) {
+            $errors[] = 'The installation lock file is present but config/database.php is missing, so there is '
+                . 'no saved connection to repair. Restore config/database.php from your backup, or unlock the '
+                . 'installer as the store owner to configure a new database.';
+        } else {
+            $saved = sh_db_config();
+            try {
+                // Step 1: reach the server with the SAVED credentials.
+                $pdo = sh_db_connect($saved['host'], null, $saved['user'], $saved['pass'], (int)$saved['port'], $saved['charset']);
+                // Step 2: the database named in the saved configuration may
+                // itself be gone (dropped or renamed by the host). Recreate only
+                // that name.
+                $exists = $pdo->prepare('SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?');
+                $exists->execute([$saved['name']]);
+                if ((int)$exists->fetchColumn() === 0) {
+                    $pdo->exec('CREATE DATABASE `' . str_replace('`', '', (string)$saved['name'])
+                        . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+                }
+                $pdo = sh_db_connect($saved['host'], $saved['name'], $saved['user'], $saved['pass'], (int)$saved['port'], $saved['charset']);
+
+                // Step 3: re-create anything missing. CREATE TABLE IF NOT EXISTS
+                // never drops or alters a table that already holds data.
+                foreach (sh_schema_sql() as $ddl) { $pdo->exec($ddl); }
+
+                $missing = [];
+                $chk = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?');
+                foreach (sh_schema_tables() as $t) {
+                    $chk->execute([$saved['name'], $t]);
+                    if ((int)$chk->fetchColumn() === 0) { $missing[] = $t; }
+                }
+                if ($missing) {
+                    throw new RuntimeException('Tables not created: ' . implode(', ', $missing));
+                }
+
+                // Step 4: existing administrators are never touched. Only a
+                // store that has no administrator at all may create its first
+                // one — that state can only be produced through real database
+                // access, which an anonymous visitor does not have.
+                $adminCount = (int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn();
+                if ($adminCount > 0) {
+                    $done = true;
+                    $notice = 'Database repaired against ' . $saved['name']
+                        . '. The existing administrator account was left untouched — sign in with your usual credentials.';
+                } else {
+                    // A first administrator for an empty admins table. The
+                    // submitted values are validated exactly as on a fresh
+                    // install and inserted once (no ON DUPLICATE KEY UPDATE).
+                    $v = new ShValidator($_POST);
+                    $v->required('admin_email', 'Admin email')->email('admin_email', 'Admin email')
+                      ->required('admin_password', 'Admin password')->password('admin_password')
+                      ->matches('admin_password2', 'admin_password', 'Password confirmation');
+                    if ($v->fails()) {
+                        $errors = array_merge($errors, array_values($v->errors()));
+                        $errors[] = 'The database was repaired, but no administrator exists yet. '
+                            . 'Enter the email address and password for the first administrator account.';
+                    } else {
+                        $ins = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status) VALUES (?,?,?,?,?)');
+                        $ins->execute([
+                            'Store Administrator',
+                            trim((string)$_POST['admin_email']),
+                            password_hash((string)$_POST['admin_password'], PASSWORD_DEFAULT),
+                            'superadmin',
+                            'active',
+                        ]);
+                        sh_log_line('install', 'Repair created the first administrator account.');
+                        $done = true;
+                        $notice = 'Database repaired against ' . $saved['name'] . ' and the store administrator was created.';
+                    }
+                }
+
+                if ($done) {
+                    file_put_contents(SH_LOCK_FILE, json_encode([
+                        'installed_at' => date('c'),
+                        'version'      => '1.0.0',
+                        'php'          => PHP_VERSION,
+                        'repair'       => true,
+                    ], JSON_PRETTY_PRINT));
+                }
+            } catch (Throwable $e) {
+                sh_log_exception($e, 'install-repair');
+                $errors[] = 'The repair could not reach the saved database. Your configuration was not changed. '
+                    . 'Check that the MySQL server is running and that the database user in config/database.php '
+                    . 'still exists.';
+            }
+        }
     } else {
         $v = new ShValidator($_POST);
         $v->required('db_host', 'Database host')
@@ -310,8 +443,96 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
     </ul>
   </div>
 
+<?php if ($shAccess['mode'] === 'repair'): ?>
+  <div class="card">
+    <h2>Restricted: this store is already installed</h2>
+    <p style="margin:0 0 10px;font-size:13.5px">
+      A ShopHaat installation is already registered in this folder, so the installer will not accept new database
+      credentials or create an administrator account from a web form. That restriction is what stops a stranger
+      from taking over your store while the database is briefly unreachable.
+    </p>
+    <p style="margin:0 0 4px;font-size:13.5px"><strong>What you can do here:</strong></p>
+    <ul style="margin:0 0 14px;padding-left:18px;font-size:13.5px">
+      <li>Re-create any missing database tables over your saved connection (<code>config/database.php</code>).</li>
+      <li>Nothing else. Existing tables, orders and administrator accounts are left exactly as they are.</li>
+    </ul>
+    <?php if ($shAccess['can_repair']): ?>
+      <form method="post" novalidate>
+        <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+        <input type="hidden" name="form" value="repair">
+        <div class="grid" style="margin-bottom:14px">
+          <div>
+            <label for="admin_email">First administrator email (only used if no administrator exists)</label>
+            <input class="f-in" id="admin_email" name="admin_email" type="email" value="<?= e($form['admin_email']) ?>">
+          </div>
+          <div>
+            <label for="admin_password">Password for that account</label>
+            <input class="f-in" id="admin_password" name="admin_password" type="password" minlength="8"
+                   autocomplete="new-password" placeholder="At least 8 characters, letters and numbers">
+          </div>
+          <div>
+            <label for="admin_password2">Confirm password</label>
+            <input class="f-in" id="admin_password2" name="admin_password2" type="password" autocomplete="new-password">
+          </div>
+        </div>
+        <p class="hint" style="margin:0 0 12px">
+          These fields are ignored completely when an administrator account already exists.
+        </p>
+        <button class="btn" type="submit" <?= $reqOk ? '' : 'disabled' ?>>Repair database tables</button>
+      </form>
+      <?php if ($shState['status'] !== 'ok'): ?>
+        <p class="hint" style="margin-top:10px">
+          Detected state: <strong><?= e($shState['status']) ?></strong>.
+          The repair uses the connection already stored in <code>config/database.php</code>.
+        </p>
+      <?php endif; ?>
+      <p class="hint" style="margin-top:10px">
+        If a repair reports that no administrator exists, the page will ask for the first administrator's
+        email address and password. That can only happen when the <code>admins</code> table is completely empty.
+      </p>
+    <?php else: ?>
+      <div class="alert alert--bad" style="margin-bottom:0">
+        <strong>config/database.php is missing</strong>, so there is no saved connection to repair.
+        Restore that file from your backup and reload this page.
+      </div>
+    <?php endif; ?>
+  </div>
+
+  <div class="card">
+    <h2>Store owner: unlock full setup</h2>
+    <p style="margin:0 0 10px;font-size:13.5px">
+      Re-installing, moving to a different database or resetting the administrator password requires proof that you
+      control the server files, not just the website address.
+    </p>
+    <ol style="margin:0 0 14px;padding-left:20px;font-size:13px;color:#3a4152">
+      <?php foreach (sh_install_unlock_instructions() as $line): ?><li style="margin-bottom:6px"><?= $line ?></li><?php endforeach; ?>
+    </ol>
+    <?php if (!$shAccess['unlock_configured']): ?>
+      <div class="alert alert--bad">
+        No unlock file was found. Create it as described above, then reload this page.
+      </div>
+    <?php endif; ?>
+    <form method="post" novalidate>
+      <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+      <input type="hidden" name="form" value="unlock">
+      <label for="install_unlock">Unlock text (contents of the file)</label>
+      <input class="f-in" id="install_unlock" name="install_unlock" autocomplete="off" spellcheck="false"
+             placeholder="Paste the exact line you saved">
+      <button class="btn" type="submit" style="margin-top:12px">Unlock the installer</button>
+    </form>
+  </div>
+<?php else: ?>
+  <?php if ($shAccess['mode'] === 'unlocked'): ?>
+    <div class="alert alert--ok">
+      <strong>Owner unlock accepted.</strong> Changes made here affect an installed store. The unlock text is
+      required again for the next submission, so finish in this same page.
+    </div>
+  <?php endif; ?>
   <form method="post" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+    <?php if ($shAccess['mode'] === 'unlocked'): ?>
+      <input type="hidden" name="install_unlock" value="<?= e($shUnlockGiven) ?>">
+    <?php endif; ?>
     <div class="card">
       <h2>Database connection</h2>
       <div class="grid">
@@ -383,10 +604,11 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 
     <button class="btn" type="submit" <?= $reqOk ? '' : 'disabled' ?>>Install ShopHaat</button>
   </form>
+<?php endif; // end restricted-mode / full-form branch ?>
 <?php endif; ?>
 </div>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   var pw = document.getElementById('admin_password');
   var pw2 = document.getElementById('admin_password2');

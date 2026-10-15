@@ -51,9 +51,9 @@ $shTransition = sh_transition_config();
 <?php endif; ?>
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
 <?= sh_theme_style_tag() ?>
-<script>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
+<script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
 <?php if (!empty($structuredData)): ?>
-<script type="application/ld+json"><?= json_encode($structuredData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
+<script type="application/ld+json"<?= sh_csp_nonce_attr() ?>><?= json_encode($structuredData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
 <?php endif; ?>
 <?= sh_transition_head($shTransition) ?>
 </head>

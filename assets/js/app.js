@@ -289,10 +289,13 @@
               return;
             }
             suggestBox.innerHTML = r.items.map(function (it) {
-              return '<a class="sh-suggest__item" href="' + it.url + '">' +
-                '<img class="sh-suggest__img" src="' + it.image + '" alt="" loading="lazy">' +
+              // Attribute values come from the server, but they are escaped here
+              // as well: an unescaped quote in a product slug or image path would
+              // otherwise be able to close the attribute and add a handler.
+              return '<a class="sh-suggest__item" href="' + esc(it.url) + '">' +
+                '<img class="sh-suggest__img" src="' + esc(it.image) + '" alt="" loading="lazy">' +
                 '<span class="sh-suggest__name"></span>' +
-                '<span class="sh-suggest__price">' + it.price + '</span></a>';
+                '<span class="sh-suggest__price">' + esc(it.price) + '</span></a>';
             }).join('');
             $$('.sh-suggest__name', suggestBox).forEach(function (el, i) { el.textContent = r.items[i].name; });
             suggestBox.hidden = false;
@@ -1591,4 +1594,49 @@
       });
     });
   });
+})();
+
+/* ==========================================================================
+   CSP-safe replacements for former inline event handlers.
+
+   The Content Security Policy restricts script execution to this file plus a
+   per-request nonce, so `onclick="…"` / `onchange="…"` attributes are no longer
+   allowed anywhere. These delegated listeners keep the original behaviour:
+   they run in the capture phase so the action happens before the element's own
+   handlers, exactly like the attribute did.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  /* <input readonly data-select-on-click> — click selects the whole value so it
+     can be copied, matching the previous onclick="this.select()". */
+  document.addEventListener('click', function (ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[data-select-on-click]') : null;
+    if (el && typeof el.select === 'function') { el.select(); }
+  }, true);
+
+  /* <select data-navigate-on-change> — go to the chosen option's value. */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-navigate-on-change')) { return; }
+    if (el.value) { window.location.href = el.value; }
+  }, true);
+
+  /* <select data-navigate-prefix="…" data-navigate-suffix="…"> — build the
+     target URL from the selected value (used for provider/SEO type pickers). */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-navigate-prefix')) { return; }
+    var target = el.getAttribute('data-navigate-prefix') + String(el.value)
+               + (el.getAttribute('data-navigate-suffix') || '');
+    if (el.value) { window.location.href = target; }
+  }, true);
+
+  /* <select data-submit-form-on-change> — submit the surrounding form. */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-submit-form-on-change')) { return; }
+    var form = el.form || (el.closest ? el.closest('form') : null);
+    if (form) { form.submit(); }
+  }, true);
 })();

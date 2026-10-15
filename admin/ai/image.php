@@ -31,7 +31,7 @@ require dirname(__DIR__) . '/_layout.php';
       <div class="sh-panel__body">
         <div class="sh-field">
           <label class="sh-field__label" for="img-pick">Product</label>
-          <select class="sh-select" id="img-pick" onchange="if(this.value)location.href=this.value">
+          <select class="sh-select" id="img-pick" data-navigate-on-change>
             <option value="">Select…</option>
             <?php foreach ($list as $r): ?>
               <option value="<?= e(sh_url('admin/ai/image.php?id=' . (int)$r['id'])) ?>"

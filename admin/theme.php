@@ -146,7 +146,7 @@ require __DIR__ . '/_layout.php';
 </form>
 <?php endif; ?>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   var form = document.getElementById('sh-theme-form');
   var preview = document.getElementById('sh-theme-preview');

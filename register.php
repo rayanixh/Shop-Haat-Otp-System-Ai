@@ -27,6 +27,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $redirect = sh_customer_return_target(sh_post('redirect', $redirect), '');
 
+    // Signup abuse limit. Counted from the audit table by client IP, so it
+    // cannot be bypassed by clearing cookies. Five accounts per hour is far
+    // above any genuine customer's pattern.
+    $signupBlocked = sh_auth_action_count('account_created', 3600) >= 5;
+
     if ($mode === 'email_password') {
         $v = new ShValidator($_POST);
         $v->required('name', 'Full name')->minLen('name', 2, 'Full name')->maxLen('name', 110, 'Full name')
@@ -35,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->matches('password2', 'password', 'Password confirmation');
         if (empty($_POST['terms'])) { $v->custom('terms', false, 'You must accept the terms and conditions.'); }
         $errors = $v->errors();
+        if ($signupBlocked) { $errors['general'] = 'Too many accounts have been created from this connection. Please try again later.'; }
 
         if (!$errors) {
             try {
@@ -77,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->required('phone', 'Phone number')->phone('phone', 'Phone number');
         if (empty($_POST['terms'])) { $v->custom('terms', false, 'You must accept the terms and conditions.'); }
         $errors = $v->errors();
+        if ($signupBlocked) { $errors['general'] = 'Too many accounts have been created from this connection. Please try again later.'; }
 
         if (!$errors) {
             $phone = sh_phone_normalize($form['phone']);

@@ -109,7 +109,7 @@ function sh_transition_body_attrs(array $cfg): string
 function sh_transition_head(array $cfg): string
 {
     if (!$cfg['enabled']) { return ''; }
-    return '<script>(function(){try{var r=sessionStorage.getItem("sh-pt");if(!r)return;var o=JSON.parse(r);'
+    return '<script' . sh_csp_nonce_attr() . '>(function(){try{var r=sessionStorage.getItem("sh-pt");if(!r)return;var o=JSON.parse(r);'
         . 'if(o&&Date.now()-o.t<8000){document.documentElement.className+=" sh-pt-hold";}'
         . 'else{sessionStorage.removeItem("sh-pt");}}catch(e){}})();</script>';
 }

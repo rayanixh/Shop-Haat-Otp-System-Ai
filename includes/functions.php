@@ -198,11 +198,100 @@ function sh_unique_slug(string $table, string $base, int $ignoreId = 0): string
     $try = $slug;
     $i = 2;
     while (true) {
-        $row = sh_one("SELECT id FROM `$table` WHERE slug = ? AND id <> ? LIMIT 1", [$try, $ignoreId]);
+        $row = sh_one("SELECT id FROM `$table` WHERE slug = ? AND id <> ? LIMIT 1", [$try, $ignoreId]); // @security-scan-ignore sql_interpolation — $table is an internal identifier, never request data
         if ($row === null) { return $try; }
         $try = $slug . '-' . $i++;
         if ($i > 200) { return $slug . '-' . bin2hex(random_bytes(3)); }
     }
+}
+
+/**
+ * Allowlist HTML sanitizer for the few places where markup is intentional
+ * (AI-generated article drafts).
+ *
+ * A regex approach was used before and could be bypassed: strip_tags() keeps
+ * attributes, and "<p/onmouseover=…>" is not matched by a pattern that expects
+ * whitespace after the tag name, while HTML parsers do treat "/" as an
+ * attribute separator. This walks the document instead, removing every element
+ * that is not on the list and every attribute on the ones that are, so the
+ * result can be rendered with innerHTML without creating a script sink.
+ *
+ * @param array<int,string> $allowed element names, lower case
+ */
+function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'h2', 'h3', 'h4']): string
+{
+    $html = trim($html);
+    if ($html === '') { return ''; }
+    if (!class_exists('DOMDocument')) {
+        // Conservative fallback: text only, no markup at all.
+        return trim(strip_tags($html));
+    }
+
+    $allow = array_flip(array_map('strtolower', $allowed));
+    $doc = new DOMDocument('1.0', 'UTF-8');
+    $prev = libxml_use_internal_errors(true);
+    $fatal = false;
+    try {
+        // The XML encoding hint keeps UTF-8 intact without mbstring entities.
+        $loaded = $doc->loadHTML('<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        // loadHTML() can report success and still return a truncated tree: past
+        // its nesting limit (256 levels) it drops everything deeper and merely
+        // logs "Excessive depth in document", so the words at the end of a
+        // deeply nested description would vanish silently. Any error-level
+        // parse message means the tree cannot be trusted, and the text-only
+        // fallback below keeps the content instead of discarding it.
+        foreach (libxml_get_errors() as $error) {
+            if ($error->level >= LIBXML_ERR_ERROR) { $fatal = true; break; }
+        }
+    } catch (Throwable $e) {
+        $loaded = false;
+    } finally {
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+    }
+    if (!$loaded || $fatal || $doc->documentElement === null) {
+        return trim(strip_tags($html));
+    }
+
+    // Collect first, then modify: mutating a live DOMNodeList skips siblings.
+    $nodes = [];
+    foreach ($doc->getElementsByTagName('*') as $node) { $nodes[] = $node; }
+    foreach ($nodes as $node) {
+        if (!($node instanceof DOMElement)) { continue; }
+        $name = strtolower($node->tagName);
+        if (!isset($allow[$name])) {
+            // Keep the words the writer produced, drop the element entirely.
+            // Removing the node (rather than unwrapping it) also discards any
+            // script/style content it may have carried.
+            if (in_array($name, ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math'], true)) {
+                if ($node->parentNode) { $node->parentNode->removeChild($node); }
+            } else {
+                $text = $doc->createTextNode($node->textContent ?? '');
+                if ($node->parentNode) { $node->parentNode->replaceChild($text, $node); }
+            }
+            continue;
+        }
+        while ($node->attributes !== null && $node->attributes->length > 0) {
+            $node->removeAttribute($node->attributes->item(0)->nodeName);
+        }
+    }
+
+    // Drop the encoding hint that was prepended to make loadHTML() read UTF-8,
+    // so it never becomes part of the stored content.
+    foreach ($doc->childNodes as $child) {
+        if ($child->nodeType === XML_PI_NODE) { $doc->removeChild($child); }
+    }
+
+    $out = '';
+    foreach ($doc->childNodes as $child) { $out .= $doc->saveHTML($child); }
+    $out = preg_replace('/<\?xml[^>]*\?>/i', '', $out) ?? $out;
+    $out = trim($out);
+    if ($out === '') {
+        // The DOM pass produced nothing. Rather than return empty and lose the
+        // writer's words, fall back to plain text while dropping all markup.
+        return trim(strip_tags($html));
+    }
+    return $out;
 }
 
 function sh_excerpt(?string $text, int $len = 120): string
@@ -823,7 +912,7 @@ function sh_user_field(int $userId, string $field): ?string
 {
     $allow = ['name', 'email', 'phone'];
     if (!in_array($field, $allow, true)) { return null; }
-    return (string)sh_val("SELECT `$field` FROM users WHERE id = ? LIMIT 1", [$userId], '');
+    return (string)sh_val("SELECT `$field` FROM users WHERE id = ? LIMIT 1", [$userId], ''); // @security-scan-ignore sql_interpolation — $field is allowlisted on the line above
 }
 
 /**

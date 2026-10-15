@@ -205,7 +205,7 @@ require __DIR__ . '/_layout.php';
     </p>
     <div class="sh-field">
       <label class="sh-field__label" for="tg-url">Webhook URL</label>
-      <input class="sh-input" id="tg-url" value="<?= e(sh_tg_webhook_url()) ?>" readonly onclick="this.select()">
+      <input class="sh-input" id="tg-url" value="<?= e(sh_tg_webhook_url()) ?>" readonly data-select-on-click>
     </div>
     <?php if ($tgHookInfo !== null): ?>
       <div class="sh-grid2">

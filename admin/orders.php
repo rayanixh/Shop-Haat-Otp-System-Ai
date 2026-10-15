@@ -451,12 +451,12 @@ elseif ($fStatus === 'cod') { $where[] = "(EXISTS (SELECT 1 FROM payment_methods
 elseif ($fStatus === 'online') { $where[] = "NOT (EXISTS (SELECT 1 FROM payment_methods pm WHERE pm.id = o.payment_method_id AND pm.type = 'cod') OR EXISTS (SELECT 1 FROM payments pc WHERE pc.order_id = o.id AND pc.kind = 'cod'))"; }
 elseif ($fStatus !== '' && isset($statusFilters[$fStatus])) { $where[] = 'o.status = ?'; $args[] = $fStatus; }
 if ($fPay !== '') { $where[] = 'o.payment_status = ?'; $args[] = $fPay; }
-$whereSql = implode(' AND ', $where);
+$whereSql = implode(' AND ', $where); // @security-scan-ignore sql_interpolation_unproven — every $where[] piece is a literal fragment holding ? placeholders and the values are bound in $args
 
-$total = (int)sh_val("SELECT COUNT(*) FROM orders o WHERE $whereSql", $args, 0);
+$total = (int)sh_val("SELECT COUNT(*) FROM orders o WHERE $whereSql", $args, 0); // @security-scan-ignore sql_interpolation_unproven — same reviewed fragment as above; nothing from the request reaches the SQL text
 $pages = max(1, (int)ceil($total / $per));
 $page = min($page, $pages);
-$rows = sh_all("SELECT o.* FROM orders o WHERE $whereSql ORDER BY o.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $args);
+$rows = sh_all("SELECT o.* FROM orders o WHERE $whereSql ORDER BY o.id DESC LIMIT $per OFFSET " . (($page - 1) * $per), $args); // @security-scan-ignore sql_interpolation_unproven — $whereSql is the reviewed fragment list; $per is the literal 25 and $page comes from sh_int()
 $itemsByOrder = sh_order_items_for(array_column($rows, 'id'));
 $riskByOrder = sh_verify_risk_for_orders($rows);
 
