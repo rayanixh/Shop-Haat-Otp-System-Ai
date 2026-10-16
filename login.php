@@ -8,6 +8,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
+require_once SH_ROOT . '/includes/mail.php';
 
 sh_session_start();
 $redirect = sh_customer_return_target(sh_get('redirect'), '');
@@ -46,13 +47,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Enter your email address and password.';
         } else {
             try {
-                $u = sh_one('SELECT id, password_hash, status FROM users WHERE email = ? LIMIT 1', [$email]);
+                $u = sh_one('SELECT id, name, email, email_verified, password_hash, status FROM users WHERE email = ? LIMIT 1', [$email]);
                 // Constant-ish work factor whether or not the user exists.
                 $hash = $u['password_hash'] ?? '$2y$10$usesomesillystringforsalt0000000000000000000000000000000';
                 if ($u !== null && password_verify($password, $hash) && $u['status'] === 'active') {
                     if (password_needs_rehash($hash, PASSWORD_DEFAULT)) {
                         sh_query('UPDATE users SET password_hash = ? WHERE id = ?',
                             [password_hash($password, PASSWORD_DEFAULT), (int)$u['id']]);
+                    }
+                    // Optional verification gate (Admin -> Email). The password is
+                    // correct but the address is unverified and the owner switched
+                    // the gate on: hold the sign-in, remember the pending state in
+                    // the session, and send the customer to the code page. No
+                    // session is created and the account is not marked verified.
+                    sh_email_schema_ensure();
+                    $gate = sh_email_gate_blocked($u, 'login');
+                    if ($gate !== null) {
+                        $target = sh_customer_return_target($redirect, 'account.php');
+                        sh_email_verify_pending_set($u, $target, 'login');
+                        if (sh_email_verify_enabled()) { sh_email_send_verification_code((string)$u['email'], (int)$u['id']); }
+                        sh_login_reset('user_login');
+                        if (function_exists('sh_security_log')) {
+                            sh_security_log('login_blocked_unverified_email', (int)$u['id'], ['email' => sh_email_mask((string)$u['email'])]);
+                        }
+                        sh_flash('warning', $gate);
+                        sh_redirect('verify-email.php');
                     }
                     sh_login_reset('user_login');
                     $uid = (int)$u['id'];

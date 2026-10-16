@@ -18,8 +18,13 @@ $retryOrderHint = sh_int($_GET['retry_order'] ?? 0);
 $checkoutReturn = $retryOrderHint > 0 ? 'checkout.php?retry_order=' . $retryOrderHint : 'checkout.php';
 $user = sh_require_login($checkoutReturn);
 require_once SH_ROOT . '/includes/firebase.php';
-if (sh_fb_checkout_blocked($user)) {
-    sh_flash('error', 'Please verify your email address before placing an order.');
+require_once SH_ROOT . '/includes/mail.php';
+// One gate for both verifiers: the store's own emailed code when SMTP is
+// configured, Firebase when that is what the store uses. It stays inert until
+// an administrator switches the requirement on.
+$verifyBlocked = sh_email_gate_blocked($user, 'checkout');
+if ($verifyBlocked !== null) {
+    sh_flash('error', $verifyBlocked);
     sh_redirect('account.php#account-verification');
 }
 $coupon = $_SESSION['coupon_code'] ?? null;

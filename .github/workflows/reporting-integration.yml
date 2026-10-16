@@ -102,5 +102,15 @@ jobs:
         run: php tests/installer-demo-data.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
+      # The email system, end to end: a real PHPMailer submission against a
+      # capture SMTP server on loopback (submission, AUTH, UTF-8, both MIME
+      # alternatives, honest failure categorisation) and the whole challenge
+      # lifecycle in MySQL (hashed-only storage, expiry, attempt lock, single
+      # use, resend cooldown, rate limits, purpose isolation, cleanup), plus the
+      # signed provider webhook and the retry policy. No provider and no
+      # credentials are needed, and nothing fakes a delivery: a message counts
+      # as sent only when the SMTP server accepts it.
+      - name: Email delivery, verification codes and webhook
+        run: php tests/email-system.php
       - name: Exercise session expiry through customer HTTP routes
         run: bash tests/session-expiration-http.sh

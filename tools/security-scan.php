@@ -312,7 +312,12 @@ function sh_scan_list(string $dir, array $exts, array $skip = []): array
 }
 
 /** Directories that are never part of a web request path. */
-$SH_SKIP_DIRS = ['tools', 'tests', '.git', 'node_modules', 'vendor', 'logs', 'backups', 'uploads', 'assets'];
+// lib/ holds third-party source we do not modify, the same way vendor/ does for
+// a Composer install: the vendored PHPMailer copy (pinned version in
+// lib/PHPMailer/VERSION). It is never reachable over HTTP (lib/.htaccess denies
+// the directory) and the application only ever selects its SMTP or mail()
+// transport, never the sendmail transport whose popen() call this scanner flags.
+$SH_SKIP_DIRS = ['tools', 'tests', '.git', 'node_modules', 'vendor', 'lib', 'logs', 'backups', 'uploads', 'assets'];
 
 /** Is this line a comment or a doc block? */
 function sh_scan_is_comment(string $line): bool
@@ -546,6 +551,7 @@ $publicEndpoints = [
     'api/otp.php' => 'sign-in one-time code', 'api/search.php' => 'public search suggestions',
     'api/cart.php' => 'guest cart operations', 'api/notifications.php' => 'public notification feed',
     'api/csp-report.php' => 'browser CSP reports',
+    'api/email-events.php' => 'provider delivery webhook: no session exists, and every request is refused unless it carries the shared secret or a valid HMAC signature',
 ];
 
 $guardTokens = ['sh_require_admin', 'sh_require_perm', 'sh_require_superadmin', 'sh_require_login',
@@ -577,6 +583,7 @@ foreach ($adminFiles as $path) {
  */
 $csrfExempt = [
     'api/csp-report.php' => 'browser-originated CSP reports carry no session and no token, and change no state',
+    'api/email-events.php' => 'machine-to-machine webhook: authenticated by a constant-time secret comparison or an HMAC over the raw body, never by a browser session',
 ];
 
 // CSRF on anything that changes state.

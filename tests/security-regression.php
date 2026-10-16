@@ -580,6 +580,11 @@ function sh_markup_files(): array
         if (!$f->isFile() || strtolower($f->getExtension()) !== 'php') { continue; }
         $rel = str_replace(SH_ROOT . '/', '', $f->getPathname());
         if (preg_match('~^(tests|tools|\.git)/~', $rel) === 1) { continue; }
+        // Vendored third-party source. It is not our markup, it can never be
+        // reached over HTTP (lib/.htaccess denies the directory), and one of its
+        // regexes contains the literal characters "<script" — which is not an
+        // inline script. Our own files are still all scanned.
+        if (str_starts_with($rel, 'lib/')) { continue; }
         $out[] = [$rel, $f->getPathname()];
     }
     return $out;
@@ -2241,6 +2246,209 @@ function sh_frame_ancestors_probe(string $value): string
     $out = array_values(array_unique($out));
     return $out === [] ? "'self'" : implode(' ', $out);
 }
+
+// ===========================================================================
+sh_section('Email verification, recovery and SMTP delivery');
+// ===========================================================================
+
+/** Read a file that must exist for the email flows. */
+function sh_email_src(string $rel): string
+{
+    $path = SH_ROOT . '/' . $rel;
+    return is_file($path) ? (string)file_get_contents($path) : '';
+}
+
+sh_t('verification codes come from a cryptographically secure source', function () {
+    $src = sh_email_src('includes/mail.php');
+    if ($src === '') { return 'includes/mail.php is missing'; }
+    if (!str_contains($src, 'random_int(')) { return 'codes are not generated with random_int()'; }
+    // Word boundaries matter: "sh_email_brand(" contains "rand(" but is not one.
+    if (preg_match('~(?<![A-Za-z_$])(?:mt_rand|rand|uniqid|srand|lcg_value)\s*\(~', $src) === 1) {
+        return 'a weak random source is used';
+    }
+    return true;
+});
+
+sh_t('a code is stored as a hash, compared with password_verify and never in the clear', function () {
+    $src = sh_email_src('includes/mail.php');
+    if (!str_contains($src, 'password_hash($code, PASSWORD_DEFAULT)')) { return 'the code is not stored as a password_hash() value'; }
+    if (!str_contains($src, "password_verify(\$code, (string)\$row['code_hash'])")) { return 'the submitted code is not compared with password_verify()'; }
+    $schema = sh_email_src('install/schema.php');
+    $start = strpos($schema, 'CREATE TABLE IF NOT EXISTS email_challenges (');
+    if ($start === false) { return 'the email_challenges table is not defined'; }
+    $ddl = substr($schema, $start, 2600);
+    if (!str_contains($ddl, 'code_hash VARCHAR(255) NOT NULL')) { return 'the hash column is missing'; }
+    foreach (['code VARCHAR', 'otp VARCHAR', 'plain_code', '`code` INT'] as $bad) {
+        if (str_contains($ddl, $bad)) { return 'the challenge table can hold a plaintext code: ' . $bad; }
+    }
+    return true;
+});
+
+sh_t('the delivery log cannot hold a body, a code or a token', function () {
+    $schema = sh_email_src('install/schema.php');
+    $start = strpos($schema, 'CREATE TABLE IF NOT EXISTS email_log (');
+    if ($start === false) { return 'the email_log table is not defined'; }
+    $end = strpos($schema, ') $E', $start);
+    if ($end === false) { return 'the email_log DDL is malformed'; }
+    $ddl = substr($schema, $start, $end - $start);
+    // Column names only: "unicode_ci" contains "code_" but is not a column.
+    preg_match_all('~^\s{8}([a-z_]+)\s+~m', $ddl, $cols);
+    foreach ($cols[1] as $col) {
+        if (in_array($col, ['body', 'html', 'message', 'text_body', 'html_body', 'code', 'code_hash', 'otp', 'token', 'raw'], true)) {
+            return 'email_log has a column that could store message content: ' . $col;
+        }
+    }
+    if (!str_contains($ddl, 'KEY idx_email_log_msgid (message_id)')) { return 'the webhook lookup has no index'; }
+    return true;
+});
+
+sh_t('no authentication code is ever placed in a URL', function () {
+    foreach (['forgot-password.php', 'reset-password.php', 'login.php', 'register.php', 'password.php', 'account.php'] as $file) {
+        $src = sh_email_src($file);
+        if ($src === '') { return $file . ' is missing'; }
+        foreach (['?code=', '&code=', '?otp=', '&otp='] as $bad) {
+            if (str_contains($src, $bad)) { return $file . ' puts a code in a URL (' . $bad . ')'; }
+        }
+    }
+    // The provider link is the only code that arrives in a URL, and it is read,
+    // never generated or echoed back.
+    $verify = sh_email_src('verify-email.php');
+    if ($verify === '' || !str_contains($verify, "_GET['oobCode']")) { return 'verify-email.php does not read the provider link'; }
+    if (!str_contains($verify, 'sh_fb_apply_oob_code(')) { return 'verify-email.php does not validate the provider code server-side'; }
+    return true;
+});
+
+sh_t('the reset flow invalidates every credential it can', function () {
+    $src = sh_email_src('reset-password.php');
+    if (!str_contains($src, 'sh_email_challenge_revoke(')) { return 'outstanding codes are not revoked after a reset'; }
+    if (!str_contains($src, 'UPDATE password_resets SET used_at = NOW()')) { return 'outstanding reset tokens are not consumed'; }
+    if (!str_contains($src, 'sh_forget_customer_session()')) { return 'the session is not rotated after a reset'; }
+    if (!str_contains($src, 'password_hash($new, PASSWORD_DEFAULT)')) { return 'the new password is not hashed with password_hash()'; }
+    if (!str_contains($src, 'sh_email_notify_password_changed(')) { return 'no real notification is sent after a reset'; }
+    return true;
+});
+
+sh_t('the sign-in gate never marks an address verified by itself', function () {
+    $src = sh_email_src('login.php');
+    if (!str_contains($src, 'sh_email_gate_blocked(')) { return 'login.php does not apply the verification gate'; }
+    if (str_contains($src, 'sh_email_mark_verified(')) { return 'login.php marks an address verified without a code'; }
+    if (!str_contains($src, 'sh_email_verify_pending_set(')) { return 'the pending verification state is not recorded'; }
+    return true;
+});
+
+sh_t('every sender reports the transport result instead of assuming success', function () {
+    foreach (['register.php', 'forgot-password.php', 'password.php', 'account.php', 'reset-password.php'] as $file) {
+        $src = sh_email_src($file);
+        if (preg_match('~!empty\(\$[a-z_]+\[[\'"]ok[\'"]\]\)~', $src) !== 1) {
+            return $file . ' does not check whether the send actually succeeded';
+        }
+    }
+    $mail = sh_email_src('config/mail.php');
+    if (!str_contains($mail, "'skipped'")) { return 'missing configuration is not reported as skipped'; }
+    if (!str_contains($mail, 'getLastMessageID()')) { return 'the accepted message is not identified for the provider webhook'; }
+    return true;
+});
+
+sh_t('the provider webhook verifies its signature before it reads the payload', function () {
+    $src = sh_email_src('api/email-events.php');
+    if ($src === '') { return 'api/email-events.php is missing'; }
+    $verifyAt = strpos($src, 'sh_email_webhook_verify(');
+    $decodeAt = strpos($src, 'json_decode(');
+    if ($verifyAt === false || $decodeAt === false) { return 'the webhook does not verify and decode'; }
+    if ($verifyAt > $decodeAt) { return 'the payload is decoded before the signature is checked'; }
+    if (strpos($src, 'sh_file_rate_limit(') === false) { return 'the webhook has no rate limit'; }
+    if (str_contains($src, 'json_encode($payload') || str_contains($src, 'echo $raw')) { return 'the webhook echoes the payload back'; }
+    $mail = sh_email_src('includes/mail.php');
+    if (!str_contains($mail, 'hash_equals($secret, $offered)') || !str_contains($mail, "hash_hmac('sha256', \$rawBody, \$secret)")) {
+        return 'the shared secret and the HMAC are not compared in constant time';
+    }
+    if (!str_contains($mail, "if (\$secret === '' || strlen(\$secret) < 24)")) { return 'a missing webhook secret is not refused'; }
+    return true;
+});
+
+sh_t('the SMTP password is never rendered, logged or returned', function () {
+    $admin = sh_email_src('admin/email.php');
+    if (preg_match('~value="<\?=\s*e\(\(string\)sh_setting\(\'smtp_password~', $admin) === 1) {
+        return 'admin/email.php renders the stored SMTP password';
+    }
+    $mail = sh_email_src('config/mail.php');
+    $statusAt = strpos($mail, 'function sh_mail_service_status()');
+    $statusEnd = $statusAt === false ? false : strpos($mail, "\n}", $statusAt);
+    if ($statusAt === false || $statusEnd === false) { return 'sh_mail_service_status() could not be read'; }
+    $fn = substr($mail, $statusAt, $statusEnd - $statusAt);
+    if (preg_match("~'password'\s*=>~", $fn) === 1) { return 'the sanitised status returns the SMTP password'; }
+    if (!str_contains($fn, "'password_set'")) { return 'the status does not report whether a password is stored'; }
+    if (!str_contains($mail, 'function sh_mail_redact(')) { return 'transcripts and errors are not redacted'; }
+    return true;
+});
+
+sh_t('email templates escape interpolated values and ship a text alternative', function () {
+    $src = sh_email_src('includes/mail.php');
+    if (!str_contains($src, 'function sh_email_e(')) { return 'the email escaper is missing'; }
+    $start = strpos($src, 'function sh_email_layout(');
+    $end = $start === false ? false : strpos($src, "\n}", $start);
+    if ($start === false || $end === false) { return 'sh_email_layout() could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['sh_email_e($heading)', "sh_email_e((string)\$o['subject'])", "sh_email_e((string)\$cta['url'])"] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'a template value is not escaped: ' . $needle; }
+    }
+    if (!str_contains($fn, "'text' =>") || !str_contains($fn, "'html' =>")) { return 'the template does not build both alternatives'; }
+    if (str_contains($fn, '<script')) { return 'the email template contains a script tag'; }
+    return true;
+});
+
+sh_t('the verification link the provider sends is a page that exists', function () {
+    if (!is_file(SH_ROOT . '/verify-email.php')) { return 'verify-email.php does not exist, so provider links land on a 404'; }
+    $fb = sh_email_src('includes/firebase.php');
+    if (!str_contains($fb, "sh_url('verify-email.php')") && !str_contains($fb, "'/verify-email.php'")) {
+        return 'the provider continue URL does not point at the verification page';
+    }
+    $verify = sh_email_src('verify-email.php');
+    foreach (['sh_email_challenge_verify(', 'sh_email_mark_verified(', 'sh_csrf_require()'] as $needle) {
+        if (!str_contains($verify, $needle)) { return 'verify-email.php is missing ' . $needle; }
+    }
+    return true;
+});
+
+sh_t('the mail library is vendored, loadable and unreachable over HTTP', function () {
+    foreach (['lib/PHPMailer/src/PHPMailer.php', 'lib/PHPMailer/src/SMTP.php', 'lib/PHPMailer/LICENSE', 'lib/PHPMailer/VERSION'] as $rel) {
+        if (!is_file(SH_ROOT . '/' . $rel)) { return $rel . ' is missing'; }
+    }
+    if (!is_file(SH_ROOT . '/lib/.htaccess')) { return 'lib/ has no directory guard'; }
+    $guard = (string)file_get_contents(SH_ROOT . '/lib/.htaccess');
+    if (!str_contains($guard, 'Require all denied') && !str_contains($guard, 'Deny from all')) { return 'lib/ is not denied over HTTP'; }
+    $loader = (string)file_get_contents(SH_ROOT . '/lib/PHPMailer/autoload.php');
+    if (!str_contains($loader, 'PHPMailer\\PHPMailer\\')) { return 'the autoloader does not map the PHPMailer namespace'; }
+    if (!str_contains($loader, "preg_match('~^[A-Za-z0-9_]+$~'")) { return 'the autoloader does not constrain the class name it maps to a file'; }
+    if (str_contains($loader, 'vendor/autoload.php') === false) { return 'the autoloader ignores a Composer install'; }
+    return true;
+});
+
+sh_t('the challenge table is indexed and tied to the account', function () {
+    $schema = sh_email_src('install/schema.php');
+    foreach ([
+        'KEY idx_email_chal_lookup (email, purpose, status, id)',
+        'KEY idx_email_chal_expiry (expires_at)',
+        'CONSTRAINT fk_email_chal_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE',
+        'CONSTRAINT fk_email_log_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL',
+    ] as $needle) {
+        if (!str_contains($schema, $needle)) { return 'the mail schema is missing: ' . $needle; }
+    }
+    if (!str_contains($schema, 'function sh_email_schema_sql()')) { return 'the email tables have no shared DDL function'; }
+    if (!str_contains($schema, 'sh_email_schema_sql())')) { return 'the installer does not create the email tables'; }
+    $mail = sh_email_src('includes/mail.php');
+    if (!str_contains($mail, 'function sh_email_schema_ensure()')) { return 'existing stores have no lazy migration for the mail tables'; }
+    if (!str_contains($mail, 'sh_email_schema_sql()')) { return 'the lazy migration does not use the shared DDL'; }
+    return true;
+});
+
+sh_t('existing accounts are grandfathered once instead of being locked out', function () {
+    $mail = sh_email_src('includes/mail.php');
+    if (!str_contains($mail, "sh_setting('email_verify_grandfathered', '0') !== '1'")) { return 'the one-time grandfathering guard is missing'; }
+    if (!str_contains($mail, "sh_setting_save('email_verify_grandfathered', '1')")) { return 'the grandfathering is not recorded'; }
+    if (!str_contains($mail, 'UPDATE users SET email_verified = 1')) { return 'existing accounts are not grandfathered'; }
+    return true;
+});
 
 // ===========================================================================
 echo "\n" . str_repeat('=', 72) . "\n";

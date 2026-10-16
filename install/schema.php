@@ -15,6 +15,7 @@ function sh_schema_tables(): array
         'telegram_admin_log', 'telegram_updates',
         'couriers', 'shipments', 'shipment_events',
         'otp_verifications', 'security_logs', 'password_resets',
+        'email_challenges', 'email_log',
     ];
 }
 
@@ -37,6 +38,10 @@ function sh_schema_sql(): array
         google_id VARCHAR(64) DEFAULT NULL,
         avatar VARCHAR(500) DEFAULT NULL,
         avatar_source VARCHAR(20) DEFAULT NULL,
+        -- Email verification. Owned by the email system (includes/mail.php);
+        -- the Firebase sync and the admin customer list read the same columns.
+        email_verified TINYINT(1) NOT NULL DEFAULT 0,
+        email_verified_at DATETIME DEFAULT NULL,
         last_login_at DATETIME DEFAULT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -518,7 +523,7 @@ function sh_schema_sql(): array
         KEY idx_applogs_created (created_at)
     ) $E";
 
-    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql());
+    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql());
 }
 
 /**
@@ -619,12 +624,87 @@ function sh_courier_seed(PDO $pdo): void
     }
 }
 
+/**
+ * Email tables. Shared by the installer, the lazy migration on existing stores
+ * and the tests, so all three apply exactly the same DDL.
+ */
+function sh_email_schema_sql(): array
+{
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return [
+        // One row per emailed verification challenge (signup verification,
+        // password reset, sensitive-change confirmation). Only a bcrypt hash of
+        // the code is stored: the plaintext exists in the email and nowhere
+        // else, so a database dump cannot be used to verify somebody else's
+        // address or reset their password. Purpose is part of every lookup, so a
+        // signup code can never be replayed against the reset flow.
+        "CREATE TABLE IF NOT EXISTS email_challenges (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id INT UNSIGNED DEFAULT NULL,
+            email VARCHAR(190) NOT NULL,
+            purpose VARCHAR(40) NOT NULL,
+            code_hash VARCHAR(255) NOT NULL,
+            status ENUM('pending','used','expired','revoked','locked') NOT NULL DEFAULT 'pending',
+            attempts INT NOT NULL DEFAULT 0,
+            max_attempts INT NOT NULL DEFAULT 5,
+            resend_count INT NOT NULL DEFAULT 0,
+            max_resends INT NOT NULL DEFAULT 5,
+            ip_address VARCHAR(45) DEFAULT NULL,
+            user_agent VARCHAR(255) DEFAULT NULL,
+            last_sent_at DATETIME DEFAULT NULL,
+            expires_at DATETIME NOT NULL,
+            used_at DATETIME DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_email_chal_lookup (email, purpose, status, id),
+            KEY idx_email_chal_user (user_id),
+            KEY idx_email_chal_expiry (expires_at),
+            CONSTRAINT fk_email_chal_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) $E",
+
+        // Delivery log: what was attempted, over which transport, and what the
+        // provider/SMTP server answered. Never holds a message body, a code or a
+        // credential. "accepted" only means the server took the message; the
+        // delivered/bounced states are written by the provider webhook.
+        "CREATE TABLE IF NOT EXISTS email_log (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id INT UNSIGNED DEFAULT NULL,
+            recipient VARCHAR(190) NOT NULL,
+            recipient_domain VARCHAR(120) DEFAULT NULL,
+            purpose VARCHAR(40) NOT NULL DEFAULT 'generic',
+            subject VARCHAR(180) DEFAULT NULL,
+            transport VARCHAR(20) NOT NULL DEFAULT 'smtp',
+            status ENUM('accepted','failed','skipped','delivered','bounced','complaint','blocked','unsubscribed') NOT NULL DEFAULT 'accepted',
+            category VARCHAR(30) NOT NULL DEFAULT 'accepted',
+            error_text VARCHAR(500) DEFAULT NULL,
+            message_id VARCHAR(190) DEFAULT NULL,
+            provider_event_id VARCHAR(120) DEFAULT NULL,
+            delivered_at DATETIME DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_email_log_created (created_at),
+            KEY idx_email_log_status (status),
+            KEY idx_email_log_msgid (message_id),
+            KEY idx_email_log_purpose (purpose),
+            KEY idx_email_log_user (user_id),
+            CONSTRAINT fk_email_log_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+        ) $E",
+    ];
+}
+
+
 // ---------------------------------------------------------------------------
 // Phone OTP verification & security tables
 // ---------------------------------------------------------------------------
 
 /** Bumped whenever the OTP schema shape changes; drives the lazy migration. */
 const SH_OTP_SCHEMA_VERSION = 4;
+
+/**
+ * Email verification schema version. Bumped when the mail tables/defaults
+ * change so existing stores pick the change up without a reinstall.
+ */
+const SH_EMAIL_SCHEMA_VERSION = 1;
 
 /**
  * OTP + security tables. Shared by the installer and the lazy migration so
@@ -683,6 +763,7 @@ function sh_otp_schema_sql(): array
             KEY idx_pwreset_token (token_hash),
             CONSTRAINT fk_pwreset_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         ) $E",
+
     ];
 }
 
@@ -772,6 +853,50 @@ function sh_otp_seed_settings(PDO $pdo): void
 {
     $st = $pdo->prepare('INSERT IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)');
     foreach (sh_otp_settings_defaults() as $k => $v) { $st->execute([$k, (string)$v]); }
+}
+
+/**
+ * Defaults for the email system. Seeded once per store; an existing value is
+ * never overwritten, so an operator's choice survives every upgrade.
+ *
+ * @return array<string,string>
+ */
+function sh_email_settings_defaults(): array
+{
+    return [
+        // Signup email verification through SMTP OTP.
+        'email_verify_enabled'          => '1',
+        // Gate: both keys pre-exist (email_verification_required belongs to the
+        // checkout gate that was already shipped). Default 0 = nobody is locked out.
+        'email_verify_required'         => '0',
+        'email_verify_required_login'   => '0',
+        // Forgot-password by emailed code, and the change-notification mails.
+        'email_forgot_enabled'          => '1',
+        'email_notify_password_change'  => '1',
+        'email_otp_on_password_change'  => '0',
+        // Challenge behaviour.
+        'email_otp_expiry_minutes'      => '10',
+        'email_otp_max_attempts'        => '5',
+        'email_otp_max_resends'         => '5',
+        'email_otp_resend_cooldown'     => '60',
+        'email_otp_email_limit'         => '3',
+        'email_otp_ip_limit'            => '10',
+        // Provider feedback and signing.
+        'email_webhook_secret'          => '',
+        'smtp_allow_self_signed'        => '0',
+        'dkim_enabled'                  => '0',
+        'dkim_domain'                   => '',
+        'dkim_selector'                 => '',
+        'dkim_private_key_path'         => '',
+        // Set to 1 by the migration after pre-existing accounts were grandfathered.
+        'email_verify_grandfathered'    => '0',
+    ];
+}
+
+function sh_email_seed_settings(PDO $pdo): void
+{
+    $st = $pdo->prepare('INSERT IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)');
+    foreach (sh_email_settings_defaults() as $k => $v) { $st->execute([$k, (string)$v]); }
 }
 
 /**
@@ -1028,6 +1153,14 @@ function sh_schema_seed(PDO $pdo, array $opts): void
 
     // Phone verification settings (defaults; provider is offline/test until configured).
     sh_otp_seed_settings($pdo);
+
+    // Email verification defaults. The mail tables themselves come from
+    // sh_schema_sql(); these keys only carry the switches and the challenge
+    // policy, so nothing here creates business content.
+    sh_email_seed_settings($pdo);
+    $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
+                   ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)')
+        ->execute(['email_schema_version', (string)SH_EMAIL_SCHEMA_VERSION]);
     $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)')
         ->execute(['otp_schema_version', (string)SH_OTP_SCHEMA_VERSION]);

@@ -672,6 +672,15 @@
    real provider result. Never claims success on its own.
    =================================================================== */
 (function () {
+  /* Select-on-focus fields (the provider webhook URL) — a small convenience that
+     keeps the markup free of inline handlers, which Content-Security-Policy blocks. */
+  document.addEventListener('focusin', function (ev) {
+    var el = ev.target;
+    if (el && el.matches && el.matches('[data-select-on-focus]') && typeof el.select === 'function') {
+      el.select();
+    }
+  });
+
   var buttons = document.querySelectorAll('[data-test-channel]');
   if (!buttons.length) return;
 
