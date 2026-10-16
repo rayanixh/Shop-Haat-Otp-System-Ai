@@ -45,6 +45,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 $token = sh_csrf_token();
+// The same single global Page Transition setting the storefront and the rest of
+// the admin panel use — this page was the one admin screen without it.
+require_once SH_ROOT . '/includes/transition.php';
+$shTransition = sh_transition_config();
 ?>
 <!doctype html>
 <html lang="en">
@@ -60,8 +64,10 @@ $token = sh_csrf_token();
 .sh-adminlogin__brand { display: flex; align-items: center; gap: 10px; justify-content: center; font-weight: 800; font-size: 19px; margin-bottom: 5px; }
 .sh-adminlogin__sub { text-align: center; font-size: 13px; color: var(--sh-muted); margin-bottom: 20px; }
 </style>
+<?= sh_transition_head($shTransition) ?>
 </head>
-<body>
+<body<?= sh_transition_body_attrs($shTransition) ?>>
+<?= sh_transition_overlay($shTransition) ?>
 <div class="sh-adminlogin">
   <div class="sh-adminlogin__box">
     <div class="sh-adminlogin__brand"><span class="sh-brand__mark">SH</span> Admin Panel</div>
@@ -92,5 +98,6 @@ $token = sh_csrf_token();
     </p>
   </div>
 </div>
+<script src="<?= e(sh_asset('assets/js/app.js')) ?>" defer></script>
 </body>
 </html>

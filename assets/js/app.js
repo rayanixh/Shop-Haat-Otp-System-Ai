@@ -1370,27 +1370,48 @@
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var timers = [];
   var navigating = false;
+  /*
+   * Every transition owns a generation. A page load arms safety timers, and a
+   * click that comes after them must not be cancelled by them: each deferred
+   * callback only acts while its own generation is still the current one. That
+   * is what stops a stale "release the page" timer from aborting a navigation
+   * that started half a second ago (which silently swallowed the click).
+   */
+  var gen = 0;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function clearTimers() { timers.forEach(clearTimeout); timers = []; }
   function setPageMs(ms) { if (page) page.style.setProperty('--sh-pt-page-ms', ms + 'ms'); }
+  function owned(g) { return g === undefined || g === gen; }
+  /** setTimeout that only runs while generation g still owns the overlay. */
+  function later(fn, ms, g) {
+    var id = setTimeout(function () { if (owned(g)) { fn(); } }, ms);
+    timers.push(id);
+    return id;
+  }
 
-  function hide() {
+  function hide(g) {
+    if (!owned(g)) return;
     clearTimers();
     navigating = false;
+    // The <head> fallback must never fire after the real reveal has run.
+    if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
     docEl.classList.remove('sh-pt-hold');
+    docEl.classList.remove('sh-pt-enter');
     if (overlay) { overlay.classList.remove('is-hold'); overlay.classList.remove('is-on'); }
     if (page) page.classList.remove('is-leaving');
   }
-  function show(ms) {
+  function show(ms, g) {
     if (!overlay) return;
     overlay.classList.add('is-on');
     if (page) page.classList.add('is-leaving');
-    timers.push(setTimeout(hide, (ms || duration) + 8000)); // safety net
+    later(hide, (ms || duration) + 8000, g); // safety net
   }
-  function release(outMs) {
-    // Overlay is visible (held); fade it out and bring the page in.
-    if (!overlay) return;
+  function release(outMs, g) {
+    // Overlay is visible (held); fade it out and bring the page in. Used by the
+    // arrival, initial-load and settings-preview paths alike.
+    if (!overlay || !owned(g)) return;
+    if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
     docEl.classList.add('sh-pt-enter');
     setPageMs(outMs);
     overlay.classList.remove('is-hold');
@@ -1399,7 +1420,7 @@
     requestAnimationFrame(function () { requestAnimationFrame(function () {
       overlay.classList.remove('is-on');
       if (page) page.classList.remove('is-leaving');
-      timers.push(setTimeout(function () { docEl.classList.remove('sh-pt-enter'); }, outMs + 50));
+      later(function () { docEl.classList.remove('sh-pt-enter'); }, outMs + 50, g);
     }); });
   }
 
@@ -1419,43 +1440,64 @@
         : '<div class="sh-pt__mark"><span></span><span></span><span></span></div>');
       if (media) overlay.querySelector('img').setAttribute('src', media);
       setPageMs(clamp(ms * .45, 160, 600));
-      show(ms);
-      timers.push(setTimeout(function () {
-        release(clamp(ms * .5, 240, 800));
-        timers.push(setTimeout(function () {
+      var testGen = ++gen;
+      show(ms, testGen);
+      later(function () {
+        release(clamp(ms * .5, 240, 800), testGen);
+        later(function () {
           overlay.className = saved.cls; overlay.setAttribute('style', saved.style || ''); overlay.innerHTML = saved.html;
-        }, 900));
-      }, ms));
+        }, 900, testGen);
+      }, ms, testGen);
     });
   }
 
   if (!enabled) { docEl.classList.remove('sh-pt-hold'); return; }
 
-  /* ---- arrival: continue the transition started on the previous page ---- */
-  var arrived = null;
-  try {
-    var raw = sessionStorage.getItem('sh-pt');
-    sessionStorage.removeItem('sh-pt');
-    if (raw) arrived = JSON.parse(raw);
-  } catch (e) { arrived = null; }
+  /* ---- arrival / initial load: finish what the <head> snippet started ----
+     The <head> snippet holds the overlay for every kind of page load and tells
+     us which one this is:
+
+       __shPtArrived  an internal navigation — timed from the moment of the click
+       __shPtCold     a first visit, refresh, bookmark, direct URL or new tab —
+                      timed from the start of the document itself
+
+     Only one is ever set, each is read once, and a stale marker can never hold
+     the page. Nothing here is required for the overlay to disappear: the
+     <head> snippet armed a fallback timer and the stylesheet carries a
+     CSS-only release, so a failure in this file still reveals the page. */
+  var arrived = window.__shPtArrived || null;
+  if (!arrived) {
+    // Defensive: if the <head> snippet was blocked (e.g. by a policy), the
+    // single-use marker may still be sitting in sessionStorage.
+    try {
+      var raw = sessionStorage.getItem('sh-pt');
+      sessionStorage.removeItem('sh-pt');
+      if (raw) { arrived = JSON.parse(raw); }
+    } catch (e) { arrived = null; }
+  }
+  var cold = window.__shPtCold || null;
+  window.__shPtArrived = null;
+  window.__shPtCold = null;
+  if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
 
   var outMs = clamp(duration * 0.5, 240, 800);
-  if (arrived && docEl.classList.contains('sh-pt-hold') && !reduced) {
+  var hold = arrived || cold;
+  if (docEl.classList.contains('sh-pt-hold') && !reduced) {
+    var loadGen = ++gen;
     overlay.classList.add('is-hold');
     overlay.classList.add('is-on');
-    // Respect the configured total time (from the original click) without
-    // ever waiting on the page itself: the page has already loaded here.
-    var elapsed = Date.now() - (arrived.t || 0);
-    var remaining = clamp((arrived.d || duration) - elapsed, 0, duration);
-    timers.push(setTimeout(function () { release(outMs); }, remaining));
-    timers.push(setTimeout(hide, remaining + outMs + 4000));
+    // Respect the configured total time without ever waiting on the page
+    // itself: the page has already parsed here, so this is the remainder only.
+    var startedAt = hold && hold.t ? hold.t : Date.now();
+    var total = hold && hold.d ? hold.d : duration;
+    var remaining = clamp(total - (Date.now() - startedAt), 0, duration);
+    later(function () { release(outMs, loadGen); }, remaining, loadGen);
+    later(function () { hide(loadGen); }, remaining + outMs + 4000, loadGen);
   } else {
-    docEl.classList.remove('sh-pt-hold');
-    if (!reduced) {
-      setPageMs(360);
-      docEl.classList.add('sh-pt-enter');
-      setTimeout(function () { docEl.classList.remove('sh-pt-enter'); }, 500);
-    }
+    // Reduced motion, or a hold that was never applied. Deliberately no content
+    // animation: animating a page that is already painted is what produced the
+    // old flash of a fully rendered page on first load.
+    hide();
   }
 
   // Back/forward cache restores the DOM with the overlay still "on".
@@ -1492,13 +1534,16 @@
     navigating = true;
     // Leave phase: page fades out while the overlay fades in, then navigate.
     // The remaining visible time is served on the next page (see arrival).
+    // Owning a fresh generation retires the page-load timers above, so a click
+    // is never cancelled by the reveal that brought this page in.
+    var clickGen = ++gen;
     var leaveMs = clamp(duration * 0.45, 160, 600);
     setPageMs(leaveMs);
     try { sessionStorage.setItem('sh-pt', JSON.stringify({ t: Date.now(), d: duration })); } catch (e) {}
-    show(duration);
-    timers.push(setTimeout(function () { location.href = url.href; }, leaveMs));
+    show(duration, clickGen);
+    later(function () { location.href = url.href; }, leaveMs, clickGen);
     // If navigation is blocked (e.g. beforeunload cancel), recover.
-    timers.push(setTimeout(function () { try { sessionStorage.removeItem('sh-pt'); } catch (e) {} hide(); }, leaveMs + 6000));
+    later(function () { try { sessionStorage.removeItem('sh-pt'); } catch (e) {} hide(clickGen); }, leaveMs + 6000, clickGen);
   });
 })();
 

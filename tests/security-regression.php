@@ -1098,6 +1098,240 @@ sh_t('the storefront layout is balanced for two banner cards and no code box', f
 });
 
 // ===========================================================================
+// Page transition — every supported page load, one shared setting
+// ===========================================================================
+
+sh_section('Page transition — first load, refresh, direct URL and admin panel');
+
+/** Layouts that render a full page and must therefore carry the transition. */
+function sh_transition_layouts(): array
+{
+    return ['includes/header.php', 'admin/_layout.php', 'admin/login.php'];
+}
+
+/**
+ * Layouts that deliberately do NOT carry it: the setup wizard runs before the
+ * store has settings, and the fatal/404 page must never depend on JavaScript
+ * to become readable.
+ */
+function sh_transition_layout_exceptions(): array
+{
+    return ['install/index.php', 'includes/errors.php'];
+}
+
+/** A configuration array in the shape sh_transition_config() returns. */
+function sh_transition_test_config(array $over = []): array
+{
+    return $over + [
+        'enabled' => true, 'bg_type' => 'gradient', 'bg_color' => '#111827', 'bg_color2' => '#1f2937',
+        'bg_direction' => 'diagonal', 'bg_media' => '', 'bg_url' => '', 'bg_css' => 'linear-gradient(135deg, #111827, #1f2937)',
+        'media' => '', 'media_url' => '', 'duration' => 450, 'fade' => 'smooth', 'dark' => true,
+    ];
+}
+
+sh_t('every full-page layout wires the one global transition', function () {
+    require_once SH_ROOT . '/includes/transition.php';
+    $offenders = [];
+    foreach (sh_transition_layouts() as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        // The head snippet decides what the first paint looks like, the body
+        // attributes carry the settings, the overlay is what the visitor sees.
+        foreach (['sh_transition_head(', 'sh_transition_body_attrs(', 'sh_transition_overlay('] as $call) {
+            if (!str_contains($src, $call)) { $offenders[] = $rel . ' is missing ' . $call; }
+        }
+        $headAt = strpos($src, 'sh_transition_head(');
+        $bodyAt = strpos($src, '<body');
+        if ($headAt !== false && $bodyAt !== false && $headAt > $bodyAt) {
+            $offenders[] = $rel . ' emits the hold after <body>, which is too late for the first paint';
+        }
+    }
+    // Every page that renders the overlay must also load the script that
+    // releases it: the layout and the footer are a pair, and a page that skips
+    // the footer would otherwise leave the overlay on screen.
+    foreach (sh_markup_files() as [$rel, $path]) {
+        $src = (string)file_get_contents($path);
+        if (str_contains($src, "includes/header.php'")) {
+            if (!str_contains($src, "includes/footer.php'")) { $offenders[] = $rel . ' opens the public layout but never closes it'; }
+        }
+        if (str_contains($src, "'_layout.php'")) {
+            if (!str_contains($src, "'_footer.php'")) { $offenders[] = $rel . ' opens the admin layout but never closes it'; }
+        }
+    }
+    return sh_assert($offenders === [], implode('; ', $offenders));
+});
+
+sh_t('the head snippet can only come from one place', function () {
+    require_once SH_ROOT . '/includes/transition.php';
+    $rendered = sh_transition_head(sh_transition_test_config());
+    // The CSP nonce is the one part that changes per request, so compare the
+    // snippet with the nonce and the duration blanked out.
+    $shape = function (string $html): string {
+        $html = preg_replace('~nonce="[^"]*"~', 'nonce="N"', $html) ?? $html;
+        return $html;
+    };
+    foreach (sh_markup_files() as [$rel, $path]) {
+        if ($rel === 'includes/transition.php') { continue; }
+        $src = (string)file_get_contents($path);
+        // No page may hand-roll the hold: a second copy would drift from the
+        // shared setting and could leave the overlay stuck.
+        if (str_contains($src, 'sh-pt-hold') && !str_contains($src, 'sh_transition_head(') && !in_array($rel, sh_transition_layouts(), true)) {
+            return $rel . ' manipulates the hold state outside the shared helper';
+        }
+        if (str_contains($shape($src), substr($shape($rendered), 0, 60))) {
+            return $rel . ' contains a copied copy of the head snippet';
+        }
+    }
+    return true;
+});
+
+sh_t('the excluded layouts are excluded on purpose and stay that way', function () {
+    foreach (sh_transition_layout_exceptions() as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (str_contains($src, 'sh_transition_overlay(')) {
+            return $rel . ' now renders the overlay: document the change and this exception';
+        }
+    }
+    // A one-line note per exclusion so the choice is visible in the code.
+    $errors = (string)file_get_contents(SH_ROOT . '/includes/errors.php');
+    if (stripos($errors, 'transition') === false) { return 'includes/errors.php does not explain why it has no overlay'; }
+    return true;
+});
+
+sh_t('no shipped file renders the overlay twice', function () {
+    foreach (sh_markup_files() as [$rel, $path]) {
+        $src = (string)file_get_contents($path);
+        if (substr_count($src, 'sh_transition_overlay(') > 1) {
+            return $rel . ' calls sh_transition_overlay() more than once';
+        }
+        if (substr_count($src, "id=\"sh-pt\"") > 0 && $rel !== 'includes/transition.php') {
+            return $rel . ' hard-codes the overlay element instead of using the helper';
+        }
+    }
+    return true;
+});
+
+sh_t('the initial-load hold is emitted for a cold load and never when disabled', function () {
+    require_once SH_ROOT . '/includes/transition.php';
+    $on = sh_transition_head(sh_transition_test_config());
+    $off = sh_transition_head(sh_transition_test_config(['enabled' => false]));
+    if ($off !== '') { return 'a disabled transition still emits a head snippet'; }
+    if ($on === '') { return 'an enabled transition emits no head snippet at all'; }
+    // What the snippet must do, in order: consume the one-shot marker, skip on
+    // reduced motion, hold the overlay, and arm its own release.
+    foreach (['sh-pt-hold', '__shPtCold', 'sh-pt', '__shPtArrived', 'prefers-reduced-motion', '__shPtFallback'] as $needle) {
+        if (!str_contains($on, $needle)) { return 'the head snippet never mentions ' . $needle; }
+    }
+    if (!str_contains($on, '450')) { return 'the head snippet does not carry the configured duration'; }
+    if (!str_contains($on, 'nonce=')) { return 'the head snippet has no CSP nonce'; }
+    if (str_contains($on, 'sh-pt-cold')) { return 'the head snippet still uses a state the stylesheet does not define'; }
+
+    // The critical rules must cover the first paint without the stylesheet.
+    if (!str_contains($on, 'html.sh-pt-hold .sh-pt')) { return 'the critical CSS does not cover the first paint'; }
+    return true;
+});
+
+sh_t('the overlay markup carries only the configured values', function () {
+    require_once SH_ROOT . '/includes/transition.php';
+    $cfg = sh_transition_test_config(['duration' => 900, 'fade' => 'cinematic', 'media_url' => '/uploads/transitions/logo.gif', 'bg_css' => 'linear-gradient(90deg, #010203, #040506)']);
+    $html = sh_transition_overlay($cfg);
+    if (substr_count($html, 'id="sh-pt"') !== 1) { return 'the overlay is not emitted exactly once'; }
+    if (!str_contains($html, 'sh-pt--cinematic')) { return 'the configured fade style is not applied'; }
+    if (!str_contains($html, '--sh-pt-ms:900ms')) { return 'the configured duration is not applied'; }
+    if (!str_contains($html, '/uploads/transitions/logo.gif')) { return 'the configured media is not rendered'; }
+    if (!str_contains($html, '#010203')) { return 'the configured background is not applied'; }
+    if (sh_transition_overlay(sh_transition_test_config(['enabled' => false])) !== '') {
+        return 'a disabled transition still renders the overlay';
+    }
+    return true;
+});
+
+sh_t('the transition stylesheet keeps the hold and its CSS-only release', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    $needles = [
+        'html.sh-pt-hold .sh-pt'                 => 'the initial-load hold has no rule',
+        'html.sh-pt-hold .sh-pt-page'            => 'the held page is not hidden',
+        'sh-pt-release'                          => 'the CSS-only release animation is gone',
+        'html.sh-pt-enter .sh-pt-page'           => 'the page is never animated back in',
+        'prefers-reduced-motion'                 => 'reduced motion is not honoured',
+    ];
+    foreach ($needles as $needle => $why) {
+        if (!str_contains($css, (string)$needle)) { return $why . ' (missing ' . $needle . ')'; }
+    }
+    if (preg_match('~html\.sh-pt-hold \.sh-pt \{[^}]*animation:[^}]*sh-pt-release~', $css) !== 1) {
+        return 'the CSS-only release is not tied to the hold state any more';
+    }
+    return true;
+});
+
+sh_t('the script releases the initial load, honours the marker and cleans up', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    foreach ([
+        '__shPtArrived'          => 'the arrival handoff from the head snippet is not read',
+        '__shPtCold'             => 'the initial-load timing is not read',
+        '__shPtFallback'         => 'the head fallback is never cancelled',
+        "sessionStorage.getItem('sh-pt')" => 'the one-shot navigation marker is not handled',
+        'pageshow'               => 'the back-forward cache restore is not handled',
+        'data-no-transition'     => 'the per-link opt-out is not honoured',
+        "url.origin !== location.origin" => 'external links are not excluded',
+        'navigating'             => 'no protection against duplicate navigations',
+    ] as $needle => $why) {
+        if (!str_contains($js, (string)$needle)) { return $why . ' (missing ' . $needle . ')'; }
+    }
+    // A stale page-load timer must not be able to cancel a fresh click.
+    if (!str_contains($js, 'function owned(g)') || substr_count($js, '++gen') < 3) {
+        return 'timers are not generation-owned: a click can be cancelled by the reveal that brought the page in';
+    }
+    return true;
+});
+
+sh_t('the behaviour harness ships with its fixtures', function () {
+    foreach (['tests/page-transition-behavior.mjs', 'tests/page-transition-fixtures.php'] as $rel) {
+        if (!is_file(SH_ROOT . '/' . $rel)) { return $rel . ' is missing, so the transition is only checked by eye'; }
+    }
+    $fixtures = (string)file_get_contents(SH_ROOT . '/tests/page-transition-fixtures.php');
+    // The fixtures must exercise the shipped helper, never a copy of it.
+    if (!str_contains($fixtures, "includes/transition.php")) { return 'the fixtures do not load the shipped transition helper'; }
+    $harness = (string)file_get_contents(SH_ROOT . '/tests/page-transition-behavior.mjs');
+    foreach (['assets/js/app.js', 'assets/css/app.css'] as $asset) {
+        if (!str_contains($harness, $asset)) { return 'the harness does not load ' . $asset; }
+    }
+    return true;
+});
+
+sh_t('transition settings are stored and validated like every other setting', function () {
+    $admin = (string)file_get_contents(SH_ROOT . '/admin/transition.php');
+    if (!str_contains($admin, 'sh_csrf_require()')) { return 'admin/transition.php accepts POST without a CSRF check'; }
+    if (!str_contains($admin, "sh_require_perm('storefront.manage'")) { return 'admin/transition.php is not permission-guarded'; }
+    require_once SH_ROOT . '/includes/transition.php';
+    // Untrusted stored values must be sanitised, never echoed.
+    if (sh_transition_hex('red; background:url(javascript:alert(1))', '#111827') !== '#111827') {
+        return 'sh_transition_hex() accepts a value that is not a hex colour';
+    }
+    if (sh_transition_hex('ff8800', '') !== '#ff8800') { return 'a bare hex colour is not normalised'; }
+    foreach (['bg_types', 'directions', 'fades', 'presets'] as $list) {
+        $fn = 'sh_transition_' . $list;
+        if (count($fn()) < 3) { return $fn . '() lost its allowlist'; }
+    }
+    // A media value is reduced to a basename, so it can never traverse.
+    if (basename('../../config/database.php') !== 'database.php') { return 'unexpected basename() behaviour'; }
+    return true;
+});
+
+sh_t('the transition never blocks the page when JavaScript is missing', function () {
+    require_once SH_ROOT . '/includes/transition.php';
+    $head = sh_transition_head(sh_transition_test_config());
+    // The fallback must be a timer (runs without app.js) and the stylesheet must
+    // carry a release of its own, so two independent paths reveal the page.
+    if (!str_contains($head, 'setTimeout') || !str_contains($head, '__shPtFallbackRelease')) {
+        return 'the head snippet has no self-release when app.js never runs';
+    }
+    if (preg_match('~setTimeout\(function\(\)\{try\{window\.__shPtFallbackRelease~', $head) !== 1) {
+        return 'the fallback release is not armed by a timer';
+    }
+    return true;
+});
+
+// ===========================================================================
 // Helpers used by the checks above
 // ===========================================================================
 

@@ -29,6 +29,17 @@ jobs:
         run: php tools/security-scan.php --fail-on=high
       - name: Security regression suite
         run: php tests/security-regression.php
+      # Drives the real rendered markup (tests/page-transition-fixtures.php),
+      # the real stylesheet and the real script in jsdom and asserts the
+      # state machine behind the page transition: first paint, refresh, direct
+      # URL, admin panel, one-shot marker, no stuck overlay, no bfcache replay.
+      # Test-only: the store itself still runs on plain PHP with no Node.js.
+      - name: Page-transition behaviour harness
+        env:
+          SH_PT_REQUIRE_JSDOM: '1'
+        run: |
+          npm install --no-save --no-package-lock jsdom@26.1.0
+          node tests/page-transition-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
