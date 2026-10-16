@@ -104,6 +104,16 @@ jobs:
         run: php tests/reporting-integration.php
       - name: Exercise session expiry through customer HTTP routes
         run: bash tests/session-expiration-http.sh
+      # The real authentication pages over real HTTP: they render without a PHP
+      # diagnostic, the recovery flow runs against a capture SMTP server (the
+      # six-digit code is read out of the delivered message, a wrong code is
+      # refused, the used code cannot be reused, only the new password signs in,
+      # and the change notification is really accepted), an unconfigured store
+      # says so instead of claiming a send, the reply is identical for an
+      # address that exists and one that does not, and the admin email screens
+      # never echo the stored SMTP password.
+      - name: Email pages and the recovery flow over HTTP
+        run: bash tests/email-pages-http.sh
       # The email system, end to end: a real PHPMailer submission against a
       # capture SMTP server on loopback (submission, AUTH, UTF-8, both MIME
       # alternatives, honest failure categorisation) and the whole challenge
