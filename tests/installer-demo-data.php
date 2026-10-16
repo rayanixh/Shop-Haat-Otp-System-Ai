@@ -210,7 +210,7 @@ try {
     $orderId = sh_insert('orders', [
         'order_number' => 'SH-REAL-1', 'user_id' => $userId, 'customer_name' => 'Real Customer',
         'customer_phone' => '01700000007', 'customer_email' => 'real@example.test',
-        'shipping_address' => '1 Real Street', 'city' => 'Dhaka', 'coupon_code' => 'WELCOME10',
+        'shipping_address' => '1 Real Street', 'shipping_city' => 'Dhaka', 'coupon_code' => 'WELCOME10',
         'subtotal' => 100.00, 'discount' => 0.00, 'delivery_fee' => 60.00, 'total' => 160.00,
         'status' => 'pending', 'payment_status' => 'unpaid',
     ]);

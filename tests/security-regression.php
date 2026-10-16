@@ -1968,6 +1968,69 @@ sh_t('a disabled slide is absent from the homepage, and one slide renders no pag
     return true;
 });
 
+sh_t('every column the installer and the fixtures write exists in the schema', function () {
+    // A fixture that writes 'city' where the table has 'shipping_city' fails only
+    // when CI finally reaches MySQL. The column list is parsed from the schema and
+    // every literal write in install/ and tests/ is checked against it here.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    $tables = [];
+    if (preg_match_all('~CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\) \$E~s', $schema, $m, PREG_SET_ORDER)) {
+        foreach ($m as $block) {
+            $cols = [];
+            foreach (preg_split('~\R~', $block[2]) ?: [] as $line) {
+                if (preg_match('~^\s*(\w+)\s+[A-Za-z]+(?:\([^)]*\))?~', $line, $c) !== 1) { continue; }
+                if (in_array(strtoupper($c[1]), ['PRIMARY', 'UNIQUE', 'KEY', 'INDEX', 'CONSTRAINT', 'FOREIGN'], true)) { continue; }
+                $cols[strtolower($c[1])] = true;
+            }
+            $tables[strtolower($block[1])] = $cols;
+        }
+    }
+    if ($tables === []) { return 'the schema could not be read'; }
+
+    $offenders = [];
+    $files = array_merge(glob(SH_ROOT . '/install/*.php'), glob(SH_ROOT . '/tests/*.php'));
+    foreach ($files as $file) {
+        $src = (string)file_get_contents($file);
+        // Each sh_insert('table', [ ... ]) / sh_update('table', [ ... ]) block is
+        // read on its own: only the keys inside that literal belong to that table.
+        if (preg_match_all("~sh_(?:insert|update)\(\s*'([a-z_]+)'\s*,\s*\[~i", $src, $calls, PREG_OFFSET_CAPTURE)) {
+            foreach ($calls[0] as $i => $call) {
+                $table = strtolower($calls[1][$i][0]);
+                if (!isset($tables[$table])) { continue; }
+                $start = $call[1] + strlen($call[0]) - 1;
+                $depth = 0;
+                $block = '';
+                for ($p = $start, $len = strlen($src); $p < $len; $p++) {
+                    $ch = $src[$p];
+                    if ($ch === '[') { $depth++; continue; }
+                    if ($ch === ']') { $depth--; if ($depth === 0) { break; } continue; }
+                    if ($depth > 0) { $block .= $ch; }
+                }
+                // A nested array is a merge (not a column list) and cannot be read
+                // here. A single key whose value is a variable is perfectly fine to
+                // check: the key is what has to exist, not the value.
+                if (str_contains($block, '[')) { continue; }
+                if (preg_match_all("~'([A-Za-z_][\w]*)'\s*=>\s*~", $block, $keys, PREG_OFFSET_CAPTURE)) {
+                    $count = count($keys[0]);
+                    for ($k = 0; $k < $count; $k++) {
+                        $key = $keys[1][$k][0];
+                        $valueStart = $keys[0][$k][1] + strlen($keys[0][$k][0]);
+                        $valueEnd = $k + 1 < $count ? $keys[0][$k + 1][1] : strlen($block);
+                        $value = trim(substr($block, $valueStart, $valueEnd - $valueStart), " \t\n\r,");
+                        // A value that is built at runtime still has to name a real
+                        // column: only the key is checked, never the value.
+                        if ($value === '' && !str_contains($block, '$')) { continue; }
+                        if (!isset($tables[$table][strtolower($key)])) {
+                            $offenders[] = basename($file) . ' writes ' . $table . '.' . $key . ', which the schema does not define';
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return sh_assert($offenders === [], implode('; ', array_slice(array_unique($offenders), 0, 6)));
+});
+
 sh_t('the panel has exactly one page heading per screen', function () {
     // The layout renders the only <h1>. A second one inside a page body means the
     // entity name appears twice as a title.
