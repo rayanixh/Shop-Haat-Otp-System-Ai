@@ -831,15 +831,22 @@ coupon_editor="$(fetch_page '/admin/coupon-edit.php?new=1')"
 coupon_token="$(printf '%s' "$coupon_editor" | csrf_from_html)"
 [[ -n "$coupon_token" ]] || fail 'the coupon editor did not provide a CSRF token'
 coupon_create_headers="$TMP_DIR/coupon-create-headers"
-curl -sS -A "$DESKTOP_UA" -D "$coupon_create_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+coupon_create_body="$TMP_DIR/coupon-create-body"
+coupon_create_code="$(curl -sS -A "$DESKTOP_UA" -D "$coupon_create_headers" -o "$coupon_create_body" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -w '%{http_code}' \
   -X POST --data-urlencode "csrf_token=${coupon_token}" \
   --data-urlencode 'form=save' --data-urlencode 'id=0' \
   --data-urlencode "code=${coupon_probe}" \
   --data-urlencode 'type=percent' --data-urlencode 'value=10' \
   --data-urlencode 'min_order=0' --data-urlencode 'status=1' \
-  "${BASE}/admin/coupon-edit.php?new=1"
-grep -Eqi '^Location: .*/?admin/coupons\.php' "$coupon_create_headers" \
-  || { cat "$coupon_create_headers" >&2; fail 'a coupon saved on its own screen did not return to the coupon list'; }
+  "${BASE}/admin/coupon-edit.php?new=1")"
+if ! grep -Eqi '^Location: .*/?admin/coupons\.php' "$coupon_create_headers"; then
+  # Say exactly what came back: a rejected token, a validation re-render and a
+  # server error all look the same from the outside otherwise.
+  echo "::error title=Coupon round trip::code=${coupon_create_code} location=$(grep -i '^location:' "$coupon_create_headers" | tr -d '\r' | head -n 1) token_len=${#coupon_token} editor_has_form=$(count_of 'name="form" value="save"' "$coupon_editor") editor_is_login=$(count_of 'sh-adminlogin__box' "$coupon_editor")"
+  echo "::error title=Coupon round trip body::$(head -c 240 "$coupon_create_body" | tr -d '\r\n' | sed 's/%/%25/g')"
+  fail 'a coupon saved on its own screen did not return to the coupon list'
+fi
 coupon_list="$(fetch_page '/admin/coupons.php')"
 assert_contains "$coupon_list" "$coupon_probe" 'the saved coupon did not appear in the listing'
 assert_contains "$coupon_list" 'Coupon created.' 'the listing did not report the successful save'
