@@ -121,20 +121,7 @@ require_once SH_ROOT . '/includes/header.php';
       <a class="sh-section__more" href="<?= e(sh_url('products.php')) ?>">All categories <?= sh_icon('chevron-right', 14) ?></a>
     </div>
     <div class="sh-catgrid">
-      <?php foreach (array_slice($cats, 0, 8) as $c): ?>
-        <a class="sh-category-card" href="<?= e(sh_url('category.php?slug=' . urlencode($c['slug']))) ?>">
-          <?php $catImg = sh_category_image($c['image'] ?? null); ?>
-          <span class="sh-category-card__icon<?= $catImg !== '' ? ' sh-category-card__icon--photo' : '' ?>">
-            <?php if ($catImg !== ''): ?>
-              <img src="<?= e($catImg) ?>" alt="<?= e($c['name']) ?>" loading="lazy" decoding="async">
-            <?php else: ?>
-              <?= sh_icon('image', 20) ?>
-            <?php endif; ?>
-          </span>
-          <span class="sh-category-card__name"><?= e($c['name']) ?></span>
-          <span class="sh-category-card__count"><?= (int)$c['product_count'] ?> items</span>
-        </a>
-      <?php endforeach; ?>
+      <?= sh_category_cards(array_slice($cats, 0, 8)) ?>
     </div>
   </section>
   <?php endif; ?>

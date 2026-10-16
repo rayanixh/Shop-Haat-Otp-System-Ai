@@ -910,21 +910,41 @@ sh_t('SEO settings and fields are guarded like any other admin data', function (
     preg_match_all('/name="([a-z_]+)"/i', $partial, $m);
     $fields = array_values(array_unique($m[1] ?? []));
     if ($fields === []) { return 'the SEO field partial renders no named inputs'; }
-    foreach (['admin/products.php', 'admin/categories.php'] as $page) {
+    // Which file owns each entity's save handler. Categories render the shared
+    // SEO block on their dedicated editor screen, so the guard follows the
+    // form: what must never happen is a rendered field with no writer.
+    $owners = [
+        'admin/products.php'      => 'admin/product-edit.php',
+        'admin/categories.php'    => 'admin/category-edit.php',
+    ];
+    foreach ($owners as $page => $owner) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $page);
+        $writer = (string)file_get_contents(SH_ROOT . '/' . $owner);
         foreach ($fields as $f) {
             // Tolerant of alignment spaces: what matters is that the key is
-            // written by this page's save handler.
-            if (preg_match("/'" . preg_quote($f, '/') . "'\\s*=>/", $src) !== 1) {
-                return $page . ' never saves the field ' . $f . ' rendered by admin/_seo-fields.php';
+            // written by the handler that owns this entity.
+            if (preg_match("/'" . preg_quote($f, '/') . "'\\s*=>/", $writer) !== 1) {
+                return $owner . ' never saves the field ' . $f . ' rendered by admin/_seo-fields.php';
             }
         }
-        if (!str_contains($src, 'require __DIR__ . \'/_seo-fields.php\';')) {
-            return $page . ' does not render the SEO fields';
+        if ($owner === $page) {
+            if (!str_contains($src, 'require __DIR__ . \'/_seo-fields.php\';')) {
+                return $page . ' does not render the SEO fields';
+            }
+        } elseif (!str_contains($src, basename($owner))) {
+            // The listing must hand its save POSTs to the editor rather than
+            // dropping them, and must stay CSRF protected while doing it.
+            return $page . ' no longer routes its form to ' . $owner;
         }
-        if (!str_contains($src, 'sh_seo_schema_ensure()')) {
-            return $page . ' writes SEO columns without ensuring they exist first';
+        if (!str_contains($writer, 'sh_seo_schema_ensure()')) {
+            return $owner . ' writes SEO columns without ensuring they exist first';
         }
+    }
+    // The SEO block itself is only rendered by the editor, which must be as
+    // guarded as the page it replaced.
+    $editor = (string)file_get_contents(SH_ROOT . '/admin/category-edit.php');
+    foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_audit('] as $must) {
+        if (!str_contains($editor, $must)) { return 'admin/category-edit.php is missing ' . $must; }
     }
     return true;
 });
@@ -1328,6 +1348,364 @@ sh_t('the transition never blocks the page when JavaScript is missing', function
     if (preg_match('~setTimeout\(function\(\)\{try\{window\.__shPtFallbackRelease~', $head) !== 1) {
         return 'the fallback release is not armed by a timer';
     }
+    return true;
+});
+
+// ===========================================================================
+// Category cards — one shared renderer, image and name only
+// ===========================================================================
+
+sh_section('Product category cards (storefront and admin)');
+
+sh_t('one renderer produces every category card', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    // The homepage and the category page must not each hand-roll a card.
+    foreach (['index.php', 'category.php'] as $rel) {
+        $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/' . $rel));
+        if (!str_contains($src, 'sh_category_cards(')) {
+            return $rel . ' does not use the shared category card renderer';
+        }
+        if (str_contains($src, 'sh-category-card__icon') || str_contains($src, 'sh-category-card__count')) {
+            return $rel . ' still renders the old card markup by hand';
+        }
+        if (preg_match('~<a class="sh-category-card~', $src) === 1) {
+            return $rel . ' builds the card element itself instead of calling the helper';
+        }
+    }
+    return true;
+});
+
+sh_t('a card shows the image and the name, and nothing else', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    $card = sh_category_card(['name' => 'Mobile Phones', 'slug' => 'mobile-phones', 'image' => '', 'product_count' => 6], 0);
+    // Exactly one link, so the whole card is clickable and nothing nests inside it.
+    if (substr_count($card, '<a ') !== 1 || substr_count($card, '</a>') !== 1) {
+        return 'a card is not a single link: ' . $card;
+    }
+    if (!str_contains($card, 'class="sh-category-card__name"')) { return 'a card has no name element'; }
+    if (!str_contains($card, 'Mobile Phones')) { return 'a card does not render the category name'; }
+    if (stripos($card, 'item') !== false || stripos($card, 'count') !== false) {
+        return 'a card still mentions an item count: ' . $card;
+    }
+    if (preg_match('~[0-9]+\s*(items?|products?)~i', $card) === 1) { return 'a card prints a numeric count'; }
+    if (!str_contains($card, 'sh-category-card__img')) { return 'a card has no image element'; }
+    // A missing photo must not leave an empty frame.
+    if (!str_contains($card, basename(sh_category_placeholder_image()))) {
+        return 'a card without an image does not fall back to the neutral placeholder';
+    }
+    return true;
+});
+
+sh_t('the uploaded category image wins over the placeholder', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    // A file that really exists in the uploads folder, so sh_category_image()
+    // resolves it exactly as it does for a saved category.
+    $dir = SH_UPLOAD_DIR . '/categories';
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { return null; }
+    $name = 'regression-category-' . bin2hex(random_bytes(4)) . '.gif';
+    $gif = base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+    if (@file_put_contents($dir . '/' . $name, $gif) === false) { return null; }
+    try {
+        $card = sh_category_card(['name' => 'Uploaded', 'slug' => 'uploaded', 'image' => $name], 0);
+        if (!str_contains($card, rawurlencode($name))) { return 'a card does not use the uploaded image: ' . $card; }
+        if (str_contains($card, 'is-placeholder') || str_contains($card, '--fallback')) {
+            return 'a card treats a real uploaded image as a placeholder';
+        }
+        // A stored value that is not on disk must fall back, never break the card.
+        $missing = sh_category_card(['name' => 'Gone', 'slug' => 'gone', 'image' => 'does-not-exist.png'], 0);
+        if (!str_contains($missing, basename(sh_category_placeholder_image()))) {
+            return 'a card whose stored image is missing does not fall back';
+        }
+        // The helper is the path guard: a traversing value cannot escape.
+        if (sh_category_image('../../config/database.php') !== '') { return 'a traversing image path resolved to a URL'; }
+    } finally {
+        @unlink($dir . '/' . $name);
+    }
+    return true;
+});
+
+sh_t('the placeholder is a neutral, self-contained image', function () {
+    $path = SH_ROOT . '/assets/images/category-fallback.svg';
+    if (!is_file($path)) { return 'the shared category placeholder is missing'; }
+    $svg = (string)file_get_contents($path);
+    if (!str_starts_with(trim($svg), '<svg')) { return 'the placeholder is not an SVG'; }
+    foreach (['<script', 'javascript:', 'onload=', 'xlink:href', '<image'] as $bad) {
+        if (stripos($svg, $bad) !== false) { return 'the placeholder contains ' . $bad; }
+    }
+    if (!str_contains($svg, 'viewBox')) { return 'the placeholder has no viewBox, so it cannot scale'; }
+    return true;
+});
+
+sh_t('the category grid is responsive and keeps its shape', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    $block = '';
+    if (preg_match('~\.sh-category-card \{(.*?)\}~s', $css, $m) === 1) { $block = $m[1]; }
+    if ($block === '') { return 'the category card has no rule'; }
+    foreach (['flex-direction: column', 'overflow: hidden'] as $need) {
+        if (!str_contains($block, $need)) { return 'the card rule has no ' . $need; }
+    }
+    if (preg_match('~\.sh-category-card__media \{[^}]*aspect-ratio:\s*4\s*/\s*3~s', $css) !== 1) {
+        return 'the card image has no fixed 4:3 frame, so rows can shift while images load';
+    }
+    if (preg_match('~\.sh-category-card__img \{[^}]*object-fit:\s*cover~s', $css) !== 1) {
+        return 'the card image is not object-fit: cover';
+    }
+    if (strpos($css, 'sh-category-card__img--fallback') === false) {
+        return 'flat placeholder artwork would be cropped: no contain rule';
+    }
+    // 4-6 columns on desktop, 2 on phones.
+    if (preg_match('~\.sh-catgrid \{ display: grid; grid-template-columns: repeat\((\d),~', $css, $m) !== 1) {
+        return 'the desktop column count is not a plain repeat()';
+    }
+    $desktop = (int)$m[1];
+    if ($desktop < 4 || $desktop > 6) { return 'the desktop grid has ' . $desktop . ' columns, expected 4-6'; }
+    if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-catgrid \{ grid-template-columns: repeat\((\d),~s', $css, $m2) !== 1) {
+        return 'the mobile column count is not declared at the 600px breakpoint';
+    }
+    if ((int)$m2[1] !== 2) { return 'mobile shows ' . $m2[1] . ' category columns, expected 2'; }
+    // Hover and focus feedback, and no layout shift from the name length.
+    if (!str_contains($css, '.sh-category-card:hover') || !str_contains($css, '.sh-category-card:focus-visible')) {
+        return 'the card has no hover/focus feedback';
+    }
+    if (preg_match('~\.sh-category-card__name \{[^}]*min-height~s', $css) !== 1) {
+        return 'category names can make cards uneven';
+    }
+    return true;
+});
+
+sh_t('no shipped page still prints a category item count', function () {
+    foreach (sh_markup_files() as [$rel, $path]) {
+        if (str_starts_with($rel, 'admin/')) { continue; }   // the admin list shows counts on purpose
+        $src = sh_source_without_comments((string)file_get_contents($path));
+        foreach (['sh-category-card__count', 'sh-category-card__icon'] as $gone) {
+            if (str_contains($src, $gone)) { return $rel . ' still renders ' . $gone; }
+        }
+        // "6 items" style blurbs next to a category link.
+        if (preg_match('~category\.php\?slug=[^>]*>.*?\d+\s*items~is', $src) === 1) {
+            return $rel . ' prints an item count beside a category link';
+        }
+    }
+    return true;
+});
+
+// ===========================================================================
+// Admin CRUD — Add at the top, forms on their own screens
+// ===========================================================================
+
+sh_section('Admin CRUD layout and form routing');
+
+/** The list page => [editor page, Add-button label] for each converted section. */
+function sh_admin_crud_map(): array
+{
+    return [
+        'admin/categories.php'      => ['admin/category-edit.php', 'Add category'],
+        'admin/products.php'        => ['admin/product-edit.php', 'Add product'],
+        'admin/homepage.php'        => ['admin/homepage-edit.php', 'Add slide'],
+        'admin/payment-methods.php' => ['admin/payment-method-edit.php', 'Add payment method'],
+        'admin/brands.php'          => ['', 'Add brand'],   // short form: modal
+    ];
+}
+
+sh_t('every list page offers its create action at the top of the section', function () {
+    $offenders = [];
+    foreach (sh_admin_crud_map() as $list => [$editor, $label]) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $list);
+        if (!str_contains($src, 'sh_admin_header(')) { $offenders[] = $list . ' has no page header'; }
+        if (!str_contains($src, $label)) { $offenders[] = $list . ' has no "' . $label . '" action'; }
+        // The header (and therefore the Add button) must come before the records.
+        $headerAt = strpos($src, 'sh_admin_header(');
+        $tableAt  = strpos($src, 'sh-tablewrap');
+        $cardsAt  = strpos($src, 'sh-cards');
+        $recordsAt = min(array_filter([$tableAt === false ? PHP_INT_MAX : $tableAt, $cardsAt === false ? PHP_INT_MAX : $cardsAt]));
+        if ($recordsAt !== PHP_INT_MAX && $headerAt > $recordsAt) {
+            $offenders[] = $list . ' renders its records before the header action';
+        }
+    }
+    return sh_assert($offenders === [], implode('; ', $offenders));
+});
+
+sh_t('the create action is wired to the editor or to a modal', function () {
+    $offenders = [];
+    foreach (sh_admin_crud_map() as $list => [$editor, $label]) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $list);
+        if ($editor !== '') {
+            if (!str_contains($src, basename($editor))) { $offenders[] = $list . ' does not link to ' . $editor; }
+            if (!is_file(SH_ROOT . '/' . $editor)) { $offenders[] = $editor . ' does not exist'; }
+        } else {
+            // A short form is a modal on the same page: it must open through the
+            // shared modal helper, and its form must still POST with a CSRF field.
+            if (!str_contains($src, 'sh_admin_modal(')) { $offenders[] = $list . ' has no shared modal'; }
+            if (substr_count($src, 'sh_csrf_field()') < 2) { $offenders[] = $list . ' modal form has no CSRF field'; }
+        }
+    }
+    return sh_assert($offenders === [], implode('; ', $offenders));
+});
+
+sh_t('no listing page renders a create/edit form below its records', function () {
+    $offenders = [];
+    foreach (array_keys(sh_admin_crud_map()) as $list) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $list);
+        $recordsAt = strpos($src, 'sh-tablewrap');
+        if ($recordsAt === false) { $recordsAt = strpos($src, 'sh-cards'); }
+        if ($recordsAt === false) { continue; }
+        $tail = substr($src, $recordsAt);
+        // A form that writes the entity (form=save) must not live after the list.
+        if (preg_match('~<form[^>]*>.*?name="form" value="save"~s', $tail) === 1) {
+            $offenders[] = $list . ' still renders its save form under the listing';
+        }
+        // Nor may it re-appear through a GET flag on the same page.
+        if (str_contains($tail, "_seo-fields.php")) {
+            $offenders[] = $list . ' still renders the SEO field block inside the listing';
+        }
+    }
+    return sh_assert($offenders === [], implode('; ', $offenders));
+});
+
+sh_t('the new editor pages are guarded like the pages they replaced', function () {
+    foreach (['admin/category-edit.php', 'admin/product-edit.php', 'admin/homepage-edit.php', 'admin/payment-method-edit.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_require_admin()'] as $must) {
+            if (!str_contains($src, $must)) { return $rel . ' is missing ' . $must; }
+        }
+        // Every editor offers a way back that keeps the listing's filters.
+        if (!str_contains($src, 'sh_admin_keep_query(')) { return $rel . ' does not preserve the listing query'; }
+        if (!str_contains($src, 'sh_admin_breadcrumb(')) { return $rel . ' has no breadcrumb'; }
+        if (!str_contains($src, "require __DIR__ . '/_footer.php';")) { return $rel . ' does not close the layout'; }
+        // POST only: a state change must never be reachable by a GET.
+        if (preg_match('~\$_GET\[[^\]]*\]\s*\)?[^;]*;\s*//\s*save~', $src) === 1) { return $rel . ' saves from a GET parameter'; }
+    }
+    return true;
+});
+
+sh_t('old edit links keep working through a redirect', function () {
+    $map = [
+        'admin/categories.php'      => 'admin/category-edit.php',
+        'admin/products.php'        => 'admin/product-edit.php',
+        'admin/homepage.php'        => 'admin/homepage-edit.php',
+        'admin/payment-methods.php' => 'admin/payment-method-edit.php',
+    ];
+    foreach ($map as $list => $editor) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $list);
+        if (!str_contains($src, "sh_redirect('" . $editor . "?edit=") && !str_contains($src, "sh_redirect('" . $editor . "'")) {
+            return $list . ' no longer forwards ?edit= to ' . $editor;
+        }
+    }
+    return true;
+});
+
+sh_t('a save posted to a listing is forwarded, never silently dropped', function () {
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/homepage.php', 'admin/payment-methods.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (!str_contains($src, "\$form === 'save'") && !str_contains($src, '$form !== \'save\'')) {
+            return $rel . ' has no branch for a save posted to it';
+        }
+        if (!str_contains($src, 'sh_redirect(')) { return $rel . ' never redirects a forwarded save'; }
+    }
+    return true;
+});
+
+sh_t('mobile tables can render as record cards', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    foreach (['.sh-tablewrap--cards', 'attr(data-label)'] as $needle) {
+        if (!str_contains($css, $needle)) { return 'the responsive table card pattern is missing ' . $needle; }
+    }
+    // The converted listings opt in and label their cells.
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (!str_contains($src, 'sh-tablewrap--cards')) { return $rel . ' does not opt into the mobile card layout'; }
+        if (substr_count($src, 'data-label=') < 3) { return $rel . ' does not label its table cells for narrow screens'; }
+    }
+    return true;
+});
+
+sh_t('the admin form helpers stay in one place', function () {
+    $tools = (string)file_get_contents(SH_ROOT . '/includes/admin-tools.php');
+    foreach (['sh_admin_header', 'sh_admin_add_button', 'sh_admin_field', 'sh_admin_error_summary', 'sh_admin_modal', 'sh_admin_breadcrumb', 'sh_admin_keep_query', 'sh_admin_range_label'] as $fn) {
+        if (!str_contains($tools, 'function ' . $fn . '(')) { return 'the shared helper ' . $fn . '() no longer exists'; }
+    }
+    // The Add button must respect permissions rather than showing a dead action.
+    if (!str_contains($tools, 'sh_admin_can(')) { return 'the Add button ignores permissions'; }
+    return true;
+});
+
+// ===========================================================================
+// Category image upload reliability
+// ===========================================================================
+
+sh_section('Category image upload and replacement');
+
+sh_t('a failed upload never removes the existing image', function () {
+    require_once SH_ROOT . '/includes/category-image.php';
+    $row = ['image' => 'existing-category.png'];
+    // PHP reports a failure (too large / partial); the result must be the failure
+    // only, with the stored image left untouched.
+    foreach ([UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_PARTIAL, UPLOAD_ERR_NO_TMP_DIR] as $code) {
+        $res = sh_category_resolve_image($row, [], ['image' => ['name' => 'new.png', 'error' => $code, 'tmp_name' => '', 'size' => 0]]);
+        if ($res['error'] === null) { return 'upload error ' . $code . ' was not reported'; }
+        if ($res['action'] !== 'keep' || $res['file'] !== 'existing-category.png') {
+            return 'a failed upload changed the stored image (error ' . $code . ')';
+        }
+        if ($res['uploaded'] !== null) { return 'a failed upload reported a stored file'; }
+    }
+    return true;
+});
+
+sh_t('keeping, replacing and removing are decided explicitly', function () {
+    require_once SH_ROOT . '/includes/category-image.php';
+    // No upload, no checkbox: keep.
+    $keep = sh_category_resolve_image(['image' => 'a.png'], [], []);
+    if ($keep['action'] !== 'keep' || $keep['file'] !== 'a.png') { return 'a plain save did not keep the image'; }
+    // Explicit removal without a replacement: remove.
+    $remove = sh_category_resolve_image(['image' => 'a.png'], ['remove_image' => '1'], []);
+    if ($remove['action'] !== 'remove' || $remove['file'] !== null) { return 'the remove flag was ignored'; }
+    // A removal tick combined with a new upload must prefer the new upload.
+    $both = sh_category_resolve_image(['image' => 'a.png'], ['remove_image' => '1'], ['image' => ['name' => 'x.png', 'error' => UPLOAD_ERR_NO_FILE, 'tmp_name' => '', 'size' => 0]]);
+    if ($both['action'] !== 'remove') { return 'a no-file upload overrode the explicit removal'; }
+    // A brand-new category with nothing uploaded stays empty (the placeholder shows).
+    $fresh = sh_category_resolve_image(null, [], []);
+    if ($fresh['action'] !== 'keep' || $fresh['file'] !== null) { return 'a new category did not start without an image'; }
+    return true;
+});
+
+sh_t('the image file is only deleted in a safe order', function () {
+    $editor = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/category-edit.php'));
+    // The previous file is removed only inside the branch that already wrote the
+    // new value to the database, and the delete helper basenames its input.
+    $updateAt = strpos($editor, "sh_update('categories'");
+    if ($updateAt === false) { return 'the category editor does not update the row'; }
+    $deleteAt = strpos($editor, 'sh_category_delete_file($old)');
+    if ($deleteAt === false) { return 'the previous image is never cleaned up'; }
+    if ($updateAt === false || $deleteAt < $updateAt) {
+        return 'the previous image is deleted before the new value is stored';
+    }
+    $helper = (string)file_get_contents(SH_ROOT . '/includes/category-image.php');
+    if (!str_contains($helper, 'basename(')) { return 'the delete helper does not basename its path'; }
+    // An upload that is validated away must be cleaned up rather than orphaned.
+    if (!str_contains($editor, "sh_category_delete_file(\$imgResult['uploaded'])")) {
+        return 'a rejected upload can be left orphaned on disk';
+    }
+    return true;
+});
+
+sh_t('the editor keeps every field the old inline form had', function () {
+    $editor = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/category-edit.php'));
+    // Losing a field here would silently drop an existing setting on save.
+    foreach ([
+        "'parent_id'" => 'parent category',
+        "'icon'" => 'navigation icon',
+        "'description'" => 'description',
+        "'sort_order'" => 'sort order',
+        "'status'" => 'navigation visibility',
+        "'image'" => 'category image',
+        'sh_category_resolve_image' => 'the image keep/replace/remove rules',
+    ] as $needle => $why) {
+        if (!str_contains($editor, (string)$needle)) { return 'the category editor no longer writes ' . $why; }
+    }
+    // The upload field still accepts the allowlisted formats and shows a preview.
+    if (!str_contains($editor, 'accept="image/jpeg,image/png,image/webp,image/gif"')) {
+        return 'the image input no longer restricts formats client-side';
+    }
+    if (!str_contains($editor, 'data-image-preview=')) { return 'the image preview was lost'; }
     return true;
 });
 

@@ -34,6 +34,11 @@ $rating   = sh_get('rating');
 $inStock  = sh_get('in_stock') === '1';
 $brandIds = array_map('intval', (array)($_GET['brand'] ?? []));
 
+// Child categories, if this category has any. Rendered as cards under the
+// heading so a shopper can drill down; the section is skipped entirely when
+// there are none, so no empty grid can appear.
+$childCats = sh_category_children((int)$category['id']);
+
 $result = sh_product_search([
     'category_id' => (int)$category['id'],
     'sort' => $sort, 'page' => $page,
@@ -169,6 +174,17 @@ require_once SH_ROOT . '/includes/header.php';
 
       <?php if ($category['description']): ?>
         <p style="font-size:13.5px;color:var(--sh-muted);margin-bottom:12px"><?= e($category['description']) ?></p>
+      <?php endif; ?>
+
+      <?php if ($childCats): ?>
+        <section class="sh-section" aria-labelledby="sh-subcats-h">
+          <div class="sh-section__head">
+            <h2 class="sh-section__title" id="sh-subcats-h"><?= sh_icon('grid', 18) ?> Shop <?= e($category['name']) ?> by category</h2>
+          </div>
+          <div class="sh-catgrid">
+            <?= sh_category_cards($childCats) ?>
+          </div>
+        </section>
       <?php endif; ?>
 
       <?php if (!$result['items']): ?>

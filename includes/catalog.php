@@ -21,6 +21,104 @@ function sh_categories(bool $onlyActive = true): array
     return $cache;
 }
 
+/**
+ * Neutral fallback image for a category with no uploaded photo.
+ *
+ * One shared asset keeps every category card the same size whether or not the
+ * owner has uploaded artwork, and replaces the oversized placeholder icon the
+ * cards used to show. It is a plain SVG with no script, so it passes the CSP.
+ */
+function sh_category_placeholder_image(): string
+{
+    return sh_url('assets/images/category-fallback.svg');
+}
+
+/**
+ * The catalogue thumbnail for a category: its own uploaded image when one is
+ * present on disk, otherwise the neutral fallback.
+ */
+function sh_category_thumb(?string $file): string
+{
+    $own = sh_category_image($file);
+    return $own !== '' ? $own : sh_category_placeholder_image();
+}
+
+/**
+ * Render one product-category card.
+ *
+ * Used everywhere a category card appears (the homepage showcase and the
+ * category listing pages) so the markup can only exist in one place. The whole
+ * card is a single link: no nested controls, no item counts, and the image sits
+ * in a fixed 4:3 frame so the grid never shifts while images load.
+ *
+ * The first few cards load eagerly on purpose: they are above the fold on
+ * mobile, and lazy-loading them is what makes a category grid appear to pop in
+ * after the rest of the page.
+ */
+function sh_category_card(array $cat, int $index = 0): string
+{
+    $name  = trim((string)($cat['name'] ?? ''));
+    $slug  = (string)($cat['slug'] ?? '');
+    if ($name === '' || $slug === '') { return ''; }
+    $href   = sh_url('category.php?slug=' . urlencode($slug));
+    $img    = sh_category_thumb($cat['image'] ?? null);
+    $hasImg = $img !== sh_category_placeholder_image();
+
+    return '<a class="sh-category-card" href="' . e($href) . '">'
+        . '<span class="sh-category-card__media">'
+        . '<img class="sh-category-card__img' . ($hasImg ? '' : ' sh-category-card__img--fallback') . '"'
+        . ' src="' . e($img) . '" alt="' . e($name) . '" width="400" height="300"'
+        . ($index < 4 ? ' decoding="async"' : ' loading="lazy" decoding="async"')
+        . '>'
+        . '</span>'
+        . '<span class="sh-category-card__name" title="' . e($name) . '">' . e($name) . '</span>'
+        . '</a>';
+}
+
+/**
+ * Category cards for a list of category rows (the homepage showcase uses this).
+ *
+ * @param array<int,array<string,mixed>> $cats
+ */
+function sh_category_cards(array $cats, int $limit = 0): string
+{
+    if ($limit > 0) { $cats = array_slice($cats, 0, $limit); }
+    $html = '';
+    $i = 0;
+    foreach ($cats as $c) {
+        $card = sh_category_card($c, $i);
+        if ($card === '') { continue; }
+        $html .= $card;
+        $i++;
+    }
+    return $html;
+}
+
+/**
+ * Child categories of $parentId, ordered the way the admin panel lists them.
+ *
+ * Returns [] when the category has no children, so callers can skip the whole
+ * section instead of rendering an empty grid.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sh_category_children(int $parentId, bool $onlyActive = true): array
+{
+    if ($parentId <= 0) { return []; }
+    try {
+        return sh_all(
+            'SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.status = 1) AS product_count
+             FROM categories c
+             WHERE c.parent_id = ? ' . ($onlyActive ? 'AND c.status = 1 ' : '') .
+            'ORDER BY c.sort_order ASC, c.name ASC',
+            [$parentId]
+        );
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'category-children');
+        return [];
+    }
+}
+
 function sh_category_by_slug(string $slug): ?array
 {
     return sh_one('SELECT * FROM categories WHERE slug = ? AND status = 1 LIMIT 1', [$slug]);

@@ -623,11 +623,17 @@
    =================================================================== */
 (function () {
   /* Preview the chosen file before it is uploaded. */
+  /* The preview target may be the old .sh-promoprev wrapper (with its own
+     caption element) or a plain <img> as the category editor uses. Both are
+     supported so no existing admin screen changes behaviour. */
   document.querySelectorAll('[data-image-preview]').forEach(function (input) {
-    var box = document.getElementById(input.getAttribute('data-image-preview'));
-    if (!box) return;
-    var img = box.querySelector('img');
-    var cap = box.querySelector('[data-preview-caption]');
+    var target = document.getElementById(input.getAttribute('data-image-preview'));
+    if (!target) return;
+    var box = target.tagName === 'IMG' ? target.parentNode : target;
+    var img = target.tagName === 'IMG' ? target : target.querySelector('img');
+    var cap = (box ? box.querySelector('[data-preview-caption]') : null)
+      || document.getElementById(input.getAttribute('data-image-preview') + '-cap');
+    var placeholder = img ? (img.getAttribute('data-placeholder-src') || '') : '';
     var original = img ? img.getAttribute('src') : '';
 
     input.addEventListener('change', function () {
@@ -645,6 +651,7 @@
       }
       var url = URL.createObjectURL(file);
       if (img) {
+        img.classList.remove('is-placeholder');
         img.onload = function () { URL.revokeObjectURL(url); };
         img.src = url;
       }
@@ -652,8 +659,27 @@
         ? (file.size / 1048576).toFixed(1) + ' MB'
         : Math.round(file.size / 1024) + ' KB';
       if (cap) cap.textContent = 'New image — ' + kb + ' (not saved yet)';
-      box.hidden = false;
+      if (box) box.hidden = false;
     });
+
+    // "Remove the current image" shows the neutral fallback straight away, so
+    // the operator sees what the storefront will show before saving.
+    var remove = document.querySelector('[data-image-remove="' + input.getAttribute('data-image-preview') + '"]');
+    if (remove && img) {
+      var syncRemoval = function () {
+        if (remove.checked && !(input.files && input.files[0])) {
+          img.classList.add('is-placeholder');
+          img.src = placeholder || original;
+          if (cap) cap.textContent = placeholder ? 'No image — placeholder shown' : 'Image will be removed';
+        } else if (!remove.checked && !(input.files && input.files[0])) {
+          img.classList.remove('is-placeholder');
+          img.src = original;
+          if (cap) cap.textContent = 'Current image';
+        }
+      };
+      remove.addEventListener('change', syncRemoval);
+      input.addEventListener('change', function () { if (remove.checked) { remove.checked = false; } });
+    }
   });
 
   /* Overlay strength: show the live value next to the slider. */

@@ -528,4 +528,89 @@ set_store_setting transition_enabled "$original_enabled"
 assert_transition_markup '/' "$(fetch_page '/')" 'GET / after re-enabling the transition' >/dev/null
 echo "::notice title=Page transition observed::home=${home_duration}ms admin=${admin_duration}ms disabled=no-overlay duration-change=750ms both panels"
 
+# ---------------------------------------------------------------------------
+# 9. Product category cards: the image is the category's own upload, the name
+#    is beneath it, and no item count is printed anywhere.
+# ---------------------------------------------------------------------------
+echo 'Category card HTTP integration'
+
+home_cards="$(fetch_page '/')"
+card_count="$(printf '%s' "$home_cards" | grep -o 'class="sh-category-card"' | wc -l | tr -d ' ')"
+[[ "$card_count" -ge 1 ]] || { echo "::error title=Category cards::the homepage rendered no category cards"; fail 'the homepage rendered no product category cards'; }
+if printf '%s' "$home_cards" | grep -qE '[0-9]+ items'; then
+  fail 'a category card still prints an item count'
+fi
+if printf '%s' "$home_cards" | grep -q 'sh-category-card__icon\|sh-category-card__count'; then
+  fail 'a category card still uses the old placeholder-icon / count markup'
+fi
+# Every card must be one link that carries an image and a name.
+card_img="$(printf '%s' "$home_cards" | grep -o 'sh-category-card__img[^"]*' | wc -l | tr -d ' ')"
+card_name="$(printf '%s' "$home_cards" | grep -o 'sh-category-card__name' | wc -l | tr -d ' ')"
+[[ "$card_img" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_img} images"
+[[ "$card_name" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_name} names"
+
+# The neutral fallback must be served, so a category without a photo is not broken.
+fallback_code="$(curl -sS -o "$TMP_DIR/fallback.svg" -w '%{http_code}' -D "$TMP_DIR/fallback-headers" "${BASE}/assets/images/category-fallback.svg")"
+[[ "$fallback_code" == '200' ]] || fail "the category fallback image returned HTTP ${fallback_code}"
+grep -Eqi '^content-type: image/svg\+xml' "$TMP_DIR/fallback-headers" || fail 'the category fallback is not served as SVG'
+grep -q '<svg' "$TMP_DIR/fallback.svg" || fail 'the category fallback is not an SVG document'
+
+# A category with a real uploaded image must use it: create one, fetch the
+# homepage and the category page, then clean both the row and the file up.
+probe_slug='category-card-probe'
+probe_file="$(php -r '
+$slug = "category-card-probe";
+$cfg = require "config/database.php";
+$src = base64_decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+$name = "probe-" . bin2hex(random_bytes(4)) . ".gif";
+$dir = __DIR__ . "/uploads/categories";
+if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { echo ""; exit; }
+if (@file_put_contents($dir . "/" . $name, $src) === false) { echo ""; exit; }
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM categories WHERE slug = ?")->execute([$slug]);
+    $st = $pdo->prepare("INSERT INTO categories (name, slug, icon, image, description, sort_order, status) VALUES (?,?,?,?,?,999,1)");
+    $st->execute(["Cards Probe", $slug, "grid", $name, "probe"]);
+    echo $name;
+} catch (Throwable $e) { echo ""; }')"
+
+if [[ -n "$probe_file" ]]; then
+  home_with_image="$(fetch_page '/')"
+  if printf '%s' "$home_with_image" | grep -q "uploads/categories/${probe_file}"; then
+    # The image tag that carries the upload must not also carry the placeholder class.
+    probe_img="$(printf '%s' "$home_with_image" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1)"
+    [[ -n "$probe_img" ]] || fail "the uploaded category image is not rendered by an <img> tag (${probe_file})"
+    case "$probe_img" in
+      *sh-category-card__img--fallback*) fail 'an uploaded category image was rendered as the placeholder' ;;
+    esac
+    echo "::notice title=Category card image::homepage card used uploads/categories/${probe_file}"
+  else
+    fail "the homepage did not use the uploaded category image (${probe_file})"
+  fi
+  cat_page="$(fetch_page "/category.php?slug=${probe_slug}")"
+  assert_contains "$cat_page" 'Cards Probe' 'the category page did not render the probe category'
+  if printf '%s' "$cat_page" | grep -qE '[0-9]+ items'; then
+    fail 'the category page still prints an item count'
+  fi
+  # The upload is a public URL that the web server really serves.
+  img_url="$(printf '%s' "$home_with_image" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1)"
+  if [[ -n "$img_url" ]]; then
+    img_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}${img_url}")"
+    [[ "$img_code" == '200' ]] || fail "the uploaded category image returned HTTP ${img_code} (${img_url})"
+  fi
+  php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $st = $pdo->prepare("SELECT image FROM categories WHERE slug = ? LIMIT 1");
+    $st->execute(["category-card-probe"]);
+    $img = (string)$st->fetchColumn();
+    $pdo->prepare("DELETE FROM categories WHERE slug = ?")->execute(["category-card-probe"]);
+    if ($img !== "" && strpos($img, "/") === false) { @unlink(__DIR__ . "/uploads/categories/" . basename($img)); }
+} catch (Throwable $e) {}'
+  echo 'Category card image probe passed'
+else
+  echo '::notice title=Category card image::probe row could not be created, uploaded-image path not checked'
+fi
+
 echo 'Session expiration HTTP integration passed'

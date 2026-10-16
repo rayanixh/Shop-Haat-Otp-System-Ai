@@ -91,6 +91,166 @@ function sh_admin_schema_ensure(): void
 // ---------------------------------------------------------------------------
 // Audit log
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Admin list-page helpers
+//
+// The admin CRUD screens all follow the same shape: a page header with the
+// section title, its description and the Add/Create action at the top, an
+// optional filter bar, and then the records. Creating and editing long records
+// happens on its own screen (or in the shared modal), never in a form appended
+// below the listing.
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin page header: title, one-line description, optional "Add new" action.
+ *
+ * Every management screen uses this so the create action is always in the same
+ * place — at the top of the section — instead of below the table.
+ */
+function sh_admin_header(string $title, string $description = '', string $actionHtml = '', string $icon = 'grid'): string
+{
+    $html = '<div class="sh-pagehead">';
+    $html .= '<div class="sh-pagehead__text"><h2 class="sh-pagehead__title">' . sh_icon($icon, 19) . '<span>' . e($title) . '</span></h2>';
+    if ($description !== '') { $html .= '<p class="sh-pagehead__desc">' . e($description) . '</p>'; }
+    $html .= '</div>';
+    if ($actionHtml !== '') { $html .= '<div class="sh-pagehead__actions">' . $actionHtml . '</div>'; }
+    return $html . '</div>';
+}
+
+/**
+ * Standard "Add / Create" button for a list page.
+ *
+ * $href is used for a dedicated create screen; $modalId opens the shared modal
+ * instead — exactly one of the two is given, so a section can never end up with
+ * two competing create buttons. A permission-denied operator gets a disabled
+ * button with the reason, which is friendlier than hiding the action and
+ * leaving them wondering whether the feature exists.
+ */
+function sh_admin_add_button(string $label, string $href = '', string $modalId = '', string $class = 'sh-btn sh-btn--sm', string $perm = ''): string
+{
+    if ($perm !== '' && function_exists('sh_admin_can') && !sh_admin_can($perm)) {
+        return '<span class="' . e($class) . ' sh-btn--disabled" aria-disabled="true" title="Your role cannot create records here">'
+            . sh_icon('plus', 14) . ' ' . e($label) . '</span>';
+    }
+    if ($href !== '') {
+        return '<a class="' . e($class) . '" href="' . e($href) . '">' . sh_icon('plus', 14) . ' ' . e($label) . '</a>';
+    }
+    if ($modalId !== '') {
+        return '<button class="' . e($class) . '" type="button" data-modal-open="' . e($modalId) . '">'
+            . sh_icon('plus', 14) . ' ' . e($label) . '</button>';
+    }
+    return '';
+}
+
+/** Breadcrumb row for a dedicated create/edit screen. */
+function sh_admin_breadcrumb(array $trail): string
+{
+    $items = [];
+    $count = count($trail);
+    $i = 0;
+    foreach ($trail as $label => $href) {
+        $i++;
+        $last = $i === $count;
+        if ($href === '' || $last) {
+            $items[] = '<span class="sh-crumbs__here"' . ($last ? ' aria-current="page"' : '') . '>' . e((string)$label) . '</span>';
+        } else {
+            $items[] = '<a href="' . e((string)$href) . '">' . e((string)$label) . '</a>';
+        }
+    }
+    return '<nav class="sh-crumbs" aria-label="Breadcrumb">' . implode('<span class="sh-crumbs__sep">' . sh_icon('chevron-right', 12) . '</span>', $items) . '</nav>';
+}
+
+/**
+ * Return the current query string with the given keys removed.
+ *
+ * Used by Edit links and by the "back to the list" action so the operator lands
+ * on the page they came from with their search, filters, sort and pagination
+ * still applied. Only scalar values are accepted (array filters such as
+ * brand[] are dropped, which is the honest behaviour for a flat link).
+ */
+function sh_admin_keep_query(array $drop = []): string
+{
+    $keep = [];
+    foreach ($_GET as $k => $v) {
+        if (is_array($v)) { continue; }
+        if (in_array((string)$k, $drop, true)) { continue; }
+        $keep[(string)$k] = (string)$v;
+    }
+    return $keep === [] ? '' : http_build_query($keep);
+}
+
+/**
+ * One row of the pagination summary shown with a list ("Showing 1–20 of 34").
+ */
+function sh_admin_range_label(int $total, int $perPage, int $page): string
+{
+    if ($total <= 0) { return 'No records'; }
+    $from = (($page - 1) * $perPage) + 1;
+    $to = min($total, $page * $perPage);
+    return 'Showing ' . $from . '–' . $to . ' of ' . number_format($total);
+}
+
+/**
+ * Wrap a form field so its label, input and error message always travel
+ * together and an error is announced next to the field it belongs to.
+ */
+function sh_admin_field(string $label, string $controlHtml, string $hint = '', ?string $error = null, string $for = '', bool $required = false): string
+{
+    $id = $for !== '' ? ' for="' . e($for) . '"' : '';
+    $html = '<div class="sh-field' . ($error !== null ? ' sh-field--bad' : '') . '">';
+    if ($label !== '') {
+        $html .= '<label class="sh-field__label"' . $id . '>' . e($label)
+            . ($required ? ' <span class="sh-field__req">*</span>' : '') . '</label>';
+    }
+    $html .= $controlHtml;
+    if ($error !== null) {
+        $html .= '<span class="sh-field__error" role="alert">' . sh_icon('alert', 13) . ' ' . e($error) . '</span>';
+    } elseif ($hint !== '') {
+        $html .= '<span class="sh-field__hint">' . $hint . '</span>';
+    }
+    return $html . '</div>';
+}
+
+/**
+ * Show every validation message once, at the top of the form, so an operator on
+ * a phone does not have to hunt through the page for the first error. The same
+ * messages also appear beside their own field.
+ */
+function sh_admin_error_summary(array $errors, string $title = 'Please fix the following:'): string
+{
+    if (!$errors) { return ''; }
+    $html = '<div class="sh-alert sh-alert--error" role="alert">' . sh_icon('x-circle', 17)
+        . '<div><strong>' . e($title) . '</strong><ul class="sh-alert__list">';
+    foreach ($errors as $e) { $html .= '<li>' . e((string)$e) . '</li>'; }
+    return $html . '</ul></div></div>';
+}
+
+/**
+ * Shared create/edit modal (small forms only).
+ *
+ * The marketplace we target has no JavaScript-heavy dependency: the modal is a
+ * plain <dialog>-free overlay toggled by the existing app.js modal handler, and
+ * every form inside it is a normal POST to the section's own handler with a
+ * CSRF field. Without JavaScript the same form is reachable from the
+ * dedicated page linked in $fallbackHref.
+ */
+function sh_admin_modal(string $id, string $title, string $bodyHtml, string $fallbackHref = '', string $icon = 'plus'): string
+{
+    $html = '<div class="sh-modal" id="' . e($id) . '" hidden>';
+    $html .= '<button class="sh-modal__scrim" type="button" data-modal-close aria-label="Close"></button>';
+    $html .= '<div class="sh-modal__box" role="dialog" aria-modal="true" aria-labelledby="' . e($id) . '-title">';
+    $html .= '<div class="sh-modal__head">' . sh_icon($icon, 17)
+        . '<h2 class="sh-modal__title" id="' . e($id) . '-title">' . e($title) . '</h2>'
+        . '<button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-modal-close aria-label="Close">'
+        . sh_icon('x', 15) . '</button></div>';
+    $html .= '<div class="sh-modal__body">' . $bodyHtml . '</div>';
+    if ($fallbackHref !== '') {
+        $html .= '<div class="sh-modal__foot"><a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($fallbackHref) . '">'
+            . sh_icon('external', 13) . ' Open full page</a></div>';
+    }
+    return $html . '</div></div>';
+}
+
 function sh_audit(string $action, string $module, ?int $targetId = null, string $targetLabel = '', $old = null, $new = null): void
 {
     sh_admin_schema_ensure();
