@@ -97,10 +97,12 @@ assert_transition_markup() {
   body_at="$(printf '%s' "$body" | grep -bo '<body' | head -n 1 | cut -d: -f1)"
   [[ -n "$head_at" && -n "$body_at" && "$head_at" -lt "$body_at" ]] || fail "${label} emits the hold after <body>, which is too late for the first paint"
   overlay_at="$(printf '%s' "$body" | grep -bo 'id="sh-pt"' | head -n 1 | cut -d: -f1)"
-  # Public pages use <main id="sh-main">; the admin layout uses .sh-admin-main
-  # and the admin sign-in page its own box. Whichever the page has, the overlay
-  # must come first.
-  main_at="$(printf '%s' "$body" | grep -bo '<main\|sh-admin-main\|sh-adminlogin__box' | head -n 1 | cut -d: -f1)"
+  # Public pages use <main id="sh-main">; the admin layout uses
+  # <div class="sh-admin-main"> and the admin sign-in page its own box.
+  # Whichever the page has, the overlay must come first. The anchors are element
+  # markup on purpose: a stylesheet selector (".sh-adminlogin__box {") sits in
+  # the head of that page and would otherwise match before the overlay.
+  main_at="$(printf '%s' "$body" | grep -bo 'id="sh-main"\|class="sh-admin-main"\|class="sh-adminlogin__box"' | head -n 1 | cut -d: -f1)"
   [[ -n "$overlay_at" && -n "$main_at" && "$overlay_at" -lt "$main_at" ]] || fail "${label} renders the overlay after the page content"
   duration="$(printf '%s' "$body" | sed -n 's/.*--sh-pt-ms:\([0-9]*\)ms.*/\1/p' | head -n 1)"
   [[ -n "$duration" ]] || fail "${label} does not carry the configured transition duration"
