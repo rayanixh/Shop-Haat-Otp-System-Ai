@@ -1511,7 +1511,7 @@
     if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return false;
     if (a.target && a.target !== '_self') return false;
     if (a.hasAttribute('download') || a.hasAttribute('data-no-transition')) return false;
-    if (a.getAttribute('role') === 'button' || a.hasAttribute('data-modal') || a.hasAttribute('data-toggle') || a.hasAttribute('data-dropdown')) return false;
+    if (a.getAttribute('role') === 'button' || a.hasAttribute('data-modal') || a.hasAttribute('data-modal-open') || a.hasAttribute('data-toggle') || a.hasAttribute('data-dropdown')) return false;
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#' || /^(javascript|mailto|tel|sms|whatsapp):/i.test(href)) return false;
     var url;

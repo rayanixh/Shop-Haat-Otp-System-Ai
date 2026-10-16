@@ -96,6 +96,7 @@ function sh_fixture_links(): string
         '  <a id="sh-fixture-blank" href="/help.php" target="_blank">New tab link</a>',
         '  <a id="sh-fixture-download" href="/track.php" download>Download link</a>',
         '  <a id="sh-fixture-modal" href="/product.php?slug=x" data-modal="1">Modal link</a>',
+        '  <a id="sh-fixture-modal-open" href="/product.php?slug=x" data-modal-open="sh-demo-modal">Modal opener (the attribute the storefront uses)</a>',
         '  <a id="sh-fixture-toggle" href="/product.php?slug=x" data-toggle="x">Toggle link</a>',
         '  <a id="sh-fixture-no-transition" href="/help.php" data-no-transition>Opt-out link</a>',
         '  <a id="sh-fixture-hash" href="#sh-main">Hash link</a>',

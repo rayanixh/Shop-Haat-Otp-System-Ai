@@ -307,6 +307,22 @@ scenario('7. Internal links, AJAX clicks and Back/Forward behave correctly', asy
 		const ev = p.click(id);
 		check('not intercepted: ' + id, !ev.defaultPrevented);
 	}
+
+	// The storefront marks modal openers with data-modal-open, and app.js's own
+	// modal handler owns those clicks (it calls preventDefault() itself). What
+	// the transition must never do is start a full-page transition for them, so
+	// the assertion is about the marker and the overlay, not about the default.
+	// The clicks above were deliberately not intercepted, so jsdom is still
+	// reporting their navigation attempts: let them settle first, or they are
+	// attributed to the modal click below.
+	await wait(150);
+	const modalNavs = p.navigations.length;
+	const modalEv = p.click('sh-fixture-modal-open');
+	await wait(150);
+	check('a real modal opener starts no page transition',
+		!p.visible(p.overlay) && marker(p.win) === null && p.navigations.length === modalNavs,
+		'overlay=' + p.visible(p.overlay) + ' marker=' + String(marker(p.win))
+			+ ' navigations=' + (p.navigations.length - modalNavs) + ' defaultPrevented=' + modalEv.defaultPrevented);
 	const ctrl = p.click('sh-fixture-internal', { ctrlKey: true });
 	check('ctrl/cmd-click (new tab) is not intercepted', !ctrl.defaultPrevented);
 	const mid = p.click('sh-fixture-internal', { button: 1 });
