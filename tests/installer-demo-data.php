@@ -42,6 +42,17 @@ function installer_assert(bool $condition, string $message): void
     if (!$condition) { throw new RuntimeException($message); }
 }
 
+/**
+ * Mark the section being exercised. The runner exposes these as annotations, so
+ * a failure says which phase it happened in without downloading the step log.
+ */
+$GLOBALS['installer_phase'] = 'start';
+function installer_phase(string $name): void
+{
+    $GLOBALS['installer_phase'] = $name;
+    echo '::notice title=Installer seeding test::' . $name . "\n";
+}
+
 function installer_count(string $table, string $where = '', array $params = []): int
 {
     $sql = 'SELECT COUNT(*) FROM `' . $table . '`' . ($where !== '' ? ' WHERE ' . $where : '');
@@ -97,6 +108,7 @@ try {
     // -----------------------------------------------------------------------
     // 1. Fresh install with demo data OFF
     // -----------------------------------------------------------------------
+    installer_phase('1 demo OFF');
     installer_reset($pdo);
     $report = sh_install_seed_all($pdo, $opts, false);
     installer_assert($report['demo'] === false, 'A demo-OFF install must report that no catalogue was installed');
@@ -118,6 +130,7 @@ try {
     // -----------------------------------------------------------------------
     // 2. Demo data must not come back: re-run, refresh, login, upgrade
     // -----------------------------------------------------------------------
+    installer_phase('2 no re-insert');
     sh_install_seed_all($pdo, $opts, false);
     sh_install_seed_all($pdo, $opts, false);
     installer_simulate_runtime($pdo);
@@ -128,6 +141,7 @@ try {
     // -----------------------------------------------------------------------
     // 3. Fresh install with demo data ON
     // -----------------------------------------------------------------------
+    installer_phase('3 demo ON');
     installer_reset($pdo);
     $report = sh_install_seed_all($pdo, $opts, true);
     installer_assert($report['demo'] === true, 'A demo-ON install must report the catalogue');
@@ -170,6 +184,7 @@ try {
     // -----------------------------------------------------------------------
     // 4. Real business records must survive the cleanup untouched
     // -----------------------------------------------------------------------
+    installer_phase('4 real records');
     $realCategory = sh_insert('categories', ['name' => 'Owner Category', 'slug' => 'owner-category', 'status' => 1]);
     $realBrand    = sh_insert('brands', ['name' => 'Owner Brand', 'slug' => 'owner-brand', 'status' => 1]);
     $realProduct  = sh_insert('products', [
@@ -211,6 +226,7 @@ try {
     // -----------------------------------------------------------------------
     // 5. Cleanup
     // -----------------------------------------------------------------------
+    installer_phase('5 cleanup');
     $result = sh_demo_cleanup($pdo);
 
     installer_assert($result['products_deleted'] > 0, 'Sample products without order history must be deleted');
@@ -238,6 +254,7 @@ try {
     // -----------------------------------------------------------------------
     // 6. After the cleanup, nothing puts sample content back
     // -----------------------------------------------------------------------
+    installer_phase('6 no restore');
     $before = installer_count('products');
     sh_install_demo_data($pdo);
     sh_install_seed_all($pdo, $opts, false);
@@ -254,6 +271,11 @@ try {
 
     echo "Installer demo-data test passed\n";
 } catch (Throwable $e) {
+    // The runner exposes these as annotations: the message has to be on one line
+    // and % escaped, because the workflow command parser treats it as an escape.
+    $detail = str_replace(["\r", "\n", '%'], [' ', ' | ', '%25'], $e->getMessage());
+    $detail = str_replace(['"', '::'], ["'", ':'], $detail);
+    echo '::error title=Installer seeding test (' . ($GLOBALS['installer_phase'] ?? 'unknown phase') . ')::' . $detail . "\n";
     fwrite(STDERR, 'Installer demo-data test failed: ' . $e->getMessage() . "\n");
     exit(1);
 }
