@@ -86,12 +86,12 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_header(
     'Payment methods',
-    'Each card shows live status and a quick instructions editor. Use Add payment method for a new method, or Advanced to edit account numbers, the number pattern, the logo and the gateway link.',
+    'Manual methods are verified from the Payments screen; a gateway method needs its gateway linked.',
     sh_admin_add_button('Add payment method', sh_url('admin/payment-method-edit.php?new=1'), '', 'sh-btn sh-btn--sm', 'integrations.manage'),
     'credit-card'
 ) ?>
 
-<div class="sh-cards sh-cards--3">
+<div class="sh-cards sh-cards--3" id="sh-payment-method-list">
   <?php foreach ($rows as $m):
     $logo = sh_payment_logo_url($m);
     $on = (int)$m['status'] === 1;

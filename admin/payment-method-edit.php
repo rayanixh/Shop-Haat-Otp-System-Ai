@@ -29,6 +29,8 @@ $editId = sh_int($_GET['edit'] ?? 0);
 $keepQs  = sh_admin_keep_query(['edit', 'new', 'form', 'id']);
 $listUrl = sh_url('admin/payment-methods.php') . ($keepQs !== '' ? '?' . $keepQs : '');
 
+$form = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
@@ -116,17 +118,10 @@ $adminTitle = $isNew ? 'Add payment method' : 'Edit payment method';
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Payment methods' => $listUrl,
     ($isNew ? 'Add method' : (string)$editing['name']) => '',
 ]) ?>
-
-<?= sh_admin_header(
-    $isNew ? 'Add a payment method' : 'Edit ' . (string)$editing['name'],
-    'Manual mobile-banking methods (bKash, Nagad, Rocket) are verified from the Payments screen; a gateway method needs its gateway linked.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to payment methods</a>',
-    $isNew ? 'plus' : 'pencil'
-) ?>
 
 <?= sh_admin_error_summary($errors) ?>
 
@@ -137,7 +132,6 @@ require __DIR__ . '/_layout.php';
   <input type="hidden" name="current_logo" value="<?= e($val('logo')) ?>">
 
   <div class="sh-panel sh-formcard">
-    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Method details</h2></div>
     <div class="sh-panel__body">
 
         <div class="sh-field"><label class="sh-field__label" for="pm-name">Display name <span class="sh-field__req">*</span></label>

@@ -114,7 +114,7 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_header(
     'Couriers',
-    'Built-in providers keep their credentials, tracking template and connection test on their own card. Custom couriers you fulfil yourself are created and edited on a dedicated screen.',
+    'Built-in providers keep their credentials and connection test on their own card.',
     sh_admin_add_button('Add a courier', $newUrl, '', 'sh-btn sh-btn--sm', 'integrations.manage'),
     'truck'
 ) ?>
@@ -219,7 +219,7 @@ $otherRows = array_values(array_filter($rows, static fn($c) => !isset($providers
       <tbody>
       <?php if (!$otherRows): ?>
         <tr class="sh-table--empty"><td colspan="5">
-          No custom couriers yet. <?= sh_admin_add_button('Add the first courier', $newUrl, '', 'sh-btn sh-btn--sm sh-btn--ghost', 'integrations.manage') ?>
+          No custom couriers yet. Use <strong>Add a courier</strong> above to create one for a service you fulfil yourself.
         </td></tr>
       <?php endif; ?>
       <?php foreach ($otherRows as $c): $cLogo = sh_courier_logo_url($c); ?>

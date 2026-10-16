@@ -34,6 +34,8 @@ $errors = [];
 $keepQs  = sh_admin_keep_query(['edit', 'new', 'form', 'id', 'current_image']);
 $listUrl = sh_url('admin/products.php') . ($keepQs !== '' ? '?' . $keepQs : '');
 
+$form = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Same guard order as the listing had: CSRF token first, then the
     // per-action permission check inside the handler below.
@@ -173,17 +175,13 @@ $adminTitle = $editing !== null ? 'Edit product' : 'New product';
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Products' => $listUrl,
-    ($editing !== null ? (string)$editing['name'] : 'New product') => '',
-]) ?>
-
-<?= sh_admin_header(
-    $editing !== null ? 'Edit product: ' . (string)$editing['name'] : 'Add a new product',
-    'Fields marked * are required. Prices, stock and visibility take effect on the storefront as soon as you save.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to products</a>',
-    $editing !== null ? 'pencil' : 'plus'
-) ?>
+    ($editing !== null ? (string)$editing['name'] : 'Add product') => '',
+], '', $editing !== null
+    ? '<a class="sh-btn sh-btn--sm sh-btn--ghost" target="_blank" rel="noopener" href="'
+        . e(sh_url('product.php?slug=' . urlencode((string)$editing['slug']))) . '">' . sh_icon('external', 14) . ' View on store</a>'
+    : '') ?>
 
 <?php if ($errors): ?>
   <div class="sh-alert sh-alert--error" role="alert"><?= sh_icon('x-circle', 17) ?>
@@ -191,17 +189,6 @@ require __DIR__ . '/_layout.php';
 <?php endif; ?>
 
   <div class="sh-panel sh-formcard">
-    <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon($editing ? 'pencil' : 'plus', 17) ?>
-        <?= $editing ? 'Edit product: ' . e($editing['name']) : 'New product' ?></h2>
-      <div class="sh-panel__actions">
-        <?php if ($editing): ?>
-          <a class="sh-btn sh-btn--sm sh-btn--ghost" target="_blank" rel="noopener"
-             href="<?= e(sh_url('product.php?slug=' . urlencode($editing['slug']))) ?>"><?= sh_icon('external', 14) ?> View on store</a>
-        <?php endif; ?>
-        <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e($listUrl) ?>"><?= sh_icon('chevron-left', 14) ?> Back to products</a>
-      </div>
-    </div>
     <div class="sh-panel__body">
       <form method="post" enctype="multipart/form-data" novalidate>
         <?= sh_csrf_field() ?>

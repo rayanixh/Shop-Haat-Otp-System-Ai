@@ -33,6 +33,8 @@ $editId = sh_int($_GET['edit'] ?? 0);
 $keepQs  = sh_admin_keep_query(['edit', 'new', 'form', 'id']);
 $listUrl = sh_url('admin/couriers.php') . ($keepQs !== '' ? '?' . $keepQs : '');
 
+$form = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
@@ -125,19 +127,10 @@ $adminTitle = $isNew ? 'Add courier' : 'Edit courier';
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Couriers' => $listUrl,
     ($isNew ? 'Add courier' : (string)$editing['name']) => '',
 ]) ?>
-
-<?= sh_admin_header(
-    $isNew ? 'Add a courier' : 'Edit ' . (string)$editing['name'],
-    $isNew
-        ? 'A custom courier is one you fulfil yourself. Give it a name, choose how tracking works, and it becomes selectable when creating a parcel.'
-        : 'Changes are written by the existing courier handler; a credential field left blank keeps the stored value.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to couriers</a>',
-    $isNew ? 'plus' : 'truck'
-) ?>
 
 <?= sh_admin_error_summary($errors) ?>
 
@@ -172,12 +165,6 @@ require __DIR__ . '/_layout.php';
   <input type="hidden" name="current_logo" value="<?= e($val('logo')) ?>">
 
   <div class="sh-panel sh-formcard">
-    <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon('truck', 17) ?> Courier details</h2>
-      <div class="sh-panel__actions">
-        <span class="sh-formcard__note">Fields marked <span class="sh-field__req">*</span> are required</span>
-      </div>
-    </div>
     <div class="sh-panel__body">
 
       <div class="sh-formsec">

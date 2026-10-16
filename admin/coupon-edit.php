@@ -27,6 +27,8 @@ $editId = sh_int($_GET['edit'] ?? 0);
 $keepQs  = sh_admin_keep_query(['edit', 'new', 'form', 'id']);
 $listUrl = sh_url('admin/coupons.php') . ($keepQs !== '' ? '?' . $keepQs : '');
 
+$form = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
@@ -100,19 +102,10 @@ $adminTitle = $isNew ? 'Add coupon' : 'Edit coupon';
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Coupons' => $listUrl,
     ($isNew ? 'Add coupon' : (string)$editing['code']) => '',
 ]) ?>
-
-<?= sh_admin_header(
-    $isNew ? 'Create a coupon' : 'Edit ' . (string)$editing['code'],
-    $isNew
-        ? 'Codes are matched against the cart total at checkout; the discount is recalculated on the server every time.'
-        : 'Editing a code does not change orders that already used it — their discount is stored with the order.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to coupons</a>',
-    $isNew ? 'plus' : 'tag'
-) ?>
 
 <?= sh_admin_error_summary($errors) ?>
 
@@ -146,12 +139,6 @@ require __DIR__ . '/_layout.php';
   <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
 
   <div class="sh-panel sh-formcard">
-    <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon('tag', 17) ?> Coupon details</h2>
-      <div class="sh-panel__actions">
-        <span class="sh-formcard__note">Fields marked <span class="sh-field__req">*</span> are required</span>
-      </div>
-    </div>
     <div class="sh-panel__body">
 
       <div class="sh-formsec">

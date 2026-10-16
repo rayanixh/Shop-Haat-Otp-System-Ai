@@ -340,10 +340,9 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head sh-panel__head--wrap">
-    <div>
-      <h1 class="sh-panel__title"><?= sh_icon('bar-chart', 18) ?> <?= e($tabs[$tab]) ?> Report</h1>
-      <p class="sh-panel__note">Order-created dates <?= e($range['from']) ?> to <?= e($range['to']) ?> · Bangladesh business calendar.</p>
-    </div>
+    <p class="sh-panel__note">
+      <?= sh_icon('bar-chart', 15) ?> Order-created dates <?= e($range['from']) ?> to <?= e($range['to']) ?> · Bangladesh business calendar.
+    </p>
     <div class="sh-panel__actions">
       <?php if ($reportError === '' && ($hasData || $tab === 'sales') && sh_admin_can('reports.export')): ?>
         <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e($reportUrl(['export' => 'csv', 'page' => null])) ?>"><?= sh_icon('download', 14) ?> Export CSV</a>

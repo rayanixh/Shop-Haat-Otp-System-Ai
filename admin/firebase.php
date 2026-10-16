@@ -61,7 +61,7 @@ require __DIR__ . '/_layout.php';
 
 <div class="sh-cards">
   <section class="sh-panel">
-    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('mail', 17) ?> Email verification (Google Firebase)</h2></div>
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('mail', 17) ?> Verifying provider</h2></div>
     <div class="sh-panel__body">
       <form method="post" novalidate>
         <?= sh_csrf_field() ?><input type="hidden" name="form" value="save">

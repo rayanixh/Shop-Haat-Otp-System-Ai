@@ -1551,6 +1551,10 @@ function sh_admin_crud_map(): array
         'admin/couriers.php'        => ['admin/courier-edit.php', 'Add a courier'],
         'admin/coupons.php'         => ['admin/coupon-edit.php', 'Add coupon'],
         'admin/brands.php'          => ['', 'Add brand'],   // short form: modal
+        'admin/admins.php'          => ['admin/admin-edit.php', 'Add admin'],
+        'admin/roles.php'           => ['admin/role-edit.php', 'Add role'],
+        'admin/verification.php'    => ['admin/verification-provider-edit.php', 'Add provider'],
+        'admin/payment-gateways.php'=> ['admin/payment-gateway-edit.php', 'Register gateway'],
     ];
 }
 
@@ -1609,19 +1613,41 @@ sh_t('no listing page renders a create/edit form below its records', function ()
     return sh_assert($offenders === [], implode('; ', $offenders));
 });
 
+function sh_admin_editor_map(): array
+{
+    // editor page => the guard it must carry. Editors live on their own screen;
+    // every one of them keeps the same shell, the same CSRF checks and the same
+    // way back to its listing.
+    return [
+        'admin/category-edit.php'               => 'sh_require_admin(',
+        'admin/product-edit.php'                => 'sh_require_admin(',
+        'admin/homepage-edit.php'               => 'sh_require_admin(',
+        'admin/payment-method-edit.php'         => 'sh_require_admin(',
+        'admin/courier-edit.php'                => 'sh_require_admin(',
+        'admin/coupon-edit.php'                 => 'sh_require_admin(',
+        'admin/admin-edit.php'                  => 'sh_require_superadmin(',
+        'admin/role-edit.php'                   => 'sh_require_superadmin(',
+        'admin/verification-provider-edit.php'  => 'sh_require_admin(',
+        'admin/payment-gateway-edit.php'        => 'sh_require_admin(',
+    ];
+}
+
 sh_t('the new editor pages are guarded like the pages they replaced', function () {
-    foreach (['admin/category-edit.php', 'admin/product-edit.php', 'admin/homepage-edit.php', 'admin/payment-method-edit.php',
-              'admin/courier-edit.php', 'admin/coupon-edit.php'] as $rel) {
+    foreach (sh_admin_editor_map() as $rel => $guard) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         // Shared form shell: every editor renders the panel as a form card with
-        // its own action footer, so the six screens cannot drift apart.
-        foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_require_admin()',
+        // its own action footer, so the screens cannot drift apart.
+        foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', $guard,
                   'sh-panel sh-formcard', 'sh-formcard__foot'] as $must) {
             if (!str_contains($src, $must)) { return $rel . ' is missing ' . $must; }
         }
         // Every editor offers a way back that keeps the listing's filters.
         if (!str_contains($src, 'sh_admin_keep_query(')) { return $rel . ' does not preserve the listing query'; }
-        if (!str_contains($src, 'sh_admin_breadcrumb(')) { return $rel . ' has no breadcrumb'; }
+        // The breadcrumb comes from the shared helper: one heading policy, no
+        // hand-written entity heading per page.
+        if (!str_contains($src, 'sh_admin_edit_head(') && !str_contains($src, 'sh_admin_breadcrumb(')) {
+            return $rel . ' has no breadcrumb';
+        }
         if (!str_contains($src, "require __DIR__ . '/_footer.php';")) { return $rel . ' does not close the layout'; }
         // POST only: a state change must never be reachable by a GET.
         if (preg_match('~\$_GET\[[^\]]*\]\s*\)?[^;]*;\s*//\s*save~', $src) === 1) { return $rel . ' saves from a GET parameter'; }
@@ -1637,6 +1663,10 @@ sh_t('old edit links keep working through a redirect', function () {
         'admin/payment-methods.php' => 'admin/payment-method-edit.php',
         'admin/couriers.php'        => 'admin/courier-edit.php',
         'admin/coupons.php'         => 'admin/coupon-edit.php',
+        'admin/admins.php'          => 'admin/admin-edit.php',
+        'admin/roles.php'           => 'admin/role-edit.php',
+        'admin/verification.php'    => 'admin/verification-provider-edit.php',
+        'admin/payment-gateways.php'=> 'admin/payment-gateway-edit.php',
     ];
     foreach ($map as $list => $editor) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $list);
@@ -1649,9 +1679,10 @@ sh_t('old edit links keep working through a redirect', function () {
 
 sh_t('a save posted to a listing is forwarded, never silently dropped', function () {
     foreach (['admin/categories.php', 'admin/products.php', 'admin/homepage.php', 'admin/payment-methods.php',
-              'admin/couriers.php', 'admin/coupons.php'] as $rel) {
+              'admin/couriers.php', 'admin/coupons.php', 'admin/admins.php', 'admin/roles.php',
+              'admin/verification.php', 'admin/payment-gateways.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
-        if (!str_contains($src, "\$form === 'save'") && !str_contains($src, '$form !== \'save\'')) {
+        if (preg_match('~\$form (===|!==)~', $src) !== 1) {
             return $rel . ' has no branch for a save posted to it';
         }
         if (!str_contains($src, 'sh_redirect(')) { return $rel . ' never redirects a forwarded save'; }
@@ -1665,11 +1696,86 @@ sh_t('mobile tables can render as record cards', function () {
         if (!str_contains($css, $needle)) { return 'the responsive table card pattern is missing ' . $needle; }
     }
     // The converted listings opt in and label their cells.
-    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php', 'admin/couriers.php', 'admin/coupons.php'] as $rel) {
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php', 'admin/couriers.php', 'admin/coupons.php',
+              'admin/admins.php', 'admin/roles.php', 'admin/payment-gateways.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         if (!str_contains($src, 'sh-tablewrap--cards')) { return $rel . ' does not opt into the mobile card layout'; }
         if (substr_count($src, 'data-label=') < 3) { return $rel . ' does not label its table cells for narrow screens'; }
     }
+    return true;
+});
+
+sh_t('the panel has exactly one page heading per screen', function () {
+    // The layout renders the only <h1>. A second one inside a page body means the
+    // entity name appears twice as a title.
+    foreach (glob(SH_ROOT . '/admin/*.php') as $file) {
+        $rel = 'admin/' . basename($file);
+        if (basename($file) === '_layout.php' || basename($file) === 'login.php') { continue; }
+        $src = (string)file_get_contents($file);
+        if (str_contains($src, '<h1')) { return $rel . ' renders a second page heading'; }
+    }
+    return true;
+});
+
+sh_t('a listing does not repeat the page title above its records', function () {
+    // These headings used to repeat the title the layout already prints in the
+    // top bar; the head now carries only a count or a range.
+    $forbidden = [
+        'admin/coupons.php'        => 'All coupons',
+        'admin/audit-log.php'      => 'Audit Log (',
+        'admin/otp-logs.php'       => 'OTP Requests (',
+        'admin/security-logs.php'  => 'Security Events (',
+        'admin/orders.php'         => 'Orders (',
+        'admin/parcels.php'        => 'Parcels (',
+        'admin/payments.php'       => 'Payments (',
+        'admin/customers.php'      => 'Customers (',
+        'admin/admins.php'         => 'sh-panel__title',
+        'admin/roles.php'          => 'sh-panel__title',
+        'admin/payment-gateways.php' => 'Registered gateways (',
+    ];
+    foreach ($forbidden as $rel => $needle) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (str_contains($src, $needle)) { return $rel . ' still repeats its title in a panel heading ("' . $needle . '")'; }
+    }
+    return true;
+});
+
+sh_t('every editor checks the token before it reads a posted value', function () {
+    foreach (sh_admin_editor_map() as $rel => $guard) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        $csrfAt = strpos($src, 'sh_csrf_require()');
+        if ($csrfAt === false) { return $rel . ' never calls sh_csrf_require()'; }
+        // A posted field read that happens before the token check would act on
+        // unauthenticated input.
+        if (preg_match('~\$_(POST)\[~', substr($src, 0, $csrfAt)) === 1) { return $rel . ' reads $_POST before the CSRF check'; }
+        // A top-level comparison runs on GET as well as POST, so the value must be
+        // initialised first: otherwise PHP warns about an undefined variable on a
+        // perfectly normal page view.
+        $sawInit = false;
+        foreach (preg_split('~\R~', $src) ?: [] as $line) {
+            if (preg_match('~^\$form = \'\'~', $line) === 1) { $sawInit = true; }
+            if (preg_match('~^if \(\$form (===|!==)~', $line) === 1 && !$sawInit) {
+                return $rel . ' compares $form at the top level before initialising it';
+            }
+        }
+        // CSRF first, then the value: no state change can happen before both.
+        $postForm = strpos($src, "sh_post('form')");
+        if ($postForm !== false && $postForm < $csrfAt) { return $rel . ' reads the form name before the CSRF check'; }
+    }
+    return true;
+});
+
+sh_t('the layout is the only place that prints the page title', function () {
+    $layout = (string)file_get_contents(SH_ROOT . '/admin/_layout.php');
+    if (substr_count($layout, '$adminTitle') < 1) { return 'the layout no longer prints the page title'; }
+    if (!str_contains($layout, 'sh-admin-top__title')) { return 'the layout title lost its class'; }
+    // sh_admin_header() must never render a heading of its own.
+    $tools = (string)file_get_contents(SH_ROOT . '/includes/admin-tools.php');
+    $start = (int)strpos($tools, 'function sh_admin_header(');
+    $end = (int)strpos($tools, "\n}\n", $start);
+    $fn = $end > $start ? substr($tools, $start, $end - $start) : substr($tools, $start, 3000);
+    if (str_contains($fn, '<h1') || str_contains($fn, '<h2')) { return 'sh_admin_header() renders a heading of its own'; }
+    if (!str_contains($fn, 'sh-pagehead--bar')) { return 'sh_admin_header() is no longer a bar'; }
     return true;
 });
 

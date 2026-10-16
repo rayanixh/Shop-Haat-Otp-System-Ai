@@ -983,11 +983,11 @@ body.sh-modal-open { overflow: hidden; }
    description and the Add/Create action at the top, filters directly beneath,
    then the records. Creating and editing long records happens on its own
    screen, never in a form appended under the listing. */
-.sh-pagehead { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-.sh-pagehead__text { min-width: 0; flex: 1 1 260px; }
-.sh-pagehead__title { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 800; color: var(--sh-ink); line-height: 1.25; }
-.sh-pagehead__title svg { color: var(--sh-brand); flex: 0 0 auto; }
-.sh-pagehead__desc { margin-top: 4px; font-size: 13px; color: var(--sh-muted); max-width: 76ch; line-height: 1.5; }
+/* The action bar under the top bar. The page title is rendered once by the
+   layout (admin/_layout.php prints $adminTitle as the top bar's <h1>), so this
+   row holds only a one-line note and the actions for the screen. */
+.sh-pagehead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.sh-pagehead__desc { min-width: 0; flex: 1 1 260px; font-size: 13px; color: var(--sh-muted); max-width: 88ch; line-height: 1.5; }
 .sh-pagehead__actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 @media (max-width: 640px) {
   .sh-pagehead__actions { margin-left: 0; width: 100%; }
@@ -995,6 +995,8 @@ body.sh-modal-open { overflow: hidden; }
 }
 
 .sh-crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--sh-muted); margin-bottom: 10px; }
+/* A breadcrumb immediately above the action bar: no double gap. */
+.sh-crumbs + .sh-pagehead--bar { margin-top: -4px; }
 .sh-crumbs a { color: var(--sh-muted); }
 .sh-crumbs a:hover { color: var(--sh-brand); }
 .sh-crumbs__sep { display: inline-flex; color: var(--sh-line); }
@@ -1007,6 +1009,17 @@ body.sh-modal-open { overflow: hidden; }
   padding: 13px 15px; border-top: 1px solid var(--sh-line); background: #fafbfc;
 }
 .sh-formcard__foot .sh-formcard__spacer { margin-left: auto; }
+/* The list footer: the range note sits with the pagination it describes. */
+.sh-listfoot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sh-listfoot .sh-pager { margin-left: auto; }
+/* Small parts of the list pages that used to carry a class with no rule: the
+   action word inside a row button, the "no image" thumbnail, a hint under a
+   form and the link that jumps from a record to its related records. */
+.sh-table__actionlabel { white-space: nowrap; }
+.sh-table__thumb--empty { display: grid; place-items: center; color: var(--sh-muted); }
+.sh-form__hint { color: var(--sh-muted); font-size: 12.5px; line-height: 1.55; }
+.sh-stat__hint { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--sh-brand); text-decoration: none; }
+.sh-stat__hint:hover { text-decoration: underline; }
 /* A form footer that sits inside a panel body (the product and payment-method
    editors keep their whole form inside the body) still reads as the card's own
    action bar: the body padding is cancelled so it lines up with the editors
@@ -1863,6 +1876,8 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 @media (max-width: 1100px) { .sh-perm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sh-health-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
   .sh-perm-grid { grid-template-columns: minmax(0, 1fr); }
+  /* A 300px minimum column would overflow a 320px phone: one column, always. */
+  .sh-vp-grid { grid-template-columns: minmax(0, 1fr); }
   .sh-stats--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-health-row { flex-wrap: wrap; }
 }

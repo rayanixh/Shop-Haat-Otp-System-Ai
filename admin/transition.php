@@ -129,7 +129,7 @@ require __DIR__ . '/_layout.php';
 
 <div class="sh-cards">
   <section class="sh-panel">
-    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('zap', 17) ?> <?= e($scopeLabel) ?></h2></div>
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('zap', 17) ?> Settings</h2></div>
     <div class="sh-panel__body">
       <label class="sh-toggle" style="margin-bottom:14px">
         <input type="checkbox" name="transition_enabled" value="1" <?= $cfg['enabled'] ? 'checked' : '' ?>>

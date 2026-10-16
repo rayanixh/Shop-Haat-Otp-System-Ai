@@ -102,19 +102,46 @@ function sh_admin_schema_ensure(): void
 // ---------------------------------------------------------------------------
 
 /**
- * Admin page header: title, one-line description, optional "Add new" action.
+ * The action bar at the top of a management screen.
  *
- * Every management screen uses this so the create action is always in the same
- * place — at the top of the section — instead of below the table.
+ * The page title is already rendered once by the administration layout
+ * (admin/_layout.php prints $adminTitle as the top bar's <h1>), so this renders
+ * only what the top bar cannot: an optional one-line note and the actions for
+ * this screen — in practice the create button, which stays at the top of the
+ * section instead of below the table.
+ *
+ * $title is kept as the accessible name of the group rather than drawn as a
+ * second heading, so a screen never shows the same title twice; $icon is
+ * accepted for call-site compatibility and is not drawn.
  */
 function sh_admin_header(string $title, string $description = '', string $actionHtml = '', string $icon = 'grid'): string
 {
-    $html = '<div class="sh-pagehead">';
-    $html .= '<div class="sh-pagehead__text"><h2 class="sh-pagehead__title">' . sh_icon($icon, 19) . '<span>' . e($title) . '</span></h2>';
+    if ($description === '' && $actionHtml === '') { return ''; }
+    $label = trim($title) !== '' ? ' aria-label="' . e($title) . '"' : '';
+    $html = '<div class="sh-pagehead sh-pagehead--bar" role="group"' . $label . '>';
     if ($description !== '') { $html .= '<p class="sh-pagehead__desc">' . e($description) . '</p>'; }
-    $html .= '</div>';
     if ($actionHtml !== '') { $html .= '<div class="sh-pagehead__actions">' . $actionHtml . '</div>'; }
     return $html . '</div>';
+}
+
+/**
+ * The head of a create/edit screen: breadcrumb, an optional short note and the
+ * secondary actions, in one compact block.
+ *
+ * The breadcrumb carries the entity — its last crumb is the record being edited
+ * — and its parent crumb is the way back to the listing, so the editor itself
+ * needs no second title and no "Back to …" button: the form's own sticky footer
+ * holds Save and Cancel. That keeps the entity name in exactly one place and
+ * leaves one control per action.
+ *
+ * @param array<string,string> $trail label => href, last entry is the current page
+ */
+function sh_admin_edit_head(array $trail, string $description = '', string $actionHtml = ''): string
+{
+    if ($trail === []) {
+        return sh_admin_header('', $description, $actionHtml);
+    }
+    return sh_admin_breadcrumb($trail) . sh_admin_header('', $description, $actionHtml);
 }
 
 /**

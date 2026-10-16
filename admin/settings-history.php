@@ -122,7 +122,8 @@ require __DIR__ . '/_layout.php';
 <?php endif; ?>
 
 <div class="sh-panel">
-  <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('history', 17) ?> Settings History (<?= number_format($total) ?>)</h2></div>
+  <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('history', 17) ?> Recorded changes</h2>
+    <div class="sh-panel__actions"><span class="sh-formcard__note"><?= number_format($total) ?> entr<?= $total === 1 ? 'y' : 'ies' ?></span></div></div>
   <div class="sh-panel__body" style="padding-bottom:0">
     <form class="sh-filterbar" method="get">
       <div class="sh-field"><label class="sh-field__label" for="h-q">Search</label><input class="sh-input" id="h-q" name="q" value="<?= e($q) ?>" placeholder="Setting name or value"></div>

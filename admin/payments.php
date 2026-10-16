@@ -237,7 +237,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Payments (<?= number_format($total) ?>)</h2>
+    <span class="sh-formcard__note"><?= number_format($total) ?> payment<?= $total === 1 ? '' : 's' ?> match the filters</span>
   </div>
   <div class="sh-panel__body" style="padding-bottom:0">
     <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">

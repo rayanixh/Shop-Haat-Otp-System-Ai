@@ -270,10 +270,9 @@ require __DIR__ . '/_layout.php';
   <input type="hidden" name="form" value="general">
   <div class="sh-panel">
     <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon('sliders', 17) ?> OTP Settings</h2>
+      <h2 class="sh-panel__title"><?= sh_icon('sliders', 17) ?> Code behaviour</h2>
     </div>
     <div class="sh-panel__body">
-      <p class="sh-panel__note" style="font-weight:700;color:var(--sh-ink)">OTP behaviour</p>
       <div class="sh-grid3">
         <div class="sh-field">
           <label class="sh-field__label" for="sc-len">Code length</label>

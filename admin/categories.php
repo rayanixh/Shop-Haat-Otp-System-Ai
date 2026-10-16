@@ -163,7 +163,7 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_header(
     'Categories',
-    'Organise the storefront into the categories shoppers browse. Each card uses the image uploaded here; without one, a neutral placeholder is shown.',
+    'Each card uses the image uploaded here; a category without one shows a neutral placeholder.',
     sh_admin_add_button('Add category', $newUrl),
     'grid'
 ) ?>
@@ -201,12 +201,9 @@ require __DIR__ . '/_layout.php';
 
 <div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('list', 17) ?> Categories
-      <span class="sh-table__meta"><?= e(sh_admin_range_label($total, $per, $page)) ?></span></h2>
     <div class="sh-panel__actions">
       <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('products.php')) ?>" target="_blank" rel="noopener">
         <?= sh_icon('external', 14) ?> View storefront</a>
-      <?= sh_admin_add_button('Add category', $newUrl) ?>
     </div>
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
@@ -218,7 +215,7 @@ require __DIR__ . '/_layout.php';
           <?php if ($filtered): ?>
             No category matches these filters. <a href="<?= e(sh_url('admin/categories.php')) ?>">Clear them</a> to see all <?= (int)$counts['all'] ?>.
           <?php else: ?>
-            No categories yet. <?= sh_admin_add_button('Add the first category', $newUrl) ?>
+            No categories yet. Use <strong>Add category</strong> above to create the first one.
           <?php endif; ?>
         </td></tr>
       <?php else: foreach ($rows as $c): ?>
@@ -266,7 +263,10 @@ require __DIR__ . '/_layout.php';
     </table>
   </div>
   <?php if ($pages > 1): ?>
-    <div class="sh-panel__body"><?= sh_paginate($total, $per, $page, sh_url('admin/categories.php') . ($listQuery !== '' ? '?' . $listQuery : '')) ?></div>
+    <div class="sh-panel__body sh-listfoot">
+      <span class="sh-formcard__note"><?= e(sh_admin_range_label($total, $per, $page)) ?></span>
+      <?= sh_paginate($total, $per, $page, sh_url('admin/categories.php') . ($listQuery !== '' ? '?' . $listQuery : '')) ?>
+    </div>
   <?php endif; ?>
 </div>
 

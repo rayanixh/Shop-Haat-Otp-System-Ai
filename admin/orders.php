@@ -437,7 +437,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('package', 17) ?> Orders (<?= number_format($total) ?>)</h2>
+    <span class="sh-formcard__note"><?= number_format($total) ?> order<?= $total === 1 ? '' : 's' ?> match the filters</span>
   </div>
   <div class="sh-panel__body" style="padding-bottom:0">
     <form class="sh-filterbar" method="get">

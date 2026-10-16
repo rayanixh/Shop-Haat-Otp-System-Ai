@@ -89,7 +89,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <?= sh_admin_header(
     'Homepage images',
-    'The slider and the feature cards on the storefront homepage. Add a new one, then reorder or hide it from the list below.',
+    '',
     sh_admin_add_button('Add slide', sh_url('admin/homepage-edit.php?new=slider'))
     . sh_admin_add_button('Add feature card', sh_url('admin/homepage-edit.php?new=card'), '', 'sh-btn sh-btn--sm sh-btn--ghost'),
     'layout'
@@ -100,11 +100,8 @@ require __DIR__ . '/_layout.php';
 
     <div class="sh-panel">
       <div class="sh-panel__head">
-        <h2 class="sh-panel__title"><?= sh_icon('layout', 17) ?> Slider slides (<?= count($slides) ?>)</h2>
-        <div class="sh-panel__actions">
-          <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('admin/homepage-edit.php?new=slider')) ?>">
-            <?= sh_icon('plus', 14) ?> Add slide</a>
-        </div>
+        <h2 class="sh-panel__title"><?= sh_icon('layout', 17) ?> Slider slides</h2>
+        <div class="sh-panel__actions"><span class="sh-formcard__note"><?= count($slides) ?> slide<?= count($slides) === 1 ? '' : 's' ?></span></div>
       </div>
       <div class="sh-panel__body" style="display:flex;flex-direction:column;gap:10px">
         <?php if (!$slides): ?>

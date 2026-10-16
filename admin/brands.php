@@ -121,7 +121,7 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_header(
     'Brands',
-    'Brands appear as a filter on the storefront and can be assigned to products. Short form, so it opens in a dialog instead of a separate page.',
+    'Brands appear as a storefront filter and can be assigned to products.',
     sh_admin_add_button('Add brand', '', 'sh-brand-modal'),
     'tag'
 ) ?>
@@ -141,9 +141,7 @@ require __DIR__ . '/_layout.php';
 
 <div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('tag', 17) ?> Brands
-      <span class="sh-table__meta"><?= count($rows) ?> shown<?= $totalBrands > count($rows) ? ' of ' . $totalBrands : '' ?></span></h2>
-    <div class="sh-panel__actions"><?= sh_admin_add_button('Add brand', '', 'sh-brand-modal') ?></div>
+    <span class="sh-formcard__note"><?= count($rows) ?> shown<?= $totalBrands > count($rows) ? ' of ' . $totalBrands : '' ?></span>
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">

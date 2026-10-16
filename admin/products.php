@@ -132,7 +132,7 @@ $listQuery = sh_admin_keep_query(['edit', 'new']);
 ?>
 <?= sh_admin_header(
     'Products',
-    'Everything the storefront sells. The table shows the filtered set; use the buttons on the right of a row to edit, show/hide or delete.',
+    '',
     sh_admin_add_button('Add product', sh_url('admin/product-edit.php?new=1') . ($listQuery !== '' ? '&' . $listQuery : ''), '', 'sh-btn sh-btn--sm', 'products.create'),
     'box'
 ) ?>
@@ -166,10 +166,6 @@ $listQuery = sh_admin_keep_query(['edit', 'new']);
 </div>
 
 <div class="sh-panel">
-  <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('box', 17) ?> Products
-      <span class="sh-table__meta"><?= e(sh_admin_range_label($total, $per, $page)) ?></span></h2>
-  </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
       <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
@@ -220,7 +216,10 @@ $listQuery = sh_admin_keep_query(['edit', 'new']);
     </table>
   </div>
   <?php if ($pages > 1): ?>
-    <div class="sh-panel__body"><?= sh_paginate($total, $per, $page, sh_url('admin/products.php') . '?' . http_build_query(array_diff_key($_GET, ['page' => 1]))) ?></div>
+    <div class="sh-panel__body sh-listfoot">
+      <span class="sh-formcard__note"><?= e(sh_admin_range_label($total, $per, $page)) ?></span>
+      <?= sh_paginate($total, $per, $page, sh_url('admin/products.php') . '?' . http_build_query(array_diff_key($_GET, ['page' => 1]))) ?>
+    </div>
   <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_footer.php'; ?>

@@ -776,13 +776,20 @@ assert_contains "$admin_home" 'sh-admin-sidebar' 'the admin dashboard did not re
 
 # Each section: Add above the records, no save form in the listing, and a
 # dedicated create screen that renders with a CSRF token and a form footer.
-admin_sections='admin/categories.php|admin/category-edit.php?new=1|Add category
-admin/products.php|admin/product-edit.php?new=1|Add product
-admin/homepage.php|admin/homepage-edit.php?new=slider|Add slide
-admin/payment-methods.php|admin/payment-method-edit.php?new=1|Add payment method
-admin/couriers.php|admin/courier-edit.php?new=1|Add a courier
-admin/coupons.php|admin/coupon-edit.php?new=1|Add coupon'
-while IFS='|' read -r list_path editor_path add_label; do
+# Each row: listing|editor|create label|marker that appears with the records. The
+# marker keeps the ordering check meaningful on pages whose records are cards
+# rather than a table (and while the table is still empty on a fresh install).
+admin_sections='admin/categories.php|admin/category-edit.php?new=1|Add category|sh-tablewrap
+admin/products.php|admin/product-edit.php?new=1|Add product|sh-tablewrap
+admin/homepage.php|admin/homepage-edit.php?new=slider|Add slide|sh-panel__body
+admin/payment-methods.php|admin/payment-method-edit.php?new=1|Add payment method|sh-payment-method-list
+admin/couriers.php|admin/courier-edit.php?new=1|Add a courier|sh-tablewrap
+admin/coupons.php|admin/coupon-edit.php?new=1|Add coupon|sh-tablewrap
+admin/admins.php|admin/admin-edit.php?new=1|Add admin|sh-tablewrap
+admin/roles.php|admin/role-edit.php?new=1|Add role|sh-tablewrap
+admin/verification.php|admin/verification-provider-edit.php?new=1|Add provider|sh-verify-providers
+admin/payment-gateways.php|admin/payment-gateway-edit.php?new=1|Register gateway|sh-tablewrap'
+while IFS='|' read -r list_path editor_path add_label record_marker; do
   [[ -n "$list_path" ]] || continue
   list_body="$(fetch_page "/${list_path}")"
   assert_contains "$list_body" "$add_label" "the ${list_path} header lost its create action"
@@ -790,8 +797,8 @@ while IFS='|' read -r list_path editor_path add_label; do
     fail "${list_path} still renders a create/edit form inside the listing"
   fi
   add_at="$(printf '%s' "$list_body" | grep -bo -- "$add_label" | head -n 1 | cut -d: -f1 || true)"
-  table_at="$(printf '%s' "$list_body" | grep -bo 'sh-tablewrap' | head -n 1 | cut -d: -f1 || true)"
-  [[ -n "$add_at" && -n "$table_at" ]] || fail "${list_path} does not render both a create action and a record list"
+  table_at="$(printf '%s' "$list_body" | grep -bo -- "$record_marker" | head -n 1 | cut -d: -f1 || true)"
+  [[ -n "$add_at" && -n "$table_at" ]] || fail "${list_path} does not render both a create action and a record list (${record_marker})"
   [[ "$add_at" -lt "$table_at" ]] || fail "${list_path} renders its records above the create action"
 
   editor_body="$(fetch_page "/${editor_path}")"

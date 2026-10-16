@@ -194,19 +194,10 @@ $adminTitle = $isEdit ? 'Edit category' : 'New category';
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Categories' => $listUrl,
-    ($isEdit ? (string)($editing['name'] ?? 'Edit category') : 'New category') => '',
+    ($isEdit ? (string)($editing['name'] ?? 'Edit category') : 'Add category') => '',
 ]) ?>
-
-<?= sh_admin_header(
-    $isEdit ? 'Edit category: ' . (string)($editing['name'] ?? '') : 'Add a new category',
-    $isEdit
-        ? 'Change the name, image, parent, ordering and search-engine fields. Products keep their existing category until you change it.'
-        : 'Create a category, upload its image and choose where it sits in the storefront navigation.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to categories</a>',
-    $isEdit ? 'pencil' : 'plus'
-) ?>
 
 <?= sh_admin_error_summary($errors) ?>
 <?php if ($notice !== ''): ?>
@@ -237,12 +228,6 @@ require __DIR__ . '/_layout.php';
   <input type="hidden" name="keep" value="<?= e($keepQs) ?>">
 
   <div class="sh-panel sh-formcard">
-    <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon('info', 17) ?> Category details</h2>
-      <div class="sh-panel__actions">
-        <span class="sh-formcard__note">Fields marked <span class="sh-field__req">*</span> are required</span>
-      </div>
-    </div>
     <div class="sh-panel__body">
 
       <div class="sh-formsec">

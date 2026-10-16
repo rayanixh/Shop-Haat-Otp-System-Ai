@@ -49,6 +49,8 @@ function sh_promo_delete_file(?string $image): void
     }
 }
 
+$form = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
@@ -174,25 +176,14 @@ $adminTitle = $editing !== null ? ($isCard ? 'Edit feature card' : 'Edit slide')
 require __DIR__ . '/_layout.php';
 ?>
 
-<?= sh_admin_breadcrumb([
+<?= sh_admin_edit_head([
     'Homepage images' => $listUrl,
-    ($editing !== null ? ($isCard ? 'Feature card: ' : 'Slide: ') . (string)$editing['title'] : ($isCard ? 'New feature card' : 'New slider slide')) => '',
+    ($editing !== null
+        ? (($isCard ? 'Feature card: ' : 'Slide: ') . (string)$editing['title'])
+        : ($isCard ? 'Add feature card' : 'Add slide')) => '',
 ]) ?>
 
-<?= sh_admin_header(
-    $editing !== null ? 'Edit ' . ($isCard ? 'feature card: ' : 'slide: ') . (string)$editing['title'] : ($isCard ? 'Add a feature card' : 'Add a slider slide'),
-    $isCard
-        ? 'Feature cards sit under the slider. Around 1200×520 px works well.'
-        : 'Slider slides rotate at the top of the homepage. Around 1600×600 px works well.',
-    '<a class="sh-btn sh-btn--sm sh-btn--ghost" href="' . e($listUrl) . '">' . sh_icon('chevron-left', 14) . ' Back to homepage images</a>',
-    $editing !== null ? 'pencil' : 'plus'
-) ?>
-
 <div class="sh-panel sh-formcard">
-  <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('image', 17) ?> <?= $isCard ? 'Card content' : 'Slide content' ?></h2>
-    <div class="sh-panel__actions"><span class="sh-formcard__note">Fields marked <span class="sh-field__req">*</span> are required</span></div>
-  </div>
   <div class="sh-panel__body">
       <form method="post" enctype="multipart/form-data" novalidate>
         <?= sh_csrf_field() ?>

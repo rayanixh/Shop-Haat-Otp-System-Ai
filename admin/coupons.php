@@ -57,17 +57,14 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_header(
     'Coupons',
-    'Percentage or fixed-amount discount codes. A coupon that has already been used on an order is deactivated instead of deleted, so order history keeps its discount.',
+    'A coupon used on an order is deactivated instead of deleted, so order history keeps its discount.',
     sh_admin_add_button('Add coupon', $newUrl, '', 'sh-btn sh-btn--sm', 'catalog.manage'),
     'tag'
 ) ?>
 
 <section class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('tag', 17) ?> All coupons</h2>
-    <div class="sh-panel__actions">
-      <span class="sh-formcard__note"><?= (int)count($rows) ?> coupon<?= count($rows) === 1 ? '' : 's' ?></span>
-    </div>
+    <span class="sh-formcard__note"><?= (int)count($rows) ?> coupon<?= count($rows) === 1 ? '' : 's' ?></span>
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
@@ -75,7 +72,7 @@ require __DIR__ . '/_layout.php';
       <tbody>
       <?php if (!$rows): ?>
         <tr class="sh-table--empty"><td colspan="7">
-          No coupons yet. <?= sh_admin_add_button('Add the first coupon', $newUrl, '', 'sh-btn sh-btn--sm sh-btn--ghost', 'catalog.manage') ?>
+          No coupons yet. Use <strong>Add coupon</strong> above to create the first one.
         </td></tr>
       <?php else: foreach ($rows as $c):
         $expired = $c['expires_at'] && strtotime((string)$c['expires_at']) < time();
