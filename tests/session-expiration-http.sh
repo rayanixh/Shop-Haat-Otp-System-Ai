@@ -23,6 +23,7 @@ cleanup() {
   if [[ -f "$TMP_DIR/probe-cleanup.php" ]]; then
     php "$TMP_DIR/probe-cleanup.php" >/dev/null 2>&1 || true
   fi
+  rm -f "$ROOT/tests/tmp-probe.php"
   # The admin section creates the account it signs in with.
   if [[ -f "$TMP_DIR/admin-cleanup.php" ]]; then
     php "$TMP_DIR/admin-cleanup.php" >/dev/null 2>&1 || true
@@ -613,30 +614,39 @@ if [[ -z "$probe_file" ]]; then
   fail 'the category-card probe category could not be created'
 fi
 
-# What the application itself sees for the probe: the stored value, whether the
-# file is on disk where the app looks for it, the URL it resolves to, and the
-# first eight categories the homepage will actually render. A failure here is
-# otherwise indistinguishable from a rendering problem, and this costs one
-# process and one annotation.
-probe_state="$(SH_TEST_PROBE_FILE="$probe_file" php -d display_errors=stderr -r '
-$_SERVER["SCRIPT_NAME"] = "/index.php";
-$_SERVER["HTTP_HOST"] = "localhost";
-require getcwd() . "/config/config.php";
-$row = sh_one("SELECT id, name, slug, image, sort_order, status FROM categories WHERE slug = ?", ["category-card-probe"]);
-$img = (string)($row["image"] ?? "");
-$parts = [
-    "upload_dir=" . SH_UPLOAD_DIR,
-    "row=" . json_encode($row),
-    "file=" . (is_file(SH_UPLOAD_DIR . "/categories/" . basename($img)) ? "present" : "missing"),
-    "resolved=" . sh_category_image($img),
-];
-$slice = [];
-foreach (array_slice(sh_categories(), 0, 8) as $c) {
-    $slice[] = $c["name"] . "[" . (string)($c["image"] ?? "") . "]";
+# A one-off probe page served by the same PHP process and the same working
+# directory as the storefront, so it answers from the application's own point of
+# view: what the row holds, whether the upload directory really contains the
+# file, which URL the helper resolves, and the categories the homepage will draw.
+# It is deleted again below (and in the EXIT trap).
+cat > tests/tmp-probe.php <<'PROBE_PAGE'
+<?php
+declare(strict_types=1);
+require dirname(__DIR__) . '/config/config.php';
+header('Content-Type: text/plain; charset=utf-8');
+$out = [];
+try {
+    $out[] = 'cwd=' . getcwd() . ' sh_root=' . SH_ROOT . ' upload_dir=' . SH_UPLOAD_DIR
+        . ' dir_exists=' . (is_dir(SH_UPLOAD_DIR . '/categories') ? 'yes' : 'no');
+    $row = sh_one('SELECT id, name, slug, image, sort_order, status FROM categories WHERE slug = ?', ['category-card-probe']);
+    $img = (string)($row['image'] ?? '');
+    $path = SH_UPLOAD_DIR . '/categories/' . basename($img);
+    $out[] = 'row=' . json_encode($row);
+    $out[] = 'path=' . $path . ' is_file=' . (is_file($path) ? 'yes' : 'no') . ' is_readable=' . (is_readable($path) ? 'yes' : 'no')
+        . ' realpath=' . (string)(realpath($path) ?: '(none)');
+    $out[] = 'dir_listing=' . implode(',', array_slice((array)@scandir(SH_UPLOAD_DIR . '/categories'), 0, 15));
+    $out[] = 'resolved=' . sh_category_image($img);
+    $slice = [];
+    foreach (array_slice(sh_categories(), 0, 10) as $c) { $slice[] = $c['name'] . '[' . (string)($c['image'] ?? '') . ']'; }
+    $out[] = 'cats=' . implode('; ', $slice);
+} catch (Throwable $e) {
+    $out[] = 'threw=' . get_class($e) . ': ' . $e->getMessage();
 }
-$parts[] = "homepage_first_eight=" . implode(", ", $slice);
-echo implode(" | ", $parts);' 2>/dev/null || true)"
+echo implode("\n", $out), "\n";
+PROBE_PAGE
+probe_state="$(curl -sS -A "$DESKTOP_UA" "${BASE}/tests/tmp-probe.php" | tr '\n' '|' | head -c 1200 || true)"
 echo "::notice title=Category probe::probe=${probe_file} | ${probe_state}"
+rm -f tests/tmp-probe.php
 
 home_cards="$(fetch_page '/')"
 card_count="$(count_of 'class="sh-category-card"' "$home_cards")"
@@ -664,8 +674,9 @@ card_name="$(count_of 'class="sh-category-card__name"' "$home_cards")"
 [[ "$card_name" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_name} names"
 
 # A real upload must be used by the card, and must not be marked as the placeholder.
+direct_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/uploads/categories/${probe_file}")"
 if ! printf '%s' "$home_cards" | grep -q "uploads/categories/${probe_file}"; then
-  echo "::error title=Category card::probe=${probe_file} | ${probe_state}"
+  echo "::error title=Category card::probe=${probe_file} | direct_http=${direct_code} | ${probe_state}"
   printf '%s' "$card_blocks" | head -c 900 | tr '\n' ' ' | sed 's/%/%25/g' | while read -r line; do
     echo "::error title=Category card markup::${line}"
   done
