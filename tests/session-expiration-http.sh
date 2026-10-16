@@ -681,14 +681,16 @@ card_name="$(count_of 'class="sh-category-card__name"' "$home_cards")"
 
 # A real upload must be used by the card, and must not be marked as the placeholder.
 direct_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/uploads/categories/${probe_file}")"
-if ! printf '%s' "$home_cards" | grep -q "uploads/categories/${probe_file}"; then
+# Only the card blocks are inspected from here on: the navigation rows also show
+# a category's own image, so a page-wide search would answer for the wrong <img>.
+if ! printf '%s' "$card_blocks" | grep -q "uploads/categories/${probe_file}"; then
   echo "::error title=Category card::probe=${probe_file} | direct_http=${direct_code} | ${probe_state}"
   printf '%s' "$card_blocks" | head -c 900 | tr '\n' ' ' | sed 's/%/%25/g' | while read -r line; do
     echo "::error title=Category card markup::${line}"
   done
   fail "the homepage did not use the uploaded category image (${probe_file})"
 fi
-probe_img="$(printf '%s' "$home_cards" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1 || true)"
+probe_img="$(printf '%s' "$card_blocks" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1 || true)"
 [[ -n "$probe_img" ]] || fail "the uploaded category image is not rendered by an <img> tag (${probe_file})"
 case "$probe_img" in
   *sh-category-card__img--fallback*) fail 'an uploaded category image was rendered as the placeholder' ;;
@@ -698,7 +700,7 @@ esac
 echo "::notice title=Category card image::homepage card used uploads/categories/${probe_file}"
 
 # The upload is a public URL that the web server really serves.
-img_url="$(printf '%s' "$home_cards" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1 || true)"
+img_url="$(printf '%s' "$card_blocks" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1 || true)"
 if [[ -n "$img_url" ]]; then
   img_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}${img_url}")"
   [[ "$img_code" == '200' ]] || fail "the uploaded category image returned HTTP ${img_code} (${img_url})"
