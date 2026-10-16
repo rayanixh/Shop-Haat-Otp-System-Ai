@@ -384,7 +384,11 @@ email_assert(empty($retry['ok']), 'A verification-code email must not be re-send
 email_phase('F cleanup');
 // ===========================================================================
 $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-foreach (['email_challenges', 'email_log', 'users', 'settings'] as $t) { $pdo->exec("DROP TABLE IF EXISTS `$t`"); }
+foreach (['email_challenges', 'email_log'] as $t) { $pdo->exec("DROP TABLE IF EXISTS `$t`"); }
 $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+// The rest of the schema is left exactly as email_prepare() built it: the test
+// only owns its own two tables, and anything that runs after it must still find
+// a usable store database. The row this run inserted is removed.
+$pdo->prepare('DELETE FROM users WHERE email = ?')->execute([$email]);
 
 echo "\nEmail system: transport, challenges, logging and webhook all passed.\n";
