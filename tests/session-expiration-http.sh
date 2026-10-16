@@ -623,28 +623,34 @@ cat > tests/tmp-probe.php <<'PROBE_PAGE'
 <?php
 declare(strict_types=1);
 require dirname(__DIR__) . '/config/config.php';
+require_once SH_ROOT . '/includes/catalog.php';
 header('Content-Type: text/plain; charset=utf-8');
+// Report the decisive facts first: the annotation is truncated on purpose.
 $out = [];
 try {
-    $out[] = 'cwd=' . getcwd() . ' sh_root=' . SH_ROOT . ' upload_dir=' . SH_UPLOAD_DIR
-        . ' dir_exists=' . (is_dir(SH_UPLOAD_DIR . '/categories') ? 'yes' : 'no');
     $row = sh_one('SELECT id, name, slug, image, sort_order, status FROM categories WHERE slug = ?', ['category-card-probe']);
     $img = (string)($row['image'] ?? '');
     $path = SH_UPLOAD_DIR . '/categories/' . basename($img);
+    $out[] = 'resolved=' . sh_category_image($img);
+    $out[] = 'card=' . ($row !== null ? sh_category_card($row, 0) : '(no row)');
+    $slice = [];
+    foreach (array_slice(sh_categories(), 0, 10) as $c) {
+        $slice[] = $c['name'] . '[' . (string)($c['image'] ?? '') . ']->' . sh_category_thumb($c['image'] ?? null);
+    }
+    $out[] = 'cats=' . implode('; ', $slice);
+    $out[] = 'cwd=' . getcwd() . ' sh_root=' . SH_ROOT . ' upload_dir=' . SH_UPLOAD_DIR
+        . ' dir_exists=' . (is_dir(SH_UPLOAD_DIR . '/categories') ? 'yes' : 'no');
+    $out[] = 'script=' . (string)($_SERVER['SCRIPT_NAME'] ?? '?') . ' base=' . sh_base_url();
     $out[] = 'row=' . json_encode($row);
     $out[] = 'path=' . $path . ' is_file=' . (is_file($path) ? 'yes' : 'no') . ' is_readable=' . (is_readable($path) ? 'yes' : 'no')
         . ' realpath=' . (string)(realpath($path) ?: '(none)');
     $out[] = 'dir_listing=' . implode(',', array_slice((array)@scandir(SH_UPLOAD_DIR . '/categories'), 0, 15));
-    $out[] = 'resolved=' . sh_category_image($img);
-    $slice = [];
-    foreach (array_slice(sh_categories(), 0, 10) as $c) { $slice[] = $c['name'] . '[' . (string)($c['image'] ?? '') . ']'; }
-    $out[] = 'cats=' . implode('; ', $slice);
 } catch (Throwable $e) {
     $out[] = 'threw=' . get_class($e) . ': ' . $e->getMessage();
 }
 echo implode("\n", $out), "\n";
 PROBE_PAGE
-probe_state="$(curl -sS -A "$DESKTOP_UA" "${BASE}/tests/tmp-probe.php" | tr '\n' '|' | head -c 1200 || true)"
+probe_state="$(curl -sS -A "$DESKTOP_UA" "${BASE}/tests/tmp-probe.php" | tr '\n' '|' | head -c 3000 || true)"
 echo "::notice title=Category probe::probe=${probe_file} | ${probe_state}"
 rm -f tests/tmp-probe.php
 
