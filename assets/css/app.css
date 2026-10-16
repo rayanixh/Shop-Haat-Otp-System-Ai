@@ -193,7 +193,9 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 }
 .sh-catmenu a { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 13.5px; color: var(--sh-ink-2); }
 .sh-catmenu a span { flex: 1 1 auto; }
-.sh-catmenu a em { font-style: normal; font-size: 11.5px; color: var(--sh-muted); }
+/* Category navigation thumbnail: the real upload in a nav row, sized in em so
+   the dropdown and the drawer share one rule. */
+.sh-catthumb { display: block; flex: 0 0 auto; width: 1.2em; height: 1.2em; border-radius: 4px; object-fit: cover; background: var(--sh-bg); }
 .sh-catmenu a:hover { background: var(--sh-brand-soft); color: var(--sh-brand); }
 .sh-nav__links { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .sh-nav__links::-webkit-scrollbar { display: none; }
@@ -1005,6 +1007,12 @@ body.sh-modal-open { overflow: hidden; }
   padding: 13px 15px; border-top: 1px solid var(--sh-line); background: #fafbfc;
 }
 .sh-formcard__foot .sh-formcard__spacer { margin-left: auto; }
+/* A form footer that sits inside a panel body (the product and payment-method
+   editors keep their whole form inside the body) still reads as the card's own
+   action bar: the body padding is cancelled so it lines up with the editors
+   that place the footer next to the body. */
+.sh-panel__body > .sh-formcard__foot,
+.sh-panel__body > form > .sh-formcard__foot { margin: 15px -15px -15px; }
 .sh-formcard__note { font-size: 12px; color: var(--sh-muted); }
 
 /* Sticky action bar for long forms. It sticks to the bottom of the viewport on

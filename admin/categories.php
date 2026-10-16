@@ -83,6 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// The listing never renders a create/edit form: both live on
+// admin/category-edit.php. An old bookmark to ?edit= / ?new= opens that page
+// with the current filters carried across, instead of silently showing the list.
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $editId = sh_int($_GET['edit'] ?? 0);
+    $keep = sh_admin_keep_query(['edit', 'new']);
+    if ($editId > 0) {
+        sh_redirect('admin/category-edit.php?edit=' . $editId . ($keep !== '' ? '&' . $keep : ''));
+    }
+    if (isset($_GET['new'])) {
+        sh_redirect('admin/category-edit.php?new=1' . ($keep !== '' ? '&' . $keep : ''));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Listing: search, filter, sort and pagination (all optional, all safe)
 // ---------------------------------------------------------------------------

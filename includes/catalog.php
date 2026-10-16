@@ -76,6 +76,25 @@ function sh_category_card(array $cat, int $index = 0): string
 }
 
 /**
+ * Small square image for a navigation row.
+ *
+ * Shows the category's own uploaded image when it has one, and the line icon the
+ * rest of the navigation uses when it does not — so a category with a real photo
+ * is never represented by a generic icon. The image is lazy-loaded on purpose:
+ * the dropdown and the mobile drawer are both hidden until the visitor opens
+ * them, so nothing extra is fetched during a page load.
+ */
+function sh_category_nav_thumb(array $cat, int $size = 20): string
+{
+    $image = sh_category_image($cat['image'] ?? null);
+    if ($image !== '') {
+        return '<img class="sh-catthumb" src="' . e($image) . '" alt=""'
+            . ' width="' . (int)$size . '" height="' . (int)$size . '" loading="lazy" decoding="async">';
+    }
+    return sh_icon((string)($cat['icon'] ?? '') !== '' ? (string)$cat['icon'] : 'grid', $size);
+}
+
+/**
  * Category cards for a list of category rows (the homepage showcase uses this).
  *
  * @param array<int,array<string,mixed>> $cats

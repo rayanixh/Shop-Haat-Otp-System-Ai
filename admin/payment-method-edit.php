@@ -130,14 +130,15 @@ require __DIR__ . '/_layout.php';
 
 <?= sh_admin_error_summary($errors) ?>
 
-<div class="sh-panel sh-formcard">
-  <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Method details</h2></div>
-  <div class="sh-panel__body">
-<form method="post" enctype="multipart/form-data" novalidate>
-        <?= sh_csrf_field() ?>
-        <input type="hidden" name="form" value="save">
-        <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
-        <input type="hidden" name="current_logo" value="<?= e($val('logo')) ?>">
+<form method="post" enctype="multipart/form-data" novalidate id="sh-method-form">
+  <?= sh_csrf_field() ?>
+  <input type="hidden" name="form" value="save">
+  <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
+  <input type="hidden" name="current_logo" value="<?= e($val('logo')) ?>">
+
+  <div class="sh-panel sh-formcard">
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Method details</h2></div>
+    <div class="sh-panel__body">
 
         <div class="sh-field"><label class="sh-field__label" for="pm-name">Display name <span class="sh-field__req">*</span></label>
           <input class="sh-input" id="pm-name" name="name" required maxlength="90" value="<?= e($val('name')) ?>" placeholder="bKash"></div>
@@ -192,17 +193,23 @@ require __DIR__ . '/_layout.php';
         <label class="sh-check" style="margin-bottom:12px">
           <input type="checkbox" name="status" value="1" <?= ($errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1) ? 'checked' : '' ?>>
           <span>Enabled at checkout</span></label>
-        <div class="sh-actions">
-          <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create method' ?></button>
-          <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
-        </div>
-      </form>
+    </div>
+    <div class="sh-formcard__foot sh-formcard__foot--sticky">
+      <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create method' ?></button>
+      <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
       <?php if ($editing !== null): ?>
-        <form method="post" data-confirm="Delete <?= e($editing['name']) ?>? Orders that used it are kept." style="margin-top:12px">
-          <?= sh_csrf_field() ?><input type="hidden" name="form" value="delete"><input type="hidden" name="id" value="<?= (int)$editing['id'] ?>">
-          <button class="sh-btn sh-btn--sm sh-btn--bad" type="submit"><?= sh_icon('trash', 13) ?> Delete this method</button>
-        </form>
+        <span class="sh-formcard__spacer"></span>
+        <button class="sh-btn sh-btn--bad" type="submit" form="sh-method-delete"
+                data-confirm="Delete &quot;<?= e($editing['name']) ?>&quot;? Orders that used it are kept.">
+          <?= sh_icon('trash', 15) ?> Delete this method</button>
       <?php endif; ?>
+    </div>
   </div>
-</div>
+</form>
+
+<?php if ($editing !== null): ?>
+  <form method="post" action="<?= e(sh_url('admin/payment-methods.php')) ?>" id="sh-method-delete">
+    <?= sh_csrf_field() ?><input type="hidden" name="form" value="delete"><input type="hidden" name="id" value="<?= (int)$editing['id'] ?>">
+  </form>
+<?php endif; ?>
 <?php require __DIR__ . '/_footer.php'; ?>

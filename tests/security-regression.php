@@ -1488,6 +1488,52 @@ sh_t('no shipped page still prints a category item count', function () {
     return true;
 });
 
+sh_t('the category navigation prints no item count', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/header.php');
+    if (str_contains($src, '<em>')) { return 'a navigation row still prints a count element'; }
+    // The dropdown and the drawer both list categories; neither may print a count.
+    foreach ([['<ul class="sh-catmenu"', '</ul>'], ['<p class="sh-drawer__title">Shop by category</p>', '<p class="sh-drawer__title">Quick links</p>']] as [$from, $to]) {
+        $start = strpos($src, $from);
+        if ($start === false) { return 'the navigation list ' . $from . ' is missing'; }
+        $end = strpos($src, $to, $start);
+        if ($end === false) { return 'the navigation list ' . $from . ' is not closed'; }
+        $block = substr($src, $start, $end - $start);
+        if (str_contains($block, 'product_count')) { return 'a navigation row prints the product count'; }
+        if (preg_match('~[0-9]+\s*(items?|products?)~i', $block) === 1) { return 'a navigation row prints a numeric count'; }
+    }
+    return true;
+});
+
+sh_t('a navigation row uses the real upload and falls back to its icon', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    // Without an upload the row keeps the line icon the rest of the nav uses.
+    $plain = sh_category_nav_thumb(['name' => 'Kitchen', 'slug' => 'kitchen', 'image' => '', 'icon' => 'grid'], 16);
+    if (str_contains($plain, '<img')) { return 'a category without an upload renders an image in the navigation'; }
+    if (!str_contains($plain, '<svg')) { return 'a category without an upload has no icon in the navigation'; }
+    // With one, the row shows the category's own image instead of a generic icon.
+    $dir = SH_UPLOAD_DIR . '/categories';
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { return null; }
+    $name = 'regression-nav-' . bin2hex(random_bytes(4)) . '.gif';
+    if (@file_put_contents($dir . '/' . $name, base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')) === false) { return null; }
+    try {
+        $row = sh_category_nav_thumb(['name' => 'Kitchen', 'slug' => 'kitchen', 'image' => $name, 'icon' => 'grid'], 16);
+        if (!str_contains($row, 'sh-catthumb') || !str_contains($row, rawurlencode($name))) {
+            return 'a navigation row does not use the uploaded image: ' . $row;
+        }
+        if (str_contains($row, '<svg')) { return 'a navigation row still shows a generic icon when a real image exists'; }
+        // The menus are hidden until opened, so nothing may load eagerly.
+        if (!str_contains($row, 'loading="lazy"') || !str_contains($row, 'alt=""')) {
+            return 'a navigation thumbnail is not a lazy decorative image: ' . $row;
+        }
+        // A stored file that is gone must fall back, not break the row.
+        $gone = sh_category_nav_thumb(['name' => 'Kitchen', 'slug' => 'kitchen', 'image' => 'nope.png', 'icon' => 'grid'], 16);
+        if (str_contains($gone, '<img')) { return 'a navigation row with a missing file still renders an image'; }
+    } finally {
+        @unlink($dir . '/' . $name);
+    }
+    return true;
+});
+
 // ===========================================================================
 // Admin CRUD — Add at the top, forms on their own screens
 // ===========================================================================
@@ -1502,6 +1548,8 @@ function sh_admin_crud_map(): array
         'admin/products.php'        => ['admin/product-edit.php', 'Add product'],
         'admin/homepage.php'        => ['admin/homepage-edit.php', 'Add slide'],
         'admin/payment-methods.php' => ['admin/payment-method-edit.php', 'Add payment method'],
+        'admin/couriers.php'        => ['admin/courier-edit.php', 'Add a courier'],
+        'admin/coupons.php'         => ['admin/coupon-edit.php', 'Add coupon'],
         'admin/brands.php'          => ['', 'Add brand'],   // short form: modal
     ];
 }
@@ -1562,9 +1610,13 @@ sh_t('no listing page renders a create/edit form below its records', function ()
 });
 
 sh_t('the new editor pages are guarded like the pages they replaced', function () {
-    foreach (['admin/category-edit.php', 'admin/product-edit.php', 'admin/homepage-edit.php', 'admin/payment-method-edit.php'] as $rel) {
+    foreach (['admin/category-edit.php', 'admin/product-edit.php', 'admin/homepage-edit.php', 'admin/payment-method-edit.php',
+              'admin/courier-edit.php', 'admin/coupon-edit.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
-        foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_require_admin()'] as $must) {
+        // Shared form shell: every editor renders the panel as a form card with
+        // its own action footer, so the six screens cannot drift apart.
+        foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_require_admin()',
+                  'sh-panel sh-formcard', 'sh-formcard__foot'] as $must) {
             if (!str_contains($src, $must)) { return $rel . ' is missing ' . $must; }
         }
         // Every editor offers a way back that keeps the listing's filters.
@@ -1583,6 +1635,8 @@ sh_t('old edit links keep working through a redirect', function () {
         'admin/products.php'        => 'admin/product-edit.php',
         'admin/homepage.php'        => 'admin/homepage-edit.php',
         'admin/payment-methods.php' => 'admin/payment-method-edit.php',
+        'admin/couriers.php'        => 'admin/courier-edit.php',
+        'admin/coupons.php'         => 'admin/coupon-edit.php',
     ];
     foreach ($map as $list => $editor) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $list);
@@ -1594,7 +1648,8 @@ sh_t('old edit links keep working through a redirect', function () {
 });
 
 sh_t('a save posted to a listing is forwarded, never silently dropped', function () {
-    foreach (['admin/categories.php', 'admin/products.php', 'admin/homepage.php', 'admin/payment-methods.php'] as $rel) {
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/homepage.php', 'admin/payment-methods.php',
+              'admin/couriers.php', 'admin/coupons.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         if (!str_contains($src, "\$form === 'save'") && !str_contains($src, '$form !== \'save\'')) {
             return $rel . ' has no branch for a save posted to it';
@@ -1610,7 +1665,7 @@ sh_t('mobile tables can render as record cards', function () {
         if (!str_contains($css, $needle)) { return 'the responsive table card pattern is missing ' . $needle; }
     }
     // The converted listings opt in and label their cells.
-    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php'] as $rel) {
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php', 'admin/couriers.php', 'admin/coupons.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         if (!str_contains($src, 'sh-tablewrap--cards')) { return $rel . ' does not opt into the mobile card layout'; }
         if (substr_count($src, 'data-label=') < 3) { return $rel . ' does not label its table cells for narrow screens'; }

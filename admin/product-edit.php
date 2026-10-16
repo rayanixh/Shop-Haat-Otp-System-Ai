@@ -190,7 +190,7 @@ require __DIR__ . '/_layout.php';
     <div><strong>Please fix the following:</strong><ul class="sh-alert__list"><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div>
 <?php endif; ?>
 
-  <div class="sh-panel">
+  <div class="sh-panel sh-formcard">
     <div class="sh-panel__head">
       <h2 class="sh-panel__title"><?= sh_icon($editing ? 'pencil' : 'plus', 17) ?>
         <?= $editing ? 'Edit product: ' . e($editing['name']) : 'New product' ?></h2>
@@ -296,8 +296,10 @@ require __DIR__ . '/_layout.php';
           <input class="sh-input" id="p-flash" type="datetime-local" name="flash_sale_ends_at"
                  value="<?= e($val('flash_sale_ends_at') !== '' ? date('Y-m-d\TH:i', strtotime($val('flash_sale_ends_at'))) : '') ?>">
         </div>
-        <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create product' ?></button>
-        <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+        <div class="sh-formcard__foot sh-formcard__foot--sticky">
+          <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create product' ?></button>
+          <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+        </div>
       </form>
     </div>
   </div>

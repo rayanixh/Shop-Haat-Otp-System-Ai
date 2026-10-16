@@ -193,8 +193,7 @@ $shTransition = sh_transition_config();
         <ul class="sh-catmenu" id="sh-catmenu" hidden>
           <?php foreach ($shCategories as $c): ?>
             <li><a href="<?= e(sh_url('category.php?slug=' . urlencode($c['slug']))) ?>">
-              <?= sh_icon($c['icon'] ?: 'grid', 16) ?><span><?= e($c['name']) ?></span>
-              <em><?= (int)$c['product_count'] ?></em>
+              <?= sh_category_nav_thumb($c, 16) ?><span><?= e($c['name']) ?></span>
             </a></li>
           <?php endforeach; ?>
         </ul>
@@ -225,7 +224,7 @@ $shTransition = sh_transition_config();
       <ul class="sh-drawer__list">
         <?php foreach ($shCategories as $c): ?>
           <li><a href="<?= e(sh_url('category.php?slug=' . urlencode($c['slug']))) ?>">
-            <?= sh_icon($c['icon'] ?: 'grid', 17) ?><span><?= e($c['name']) ?></span></a></li>
+            <?= sh_category_nav_thumb($c, 17) ?><span><?= e($c['name']) ?></span></a></li>
         <?php endforeach; ?>
       </ul>
       <p class="sh-drawer__title">Quick links</p>

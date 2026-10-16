@@ -23,6 +23,10 @@ cleanup() {
   if [[ -f "$TMP_DIR/probe-cleanup.php" ]]; then
     php "$TMP_DIR/probe-cleanup.php" >/dev/null 2>&1 || true
   fi
+  # The admin section creates the account it signs in with.
+  if [[ -f "$TMP_DIR/admin-cleanup.php" ]]; then
+    php "$TMP_DIR/admin-cleanup.php" >/dev/null 2>&1 || true
+  fi
   rm -f "$COOKIE_JAR" "$SERVER_LOG"
   rm -rf "$TMP_DIR"
 }
@@ -675,5 +679,138 @@ esac
 php "$TMP_DIR/probe-cleanup.php"
 probe_gone="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/category.php?slug=category-card-probe")"
 [[ "$probe_gone" == '404' ]] || fail "the probe category was not removed (category page returned HTTP ${probe_gone})"
+
+# ---------------------------------------------------------------------------
+# 10. The admin panel over real HTTP. An authenticated operator must reach the
+#     list pages, every Add action must sit above the records, every create/edit
+#     form must live on its own screen, and a real save must round-trip through
+#     the existing handler. The CI database seeds no admin, so this section
+#     creates one and removes it again (the EXIT trap removes it too).
+# ---------------------------------------------------------------------------
+echo 'Admin panel HTTP integration'
+
+cat > "$TMP_DIR/admin-cleanup.php" <<'ADMIN_CLEANUP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass']);
+    $pdo->prepare('DELETE FROM admins WHERE email = ?')->execute(['http-test-admin@example.test']);
+} catch (Throwable $e) {
+}
+ADMIN_CLEANUP
+
+admin_password='Http-Test-Admin-Pass-1!'
+admin_created="$(SH_TEST_ADMIN_PASSWORD="$admin_password" php -d display_errors=stderr -r '
+$cfg = require getcwd() . "/config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM admins WHERE email = ?")->execute(["http-test-admin@example.test"]);
+    $st = $pdo->prepare("INSERT INTO admins (name, email, password_hash, role, status) VALUES (?,?,?,?,?)");
+    $st->execute(["HTTP Test Admin", "http-test-admin@example.test", password_hash(getenv("SH_TEST_ADMIN_PASSWORD"), PASSWORD_DEFAULT), "superadmin", "active"]);
+    echo "ok";
+} catch (Throwable $e) { echo ""; }' 2>/dev/null || true)"
+if [[ "$admin_created" != 'ok' ]]; then
+  echo '::error title=Admin panel::the admin account for this section could not be created'
+  fail 'the admin HTTP section could not create its admin account'
+fi
+
+# Sign in through the real form, with a real CSRF token.
+admin_login_page="$(curl -sS -A "$DESKTOP_UA" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/admin/login.php")"
+admin_token="$(printf '%s' "$admin_login_page" | csrf_from_html)"
+[[ -n "$admin_token" ]] || fail 'the admin sign-in page did not provide a CSRF token'
+admin_login_headers="$TMP_DIR/admin-login-headers"
+curl -sS -A "$DESKTOP_UA" -D "$admin_login_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${admin_token}" \
+  --data-urlencode 'email=http-test-admin@example.test' \
+  --data-urlencode "password=${admin_password}" \
+  --data-urlencode 'redirect=' \
+  "${BASE}/admin/login.php"
+grep -Eqi '^Location: .*/?admin/dashboard\.php' "$admin_login_headers" \
+  || { cat "$admin_login_headers" >&2; fail 'the admin sign-in did not redirect to the dashboard'; }
+
+admin_home="$(fetch_page '/admin/dashboard.php')"
+if printf '%s' "$admin_home" | grep -q 'sh-adminlogin__box'; then
+  fail 'the admin dashboard still rendered the sign-in form for an authenticated operator'
+fi
+assert_contains "$admin_home" 'sh-admin-sidebar' 'the admin dashboard did not render the panel navigation'
+
+# Each section: Add above the records, no save form in the listing, and a
+# dedicated create screen that renders with a CSRF token and a form footer.
+admin_sections='admin/categories.php|admin/category-edit.php?new=1|Add category
+admin/products.php|admin/product-edit.php?new=1|Add product
+admin/homepage.php|admin/homepage-edit.php?new=slider|Add slide
+admin/payment-methods.php|admin/payment-method-edit.php?new=1|Add payment method
+admin/couriers.php|admin/courier-edit.php?new=1|Add a courier
+admin/coupons.php|admin/coupon-edit.php?new=1|Add coupon'
+while IFS='|' read -r list_path editor_path add_label; do
+  [[ -n "$list_path" ]] || continue
+  list_body="$(fetch_page "/${list_path}")"
+  assert_contains "$list_body" "$add_label" "the ${list_path} header lost its create action"
+  if printf '%s' "$list_body" | grep -q 'name="form" value="save"'; then
+    fail "${list_path} still renders a create/edit form inside the listing"
+  fi
+  add_at="$(printf '%s' "$list_body" | grep -bo -- "$add_label" | head -n 1 | cut -d: -f1 || true)"
+  table_at="$(printf '%s' "$list_body" | grep -bo 'sh-tablewrap' | head -n 1 | cut -d: -f1 || true)"
+  [[ -n "$add_at" && -n "$table_at" ]] || fail "${list_path} does not render both a create action and a record list"
+  [[ "$add_at" -lt "$table_at" ]] || fail "${list_path} renders its records above the create action"
+
+  editor_body="$(fetch_page "/${editor_path}")"
+  assert_contains "$editor_body" 'name="csrf_token"' "the ${editor_path} form has no CSRF field"
+  assert_contains "$editor_body" 'sh-formcard' "the ${editor_path} form is not rendered in a form card"
+  assert_contains "$editor_body" 'sh-formcard__foot' "the ${editor_path} form has no action footer"
+  assert_contains "$editor_body" 'sh-crumbs' "the ${editor_path} page has no breadcrumb"
+
+  # A bookmark to the old inline editor still lands on the dedicated screen.
+  admin_edit_headers="$TMP_DIR/admin-edit-headers"
+  admin_edit_code="$(curl -sS -A "$DESKTOP_UA" -D "$admin_edit_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -w '%{http_code}' "${BASE}/${list_path}?edit=1")"
+  [[ "$admin_edit_code" == '302' ]] || fail "${list_path}?edit=1 answered HTTP ${admin_edit_code} instead of forwarding to the editor"
+  grep -Eqi "^Location: .*/?$(basename "${editor_path%%\?*}")" "$admin_edit_headers" \
+    || { cat "$admin_edit_headers" >&2; fail "${list_path}?edit=1 did not forward to $(basename "${editor_path%%\?*}")"; }
+  echo "::notice title=Admin section::${list_path} → ${editor_path} (${add_label}) OK"
+done <<< "$admin_sections"
+
+# A real create → list → delete round trip through the coupon screens.
+coupon_probe="HTTPPROBE$$"
+coupon_editor="$(fetch_page '/admin/coupon-edit.php?new=1')"
+coupon_token="$(printf '%s' "$coupon_editor" | csrf_from_html)"
+[[ -n "$coupon_token" ]] || fail 'the coupon editor did not provide a CSRF token'
+coupon_create_headers="$TMP_DIR/coupon-create-headers"
+curl -sS -A "$DESKTOP_UA" -D "$coupon_create_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${coupon_token}" \
+  --data-urlencode 'form=save' --data-urlencode 'id=0' \
+  --data-urlencode "code=${coupon_probe}" \
+  --data-urlencode 'type=percent' --data-urlencode 'value=10' \
+  --data-urlencode 'min_order=0' --data-urlencode 'status=1' \
+  "${BASE}/admin/coupon-edit.php?new=1"
+grep -Eqi '^Location: .*/?admin/coupons\.php' "$coupon_create_headers" \
+  || { cat "$coupon_create_headers" >&2; fail 'a coupon saved on its own screen did not return to the coupon list'; }
+coupon_list="$(fetch_page '/admin/coupons.php')"
+assert_contains "$coupon_list" "$coupon_probe" 'the saved coupon did not appear in the listing'
+assert_contains "$coupon_list" 'Coupon created.' 'the listing did not report the successful save'
+
+# Deleting it again must work through the listing's own action.
+coupon_id="$(SH_TEST_COUPON_CODE="$coupon_probe" php -r '
+$cfg = require getcwd() . "/config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $st = $pdo->prepare("SELECT id FROM coupons WHERE code = ? LIMIT 1");
+    $st->execute([getenv("SH_TEST_COUPON_CODE")]);
+    echo (string)$st->fetchColumn();
+} catch (Throwable $e) { echo ""; }' 2>/dev/null || true)"
+[[ -n "$coupon_id" ]] || fail 'the saved coupon could not be found to delete again'
+coupon_delete_token="$(printf '%s' "$coupon_list" | csrf_from_html)"
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${coupon_delete_token}" \
+  --data-urlencode 'form=delete' --data-urlencode "id=${coupon_id}" \
+  "${BASE}/admin/coupons.php"
+coupon_after="$(fetch_page '/admin/coupons.php')"
+if printf '%s' "$coupon_after" | grep -q "$coupon_probe"; then
+  fail 'the coupon delete action left the coupon in the listing'
+fi
+echo "::notice title=Admin CRUD round trip::coupon ${coupon_probe} created, listed and deleted through the panel"
+
+php "$TMP_DIR/admin-cleanup.php"
+echo 'Admin panel HTTP integration passed'
 
 echo 'Session expiration HTTP integration passed'
