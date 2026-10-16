@@ -225,19 +225,43 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-promo__panel a:hover { background: var(--sh-brand-soft); color: var(--sh-brand); }
 .sh-promo__panel a span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sh-carousel { position: relative; border-radius: var(--sh-radius); overflow: hidden; background: #fff; box-shadow: var(--sh-shadow); min-height: 300px; }
-.sh-slide { display: none; height: 100%; min-height: 300px; color: #fff; position: relative; background: #23283a; }
-.sh-slide--on { display: block; animation: sh-fade .35s ease; }
+/* Smooth crossfade carousel.
+   Every slide stays in the DOM, painted and decoded, stacked on top of each
+   other: the incoming slide fades in over the still-opaque outgoing one, so a
+   frame can never show the container (no white flash, no blank frame). The
+   container background matches the slide background so any residual blend is
+   dark rather than bright, and the whole thing degrades to a hard cut when the
+   visitor asks for reduced motion. */
+.sh-carousel { position: relative; border-radius: var(--sh-radius); overflow: hidden;
+  background: #23283a; box-shadow: var(--sh-shadow); min-height: 300px;
+  --sh-slide-fade: 700ms; --sh-slide-ease: cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Fallback plate: shown while an image is still loading and whenever a slide has
+   no usable image at all, so text never sits on an empty white box. */
+.sh-slide { position: absolute; inset: 0; min-height: 300px; color: #fff; overflow: hidden;
+  background: linear-gradient(135deg, #2b3247 0%, #1d2230 55%, #141822 100%);
+  opacity: 0; z-index: 0; pointer-events: none;
+  transition: opacity var(--sh-slide-fade) var(--sh-slide-ease); }
+.sh-slide--on { opacity: 1; z-index: 1; pointer-events: auto; }
+/* The incoming slide sits above the outgoing one while it fades in. */
+.sh-slide--in { z-index: 2; }
+
 /* Background photo fills the slide at any aspect ratio without distortion. */
 .sh-slide__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  object-position: center right; display: block; }
+  object-position: center; display: block; border: 0; user-select: none;
+  transform: scale(1.05); transform-origin: 50% 55%;
+  transition: transform calc(var(--sh-slide-fade) * 2) var(--sh-slide-ease); }
+/* Very restrained settle: the photo drifts to rest as the slide finishes fading,
+   which reads as depth rather than as movement on its own. */
+.sh-slide--on .sh-slide__img { transform: scale(1); }
+.sh-slide--noimg .sh-slide__img, .sh-slide--noimg .sh-slide__scrim { display: none; }
+
 /* Readable scrim: strong on the text side, clear over the product side. */
 .sh-slide__scrim { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(15,18,28,.82) 0%, rgba(15,18,28,.66) 38%,
               rgba(15,18,28,.28) 62%, rgba(15,18,28,.10) 100%); }
-.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; height: 100%; min-width: 0;
+.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; min-width: 0;
   display: flex; flex-direction: column; justify-content: center; padding: 34px 40px; }
-@keyframes sh-fade { from { opacity: .35; } to { opacity: 1; } }
 .sh-slide__tag { display: inline-block; align-self: flex-start; color: #fff; background: rgba(255,255,255,.18);
   border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px); padding: 4px 11px; border-radius: 20px;
   font-size: 11.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; margin-bottom: 12px; }
@@ -245,22 +269,15 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
   text-shadow: 0 2px 12px rgba(0,0,0,.35); }
 .sh-slide__text { color: rgba(255,255,255,.98); margin-top: 9px; font-size: 14.5px; max-width: 420px; opacity: 1;
   text-shadow: 0 1px 8px rgba(0,0,0,.3); }
-.sh-slide__btn { align-self: flex-start; margin-top: 18px; background: #fff; color: var(--sh-ink);
-  padding: 10px 22px; border-radius: 6px; font-weight: 700; font-size: 14px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.22); transition: transform .14s ease, background .14s ease; }
-.sh-slide__btn:active { transform: translateY(1px); }
-.sh-slide__btn:hover { background: #f1f2f5; }
-.sh-carousel__dots { position: absolute; z-index: 2; bottom: 14px; left: 40px; display: flex; gap: 7px; }
-.sh-carousel__dot { cursor: pointer; }
-.sh-carousel__dot { width: 22px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.45); }
-.sh-carousel__dot--on { background: #fff; }
-.sh-carousel__arrow {
-  position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%;
-  background: rgba(255,255,255,.92); color: var(--sh-ink); display: grid; place-items: center;
-  box-shadow: 0 2px 10px rgba(0,0,0,.25); z-index: 2; transition: background .14s ease;
-}
-.sh-carousel__arrow:hover { background: #fff; }
-.sh-carousel__arrow--prev { left: 10px; } .sh-carousel__arrow--next { right: 10px; }
+
+/* Minimal pagination: small bars, no arrows. They are the only manual control,
+   so they stay keyboard reachable and carry the slide name for screen readers. */
+.sh-carousel__dots { position: absolute; z-index: 3; bottom: 14px; left: 40px; display: flex; gap: 7px; }
+.sh-carousel__dot { cursor: pointer; padding: 7px 0; background: none; border: 0; }
+.sh-carousel__dot::before { content: ''; display: block; width: 22px; height: 4px; border-radius: 3px;
+  background: rgba(255,255,255,.45); transition: background .25s var(--sh-slide-ease), width .25s var(--sh-slide-ease); }
+.sh-carousel__dot--on::before { background: #fff; width: 28px; }
+.sh-carousel__dot:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 4px; }
 
 .sh-promo__side { display: grid; grid-template-rows: repeat(3, 1fr); gap: 12px; }
 .sh-sidecard { position: relative; overflow: hidden; border-radius: var(--sh-radius); padding: 15px 16px;
@@ -880,11 +897,11 @@ body.sh-modal-open { overflow: hidden; }
   .sh-toast { max-width: 100%; }
   .sh-promo { grid-template-columns: 1fr; }
   .sh-promo__side { grid-template-rows: none; grid-template-columns: repeat(3, 1fr); }
-  .sh-carousel, .sh-slide { min-height: 208px; }
-  .sh-slide { padding: 22px; }
+  .sh-carousel, .sh-slide, .sh-slide__inner { min-height: 208px; }
+  .sh-slide__inner { padding: 22px; }
   .sh-slide__title { font-size: 22px; }
   .sh-slide__text { font-size: 13px; }
-  .sh-carousel__dots { left: 22px; }
+  .sh-carousel__dots { left: 22px; bottom: 8px; }
   .sh-listing { grid-template-columns: 1fr; }
   .sh-filters {
     position: fixed; inset: 0; z-index: 210; max-height: none; border-radius: 0; overflow-y: auto;
@@ -1330,8 +1347,13 @@ body.sh-modal-open { overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sh-sidecard__img, .sh-slide__btn { transition: none; }
+  .sh-sidecard__img { transition: none; }
   .sh-sidecard:hover .sh-sidecard__img { transform: none; }
+  /* Slides still change (the visitor asked for less motion, not for a broken
+     page), but the crossfade becomes an instant cut and the photo never zooms. */
+  .sh-carousel { --sh-slide-fade: 1ms; }
+  .sh-slide, .sh-slide__img, .sh-carousel__dot::before { transition: none; }
+  .sh-slide__img { transform: none; }
 }
 
 /* ==========================================================================

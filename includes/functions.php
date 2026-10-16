@@ -120,6 +120,100 @@ function sh_promo_image(?string $file): string
 }
 
 /**
+ * The homepage hero slider markup.
+ *
+ * Lives here rather than inline in index.php so the behaviour harness can drive
+ * exactly the markup the storefront ships, instead of a copy of it that could
+ * drift.
+ *
+ * Design rules this markup follows (all enforced by the test suite):
+ *   - no slide-level button: the slide carries the image, badge, heading and
+ *     description, and nothing the visitor can tap by accident;
+ *   - every slide is rendered and stacked, never hidden with display:none, so
+ *     the incoming image is already decoded when it fades in;
+ *   - a slide whose image file is missing is marked sh-slide--noimg and falls
+ *     back to the gradient plate while keeping its text;
+ *   - pagination is rendered only when there is more than one slide, and carries
+ *     the slide name for screen readers.
+ */
+function sh_slider_markup(array $slides): string
+{
+    if (!$slides) { return ''; }
+
+    $interval = sh_slider_interval_ms();
+    $fade     = sh_slider_fade_ms();
+    $total    = count($slides);
+
+    $html = '<div class="sh-carousel' . ($total > 1 ? ' sh-carousel--multi' : '') . '"'
+        . ' data-carousel data-carousel-interval="' . (int)$interval . '"'
+        . ' data-carousel-fade="' . (int)$fade . '"'
+        . ' style="--sh-slide-fade:' . (int)$fade . 'ms"'
+        . ' aria-roledescription="carousel" aria-label="Featured offers">';
+
+    foreach (array_values($slides) as $i => $sl) {
+        $img = sh_promo_image($sl['image'] ?? '');
+        $html .= '<div class="sh-slide' . ($i === 0 ? ' sh-slide--on' : '')
+            . ($img === '' ? ' sh-slide--noimg' : '') . '" data-slide="' . (int)$i . '"'
+            . ($i === 0 ? '' : ' aria-hidden="true"') . '>';
+        if ($img !== '') {
+            $html .= '<img class="sh-slide__img" src="' . e($img) . '" alt="' . e($sl['title'])
+                . '" width="1696" height="624" '
+                . ($i === 0 ? 'fetchpriority="high"' : 'loading="lazy"')
+                . ' decoding="async" draggable="false">';
+        }
+        $html .= '<span class="sh-slide__scrim" aria-hidden="true" style="opacity:'
+            . e(number_format(max(0, min(100, (int)($sl['overlay'] ?? 70))) / 100, 2)) . '"></span>'
+            . '<div class="sh-slide__inner">';
+        if (trim((string)($sl['tag'] ?? '')) !== '') {
+            $html .= '<span class="sh-slide__tag">' . e($sl['tag']) . '</span>';
+        }
+        $html .= '<h2 class="sh-slide__title">' . e($sl['title']) . '</h2>';
+        if (trim((string)($sl['subtitle'] ?? '')) !== '') {
+            $html .= '<p class="sh-slide__text">' . e($sl['subtitle']) . '</p>';
+        }
+        $html .= '</div></div>';
+    }
+
+    if ($total > 1) {
+        $html .= '<div class="sh-carousel__dots" role="group" aria-label="Choose a slide">';
+        foreach (array_values($slides) as $i => $sl) {
+            $html .= '<button class="sh-carousel__dot' . ($i === 0 ? ' sh-carousel__dot--on' : '') . '"'
+                . ' type="button" data-slide-to="' . (int)$i . '"'
+                . ' aria-label="Slide ' . (int)($i + 1) . ' of ' . (int)$total . ': ' . e($sl['title']) . '"'
+                . ($i === 0 ? ' aria-current="true"' : '') . '></button>';
+        }
+        $html .= '</div>';
+    }
+
+    return $html . '</div>';
+}
+
+/**
+ * How long each homepage slide stays on screen, in milliseconds.
+ *
+ * Clamped on read, not only on write: a value typed into the admin panel, edited
+ * in the database, or left over from an older install can never push the slider
+ * outside the 4-6 second band the storefront is designed for.
+ */
+function sh_slider_interval_ms(): int
+{
+    $ms = (int)sh_setting('slider_interval_ms', '5200');
+    return ($ms >= 4000 && $ms <= 6000) ? $ms : 5200;
+}
+
+/**
+ * The homepage slide crossfade duration, in milliseconds (600-1000 ms).
+ *
+ * The same clamp applies: a shorter fade flickers, a longer one feels stalled,
+ * so both ends of the range are enforced here rather than trusted from storage.
+ */
+function sh_slider_fade_ms(): int
+{
+    $ms = (int)sh_setting('slider_fade_ms', '700');
+    return ($ms >= 600 && $ms <= 1000) ? $ms : 700;
+}
+
+/**
  * Homepage promo content, loaded from the database.
  * $placement is 'slider' or 'card'. Only active rows are returned, in admin order.
  */

@@ -354,33 +354,147 @@
     });
   }
 
-  /* ---------- Hero carousel -------------------------------------------- */
+  /* ---------- Homepage hero carousel ------------------------------------ */
+  /*
+   * Button-free crossfade. The rules it has to keep:
+   *   - the incoming slide fades in over the outgoing one, which stays fully
+   *     opaque until the fade has finished, so no frame can show the container
+   *     (that is what used to read as a blank/white flash);
+   *   - every slide is already in the DOM with its image decoded, so switching
+   *     never waits for a download;
+   *   - the next slide's image is warmed in advance;
+   *   - autoplay stops while the tab is hidden or the carousel is scrolled out
+   *     of view, and never runs at all under prefers-reduced-motion;
+   *   - a slide whose image fails to load keeps its gradient plate and text.
+   */
   var carousel = $('[data-carousel]');
   if (carousel) {
     var slides = $$('.sh-slide', carousel);
     var dots = $$('.sh-carousel__dot', carousel);
-    var idx = 0, auto = null;
-    function show(i) {
-      idx = (i + slides.length) % slides.length;
-      slides.forEach(function (s, n) { s.classList.toggle('sh-slide--on', n === idx); });
-      dots.forEach(function (d, n) { d.classList.toggle('sh-carousel__dot--on', n === idx); });
+    var motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    var interval = parseInt(carousel.getAttribute('data-carousel-interval') || '5200', 10);
+    if (!(interval >= 4000 && interval <= 6000)) { interval = 5200; }
+    var fade = parseInt(carousel.getAttribute('data-carousel-fade') || '700', 10);
+    if (!(fade >= 600 && fade <= 1000)) { fade = 700; }
+    carousel.style.setProperty('--sh-slide-fade', fade + 'ms');
+    var idx = 0, auto = null, settle = null, visible = true, warm = {};
+
+    function reduced() { return !!(motionQuery && motionQuery.matches); }
+    function at(i) { return slides[((i % slides.length) + slides.length) % slides.length]; }
+
+    /* Warm the next slide's image so the fade never waits on the network. */
+    function preload(i) {
+      var img = $('.sh-slide__img', at(i));
+      var src = img ? img.getAttribute('src') : null;
+      if (!src || warm[src]) { return; }
+      warm[src] = true;
+      var warmer = new Image();
+      warmer.decoding = 'async';
+      warmer.src = src;
     }
-    function start() { stop(); if (slides.length > 1) { auto = setInterval(function () { show(idx + 1); }, 5200); } }
+
+    function rest(slide) {
+      slide.classList.remove('sh-slide--on', 'sh-slide--in');
+      slide.setAttribute('aria-hidden', 'true');
+    }
+
+    function show(next, first) {
+      var to = at(next);
+      if (!to || (to === slides[idx] && !first)) { return; }
+      var from = slides[idx];
+      if (settle) { clearTimeout(settle); settle = null; }
+
+      /* Anything that is neither the current nor the incoming slide is at rest. */
+      slides.forEach(function (s) { if (s !== from && s !== to) { rest(s); } });
+
+      if (reduced() || first) {
+        /* Reduced motion: an instant cut, no zoom, nothing moving. */
+        if (from && from !== to) { rest(from); }
+        to.classList.remove('sh-slide--in');
+        to.classList.add('sh-slide--on');
+        to.removeAttribute('aria-hidden');
+      } else {
+        to.classList.add('sh-slide--in');
+        to.removeAttribute('aria-hidden');
+        /* The outgoing slide stays painted until the fade ends, but it is no
+           longer the slide being read out: the change is announced at once. */
+        if (from && from !== to) { from.setAttribute('aria-hidden', 'true'); }
+        void to.offsetWidth;             /* commit opacity:0 so the fade runs */
+        to.classList.add('sh-slide--on');
+        settle = setTimeout(function () {
+          if (from && from !== to) { rest(from); }
+          to.classList.remove('sh-slide--in');
+          settle = null;
+        }, fade + 120);
+      }
+
+      idx = slides.indexOf(to);
+      dots.forEach(function (d, n) {
+        d.classList.toggle('sh-carousel__dot--on', n === idx);
+        if (n === idx) { d.setAttribute('aria-current', 'true'); } else { d.removeAttribute('aria-current'); }
+      });
+      preload(idx + 1);
+    }
+
     function stop() { if (auto) { clearInterval(auto); auto = null; } }
-    dots.forEach(function (d, n) { d.addEventListener('click', function () { show(n); start(); }); });
-    var prev = $('[data-carousel-prev]', carousel), next = $('[data-carousel-next]', carousel);
-    if (prev) { prev.addEventListener('click', function () { show(idx - 1); start(); }); }
-    if (next) { next.addEventListener('click', function () { show(idx + 1); start(); }); }
+    function start() {
+      stop();
+      if (slides.length > 1 && !reduced() && visible && !document.hidden) {
+        auto = setInterval(function () { show(idx + 1); }, interval);
+      }
+    }
+
+    slides.forEach(function (slide) {
+      var img = $('.sh-slide__img', slide);
+      if (!img) { return; }
+      img.addEventListener('error', function () {
+        /* Missing or broken file: keep the plate, the heading and the text. */
+        slide.classList.add('sh-slide--noimg');
+        img.removeAttribute('src');
+      });
+    });
+
+    dots.forEach(function (d, n) {
+      d.addEventListener('click', function () { show(n); start(); });
+    });
+
     carousel.addEventListener('mouseenter', stop);
     carousel.addEventListener('mouseleave', start);
-    var sx = 0;
-    carousel.addEventListener('touchstart', function (e) { sx = e.touches[0].clientX; stop(); }, { passive: true });
+    carousel.addEventListener('focusin', stop);
+    carousel.addEventListener('focusout', start);
+
+    var swipeX = 0, swiping = false;
+    carousel.addEventListener('touchstart', function (e) {
+      swipeX = e.touches[0].clientX; swiping = true; stop();
+    }, { passive: true });
     carousel.addEventListener('touchend', function (e) {
-      var dx = e.changedTouches[0].clientX - sx;
-      if (Math.abs(dx) > 45) { show(idx + (dx < 0 ? 1 : -1)); }
+      var dx = e.changedTouches[0].clientX - swipeX;
+      if (swiping && Math.abs(dx) > 45) { show(idx + (dx < 0 ? 1 : -1)); }
+      swiping = false;
       start();
     }, { passive: true });
-    show(0); start();
+    carousel.addEventListener('touchcancel', function () { swiping = false; start(); }, { passive: true });
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { stop(); } else { start(); }
+    });
+
+    /* Off-screen carousels stop as well: nothing rotates where nobody looks. */
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        visible = entries[0].intersectionRatio > 0.15;
+        if (visible) { start(); } else { stop(); }
+      }, { threshold: [0, 0.15, 1] }).observe(carousel);
+    }
+
+    if (motionQuery) {
+      var onMotionChange = function () { show(idx, true); start(); };
+      if (motionQuery.addEventListener) { motionQuery.addEventListener('change', onMotionChange); }
+      else if (motionQuery.addListener) { motionQuery.addListener(onMotionChange); }
+    }
+
+    show(0, true);
+    start();
   }
 
   /* ---------- Countdown timers ----------------------------------------- */

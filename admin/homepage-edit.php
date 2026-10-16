@@ -123,12 +123,18 @@ if ($form === 'save') {
             'tag'         => trim(sh_post('tag')) ?: null,
             'title'       => trim(sh_post('title')),
             'subtitle'    => trim(sh_post('subtitle')) ?: null,
-            'button_text' => $btnText ?: null,
-            'button_url'  => $btnUrl ?: null,
             'image'       => $image,
             'overlay'     => $overlay,
             'status'      => !empty($_POST['status']) ? 1 : 0,
         ];
+        // Slide buttons were removed from the public interface. The columns are
+        // still used by the feature cards, and a slide's stored button text is
+        // deliberately left alone rather than blanked, so the change is fully
+        // reversible and no existing value is destroyed.
+        if ($placement === 'card') {
+            $data['button_text'] = $btnText ?: null;
+            $data['button_url']  = $btnUrl ?: null;
+        }
         try {
             if ($row) {
                 // Replacing the image? remove the old upload.
@@ -167,12 +173,18 @@ $val = static function (string $k, $fb = '') use ($editing, $errors) {
     return (string)($editing[$k] ?? $fb);
 };
 $isCard = $editing !== null && $editing['placement'] === 'card';
-$placement = $editing['placement'] ?? ($requestedPlacement !== '' ? $requestedPlacement : 'slider');
+$placement = $editing['placement']
+    ?? ($requestedPlacement !== '' ? $requestedPlacement : (sh_post('placement') === 'card' ? 'card' : 'slider'));
+// A brand-new row has no stored placement yet, so the form's own choice decides
+// what this screen is: it must not label a new feature card as a slide.
+$isCardForm = $placement === 'card';
 $chkStatus = $errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1;
 $curImage = sh_promo_image($val('image'));
 
 $adminPage = 'homepage';
-$adminTitle = $editing !== null ? ($isCard ? 'Edit feature card' : 'Edit slide') : 'New slide';
+$adminTitle = $editing !== null
+    ? ($isCardForm ? 'Edit feature card' : 'Edit slide')
+    : ($isCardForm ? 'Add feature card' : 'Add slide');
 require __DIR__ . '/_layout.php';
 ?>
 
@@ -180,7 +192,7 @@ require __DIR__ . '/_layout.php';
     'Homepage images' => $listUrl,
     ($editing !== null
         ? (($isCard ? 'Feature card: ' : 'Slide: ') . (string)$editing['title'])
-        : ($isCard ? 'Add feature card' : 'Add slide')) => '',
+        : ($isCardForm ? 'Add feature card' : 'Add slide')) => '',
 ]) ?>
 
 <div class="sh-panel sh-formcard">
@@ -197,7 +209,7 @@ require __DIR__ . '/_layout.php';
                  data-image-preview="promo-preview">
           <span class="sh-field__hint">
             JPG, PNG, WebP or GIF. Up to <?= e(sh_bytes_label(sh_server_upload_limit())) ?>.
-            <?= $isCard ? 'Around 1200&times;520 px works well.' : 'Around 1600&times;600 px works well.' ?>
+            <?= $isCardForm ? 'Around 1200&times;520 px works well.' : 'Around 1600&times;600 px works well.' ?>
             <?= $editing ? 'Leave empty to keep the current image.' : '' ?>
           </span>
         </div>
@@ -212,7 +224,7 @@ require __DIR__ . '/_layout.php';
             The saved file (<?= e($val('image')) ?>) is missing from the server. Upload a replacement.</p>
         <?php endif; ?>
 
-        <?php if (!$isCard): ?>
+        <?php if (!$isCardForm): ?>
           <div class="sh-field">
             <label class="sh-field__label" for="pm-tag">Badge</label>
             <input class="sh-input" id="pm-tag" name="tag" maxlength="60" value="<?= e($val('tag')) ?>" placeholder="Flash Sale Live">
@@ -228,17 +240,25 @@ require __DIR__ . '/_layout.php';
           <label class="sh-field__label" for="pm-sub">Description</label>
           <textarea class="sh-textarea" id="pm-sub" name="subtitle" rows="2" maxlength="255"><?= e($val('subtitle')) ?></textarea>
         </div>
-        <div class="sh-grid2">
-          <div class="sh-field">
-            <label class="sh-field__label" for="pm-bt">Button text</label>
-            <input class="sh-input" id="pm-bt" name="button_text" maxlength="60" value="<?= e($val('button_text')) ?>">
+        <?php if ($isCardForm): ?>
+          <div class="sh-grid2">
+            <div class="sh-field">
+              <label class="sh-field__label" for="pm-bt">Button text</label>
+              <input class="sh-input" id="pm-bt" name="button_text" maxlength="60" value="<?= e($val('button_text')) ?>">
+            </div>
+            <div class="sh-field">
+              <label class="sh-field__label" for="pm-bu">Button link</label>
+              <input class="sh-input" id="pm-bu" name="button_url" maxlength="255" value="<?= e($val('button_url')) ?>"
+                     placeholder="products.php?flash=1">
+            </div>
           </div>
-          <div class="sh-field">
-            <label class="sh-field__label" for="pm-bu">Button link</label>
-            <input class="sh-input" id="pm-bu" name="button_url" maxlength="255" value="<?= e($val('button_url')) ?>"
-                   placeholder="products.php?flash=1">
-          </div>
-        </div>
+        <?php else: ?>
+          <p class="sh-field__hint" style="margin:0 0 12px">
+            Slides no longer carry a button: the image, badge, heading and description are what the homepage shows.
+            Any button text saved earlier is kept in the database and can be restored, but it is not displayed.
+            Use a feature card when you need a call to action.
+          </p>
+        <?php endif; ?>
         <div class="sh-field">
           <label class="sh-field__label" for="pm-ov">Text readability overlay — <span data-overlay-out><?= e($val('overlay', '70')) ?></span>%</label>
           <input id="pm-ov" type="range" name="overlay" min="0" max="100" step="5"

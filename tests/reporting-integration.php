@@ -82,6 +82,11 @@ try {
 
     foreach (sh_schema_sql() as $ddl) { $pdo->exec($ddl); }
     sh_schema_seed($pdo, ['site_name' => 'ShopHaat Reporting Test', 'admin_email' => 'admin@example.test']);
+    // Production installs seed the payment routes with a blank merchant number
+    // (a made-up number must never ship). This fixture therefore supplies its own
+    // number for the manual method it exercises, exactly as a real owner would.
+    sh_seed_essential_starters($pdo);
+    sh_query("UPDATE payment_methods SET account_number = '01700000000' WHERE code = 'bkash'");
 
     $adminId = sh_insert('admins', [
         'name' => 'Reporting Admin',

@@ -28,6 +28,11 @@ cleanup() {
   if [[ -f "$TMP_DIR/admin-cleanup.php" ]]; then
     php "$TMP_DIR/admin-cleanup.php" >/dev/null 2>&1 || true
   fi
+  # The slider section creates its own two slides; a failed assertion mid-section
+  # must not leave them behind either.
+  if [[ -f "$TMP_DIR/slider.php" ]]; then
+    php "$TMP_DIR/slider.php" cleanup >/dev/null 2>&1 || true
+  fi
   rm -f "$COOKIE_JAR" "$SERVER_LOG"
   rm -rf "$TMP_DIR"
 }
@@ -871,6 +876,202 @@ if printf '%s' "$coupon_after" | grep -q "$coupon_probe"; then
   fail 'the coupon delete action left the coupon in the listing'
 fi
 echo "::notice title=Admin CRUD round trip::coupon ${coupon_probe} created, listed and deleted through the panel"
+
+# ---------------------------------------------------------------------------
+# 11. Homepage slider over real HTTP. The CI database seeds no promo content, so
+#     this section creates two slides of its own, drives the real homepage and
+#     removes them again. It asserts what the markup must guarantee: no slide
+#     button, no arrow controls, the configured timing, exactly one slide in the
+#     initial state with the rest stacked behind it, a disabled slide that does
+#     not reach the page at all, a single slide that renders no pagination, and a
+#     missing image that degrades to its plate instead of a broken frame.
+# ---------------------------------------------------------------------------
+cat > "$TMP_DIR/slider.php" <<'PHP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (Throwable $e) { fwrite(STDERR, 'slider probe: ' . $e->getMessage() . "\n"); exit(1); }
+$cmd = $argv[1] ?? '';
+$arg = $argv[2] ?? '';
+try {
+    if ($cmd === 'seed') {
+        $pdo->prepare("DELETE FROM promo_slides WHERE title LIKE 'Slider Probe %'")->execute();
+        $ins = $pdo->prepare("INSERT INTO promo_slides (placement, slot, tag, title, subtitle, button_text, button_url, image, overlay, sort_order, status)
+                              VALUES ('slider', NULL, ?, ?, ?, NULL, NULL, ?, 70, ?, 1)");
+        $ins->execute(['Probe Badge', 'Slider Probe One', 'First probe slide text.', 'promo/slide-flash.jpg', 1]);
+        $a = (int)$pdo->lastInsertId();
+        $ins->execute(['Probe Badge Two', 'Slider Probe Two', 'Second probe slide text.', 'promo/slide-grocery.jpg', 2]);
+        $b = (int)$pdo->lastInsertId();
+        echo $a . ' ' . $b;
+    } elseif ($cmd === 'status') {
+        // php slider.php status <0|1> <id>
+        $st = $pdo->prepare('UPDATE promo_slides SET status = ? WHERE id = ?');
+        $st->execute([(int)$arg, (int)($argv[3] ?? 0)]);
+        echo 'ok';
+    } elseif ($cmd === 'missing') {
+        // php slider.php missing <id>
+        $pdo->prepare("UPDATE promo_slides SET image = 'promo/slider-probe-missing.jpg' WHERE id = ?")->execute([(int)$arg]);
+        echo 'ok';
+    } elseif ($cmd === 'cleanup') {
+        $pdo->exec("DELETE FROM promo_slides WHERE title LIKE 'Slider Probe %'");
+        echo 'ok';
+    } else {
+        echo 'unknown';
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, 'slider probe: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+PHP
+
+slider_ids="$(php "$TMP_DIR/slider.php" seed)" || fail 'the slider probe slides could not be created'
+slide_one="${slider_ids%% *}"
+slide_two="${slider_ids##* }"
+[[ -n "$slide_one" && -n "$slide_two" && "$slide_one" != "$slide_two" ]] || fail 'the slider probe did not get two slide ids'
+
+home_slider="$(fetch_page '/index.php')"
+
+# 1. No slide-level call to action and no arrow controls anywhere on the page.
+[[ "$(count_of 'sh-slide__btn' "$home_slider")" == '0' ]] || fail 'the homepage still renders a slide CTA button'
+for gone in sh-carousel__arrow data-carousel-prev data-carousel-next; do
+  [[ "$(count_of "$gone" "$home_slider")" == '0' ]] || fail "the homepage still renders the removed slider control: ${gone}"
+done
+
+# 2. The content is still there, and the slides are stacked rather than swapped.
+assert_contains "$home_slider" 'Slider Probe One' 'the homepage slider lost its first slide heading'
+assert_contains "$home_slider" 'First probe slide text.' 'the homepage slider lost its slide description'
+assert_contains "$home_slider" 'data-carousel' 'the homepage no longer initialises the slider'
+
+slide_count="$(count_of 'data-slide="' "$home_slider")"
+dot_count="$(count_of 'data-slide-to="' "$home_slider")"
+img_count="$(count_of 'class="sh-slide__img"' "$home_slider")"
+[[ "$slide_count" == '2' ]] || fail "the homepage rendered ${slide_count} slides instead of the 2 active ones"
+[[ "$dot_count" == '2' ]] || fail "the homepage rendered ${dot_count} pagination buttons for 2 slides"
+[[ "$img_count" == '2' ]] || fail "the homepage rendered ${img_count} slide images for 2 slides"
+[[ "$(count_of 'sh-slide--on' "$home_slider")" == '1' ]] || fail 'more than one slide starts as the visible slide'
+[[ "$(count_of 'sh-slide--in' "$home_slider")" == '0' ]] || fail 'the served markup already contains a transition state'
+
+# 3. The timing is the configured, clamped band: 4-6 s per slide, 600-1000 ms fade.
+interval="$(printf '%s' "$home_slider" | grep -o 'data-carousel-interval="[0-9]*"' | head -n 1 | grep -o '[0-9]*' || true)"
+fade="$(printf '%s' "$home_slider" | grep -o 'data-carousel-fade="[0-9]*"' | head -n 1 | grep -o '[0-9]*' || true)"
+[[ "$interval" =~ ^[0-9]+$ && "$interval" -ge 4000 && "$interval" -le 6000 ]] || fail "the slide interval is outside 4000-6000 ms (${interval:-none})"
+[[ "$fade" =~ ^[0-9]+$ && "$fade" -ge 600 && "$fade" -le 1000 ]] || fail "the crossfade is outside 600-1000 ms (${fade:-none})"
+
+# 4. A disabled slide is not rendered at all — not hidden, absent.
+php "$TMP_DIR/slider.php" status 0 "$slide_two" >/dev/null
+home_one="$(fetch_page '/index.php')"
+if [[ "$home_one" == *'Slider Probe Two'* ]]; then
+  fail 'a slide switched off in the admin panel still reached the homepage'
+fi
+[[ "$(count_of 'data-slide="' "$home_one")" == '1' ]] || fail 'the homepage did not fall back to the single active slide'
+[[ "$(count_of 'data-slide-to="' "$home_one")" == '0' ]] || fail 'the homepage rendered pagination for a single slide'
+assert_contains "$home_one" 'Slider Probe One' 'the remaining slide disappeared with the disabled one'
+
+# 5. A missing image degrades to the plate and keeps the text.
+php "$TMP_DIR/slider.php" status 1 "$slide_two" >/dev/null
+php "$TMP_DIR/slider.php" missing "$slide_two" >/dev/null
+home_missing="$(fetch_page '/index.php')"
+assert_contains "$home_missing" 'sh-slide--noimg' 'a slide whose image file is gone is not marked for the fallback plate'
+assert_contains "$home_missing" 'Slider Probe Two' 'a slide with a missing image lost its heading'
+[[ "$(count_of 'class="sh-slide__img"' "$home_missing")" == '1' ]] || fail 'the missing image was still rendered as a slide image'
+if [[ "$home_missing" == *'slider-probe-missing.jpg'* ]]; then
+  fail 'the homepage still points at a slide image that does not exist'
+fi
+
+php "$TMP_DIR/slider.php" cleanup >/dev/null
+echo "::notice title=Homepage slider::slides=${slide_count} dots=${dot_count} interval=${interval}ms fade=${fade}ms disabled=absent noimg=plate"
+
+# ---------------------------------------------------------------------------
+# 10b. Demo-data review screen: it must load for an operator, list the sample
+#      records it thinks it found, refuse to remove anything without the typed
+#      confirmation phrase, and then remove exactly those sample records while
+#      leaving every other product alone.
+# ---------------------------------------------------------------------------
+cat > "$TMP_DIR/demo-probe.php" <<'PHP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (Throwable $e) { fwrite(STDERR, 'demo probe: ' . $e->getMessage() . "\n"); exit(1); }
+// A row that carries one of the starter catalogue's own slugs, which is exactly
+// what the review screen matches on.
+$slug = 'voltaro-pulse-60-wireless-headphones';
+$cmd = $argv[1] ?? '';
+try {
+    if ($cmd === 'seed') {
+        $pdo->prepare('DELETE FROM products WHERE slug = ?')->execute([$slug]);
+        $pdo->prepare('INSERT INTO products (name, slug, sku, price, stock, product_type, status)
+                       VALUES (?,?,?,?,?,?,1)')->execute(['Voltaro Pulse 60 Wireless Headphones', $slug, 'DEMO-PROBE', 100.00, 5, 'physical']);
+        echo (string)$pdo->lastInsertId();
+    } elseif ($cmd === 'count') {
+        $st = $pdo->prepare('SELECT COUNT(*) FROM products WHERE slug = ?');
+        $st->execute([$slug]);
+        echo (string)$st->fetchColumn();
+    } elseif ($cmd === 'cleanup') {
+        $pdo->prepare('DELETE FROM products WHERE slug = ?')->execute([$slug]);
+        echo 'ok';
+    } else {
+        echo 'unknown';
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, 'demo probe: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+PHP
+
+demo_probe_id="$(php "$TMP_DIR/demo-probe.php" seed)" || fail 'the demo-data probe product could not be created'
+[[ -n "$demo_probe_id" ]] || fail 'the demo-data probe product was not inserted'
+
+demo_page="$(fetch_page '/admin/demo-data.php')"
+assert_contains "$demo_page" 'Demo data review' 'the demo-data review screen did not render'
+assert_contains "$demo_page" 'Voltaro Pulse 60 Wireless Headphones' 'the review screen did not list the sample product it matched'
+assert_contains "$demo_page" 'name="confirm_phrase"' 'the review screen has no confirmation field'
+demo_token="$(printf '%s' "$demo_page" | csrf_from_html)"
+[[ -n "$demo_token" ]] || fail 'the review screen did not provide a CSRF token'
+demo_phrase="$(printf '%s' "$demo_page" | grep -o 'Type <code>[^<]*</code>' | head -n 1 | sed 's/.*<code>//; s|</code>.*||')"
+[[ -n "$demo_phrase" ]] || fail 'the review screen does not state the confirmation phrase it wants'
+
+# A wrong phrase (and no acknowledgement) must change nothing at all.
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${demo_token}" \
+  --data-urlencode 'form=cleanup' --data-urlencode 'confirm_phrase=delete it' --data-urlencode 'acknowledge=1' \
+  "${BASE}/admin/demo-data.php"
+demo_refused="$(fetch_page '/admin/demo-data.php')"
+assert_contains "$demo_refused" 'Nothing was removed' 'the review screen did not refuse an unconfirmed removal'
+[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '1' ]] || fail 'an unconfirmed removal deleted a product'
+# Re-read the token from the freshly rendered screen so this section keeps
+# working if the application ever rotates the token per submission.
+demo_token="$(printf '%s' "$demo_refused" | csrf_from_html)"
+[[ -n "$demo_token" ]] || fail 'the review screen stopped providing a CSRF token'
+
+# Ticking the box but not typing the phrase must change nothing either.
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${demo_token}" \
+  --data-urlencode 'form=cleanup' --data-urlencode "confirm_phrase=${demo_phrase}" \
+  "${BASE}/admin/demo-data.php"
+[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '1' ]] || fail 'a removal without the acknowledgement ran anyway'
+
+# The full, explicit confirmation removes the sample row ...
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${demo_token}" \
+  --data-urlencode 'form=cleanup' --data-urlencode "confirm_phrase=${demo_phrase}" --data-urlencode 'acknowledge=1' \
+  "${BASE}/admin/demo-data.php"
+[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '0' ]] || fail 'the confirmed removal did not delete the sample product'
+demo_done="$(fetch_page '/admin/demo-data.php')"
+assert_contains "$demo_done" 'No sample content found' 'the review screen still reports sample content after the confirmed removal'
+
+# ... and the products that are not part of the catalogue are still there.
+real_products="$(php -r '
+$cfg = require getcwd() . "/config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    echo (string)$pdo->query("SELECT COUNT(*) FROM products WHERE slug NOT LIKE \"voltaro%\"")->fetchColumn();
+} catch (Throwable $e) { echo "0"; }' 2>/dev/null || true)"
+[[ "${real_products:-0}" -ge 1 ]] || fail 'the demo-data cleanup removed products that were not sample content'
+echo "::notice title=Demo data review::refused=wrong-phrase,no-ack | removed=sample-product | real products kept=${real_products}"
 
 php "$TMP_DIR/admin-cleanup.php"
 echo 'Admin panel HTTP integration passed'

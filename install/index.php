@@ -61,11 +61,15 @@ $done = false;
 $form = [
     'db_host' => 'localhost', 'db_name' => '', 'db_user' => '', 'db_pass' => '',
     'site_name' => 'ShopHaat', 'admin_email' => '', 'admin_password' => '',
-    'admin_password2' => '', 'demo_data' => '1',
+    'admin_password2' => '', 'demo_data' => '0',
 ];
 foreach ($form as $k => $v) {
     if (isset($_POST[$k]) && is_string($_POST[$k])) { $form[$k] = trim($_POST[$k]); }
 }
+// A checkbox posts only when ticked. Normalise the raw value to exactly '0' or
+// '1' so the seeding decision can never be flipped by an unexpected value, and
+// so the rendered checkbox always reflects what the backend will actually do.
+$form['demo_data'] = ($form['demo_data'] === '1') ? '1' : '0';
 
 // On a repair, pre-fill the saved connection so the operator mostly confirms what is there.
 // The stored password is deliberately NOT pre-filled into the HTML.
@@ -276,12 +280,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $siteUrl = rtrim(sh_site_url(), '/');
-                sh_schema_seed($pdo, [
-                    'site_name'   => $form['site_name'],
-                    'site_url'    => $siteUrl,
-                    'logo'        => $logoFile ?? '',
-                    'admin_email' => $form['admin_email'],
-                ]);
 
                 // Admin account
                 $adm = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status)
@@ -294,9 +292,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'superadmin',
                 ]);
 
-                if ($form['demo_data'] === '1') {
-                    sh_install_demo_data($pdo);
-                }
+                // Payment routes and disabled gateway definitions are structural
+                // configuration, not demo content: a store that declined the starter
+                // catalogue still has to be able to record an order. Blank account
+                // numbers keep the manual methods hidden from checkout until the
+                // owner enters a real merchant number in Admin -> Payment Methods.
+                //
+                // $form['demo_data'] is normalised to exactly '0' or '1' during
+                // validation, so a crafted "demo_data=0,1" or an empty value cannot
+                // slip past this compare. Passing the flag straight through means the
+                // backend makes the decision from the validated value, not from the
+                // state of a checkbox in the browser.
+                $shSeedReport = sh_install_seed_all($pdo, [
+                    'site_name'   => $form['site_name'],
+                    'site_url'    => $siteUrl,
+                    'logo'        => $logoFile ?? '',
+                    'admin_email' => $form['admin_email'],
+                ], $form['demo_data'] === '1');
+                sh_log_line('install', 'Seeding: ' . json_encode($shSeedReport));
 
                 // Write config
                 $cfgContent = "<?php
@@ -577,7 +590,15 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
       </div>
       <div style="margin-top:14px" class="check">
         <input type="checkbox" id="demo_data" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
-        <label for="demo_data" style="font-weight:500;margin:0">Install starter catalogue (categories, brands, sample products and banners). Recommended for a first install — you can delete these items later from the admin panel.</label>
+        <label for="demo_data" style="font-weight:500;margin:0">Install the optional starter catalogue</label>
+        <p class="hint" style="margin:6px 0 0 22px">
+          Adds the seven sample categories, eight brands, thirty sample products, sample reviews,
+          three sample coupons and the two homepage slides. Leave this unticked for a clean store:
+          you get the full database structure, your settings and the four payment routes, and no
+          sample products, customers, orders, reviews or banners. Nothing here is ever inserted
+          again by a page view, a login or an upgrade, and leaving the box unticked never deletes
+          records that already exist in this database.
+        </p>
       </div>
     </div>
 

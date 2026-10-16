@@ -1110,9 +1110,11 @@ sh_t('the storefront layout is balanced for two banner cards and no code box', f
         return 'index.php does not render exactly two banner cards';
     }
     if (str_contains($index, 'q=code')) { return 'index.php still links to the removed code search'; }
-    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    // Those cards are sample content: they live in the optional starter catalogue,
+    // never in the structure-level seeder that every install runs.
+    $starter = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
     foreach (['card_1', 'card_2', 'card_3'] as $slot) {
-        if (strpos($schema, $slot) === false) { return 'the installer no longer seeds ' . $slot; }
+        if (strpos($starter, $slot) === false) { return 'the starter catalogue no longer seeds ' . $slot; }
     }
     return true;
 });
@@ -1736,6 +1738,233 @@ sh_t('no write sends an explicit NULL into a NOT NULL column', function () {
             }
         }
     }
+    return true;
+});
+
+sh_t('the installer never writes sample business records into an ordinary install', function () {
+    // The demo-data bug: sh_schema_seed() -- which runs for EVERY install --
+    // inserted categories, brands, promo slides, coupons and invented contact
+    // details. Structure-level starters are allowed; business records are not.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    $start = (int)strpos($schema, 'function sh_schema_seed(');
+    $end = (int)strpos($schema, "\n}\n", $start);
+    if ($start === 0 || $end <= $start) { return 'sh_schema_seed() could not be read'; }
+    $fn = substr($schema, $start, $end - $start);
+    foreach (['promo_slides', 'INSERT INTO products', 'INSERT INTO categories', 'INSERT INTO brands',
+              'INSERT INTO coupons', 'INSERT INTO reviews', 'INSERT INTO orders', 'INSERT INTO users'] as $bad) {
+        if (str_contains($fn, $bad)) { return 'sh_schema_seed() still inserts business content: ' . $bad; }
+    }
+    // Invented company details must not ship as if they were the real business.
+    foreach (["'+880 1700-000000'", "'Level 4, Bijoy Sarani", "'We deliver genuine products across Bangladesh"] as $fake) {
+        if (str_contains($fn, $fake)) { return 'sh_schema_seed() still invents business details: ' . $fake; }
+    }
+    return true;
+});
+
+sh_t('the setup wizard defaults to "no sample content" and honours the posted choice', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/install/index.php');
+    if (preg_match("~'demo_data'\s*=>\s*'1'~", $src) === 1) {
+        return 'the installer still pre-selects the starter catalogue, so an untouched form installs sample content';
+    }
+    // A checkbox posts only when ticked: the value has to be normalised, and the
+    // gate has to compare against that normalised value.
+    if (!str_contains($src, "\$form['demo_data'] = (\$form['demo_data'] === '1') ? '1' : '0';")) {
+        return 'the installer does not normalise the posted demo-data value';
+    }
+    if (!str_contains($src, "\$form['demo_data'] === '1'")) {
+        return 'the installer no longer gates the catalogue on the validated value';
+    }
+    if (preg_match('~\$_POST\[.demo_data.\]\s*(===|==|!==|!=)\s*~', $src) === 1) {
+        return 'the installer decides from the raw POST value instead of the validated one';
+    }
+    if (!str_contains($src, 'sh_install_seed_all(')) { return 'the installer does not use the shared seeding decision'; }
+    return true;
+});
+
+sh_t('the starter catalogue is idempotent and cannot be re-created by a normal request', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
+    // Every seeded table has to be looked up by its own unique key before it is
+    // written. One generic helper does that; each table must appear in a call.
+    if (!str_contains($src, "SELECT id FROM ' . \$table . ' WHERE ' . \$column . ' = ? LIMIT 1")) {
+        return 'the seeder has no by-key lookup helper';
+    }
+    foreach (['categories', 'brands', 'products', 'promo_slides'] as $table) {
+        if (preg_match('~\\$find\\(\\$pdo, \'' . $table . '\'~', $src) !== 1) {
+            return 'the seeder never checks ' . $table . ' for an existing row';
+        }
+    }
+    // Coupons are guarded by the table's own unique key instead of a lookup.
+    if (preg_match('~INSERT IGNORE INTO coupons~', $src) !== 1) {
+        return 'the seeder inserts coupons without a duplicate guard';
+    }
+    // The opt-in flag decides, not the checkbox: without an explicit request a
+    // recorded decision makes the call a no-op.
+    if (preg_match('~function sh_install_demo_data\(PDO \$pdo, bool \$explicitRequest = false\)~', $src) !== 1) {
+        return 'sh_install_demo_data() no longer distinguishes an explicit request from an automatic call';
+    }
+    if (!str_contains($src, 'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)')) {
+        return 'the seeder does not record that it ran';
+    }
+    // Only the installer may run it, and only behind the validated choice.
+    $callers = [];
+    foreach (array_merge(glob(SH_ROOT . '/includes/*.php'), glob(SH_ROOT . '/admin/*.php'),
+                         glob(SH_ROOT . '/*.php'), glob(SH_ROOT . '/install/*.php')) as $file) {
+        $rel = str_replace(SH_ROOT . '/', '', $file);
+        if (str_contains((string)file_get_contents($file), 'sh_install_demo_data(') && $rel !== 'install/demo-data.php'
+            && $rel !== 'install/schema.php' && $rel !== 'tests/installer-demo-data.php') {
+            $callers[] = $rel;
+        }
+    }
+    if ($callers !== []) { return 'sample content can be installed from outside the setup wizard: ' . implode(', ', $callers); }
+    return true;
+});
+
+sh_t('removing sample content needs an explicit, permission-checked confirmation', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/admin/demo-data.php');
+    foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_audit('] as $must) {
+        if (!str_contains($src, $must)) { return 'admin/demo-data.php is missing ' . $must; }
+    }
+    if (preg_match('~\\$confirmPhrase = \'([^\']+)\'~', $src, $m) !== 1) { return 'the cleanup screen has no confirmation phrase'; }
+    if (mb_strlen($m[1]) < 8) { return 'the confirmation phrase is too easy to type by accident'; }
+    if (!str_contains($src, '$typed !== $confirmPhrase')) { return 'the typed confirmation phrase is never compared'; }
+    if (!str_contains($src, "!empty(\$_POST['acknowledge'])")) { return 'the cleanup screen has no acknowledgement checkbox'; }
+    // The cleanup itself must be all-or-nothing.
+    $seeder = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
+    $start = (int)strpos($seeder, 'function sh_demo_cleanup(');
+    $end = (int)strpos($seeder, "\n}\n", $start);
+    if ($start === 0 || $end <= $start) { return 'sh_demo_cleanup() could not be read'; }
+    $fn = substr($seeder, $start, $end - $start);
+    foreach (['beginTransaction()', 'rollBack()', 'commit()'] as $must) {
+        if (!str_contains($fn, $must)) { return 'the cleanup is not wrapped in a transaction (' . $must . ')'; }
+    }
+    foreach (["DELETE FROM users", "DELETE FROM orders", "DELETE FROM order_items", "DELETE FROM payments",
+              "DELETE FROM admins", "DELETE FROM settings", "DELETE FROM payment_methods", "DELETE FROM payment_gateways"] as $bad) {
+        if (str_contains($fn, $bad)) { return 'the cleanup can delete protected records: ' . $bad; }
+    }
+    return true;
+});
+
+sh_t('removing sample content never destroys records that may be real', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
+    $start = (int)strpos($src, 'function sh_demo_cleanup(');
+    $end = (int)strpos($src, "\n}\n", $start);
+    $fn = substr($src, $start, $end - $start);
+    // Products in order history and products carrying a visitor review are
+    // deactivated; a used coupon is disabled; a category or brand still in use is
+    // kept. Deleting any of those would take real data with it.
+    foreach (["\$p['order_lines'] > 0 || (\$p['foreign_reviews'] ?? 0) > 0", 'products_deactivated',
+              'coupons_disabled', "SELECT COUNT(*) FROM products WHERE category_id = ?" ] as $must) {
+        if (!str_contains($fn, $must)) { return 'the cleanup no longer protects: ' . $must; }
+    }
+    return true;
+});
+
+sh_t('the public homepage slider carries no call-to-action and no arrow controls', function () {
+    $index = (string)file_get_contents(SH_ROOT . '/index.php');
+    $fn    = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    $js    = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    $css   = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    foreach ([[$index, 'index.php'], [$fn, 'includes/functions.php'], [$js, 'assets/js/app.js'], [$css, 'assets/css/app.css']] as [$src, $rel]) {
+        foreach (['sh-slide__btn', 'sh-carousel__arrow', 'data-carousel-prev', 'data-carousel-next'] as $gone) {
+            if (str_contains($src, $gone)) { return $rel . ' still ships the removed slider control: ' . $gone; }
+        }
+    }
+    // The markup is rendered by one shared function so the harness can drive the
+    // shipped string; index.php must call it rather than keep its own copy.
+    $start = strpos($fn, 'function sh_slider_markup(');
+    $end = $start === false ? false : strpos($fn, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'sh_slider_markup() is missing'; }
+    $markup = substr($fn, $start, $end - $start);
+    if (!str_contains($index, 'sh_slider_markup(')) { return 'index.php does not render the shared slider markup'; }
+    if (str_contains($index, 'sh-slide__img')) { return 'index.php keeps a second copy of the slider markup'; }
+    // The content the slide is there for must survive the removal.
+    foreach (['sh-slide__title', 'sh-slide__text', 'sh-slide__img', 'sh-slide__tag'] as $kept) {
+        if (!str_contains($markup, $kept)) { return 'the slider markup no longer renders ' . $kept; }
+    }
+    // Feature cards keep their own link — the removal is scoped to the slides.
+    if (!str_contains($index, 'sh-sidecard__link')) { return 'the feature cards lost their link'; }
+    if (!str_contains($css, '.sh-sidecard__link')) { return 'the feature card link lost its styling'; }
+    return true;
+});
+
+sh_t('the slider crossfades instead of swapping, and never shows a blank frame', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    $js  = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    $markup = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+
+    // Slides are stacked and faded, never display:none (that was the flicker:
+    // the browser had to lay the incoming slide out and decode it mid-swap).
+    if (preg_match('~\.sh-slide\s*\{[^}]*position:\s*absolute~', $css) !== 1) {
+        return 'slides are not absolutely stacked';
+    }
+    if (preg_match('~\.sh-slide\s*\{[^}]*display:\s*none~', $css) === 1) {
+        return 'a slide is still switched off with display:none';
+    }
+    if (!str_contains($css, '--sh-slide-ease: cubic-bezier(0.22, 1, 0.36, 1)')) {
+        return 'the slider no longer uses the requested easing curve';
+    }
+    if (preg_match('~\.sh-slide\s*\{[^}]*transition:\s*opacity var\(--sh-slide-fade\)~', $css) !== 1) {
+        return 'the slide opacity is not driven by the configured fade duration';
+    }
+    // The incoming slide sits above the outgoing one while it fades in.
+    if (preg_match('~\.sh-slide--in\s*\{\s*z-index:\s*2~', $css) !== 1) {
+        return 'the incoming slide is not layered above the outgoing one';
+    }
+    // The outgoing slide is only released after the fade, so no frame can show
+    // the container behind it.
+    if (strpos($js, 'fade + 120') === false) { return 'the outgoing slide is released without waiting for the fade'; }
+    // Autoplay and fade durations come from the settings, clamped in both places.
+    foreach (['data-carousel-interval', 'data-carousel-fade'] as $attr) {
+        if (!str_contains($markup, $attr)) { return 'the slider markup does not pass ' . $attr . ' to the script'; }
+        if (!str_contains($js, $attr)) { return 'the script ignores ' . $attr; }
+    }
+    if (strpos($js, ">= 4000 && interval <= 6000") === false) { return 'the autoplay interval is not clamped to 4-6 s'; }
+    if (strpos($js, ">= 600 && fade <= 1000") === false) { return 'the crossfade is not clamped to 600-1000 ms'; }
+    $fn = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    foreach (['function sh_slider_interval_ms(', 'function sh_slider_fade_ms('] as $helper) {
+        if (strpos($fn, $helper) === false) { return 'missing ' . $helper; }
+    }
+    // The admin screen that changes them validates the same band.
+    $admin = (string)file_get_contents(SH_ROOT . '/admin/homepage.php');
+    if (!str_contains($admin, 'slider_timing') || !str_contains($admin, '4000 || $intervalMs > 6000')) {
+        return 'admin/homepage.php does not validate the slider timing it saves';
+    }
+    return true;
+});
+
+sh_t('the slider keeps itself safe: hidden tab, off-screen, reduced motion, broken image', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    foreach (["document.hidden", "'visibilitychange'", "IntersectionObserver",
+              "'(prefers-reduced-motion: reduce)'", "'error'", "new Image()"] as $must) {
+        if (!str_contains($js, $must)) { return 'the carousel script ignores ' . $must; }
+    }
+    // A missing file must degrade to the gradient plate and keep the text: the
+    // server marks the slide, and the script handles an image that fails later.
+    $markup = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    if (!str_contains($markup, 'sh-slide--noimg')) { return 'the slider markup does not mark a slide without a usable image'; }
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    if (!str_contains($css, '.sh-slide--noimg')) { return 'the missing-image state has no styling'; }
+    // Reduced motion collapses the fade too.
+    if (preg_match('~@media \(prefers-reduced-motion: reduce\)\s*\{[^@]*--sh-slide-fade: 1ms~s', $css) !== 1) {
+        return 'the reduced-motion block no longer collapses the slide fade';
+    }
+    return true;
+});
+
+sh_t('a disabled slide is absent from the homepage, and one slide renders no pagination', function () {
+    $fn = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    // Disabled slides are filtered in SQL, so they are never rendered, never
+    // downloaded and cannot leak their heading into the page source.
+    if (preg_match("~SELECT \* FROM promo_slides WHERE placement = \? AND status = 1~", $fn) !== 1) {
+        return 'sh_promo_items() no longer filters disabled slides in the query';
+    }
+    $markup = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    if (preg_match('~if \(\$total > 1\)~', $markup) !== 1) {
+        return 'the slider markup renders pagination even when there is a single slide';
+    }
+    // The shared markup is also what the behaviour harness loads, so it must not
+    // depend on anything a fixture cannot provide.
+    if (!str_contains($markup, 'function sh_slider_markup(')) { return 'sh_slider_markup() is missing'; }
     return true;
 });
 

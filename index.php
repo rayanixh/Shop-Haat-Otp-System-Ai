@@ -52,43 +52,12 @@ require_once SH_ROOT . '/includes/header.php';
       <?php endforeach; ?>
     </nav>
 
-<?php $shSlides = sh_promo_items('slider'); ?>
-    <?php if ($shSlides): ?>
-    <div class="sh-carousel" data-carousel>
-      <?php foreach ($shSlides as $i => $sl): $img = sh_promo_image($sl['image']); ?>
-        <div class="sh-slide <?= $i === 0 ? 'sh-slide--on' : '' ?>">
-          <?php if ($img !== ''): ?>
-            <img class="sh-slide__img" src="<?= e($img) ?>" alt="<?= e($sl['title']) ?>"
-                 <?= $i === 0 ? 'fetchpriority="high"' : 'loading="lazy"' ?> decoding="async">
-          <?php endif; ?>
-          <span class="sh-slide__scrim" aria-hidden="true"
-                style="opacity:<?= e(number_format(max(0, min(100, (int)$sl['overlay'])) / 100, 2)) ?>"></span>
-          <div class="sh-slide__inner">
-            <?php if (trim((string)$sl['tag']) !== ''): ?>
-              <span class="sh-slide__tag"><?= e($sl['tag']) ?></span>
-            <?php endif; ?>
-            <h2 class="sh-slide__title"><?= e($sl['title']) ?></h2>
-            <?php if (trim((string)$sl['subtitle']) !== ''): ?>
-              <p class="sh-slide__text"><?= e($sl['subtitle']) ?></p>
-            <?php endif; ?>
-            <?php if (trim((string)$sl['button_text']) !== '' && trim((string)$sl['button_url']) !== ''): ?>
-              <a class="sh-slide__btn" href="<?= e(sh_url($sl['button_url'])) ?>"><?= e($sl['button_text']) ?></a>
-            <?php endif; ?>
-          </div>
-        </div>
-      <?php endforeach; ?>
-      <?php if (count($shSlides) > 1): ?>
-        <button class="sh-carousel__arrow sh-carousel__arrow--prev" type="button" data-carousel-prev aria-label="Previous slide"><?= sh_icon('chevron-left', 18) ?></button>
-        <button class="sh-carousel__arrow sh-carousel__arrow--next" type="button" data-carousel-next aria-label="Next slide"><?= sh_icon('chevron-right', 18) ?></button>
-        <div class="sh-carousel__dots">
-          <?php foreach ($shSlides as $i => $sl): ?>
-            <button class="sh-carousel__dot <?= $i === 0 ? 'sh-carousel__dot--on' : '' ?>" type="button"
-                    aria-label="Slide <?= (int)($i + 1) ?>"></button>
-          <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
+<?php
+    // The hero slider markup (and its no-CTA, stacked-crossfade rules) lives in
+    // includes/functions.php so the storefront and the behaviour harness render
+    // exactly the same string.
+    echo sh_slider_markup(sh_promo_items('slider'));
+?>
 
 <?php $shCards = sh_promo_items('card'); ?>
     <?php if ($shCards): ?>

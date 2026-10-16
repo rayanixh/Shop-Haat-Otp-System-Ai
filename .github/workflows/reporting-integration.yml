@@ -29,17 +29,23 @@ jobs:
         run: php tools/security-scan.php --fail-on=high
       - name: Security regression suite
         run: php tests/security-regression.php
-      # Drives the real rendered markup (tests/page-transition-fixtures.php),
-      # the real stylesheet and the real script in jsdom and asserts the
-      # state machine behind the page transition: first paint, refresh, direct
-      # URL, admin panel, one-shot marker, no stuck overlay, no bfcache replay.
+      # Both harnesses drive the REAL rendered markup (tests/page-transition-
+      # fixtures.php and tests/slider-fixtures.php, which call the shipped
+      # helpers), the real stylesheet and the real script inside jsdom:
+      #   - the page transition state machine: first paint, refresh, direct URL,
+      #     admin panel, one-shot marker, no stuck overlay, no bfcache replay;
+      #   - the homepage slider: crossfade layering, autoplay interval, pause on
+      #     a hidden tab / off-screen carousel, reduced motion, image warm-up,
+      #     a missing image and the button-free markup.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Page-transition behaviour harness
+      - name: Front-end behaviour harnesses (page transition and slider)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
+          SH_SLIDER_REQUIRE_JSDOM: '1'
         run: |
           npm install --no-save --no-package-lock jsdom@26.1.0
           node tests/page-transition-behavior.mjs
+          node tests/slider-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
@@ -88,6 +94,12 @@ jobs:
           ];
           PHP
           touch config/installed.lock
+      # Installer seeding: a demo-OFF install must create structure and essential
+      # settings only, a demo-ON install must create the starter catalogue exactly
+      # once, and the cleanup screen must never destroy real records. It leaves
+      # the disposable database empty again for the reporting test below.
+      - name: Installer seeding decision (demo data on and off)
+        run: php tests/installer-demo-data.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
       - name: Exercise session expiry through customer HTTP routes

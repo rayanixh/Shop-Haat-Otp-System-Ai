@@ -64,6 +64,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/homepage.php');
     }
 
+    // Slider timing. Both values are clamped to the band the storefront is built
+    // for (4-6 s per slide, 600-1000 ms crossfade) and re-clamped on read by
+    // sh_slider_interval_ms()/sh_slider_fade_ms(), so a bad value can never
+    // reach the homepage even by editing the settings table directly.
+    if ($form === 'slider_timing') {
+        $intervalMs = sh_int($_POST['slider_interval_ms'] ?? 0);
+        $fadeMs     = sh_int($_POST['slider_fade_ms'] ?? 0);
+        if ($intervalMs < 4000 || $intervalMs > 6000) {
+            sh_flash('error', 'Time per slide must be between 4000 and 6000 milliseconds (4-6 seconds).');
+        } elseif ($fadeMs < 600 || $fadeMs > 1000) {
+            sh_flash('error', 'Transition length must be between 600 and 1000 milliseconds.');
+        } else {
+            sh_setting_save('slider_interval_ms', (string)$intervalMs);
+            sh_setting_save('slider_fade_ms', (string)$fadeMs);
+            sh_log_line('promo', 'Slider timing updated by ' . $admin['email']);
+            sh_flash('success', 'Slider timing saved.');
+        }
+        sh_redirect('admin/homepage.php');
+    }
+
     // The form now lives on admin/homepage-edit.php. Anything that still posts
     // a save here (a tab opened before the change) is forwarded rather than
     // dropped, and nothing from the body is stored.
@@ -119,8 +139,9 @@ require __DIR__ . '/_layout.php';
               <div class="sh-promorow__title"><?= e($sl['title']) ?></div>
               <div class="sh-promorow__meta">
                 <?= $sl['tag'] ? e($sl['tag']) . ' &middot; ' : '' ?>
-                <?= $sl['button_text'] ? e($sl['button_text']) . ' &rarr; ' . e($sl['button_url']) : 'No button' ?>
+                <?= e(mb_strimwidth(trim((string)$sl['subtitle']), 0, 90, '…')) ?>
               </div>
+              <div class="sh-promorow__meta">Badge, heading and text only — slides no longer show a button.</div>
               <?php if ($img === '' && trim((string)$sl['image']) !== ''): ?>
                 <div class="sh-promorow__meta" style="color:#c62828">Image file missing — re-upload it.</div>
               <?php endif; ?>
@@ -196,6 +217,36 @@ require __DIR__ . '/_layout.php';
   </div>
 
   <div class="sh-panel" style="align-self:start">
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('zap', 17) ?> Slider timing</h2></div>
+    <div class="sh-panel__body">
+      <p class="sh-panel__note" style="margin:0 0 12px">
+        Slides move on their own with a crossfade — the outgoing image stays in place until the next one has
+        finished fading in, so a slide change never shows a blank frame or a white flash. Visitors whose browser
+        asks for reduced motion get an instant change instead, and the rotation pauses while the tab is hidden.
+      </p>
+      <form method="post" novalidate>
+        <?= sh_csrf_field() ?>
+        <input type="hidden" name="form" value="slider_timing">
+        <div class="sh-field">
+          <label class="sh-field__label" for="sl-interval">Time on each slide (ms)</label>
+          <input class="sh-input" id="sl-interval" name="slider_interval_ms" type="number" inputmode="numeric"
+                 min="4000" max="6000" step="100" required value="<?= (int)sh_slider_interval_ms() ?>" style="max-width:160px">
+          <p class="sh-form__hint">4000–6000 (4–6 seconds). Default 5200.</p>
+        </div>
+        <div class="sh-field">
+          <label class="sh-field__label" for="sl-fade">Crossfade length (ms)</label>
+          <input class="sh-input" id="sl-fade" name="slider_fade_ms" type="number" inputmode="numeric"
+                 min="600" max="1000" step="50" required value="<?= (int)sh_slider_fade_ms() ?>" style="max-width:160px">
+          <p class="sh-form__hint">600–1000. Default 700.</p>
+        </div>
+        <div class="sh-actions">
+          <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('check-circle', 14) ?> Save timing</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="sh-panel" style="align-self:start">
     <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('info', 17) ?> How this page works</h2></div>
     <div class="sh-panel__body">
       <p class="sh-panel__note" style="margin:0 0 10px">
@@ -206,6 +257,8 @@ require __DIR__ . '/_layout.php';
         <li>JPG, PNG, WebP or GIF images.</li>
         <li>Order is changed with the ↑ ↓ buttons, not by editing numbers.</li>
         <li>Feature cards cannot be deleted — switch one off instead.</li>
+        <li>Slides show the image, badge, heading and description. Slides have no button; use a feature card when you need one.</li>
+        <li>A slide switched off is removed from the homepage — it is not loaded, not just hidden.</li>
       </ul>
       <p class="sh-panel__note">
         <a href="<?= e(sh_url('index.php')) ?>" target="_blank" rel="noopener">Open the homepage <?= sh_icon('external', 12) ?></a>

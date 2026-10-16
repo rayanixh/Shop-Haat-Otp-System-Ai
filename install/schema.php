@@ -875,7 +875,87 @@ function sh_google_schema_migrate(PDO $pdo): void
     } catch (Throwable $e) { sh_log_exception($e, 'google-schema'); }
 }
 
-/** Default rows inserted once at install time. */
+/**
+ * The four payment routes every store needs to take an order: three manual
+ * mobile-banking wallets and cash on delivery, plus the three disabled gateway
+ * definitions the admin panel edits.
+ *
+ * These are structural configuration, not demo content: they carry no merchant
+ * numbers (the account number is left blank until the owner enters a real one,
+ * and sh_payment_method_available_for_order() keeps a blank method out of
+ * checkout), no credentials and no fake business records. Seeding them with the
+ * starter catalogue instead would leave a demo-off install unable to record a
+ * single order, and would leave the reporting integration fixtures with nothing
+ * to test against.
+ *
+ * Idempotent: INSERT IGNORE keyed on the unique method/gateway code.
+ */
+function sh_seed_essential_starters(PDO $pdo): void
+{
+    $pm = $pdo->prepare('INSERT IGNORE INTO payment_methods
+        (code, name, type, description, instructions, account_number, account_type, sort_order, status)
+        VALUES (?,?,?,?,?,?,?,?,?)');
+    $pm->execute(['bkash', 'bKash', 'manual', 'Send money from your bKash app or dial *247#.',
+        "1. Open the bKash app and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Complete the transaction and copy the Transaction ID (TrxID).\n5. Submit the TrxID and your bKash number below.",
+        '', 'Personal', 1, 1]); // Blank until the owner enters the real merchant number
+    $pm->execute(['nagad', 'Nagad', 'manual', 'Send money using the Nagad app or dial *167#.',
+        "1. Open Nagad and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Copy the Transaction ID from the confirmation message.\n5. Submit the Transaction ID and your Nagad number below.",
+        '', 'Personal', 2, 1]);
+    $pm->execute(['rocket', 'Rocket', 'manual', 'Send money using Rocket (DBBL) or dial *322#.',
+        "1. Open Rocket and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Copy the Transaction ID (TxnID).\n5. Submit the Transaction ID and your Rocket number below.",
+        '', 'Personal', 3, 1]);
+    $pm->execute(['cod', 'Cash on Delivery', 'cod', 'Pay in cash when your order arrives.',
+        "Keep the exact amount ready. Our delivery partner will collect the payment at your door. Cash on Delivery is available for physical products only.",
+        null, null, 4, 1]);
+
+    // Gateway definitions (disabled until real credentials are supplied)
+    $gw = $pdo->prepare('INSERT IGNORE INTO payment_gateways (code, name, driver, description, mode, status, sort_order)
+                         VALUES (?,?,?,?,?,?,?)');
+    $gw->execute(['sslcommerz', 'SSLCommerz', 'sslcommerz', 'Cards, mobile banking and net banking via SSLCommerz.', 'sandbox', 0, 1]);
+    $gw->execute(['aamarpay', 'aamarPay', 'aamarpay', 'Cards and mobile financial services via aamarPay.', 'sandbox', 0, 2]);
+    $gw->execute(['shurjopay', 'shurjoPay', 'shurjopay', 'Payment aggregation via shurjoPay.', 'sandbox', 0, 3]);
+}
+
+/**
+ * One install run's complete seeding decision.
+ *
+ * Kept in one function so the installer and the test suite exercise exactly the
+ * same path: every install gets the structure-level starters, and the starter
+ * catalogue runs only when the operator asked for it. When they did not, the
+ * refusal is recorded in the settings table so a later automatic run (a page
+ * view, a login, an upgrade) can never reconsider — only an explicit new install
+ * request can, and that always comes through $withDemo = true.
+ *
+ * @return array<string,mixed> short report for the install log
+ */
+function sh_install_seed_all(PDO $pdo, array $opts, bool $withDemo): array
+{
+    sh_schema_seed($pdo, $opts);
+    sh_seed_essential_starters($pdo);
+
+    if ($withDemo) {
+        return ['demo' => true, 'report' => sh_install_demo_data($pdo, true)];
+    }
+
+    $st = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1');
+    $st->execute(['demo_data_state']);
+    if ($st->fetchColumn() === false) {
+        $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)')
+            ->execute(['demo_data_state', 'none']);
+    }
+    return ['demo' => false, 'report' => []];
+}
+
+/**
+ * Structure-level starters only: the settings a store needs to render at all,
+ * the notification matrix, courier registry and OTP defaults.
+ *
+ * This runs on every install, including installs where the operator declined the
+ * starter catalogue, so it must never insert business records — no products,
+ * categories, customers, orders, reviews, slides, promotions or placeholder
+ * company details. Those live in install/demo-data.php and only run when the
+ * operator asks for them.
+ */
 function sh_schema_seed(PDO $pdo, array $opts): void
 {
     $siteName = $opts['site_name'] ?? 'ShopHaat';
@@ -893,9 +973,11 @@ function sh_schema_seed(PDO $pdo, array $opts): void
         'currency_symbol'      => 'BDT ',
         'currency_code'        => 'BDT',
         'contact_email'        => $email,
-        'contact_phone'        => '+880 1700-000000',
-        'contact_address'      => 'Level 4, Bijoy Sarani, Dhaka 1215, Bangladesh',
-        'footer_about'         => 'We deliver genuine products across Bangladesh with fast shipping, easy returns and secure payment options.',
+        // Deliberately blank: an unconfigured store must not publish a made-up
+        // phone number or office address as if it were the real business.
+        'contact_phone'        => '',
+        'contact_address'      => '',
+        'footer_about'         => '',
         'footer_copyright'     => '© ' . date('Y') . ' ' . $siteName . '. All rights reserved.',
         'delivery_fee_inside'  => '60',
         'delivery_fee_outside' => '120',
@@ -929,47 +1011,6 @@ function sh_schema_seed(PDO $pdo, array $opts): void
     $st = $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
                          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
     foreach ($settings as $k => $v) { $st->execute([$k, (string)$v]); }
-
-    // Payment methods
-    $pm = $pdo->prepare('INSERT IGNORE INTO payment_methods
-        (code, name, type, description, instructions, account_number, account_type, sort_order, status)
-        VALUES (?,?,?,?,?,?,?,?,?)');
-    $pm->execute(['bkash', 'bKash', 'manual', 'Send money from your bKash app or dial *247#.',
-        "1. Open the bKash app and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Complete the transaction and copy the Transaction ID (TrxID).\n5. Submit the TrxID and your bKash number below.",
-        '01700000000', 'Personal', 1, 1]);
-    $pm->execute(['nagad', 'Nagad', 'manual', 'Send money using the Nagad app or dial *167#.',
-        "1. Open Nagad and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Copy the Transaction ID from the confirmation message.\n5. Submit the Transaction ID and your Nagad number below.",
-        '01800000000', 'Personal', 2, 1]);
-    $pm->execute(['rocket', 'Rocket', 'manual', 'Send money using Rocket (DBBL) or dial *322#.',
-        "1. Open Rocket and choose Send Money.\n2. Enter the merchant number shown above.\n3. Enter the exact amount.\n4. Copy the Transaction ID (TxnID).\n5. Submit the Transaction ID and your Rocket number below.",
-        '018000000001', 'Personal', 3, 1]);
-    $pm->execute(['cod', 'Cash on Delivery', 'cod', 'Pay in cash when your order arrives.',
-        "Keep the exact amount ready. Our delivery partner will collect the payment at your door. Cash on Delivery is available for physical products only.",
-        null, null, 4, 1]);
-
-    // Gateway definitions (disabled until real credentials are supplied)
-    $gw = $pdo->prepare('INSERT IGNORE INTO payment_gateways (code, name, driver, description, mode, status, sort_order)
-                         VALUES (?,?,?,?,?,?,?)');
-    $gw->execute(['sslcommerz', 'SSLCommerz', 'sslcommerz', 'Cards, mobile banking and net banking via SSLCommerz.', 'sandbox', 0, 1]);
-    $gw->execute(['aamarpay', 'aamarPay', 'aamarpay', 'Cards and mobile financial services via aamarPay.', 'sandbox', 0, 2]);
-    $gw->execute(['shurjopay', 'shurjoPay', 'shurjopay', 'Payment aggregation via shurjoPay.', 'sandbox', 0, 3]);
-
-    // Homepage promo content (slider slides + the three feature cards).
-    $ps = $pdo->prepare('INSERT IGNORE INTO promo_slides
-        (placement, slot, tag, title, subtitle, button_text, button_url, image, overlay, sort_order, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,1)');
-    $ps->execute(['slider', null, 'Flash Sale Live', 'Up to 40% off electronics and home essentials',
-        'Limited stock on daily deals. New offers added every morning at 10:00 AM.',
-        'Shop Flash Sale', 'products.php?flash=1', 'promo/slide-flash.jpg', 70, 1]);
-    $ps->execute(['slider', null, 'Everyday Value', 'Groceries and daily essentials at honest prices',
-        'Free delivery on orders over the qualifying amount inside the city.',
-        'Start Shopping', 'products.php?sort=popular', 'promo/slide-grocery.jpg', 70, 3]);
-    $ps->execute(['card', 'card_1', null, 'New Arrivals', 'Fresh stock added this week',
-        'Explore', 'products.php?sort=newest', 'promo/card-new.jpg', 70, 1]);
-    $ps->execute(['card', 'card_2', null, 'Clearance Offers', '20% off or more',
-        'View deals', 'products.php?discount=20', 'promo/card-clearance.jpg', 70, 2]);
-    $ps->execute(['card', 'card_3', null, 'Track Your Order', 'Live status in seconds',
-        'Track now', 'track.php', 'promo/card-track.jpg', 70, 3]);
 
     // Notification event matrix
     $events = ['order_created', 'payment_submitted', 'payment_approved', 'payment_rejected',
