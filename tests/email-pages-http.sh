@@ -440,9 +440,26 @@ known_text="$(tr -d '\n' < "$TMP_DIR/known-body")"
 assert_contains "$known_text" 'Password recovery by email is not available yet' 'an unconfigured store did not explain that it cannot send mail'
 assert_absent "$known_text" 'a reset code has been sent' 'an unconfigured store claimed a reset code was sent'
 assert_absent "$known_text" 'No code is pending' 'the unconfigured reply leaks internal detail'
-if [[ "$unknown_text" != "$known_text" ]]; then
+
+# The notice is the only part of the page that could betray whether the address
+# has an account, so it is compared word for word. The surrounding markup is
+# session-specific (CSRF token, one-shot transition marker, the address the
+# visitor typed) and is not part of the answer.
+notice_of() {
+  grep -o 'Password recovery by email is not available yet[^<]*' "$1" | head -n 1 | sed 's/[[:space:]]\+/ /g'
+}
+known_notice="$(notice_of "$TMP_DIR/known-body")"
+unknown_notice="$(notice_of "$TMP_DIR/unknown-body")"
+[[ -n "$known_notice" && -n "$unknown_notice" ]] || fail 'the unconfigured store did not answer the recovery form at all'
+if [[ "$known_notice" != "$unknown_notice" ]]; then
+  echo "known:   $known_notice" >&2
+  echo "unknown: $unknown_notice" >&2
   fail 'the reply differs for an address that exists and one that does not'
 fi
+for pair in "known:$known_text" "unknown:$unknown_text"; do
+  label="${pair%%:*}"; text="${pair#*:}"
+  assert_absent "$text" 'If an account exists for that email' "the ${label} address produced the copy used when a code really was sent"
+done
 # The unverified fixture was never touched by any of this.
 state="$(fixtures state "$CUSTOMER_EMAIL")"
 assert_contains "$state" 'unverified_flag=0' 'an unverified account was marked verified without a code'
