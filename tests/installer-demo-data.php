@@ -248,12 +248,21 @@ try {
     installer_assert_same(2, installer_count('products'), 'Only the real product and the one kept sample product may remain');
     // Everything that is not still listed as sample content must have been
     // removed: the two counts have to add up to the seeded total.
+    // Every sample product is handled exactly once: deleted, or deactivated and
+    // kept listed because it carries order history or a visitor review. So the two
+    // counts add up to everything the seeder created, and what stays listed can
+    // only be what was deactivated.
     $remainingSamples = count(sh_demo_inventory($pdo)['products']);
     installer_assert_same(1, $remainingSamples, 'exactly one sample product must be kept for its order history and visitor review');
     installer_assert_same(
-        (int)$seeded['products'] - $remainingSamples,
+        (int)$seeded['products'],
         $result['products_deleted'] + $result['products_deactivated'],
-        'Every other sample product must have been removed'
+        'Every sample product must have been deleted or deactivated'
+    );
+    installer_assert_same(
+        $remainingSamples,
+        $result['products_deactivated'],
+        'Only the sample products kept for their business history may stay listed'
     );
     installer_assert_same(0, installer_count('promo_slides'), 'No sample slide or card may survive the cleanup');
     installer_assert_same(2, installer_count('categories'), 'Only the owner category and the kept sample category may remain');
