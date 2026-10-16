@@ -285,8 +285,8 @@ set_store_setting smtp_enabled 1
 set_store_setting smtp_host 127.0.0.1
 set_store_setting smtp_port "$SMTP_PORT"
 set_store_setting smtp_encryption none
-set_store_setting smtp_username ''
-set_store_setting smtp_password ''
+set_store_setting smtp_username 'apiuser'
+set_store_setting smtp_password "$SMTP_PASSWORD"
 set_store_setting smtp_from_email 'noreply@shophaat.test'
 set_store_setting smtp_from_name 'ShopHaat Test'
 
@@ -298,8 +298,17 @@ curl -sS -A "$DESKTOP_UA" -D "$forgot_headers" -o /dev/null -c "$COOKIE_JAR" -b 
   -X POST --data-urlencode "csrf_token=${forgot_token}" \
   --data-urlencode "email=${CUSTOMER_EMAIL}" \
   "${BASE}/forgot-password.php"
-grep -Eqi '^Location: .*/?reset-password\.php' "$forgot_headers" \
-  || { cat "$forgot_headers" >&2; fail 'forgot-password.php did not hand off to the reset page after a real submission'; }
+if ! grep -Eqi '^Location: .*/?reset-password\.php' "$forgot_headers"; then
+  cat "$forgot_headers" >&2
+  echo '--- body ---' >&2
+  curl -sS -A "$DESKTOP_UA" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/forgot-password.php" \
+    | grep -o 'sh-alert[^<]*<[^>]*>[^<]*' | head -n 5 >&2 || true
+  dump_app_log 'forgot-password'
+  fail 'forgot-password.php did not hand off to the reset page after a real submission'
+fi
+# The code must have gone out over an authenticated SMTP session.
+assert_contains "$(cat "$SMTP_DIR/message.txt" 2>/dev/null)" 'AUTH LOGIN' \
+  'the recovery code was not submitted over authenticated SMTP'
 
 # The code only exists in the delivered message: read it from the captured SMTP
 # submission and prove the database itself never holds it in the clear.

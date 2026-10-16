@@ -84,7 +84,11 @@ function sh_mail_service_status(): array
 {
     $t = sh_mail_transport();
     $fromOk = $t['from_email'] !== '' && sh_valid_email((string)$t['from_email']);
-    $ready = $fromOk && ($t['driver'] === 'smtp' ? ($t['host'] !== '' && $t['password'] !== '') : true);
+    // A password is only required when the host authenticates with a username:
+    // a local relay that accepts unauthenticated mail is a real setup, and
+    // blocking it would be a lie about what the store can do.
+    $authOk = $t['username'] === '' || $t['password'] !== '';
+    $ready = $fromOk && ($t['driver'] === 'smtp' ? ($t['host'] !== '' && $authOk) : true);
     $missing = [];
     if (!$fromOk) { $missing[] = 'A valid sender email address (Sender email)'; }
     if ($t['driver'] === 'smtp' && $t['host'] === '') { $missing[] = 'SMTP host'; }
