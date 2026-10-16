@@ -1705,6 +1705,40 @@ sh_t('mobile tables can render as record cards', function () {
     return true;
 });
 
+sh_t('no write sends an explicit NULL into a NOT NULL column', function () {
+    // MySQL runs in strict mode: a NULL written into a NOT NULL column aborts the
+    // statement, so the save silently reverts to "the form came back". The schema
+    // is the source of truth here.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    $tables = [];
+    if (preg_match_all('~CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\) \$E~s', $schema, $m, PREG_SET_ORDER)) {
+        foreach ($m as $block) {
+            $cols = [];
+            foreach (preg_split('~\R~', $block[2]) ?: [] as $line) {
+                if (preg_match('~^\s*(\w+)\s+[A-Za-z]+(?:\([^)]*\))?\s*(.*?),?$~', $line, $c) !== 1) { continue; }
+                if (in_array(strtoupper($c[1]), ['PRIMARY', 'UNIQUE', 'KEY', 'INDEX', 'CONSTRAINT', 'FOREIGN'], true)) { continue; }
+                $cols[$c[1]] = str_contains(strtoupper($c[2]), 'NOT NULL');
+            }
+            $tables[$block[1]] = $cols;
+        }
+    }
+    if ($tables === []) { return 'the schema could not be read'; }
+
+    foreach (array_merge(glob(SH_ROOT . '/admin/*.php'), glob(SH_ROOT . '/includes/*.php')) as $file) {
+        $src = (string)file_get_contents($file);
+        foreach (preg_split('~\R~', $src) ?: [] as $i => $line) {
+            if (preg_match("~^\s*'(\w+)'\s*=>\s*(.*)$~", $line, $c) !== 1) { continue; }
+            if (preg_match('~\bnull\b~', $c[2]) !== 1) { continue; }
+            foreach ($tables as $table => $cols) {
+                if (!isset($cols[$c[1]]) || $cols[$c[1]] !== true) { continue; }
+                if (preg_match("~sh_(?:insert|update)\(\s*'" . $table . "'~", $src) !== 1) { continue; }
+                return basename($file) . ' writes NULL into ' . $table . '.' . $c[1] . ' (line ' . ($i + 1) . '), which is NOT NULL';
+            }
+        }
+    }
+    return true;
+});
+
 sh_t('the panel has exactly one page heading per screen', function () {
     // The layout renders the only <h1>. A second one inside a page body means the
     // entity name appears twice as a title.

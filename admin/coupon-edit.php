@@ -58,8 +58,11 @@ if ($form === 'save') {
             'type' => $type,
             'value' => $value,
             'min_order' => (float)(sh_post('min_order') ?: 0),
-            'max_discount' => sh_post('max_discount') !== '' ? (float)sh_post('max_discount') : null,
-            'usage_limit' => sh_int($_POST['usage_limit'] ?? 0) ?: null,
+            // Both columns are NOT NULL: an empty field means "no cap" / "unlimited",
+            // which the shop reads as 0. Writing NULL would be refused by MySQL in
+            // strict mode and would silently break the save.
+            'max_discount' => sh_post('max_discount') !== '' ? (float)sh_post('max_discount') : 0.0,
+            'usage_limit' => max(0, sh_int($_POST['usage_limit'] ?? 0)),
             'starts_at' => $starts !== '' ? str_replace('T', ' ', $starts) . ':00' : null,
             'expires_at' => $expires !== '' ? str_replace('T', ' ', $expires) . ':00' : null,
             'status' => !empty($_POST['status']) ? 1 : 0,
@@ -95,7 +98,7 @@ $dt = static function (string $k) use ($editing): string {
 $statusOn  = $errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1;
 $usedCount = $editing !== null ? (int)sh_val('SELECT COUNT(*) FROM orders WHERE coupon_id = ?', [(int)$editing['id']], 0) : 0;
 $expired   = $editing !== null && !empty($editing['expires_at']) && strtotime((string)$editing['expires_at']) < time();
-$exhausted = $editing !== null && $editing['usage_limit'] !== null && (int)$editing['used_count'] >= (int)$editing['usage_limit'];
+$exhausted = $editing !== null && (int)$editing['usage_limit'] > 0 && (int)$editing['used_count'] >= (int)$editing['usage_limit'];
 
 $adminPage = 'coupons';
 $adminTitle = $isNew ? 'Add coupon' : 'Edit coupon';
@@ -120,7 +123,7 @@ require __DIR__ . '/_layout.php';
       <?php if ($usedCount > 0): ?><a class="sh-stat__hint" href="<?= e(sh_url('admin/orders.php?q=' . urlencode((string)$editing['code']))) ?>">Search orders</a><?php endif; ?>
     </div>
     <div class="sh-stat"><span class="sh-stat__label">Times used</span>
-      <span class="sh-stat__value"><?= (int)$editing['used_count'] ?><?= $editing['usage_limit'] !== null ? ' / ' . (int)$editing['usage_limit'] : '' ?></span></div>
+      <span class="sh-stat__value"><?= (int)$editing['used_count'] ?><?= (int)$editing['usage_limit'] > 0 ? ' / ' . (int)$editing['usage_limit'] : '' ?></span></div>
     <div class="sh-stat"><span class="sh-stat__label">Validity</span>
       <span class="sh-stat__value" style="font-size:14px"><?= $expired ? 'Expired' : (empty($editing['expires_at']) ? 'No end date' : 'Until ' . e(date('d M Y', strtotime((string)$editing['expires_at'])))) ?></span></div>
     <div class="sh-stat"><span class="sh-stat__label">Status</span>

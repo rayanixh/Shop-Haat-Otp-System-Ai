@@ -76,14 +76,14 @@ require __DIR__ . '/_layout.php';
         </td></tr>
       <?php else: foreach ($rows as $c):
         $expired = $c['expires_at'] && strtotime((string)$c['expires_at']) < time();
-        $exhausted = $c['usage_limit'] !== null && (int)$c['used_count'] >= (int)$c['usage_limit']; ?>
+        $exhausted = (int)$c['usage_limit'] > 0 && (int)$c['used_count'] >= (int)$c['usage_limit']; ?>
         <tr>
           <td data-label="Code"><code style="font-weight:700;font-size:13px"><?= e($c['code']) ?></code></td>
           <td data-label="Discount"><strong><?= $c['type'] === 'percent' ? (float)$c['value'] . '%' : e(sh_money($c['value'])) ?></strong>
-            <?php if ($c['max_discount'] !== null): ?>
+            <?php if ((float)$c['max_discount'] > 0): ?>
               <div class="sh-table__meta">max <?= e(sh_money($c['max_discount'])) ?></div><?php endif; ?></td>
           <td data-label="Conditions" class="sh-table__meta"><?= (float)$c['min_order'] > 0 ? 'Min order ' . e(sh_money($c['min_order'])) : 'No minimum' ?></td>
-          <td data-label="Used"><?= (int)$c['used_count'] ?><?= $c['usage_limit'] !== null ? ' / ' . (int)$c['usage_limit'] : '' ?></td>
+          <td data-label="Used"><?= (int)$c['used_count'] ?><?= (int)$c['usage_limit'] > 0 ? ' / ' . (int)$c['usage_limit'] : '' ?></td>
           <td data-label="Validity" class="sh-table__meta">
             <?php if ($c['expires_at']): ?>Until <?= e(date('d M Y', strtotime((string)$c['expires_at']))) ?>
             <?php else: ?>No end date<?php endif; ?></td>
