@@ -613,6 +613,31 @@ if [[ -z "$probe_file" ]]; then
   fail 'the category-card probe category could not be created'
 fi
 
+# What the application itself sees for the probe: the stored value, whether the
+# file is on disk where the app looks for it, the URL it resolves to, and the
+# first eight categories the homepage will actually render. A failure here is
+# otherwise indistinguishable from a rendering problem, and this costs one
+# process and one annotation.
+probe_state="$(SH_TEST_PROBE_FILE="$probe_file" php -d display_errors=stderr -r '
+$_SERVER["SCRIPT_NAME"] = "/index.php";
+$_SERVER["HTTP_HOST"] = "localhost";
+require getcwd() . "/config/config.php";
+$row = sh_one("SELECT id, name, slug, image, sort_order, status FROM categories WHERE slug = ?", ["category-card-probe"]);
+$img = (string)($row["image"] ?? "");
+$parts = [
+    "upload_dir=" . SH_UPLOAD_DIR,
+    "row=" . json_encode($row),
+    "file=" . (is_file(SH_UPLOAD_DIR . "/categories/" . basename($img)) ? "present" : "missing"),
+    "resolved=" . sh_category_image($img),
+];
+$slice = [];
+foreach (array_slice(sh_categories(), 0, 8) as $c) {
+    $slice[] = $c["name"] . "[" . (string)($c["image"] ?? "") . "]";
+}
+$parts[] = "homepage_first_eight=" . implode(", ", $slice);
+echo implode(" | ", $parts);' 2>/dev/null || true)"
+echo "::notice title=Category probe::probe=${probe_file} | ${probe_state}"
+
 home_cards="$(fetch_page '/')"
 card_count="$(count_of 'class="sh-category-card"' "$home_cards")"
 if [[ "$card_count" -lt 1 ]]; then
@@ -640,6 +665,10 @@ card_name="$(count_of 'class="sh-category-card__name"' "$home_cards")"
 
 # A real upload must be used by the card, and must not be marked as the placeholder.
 if ! printf '%s' "$home_cards" | grep -q "uploads/categories/${probe_file}"; then
+  echo "::error title=Category card::probe=${probe_file} | ${probe_state}"
+  printf '%s' "$card_blocks" | head -c 900 | tr '\n' ' ' | sed 's/%/%25/g' | while read -r line; do
+    echo "::error title=Category card markup::${line}"
+  done
   fail "the homepage did not use the uploaded category image (${probe_file})"
 fi
 probe_img="$(printf '%s' "$home_cards" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1 || true)"
