@@ -592,7 +592,7 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
         <input type="checkbox" id="demo_data" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
         <label for="demo_data" style="font-weight:500;margin:0">Install the optional starter catalogue</label>
         <p class="hint" style="margin:6px 0 0 22px">
-          Adds the seven sample categories, eight brands, thirty sample products, sample reviews,
+          Adds the seven sample categories, eight brands, twenty-nine sample products, sample reviews,
           three sample coupons and the two homepage slides. Leave this unticked for a clean store:
           you get the full database structure, your settings and the four payment routes, and no
           sample products, customers, orders, reviews or banners. Nothing here is ever inserted

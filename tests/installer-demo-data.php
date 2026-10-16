@@ -246,7 +246,15 @@ try {
     installer_assert_same(1, installer_count('reviews', 'id = ?', [$visitorReview]), 'A real customer review must survive the cleanup');
     installer_assert_same(0, installer_count('products', 'id = ? AND status = 1', [$orderedSample]), 'A sample product kept for its order history or its visitor review must be deactivated');
     installer_assert_same(2, installer_count('products'), 'Only the real product and the one kept sample product may remain');
-    installer_assert_same((int)$seeded['products'] - 2, $result['products_deleted'] + $result['products_deactivated'], 'Every other sample product must have been removed');
+    // Everything that is not still listed as sample content must have been
+    // removed: the two counts have to add up to the seeded total.
+    $remainingSamples = count(sh_demo_inventory($pdo)['products']);
+    installer_assert_same(1, $remainingSamples, 'exactly one sample product must be kept for its order history and visitor review');
+    installer_assert_same(
+        (int)$seeded['products'] - $remainingSamples,
+        $result['products_deleted'] + $result['products_deactivated'],
+        'Every other sample product must have been removed'
+    );
     installer_assert_same(0, installer_count('promo_slides'), 'No sample slide or card may survive the cleanup');
     installer_assert_same(2, installer_count('categories'), 'Only the owner category and the kept sample category may remain');
     installer_assert_same(1, installer_count('payment_methods', "code = 'cod' AND status = 1"), 'The cleanup must not touch payment routes');
