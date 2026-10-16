@@ -17,6 +17,12 @@ DESKTOP_UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safa
 
 cleanup() {
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  # The category section writes this script and then creates a probe category;
+  # running it here too means a failed assertion cannot leave the probe row or
+  # its upload behind. The script deletes nothing when the probe is not there.
+  if [[ -f "$TMP_DIR/probe-cleanup.php" ]]; then
+    php "$TMP_DIR/probe-cleanup.php" >/dev/null 2>&1 || true
+  fi
   rm -f "$COOKIE_JAR" "$SERVER_LOG"
   rm -rf "$TMP_DIR"
 }
@@ -75,6 +81,16 @@ set_store_setting() {
   ' >/dev/null || fail "could not write the setting ${key}"
 }
 
+# Count occurrences of a fixed string in a body. Written so a missing match
+# cannot abort the script: with `set -o pipefail` a `grep` that finds nothing
+# makes the whole command substitution fail, which would hide the assertion that
+# was about to explain the problem.
+count_of() {
+  local n
+  n="$(printf '%s' "$2" | grep -o -- "$1" | wc -l)" || n=0
+  printf '%s' "${n// /}"
+}
+
 fetch_page() {
   local path="$1" ua="${2:-$DESKTOP_UA}"
   # -L: some routes legitimately redirect (checkout with an empty cart), and the
@@ -87,7 +103,7 @@ fetch_page() {
 assert_transition_markup() {
   local path="$1" body="$2" label="$3"
   local overlay_count head_at body_at overlay_at main_at duration
-  overlay_count="$(printf '%s' "$body" | grep -o 'id="sh-pt"' | wc -l | tr -d ' ')"
+  overlay_count="$(count_of 'id="sh-pt"' "$body")"
   [[ "$overlay_count" == "1" ]] || fail "${label} rendered ${overlay_count} transition overlays, expected exactly 1"
   assert_contains "$body" 'data-transition="1"' "${label} does not announce the transition on the body"
   assert_contains "$body" '__shPtFallback' "${label} has no first-paint hold script"
@@ -529,25 +545,15 @@ assert_transition_markup '/' "$(fetch_page '/')" 'GET / after re-enabling the tr
 echo "::notice title=Page transition observed::home=${home_duration}ms admin=${admin_duration}ms disabled=no-overlay duration-change=750ms both panels"
 
 # ---------------------------------------------------------------------------
-# 9. Product category cards: the image is the category's own upload, the name
-#    is beneath it, and no item count is printed anywhere.
+# 9. Product category cards: the category's own uploaded image on top, the name
+#    beneath it, a neutral fallback when nothing is uploaded, and no item count
+#    anywhere on a card. The CI database ships no categories, so this section
+#    creates its own probe parent (with a real GIF in uploads/categories) and a
+#    child without an upload — the child is what proves the fallback on a real
+#    category page. Both rows and the file are removed again, from the EXIT trap
+#    as well, so a failure cannot leave them behind.
 # ---------------------------------------------------------------------------
 echo 'Category card HTTP integration'
-
-home_cards="$(fetch_page '/')"
-card_count="$(printf '%s' "$home_cards" | grep -o 'class="sh-category-card"' | wc -l | tr -d ' ')"
-[[ "$card_count" -ge 1 ]] || { echo "::error title=Category cards::the homepage rendered no category cards"; fail 'the homepage rendered no product category cards'; }
-if printf '%s' "$home_cards" | grep -qE '[0-9]+ items'; then
-  fail 'a category card still prints an item count'
-fi
-if printf '%s' "$home_cards" | grep -q 'sh-category-card__icon\|sh-category-card__count'; then
-  fail 'a category card still uses the old placeholder-icon / count markup'
-fi
-# Every card must be one link that carries an image and a name.
-card_img="$(printf '%s' "$home_cards" | grep -o 'sh-category-card__img[^"]*' | wc -l | tr -d ' ')"
-card_name="$(printf '%s' "$home_cards" | grep -o 'sh-category-card__name' | wc -l | tr -d ' ')"
-[[ "$card_img" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_img} images"
-[[ "$card_name" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_name} names"
 
 # The neutral fallback must be served, so a category without a photo is not broken.
 fallback_code="$(curl -sS -o "$TMP_DIR/fallback.svg" -w '%{http_code}' -D "$TMP_DIR/fallback-headers" "${BASE}/assets/images/category-fallback.svg")"
@@ -555,62 +561,119 @@ fallback_code="$(curl -sS -o "$TMP_DIR/fallback.svg" -w '%{http_code}' -D "$TMP_
 grep -Eqi '^content-type: image/svg\+xml' "$TMP_DIR/fallback-headers" || fail 'the category fallback is not served as SVG'
 grep -q '<svg' "$TMP_DIR/fallback.svg" || fail 'the category fallback is not an SVG document'
 
-# A category with a real uploaded image must use it: create one, fetch the
-# homepage and the category page, then clean both the row and the file up.
-probe_slug='category-card-probe'
-probe_file="$(php -r '
-$slug = "category-card-probe";
-$cfg = require "config/database.php";
+probe_label='Cards Probe'
+probe_child_label='Cards Probe Child'
+
+cat > "$TMP_DIR/probe-cleanup.php" <<'PROBE_CLEANUP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass']);
+    $st = $pdo->prepare('SELECT image FROM categories WHERE slug = ? LIMIT 1');
+    $st->execute(['category-card-probe']);
+    $image = (string)$st->fetchColumn();
+    $pdo->prepare('DELETE FROM categories WHERE slug IN (?, ?)')->execute(['category-card-probe-child', 'category-card-probe']);
+    if ($image !== '' && strpos($image, '/') === false) {
+        @unlink(getcwd() . '/uploads/categories/' . basename($image));
+    }
+} catch (Throwable $e) {
+}
+PROBE_CLEANUP
+
+# The probe row, its upload and its child. getcwd() is the repository root, the
+# same directory the PHP test server serves, so the path written here is the one
+# the storefront reads. display_errors goes to stderr so a warning cannot corrupt
+# the file name this command substitution captures.
+probe_file="$(php -d display_errors=stderr -r '
+$_SERVER["SCRIPT_NAME"] = "/tests/probe.php";
+$_SERVER["HTTP_HOST"] = "localhost";
+$cfg = require getcwd() . "/config/database.php";
 $src = base64_decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
 $name = "probe-" . bin2hex(random_bytes(4)) . ".gif";
-$dir = __DIR__ . "/uploads/categories";
-if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { echo ""; exit; }
-if (@file_put_contents($dir . "/" . $name, $src) === false) { echo ""; exit; }
+$dir = getcwd() . "/uploads/categories";
+if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { exit; }
+if (@file_put_contents($dir . "/" . $name, $src) === false) { exit; }
 try {
     $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
-    $pdo->prepare("DELETE FROM categories WHERE slug = ?")->execute([$slug]);
-    $st = $pdo->prepare("INSERT INTO categories (name, slug, icon, image, description, sort_order, status) VALUES (?,?,?,?,?,999,1)");
-    $st->execute(["Cards Probe", $slug, "grid", $name, "probe"]);
+    $pdo->prepare("DELETE FROM categories WHERE slug IN (?, ?)")->execute(["category-card-probe-child", "category-card-probe"]);
+    $insert = $pdo->prepare("INSERT INTO categories (name, slug, icon, image, description, sort_order, status, parent_id) VALUES (?,?,?,?,?,?,?,?)");
+    $insert->execute(["Cards Probe", "category-card-probe", "grid", $name, "category card probe", -99, 1, null]);
+    $parentId = (int)$pdo->lastInsertId();
+    $insert->execute(["Cards Probe Child", "category-card-probe-child", "grid", null, "category card probe child", -98, 1, $parentId]);
     echo $name;
-} catch (Throwable $e) { echo ""; }')"
-
-if [[ -n "$probe_file" ]]; then
-  home_with_image="$(fetch_page '/')"
-  if printf '%s' "$home_with_image" | grep -q "uploads/categories/${probe_file}"; then
-    # The image tag that carries the upload must not also carry the placeholder class.
-    probe_img="$(printf '%s' "$home_with_image" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1)"
-    [[ -n "$probe_img" ]] || fail "the uploaded category image is not rendered by an <img> tag (${probe_file})"
-    case "$probe_img" in
-      *sh-category-card__img--fallback*) fail 'an uploaded category image was rendered as the placeholder' ;;
-    esac
-    echo "::notice title=Category card image::homepage card used uploads/categories/${probe_file}"
-  else
-    fail "the homepage did not use the uploaded category image (${probe_file})"
-  fi
-  cat_page="$(fetch_page "/category.php?slug=${probe_slug}")"
-  assert_contains "$cat_page" 'Cards Probe' 'the category page did not render the probe category'
-  if printf '%s' "$cat_page" | grep -qE '[0-9]+ items'; then
-    fail 'the category page still prints an item count'
-  fi
-  # The upload is a public URL that the web server really serves.
-  img_url="$(printf '%s' "$home_with_image" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1)"
-  if [[ -n "$img_url" ]]; then
-    img_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}${img_url}")"
-    [[ "$img_code" == '200' ]] || fail "the uploaded category image returned HTTP ${img_code} (${img_url})"
-  fi
-  php -r '
-$cfg = require "config/database.php";
-try {
-    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
-    $st = $pdo->prepare("SELECT image FROM categories WHERE slug = ? LIMIT 1");
-    $st->execute(["category-card-probe"]);
-    $img = (string)$st->fetchColumn();
-    $pdo->prepare("DELETE FROM categories WHERE slug = ?")->execute(["category-card-probe"]);
-    if ($img !== "" && strpos($img, "/") === false) { @unlink(__DIR__ . "/uploads/categories/" . basename($img)); }
-} catch (Throwable $e) {}'
-  echo 'Category card image probe passed'
-else
-  echo '::notice title=Category card image::probe row could not be created, uploaded-image path not checked'
+} catch (Throwable $e) {
+    @unlink($dir . "/" . $name);
+}' 2>/dev/null || true)"
+if [[ -z "$probe_file" ]]; then
+  echo '::error title=Category cards::the probe category could not be created, so the category cards could not be exercised'
+  fail 'the category-card probe category could not be created'
 fi
+
+home_cards="$(fetch_page '/')"
+card_count="$(count_of 'class="sh-category-card"' "$home_cards")"
+if [[ "$card_count" -lt 1 ]]; then
+  echo '::error title=Category cards::the homepage rendered no category cards'
+  fail 'the homepage rendered no product category cards'
+fi
+assert_contains "$home_cards" "$probe_label" 'the homepage did not draw the probe category as a card'
+
+# Only the cards are inspected for a count: a cart or order summary legitimately
+# prints "2 items" elsewhere on the site.
+card_blocks="$(printf '%s' "$home_cards" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+[[ -n "$card_blocks" ]] || fail 'the category cards could not be isolated from the homepage markup'
+if printf '%s' "$card_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
+  fail 'a category card still prints an item count'
+fi
+if printf '%s' "$card_blocks" | grep -q 'sh-category-card__icon\|sh-category-card__count'; then
+  fail 'a category card still uses the placeholder-icon / count markup'
+fi
+
+# Each card is one link carrying exactly one image and one name.
+card_img="$(count_of 'class="sh-category-card__img' "$home_cards")"
+card_name="$(count_of 'class="sh-category-card__name"' "$home_cards")"
+[[ "$card_img" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_img} images"
+[[ "$card_name" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_name} names"
+
+# A real upload must be used by the card, and must not be marked as the placeholder.
+if ! printf '%s' "$home_cards" | grep -q "uploads/categories/${probe_file}"; then
+  fail "the homepage did not use the uploaded category image (${probe_file})"
+fi
+probe_img="$(printf '%s' "$home_cards" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1 || true)"
+[[ -n "$probe_img" ]] || fail "the uploaded category image is not rendered by an <img> tag (${probe_file})"
+case "$probe_img" in
+  *sh-category-card__img--fallback*) fail 'an uploaded category image was rendered as the placeholder' ;;
+  *sh-category-card__img*) ;;
+  *) fail 'the uploaded category image is not rendered as a category card image' ;;
+esac
+echo "::notice title=Category card image::homepage card used uploads/categories/${probe_file}"
+
+# The upload is a public URL that the web server really serves.
+img_url="$(printf '%s' "$home_cards" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1 || true)"
+if [[ -n "$img_url" ]]; then
+  img_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}${img_url}")"
+  [[ "$img_code" == '200' ]] || fail "the uploaded category image returned HTTP ${img_code} (${img_url})"
+fi
+
+# The category page must use the same cards, and a child without an upload must
+# fall back to the neutral artwork instead of breaking.
+cat_page="$(fetch_page "/category.php?slug=category-card-probe")"
+assert_contains "$cat_page" "$probe_child_label" 'the category page did not draw its child category as a card'
+cat_cards="$(count_of 'class="sh-category-card"' "$cat_page")"
+[[ "$cat_cards" -ge 1 ]] || fail 'the category page drew no child category cards'
+cat_blocks="$(printf '%s' "$cat_page" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+if printf '%s' "$cat_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
+  fail 'a category page card still prints an item count'
+fi
+child_img="$(printf '%s' "$cat_page" | grep -o '<img class="[^"]*" src="[^"]*category-fallback\.svg[^"]*"' | head -n 1 || true)"
+[[ -n "$child_img" ]] || fail 'a category without an upload did not use the neutral fallback on the category page'
+case "$child_img" in
+  *sh-category-card__img--fallback*) ;;
+  *) fail 'the fallback image on the category page is not marked as the placeholder' ;;
+esac
+
+# Clean up now and prove it worked, so a probe row cannot skew a later run.
+php "$TMP_DIR/probe-cleanup.php"
+probe_gone="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/category.php?slug=category-card-probe")"
+[[ "$probe_gone" == '404' ]] || fail "the probe category was not removed (category page returned HTTP ${probe_gone})"
 
 echo 'Session expiration HTTP integration passed'
