@@ -21,6 +21,7 @@ require_once SH_ROOT . '/includes/catalog.php';
 require_once SH_ROOT . '/includes/seo.php';
 require_once SH_ROOT . '/includes/category-image.php';
 sh_seo_schema_ensure();
+sh_category_schema_ensure();
 
 sh_session_start();
 sh_require_admin();
@@ -41,6 +42,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
 
+    if ($form === 'crop') {
+        $id = sh_int($_POST['id'] ?? 0);
+        $editingRow = $id > 0 ? sh_one('SELECT * FROM categories WHERE id = ? LIMIT 1', [$id]) : null;
+        if ($id <= 0 || $editingRow === null) {
+            sh_json(['ok' => false, 'error' => 'Category not found.'], 404);
+        }
+
+        $cropRaw = trim((string)sh_post('crop_data'));
+        $cropData = $cropRaw !== '' ? json_decode($cropRaw, true) : null;
+        $dataUrl = trim((string)sh_post('cropped_image_data'));
+
+        if (!is_array($cropData) || empty($cropData['width']) || empty($cropData['height'])) {
+            sh_json(['ok' => false, 'error' => 'Invalid crop coordinates.'], 400);
+        }
+
+        $sourceFile = !empty($editingRow['image_orig']) ? (string)$editingRow['image_orig'] : (string)($editingRow['image'] ?? '');
+        if ($sourceFile === '') {
+            sh_json(['ok' => false, 'error' => 'No image to crop.'], 400);
+        }
+
+        $croppedName = sh_image_crop_from_data($sourceFile, $cropData, $dataUrl);
+        if ($croppedName === null) {
+            sh_json(['ok' => false, 'error' => 'Failed to crop image.'], 500);
+        }
+
+        $oldImage = (string)($editingRow['image'] ?? '');
+        sh_update('categories', [
+            'image'      => $croppedName,
+            'image_orig' => $sourceFile,
+            'image_crop' => $cropRaw,
+        ], 'id = ?', [$id]);
+
+        if ($oldImage !== '' && $oldImage !== $croppedName && $oldImage !== $sourceFile) {
+            sh_category_delete_file($oldImage);
+        }
+
+        sh_audit('category_crop_updated', 'category', $id, (string)$editingRow['name'],
+            ['image' => $oldImage], ['image' => $croppedName, 'crop' => $cropData]);
+
+        sh_json([
+            'ok'        => true,
+            'image'     => $croppedName,
+            'url'       => sh_category_image($croppedName),
+            'orig_url'  => sh_category_orig_image($sourceFile, $croppedName),
+            'crop_data' => $cropRaw,
+            'message'   => 'Category image crop saved successfully.',
+        ]);
+    }
+
     if ($form === 'delete') {
         $id = sh_int($_POST['id'] ?? 0);
         $count = (int)sh_val('SELECT COUNT(*) FROM products WHERE category_id = ?', [$id], 0);
@@ -51,10 +101,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'This category has ' . $children . ' sub-category(ies). Move or delete those first.');
             sh_redirect('admin/category-edit.php?edit=' . $id);
         }
-        $row = sh_one('SELECT name, image FROM categories WHERE id = ? LIMIT 1', [$id]);
+        $row = sh_one('SELECT name, image, image_orig FROM categories WHERE id = ? LIMIT 1', [$id]);
         sh_query('DELETE FROM categories WHERE id = ?', [$id]);
         if ($row !== null) {
             sh_category_delete_file($row['image'] ?? null);
+            if (!empty($row['image_orig']) && $row['image_orig'] !== ($row['image'] ?? null)) {
+                sh_category_delete_file($row['image_orig']);
+            }
             sh_audit('category_deleted', 'category', $id, (string)$row['name'], ['name' => $row['name']], null);
         }
         sh_seo_cache_invalidate();
@@ -103,6 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($errors && $imgResult['uploaded'] !== null) {
             // Nothing was stored, so do not leave an orphan file behind.
             sh_category_delete_file($imgResult['uploaded']);
+            if (!empty($imgResult['uploaded_orig']) && $imgResult['uploaded_orig'] !== $imgResult['uploaded']) {
+                sh_category_delete_file($imgResult['uploaded_orig']);
+            }
             $imgResult['uploaded'] = null;
         }
 
@@ -113,6 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'slug' => $slug,
                 'icon' => in_array(sh_post('icon'), $iconChoices, true) ? sh_post('icon') : 'grid',
                 'image' => $imgResult['file'],
+                'image_orig' => $imgResult['orig_file'] ?? ($editingRow['image_orig'] ?? $imgResult['file']),
+                'image_crop' => $imgResult['crop_data'] ?? ($editingRow['image_crop'] ?? null),
                 'description' => sh_post('description') ?: null,
                 'sort_order' => sh_int($_POST['sort_order'] ?? 0),
                 'status' => !empty($_POST['status']) ? 1 : 0,
@@ -135,7 +193,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // previous image can safely be removed.
                     if ($imgResult['action'] !== 'keep') {
                         $old = (string)($before['image'] ?? '');
-                        if ($old !== '' && $old !== (string)($data['image'] ?? '')) { sh_category_delete_file($old); }
+                        if ($old !== '' && $old !== (string)($data['image'] ?? '') && $old !== (string)($data['image_orig'] ?? '')) {
+                            sh_category_delete_file($old);
+                        }
+                        if ($imgResult['action'] === 'remove') {
+                            $oldOrig = (string)($before['image_orig'] ?? '');
+                            if ($oldOrig !== '' && $oldOrig !== $old) {
+                                sh_category_delete_file($oldOrig);
+                            }
+                        }
                     }
                     $diff = [];
                     foreach (['name', 'slug', 'parent_id', 'status', 'sort_order'] as $k) {
@@ -183,6 +249,7 @@ $chkStatus = $errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1)
 $curImage  = sh_category_image($val('image'));
 $storedImage = trim((string)$val('image'));
 $missingImage = $curImage === '' && $storedImage !== '';
+$curOrigImage = sh_category_orig_image($editing['image_orig'] ?? null, $editing['image'] ?? null);
 
 // Parent choices: top-level categories only, never the row being edited.
 $parents = sh_all('SELECT id, name FROM categories WHERE parent_id IS NULL AND (id <> ?) ORDER BY name ASC', [(int)($editing['id'] ?? 0)]);
@@ -191,6 +258,7 @@ $productCount = $isEdit ? (int)sh_val('SELECT COUNT(*) FROM products WHERE categ
 
 $adminPage = 'categories';
 $adminTitle = $isEdit ? 'Edit category' : 'New category';
+$adminScripts = ['assets/js/category-cropper.js'];
 require __DIR__ . '/_layout.php';
 ?>
 
@@ -267,11 +335,22 @@ require __DIR__ . '/_layout.php';
                  data-placeholder-src="<?= e(sh_category_placeholder_image()) ?>"
                  class="<?= $curImage === '' ? 'is-placeholder' : '' ?>">
             <span class="sh-catimage__cap" id="cat-preview-cap"><?= $curImage !== '' ? 'Current image' : 'No image — placeholder shown' ?></span>
+            <button type="button" class="sh-btn sh-btn--sm" id="btn-crop-image"
+                    data-orig-src="<?= e($curOrigImage) ?>"
+                    style="margin-top:8px; width:100%; justify-content:center; <?= $curImage === '' ? 'display:none;' : '' ?>">
+              <?= sh_icon('crop', 14) ?> Edit / Crop Image
+            </button>
+            <span class="sh-badge" id="cat-crop-indicator"
+                  style="margin-top:6px; font-size:11px; <?= !empty($editing['image_crop']) ? '' : 'display:none;' ?>">
+              <?= sh_icon('check-circle', 11) ?> Custom crop saved
+            </span>
           </div>
           <div class="sh-catimage__fields">
+            <input type="hidden" name="crop_data" id="c-crop-data" value="<?= e($val('image_crop')) ?>">
+            <input type="hidden" name="cropped_image_data" id="c-cropped-image-data">
             <?= sh_admin_field('Upload a new image',
                 '<input class="sh-input" id="c-img" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" data-image-preview="cat-preview">',
-                'JPG, PNG, WebP or GIF, up to ' . e(sh_bytes_label(sh_server_upload_limit())) . '. A square or 4:3 image around 400&times;300 px looks best. It is shown uncropped on the category card.',
+                'JPG, PNG, WebP or GIF, up to ' . e(sh_bytes_label(sh_server_upload_limit())) . '. A 4:3 or square image looks best. Use the crop editor to reposition the visible subject.',
                 $errors['image'] ?? null, 'c-img') ?>
             <?php if ($isEdit && $storedImage !== ''): ?>
               <label class="sh-check">
@@ -339,5 +418,81 @@ require __DIR__ . '/_layout.php';
     <input type="hidden" name="id" value="<?= (int)$editing['id'] ?>">
   </form>
 <?php endif; ?>
+
+<!-- Category Image Crop & Position Modal -->
+<div class="sh-modal sh-cropper-modal" id="modal-category-cropper" hidden>
+  <div class="sh-modal__scrim" data-cropper-cancel></div>
+  <div class="sh-modal__card sh-cropper-modal__card">
+    <div class="sh-cropper-modal__head">
+      <h3><?= sh_icon('crop', 18) ?> Crop &amp; Position Category Image</h3>
+      <p class="sh-cropper-modal__sub">Drag to reposition, use handles to adjust visible area, or zoom. Previews update live.</p>
+      <button type="button" class="sh-modal__x" data-cropper-cancel aria-label="Close"><?= sh_icon('x', 18) ?></button>
+    </div>
+    <div class="sh-cropper-modal__body">
+      <div class="sh-cropper-layout">
+        <div class="sh-cropper-pane">
+          <div class="sh-cropper-viewport" id="cropper-viewport">
+            <img id="cropper-image" alt="Image to crop" draggable="false">
+            <div class="sh-cropper-box" id="cropper-box">
+              <div class="sh-cropper-grid"><span></span><span></span><span></span><span></span></div>
+              <div class="sh-cropper-handle sh-cropper-handle--nw" data-dir="nw"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--ne" data-dir="ne"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--se" data-dir="se"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--sw" data-dir="sw"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--n" data-dir="n"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--s" data-dir="s"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--w" data-dir="w"></div>
+              <div class="sh-cropper-handle sh-cropper-handle--e" data-dir="e"></div>
+            </div>
+          </div>
+          <div class="sh-cropper-zoombar">
+            <button type="button" class="sh-cropper-toolbtn" id="crop-zoom-out" title="Zoom Out"><?= sh_icon('minus', 14) ?></button>
+            <input type="range" class="sh-cropper-slider" id="crop-zoom-slider" min="1" max="3" step="0.05" value="1" aria-label="Zoom level">
+            <button type="button" class="sh-cropper-toolbtn" id="crop-zoom-in" title="Zoom In"><?= sh_icon('plus', 14) ?></button>
+            <span class="sh-cropper-zoomval" id="crop-zoom-val">100%</span>
+            <button type="button" class="sh-cropper-toolbtn sh-cropper-toolbtn--text" id="crop-fit-btn">Fit</button>
+          </div>
+        </div>
+        <div class="sh-cropper-sidebar">
+          <div class="sh-cropper-group">
+            <label class="sh-cropper-label">Target Format</label>
+            <div class="sh-cropper-aspects">
+              <button type="button" class="sh-cropper-aspect is-active" data-aspect="4:3">4:3 Card</button>
+              <button type="button" class="sh-cropper-aspect" data-aspect="1:1">1:1 Square</button>
+              <button type="button" class="sh-cropper-aspect" data-aspect="16:9">16:9 Banner</button>
+              <button type="button" class="sh-cropper-aspect" data-aspect="free">Free</button>
+            </div>
+          </div>
+          <div class="sh-cropper-group">
+            <label class="sh-cropper-label">Live Storefront Card</label>
+            <div class="sh-category-card sh-cropper-card-preview">
+              <span class="sh-category-card__media">
+                <canvas id="crop-live-card" width="400" height="300" class="sh-category-card__img"></canvas>
+              </span>
+              <span class="sh-category-card__name" id="crop-live-name"><?= e((string)$val('name', 'Category Name')) ?></span>
+            </div>
+          </div>
+          <div class="sh-cropper-group">
+            <label class="sh-cropper-label">Navigation Menu (1:1)</label>
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--sh-bg-2);border-radius:6px;border:1px solid var(--sh-line);">
+              <canvas id="crop-live-nav" width="40" height="40" style="width:24px;height:24px;border-radius:4px;object-fit:cover;"></canvas>
+              <span style="font-size:13px;font-weight:600;color:var(--sh-ink);" id="crop-live-navname"><?= e((string)$val('name', 'Category Name')) ?></span>
+            </div>
+          </div>
+          <p class="sh-field__hint" style="margin-top:auto;font-size:11.5px;line-height:1.4;">
+            Position the main subject in the center or focus area. What you see in the live preview is exactly what customers will see.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="sh-cropper-modal__foot">
+      <button type="button" class="sh-btn sh-btn--ghost" id="crop-btn-reset"><?= sh_icon('rotate', 13) ?> Reset</button>
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button type="button" class="sh-btn sh-btn--ghost" data-cropper-cancel>Cancel</button>
+        <button type="button" class="sh-btn" id="crop-btn-save"><?= sh_icon('check-circle', 14) ?> Save Crop</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <?php require __DIR__ . '/_footer.php'; ?>

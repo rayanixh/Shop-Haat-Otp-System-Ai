@@ -72,6 +72,8 @@ function sh_schema_sql(): array
         slug VARCHAR(140) NOT NULL,
         icon VARCHAR(60) NOT NULL DEFAULT 'grid',
         image VARCHAR(190) DEFAULT NULL,
+        image_orig VARCHAR(190) DEFAULT NULL,
+        image_crop TEXT DEFAULT NULL,
         description VARCHAR(255) DEFAULT NULL,
         sort_order INT NOT NULL DEFAULT 0,
         status TINYINT(1) NOT NULL DEFAULT 1,

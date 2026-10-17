@@ -928,6 +928,245 @@ body.sh-modal-open { overflow: hidden; }
   .sh-verify-card__code { height: 46px; font-size: 20px; letter-spacing: 6px; }
 }
 
+/* 16e. CATEGORY IMAGE CROPPER --------------------------------------------- */
+.sh-cropper-modal .sh-cropper-modal__card {
+  width: 95%;
+  max-width: 880px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+  background: #ffffff;
+}
+.sh-cropper-modal__head {
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--sh-line);
+  position: relative;
+  background: #ffffff;
+}
+.sh-cropper-modal__head h3 {
+  font-size: 16.5px;
+  font-weight: 800;
+  color: var(--sh-heading);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.sh-cropper-modal__sub {
+  font-size: 12.5px;
+  color: var(--sh-muted);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+.sh-cropper-modal__body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  background: var(--sh-bg-2);
+}
+.sh-cropper-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 18px;
+  align-items: start;
+}
+.sh-cropper-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sh-cropper-viewport {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  background: #14171f;
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+  cursor: grab;
+  box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.4);
+}
+.sh-cropper-viewport:active {
+  cursor: grabbing;
+}
+.sh-cropper-viewport img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.sh-cropper-box {
+  position: absolute;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.58);
+  box-sizing: border-box;
+  touch-action: none;
+  cursor: move;
+}
+.sh-cropper-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+.sh-cropper-grid span:nth-child(1) { border-right: 1px dashed rgba(255,255,255,0.4); grid-row: 1 / -1; grid-column: 1; }
+.sh-cropper-grid span:nth-child(2) { border-right: 1px dashed rgba(255,255,255,0.4); grid-row: 1 / -1; grid-column: 2; }
+.sh-cropper-grid span:nth-child(3) { border-bottom: 1px dashed rgba(255,255,255,0.4); grid-column: 1 / -1; grid-row: 1; }
+.sh-cropper-grid span:nth-child(4) { border-bottom: 1px dashed rgba(255,255,255,0.4); grid-column: 1 / -1; grid-row: 2; }
+
+.sh-cropper-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.35);
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  box-sizing: border-box;
+}
+.sh-cropper-handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.sh-cropper-handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.sh-cropper-handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.sh-cropper-handle--se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.sh-cropper-handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.sh-cropper-handle--n { top: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.sh-cropper-handle--s { bottom: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.sh-cropper-handle--w { top: calc(50% - 6px); left: -6px; cursor: ew-resize; }
+.sh-cropper-handle--e { top: calc(50% - 6px); right: -6px; cursor: ew-resize; }
+
+.sh-cropper-zoombar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #ffffff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--sh-line);
+}
+.sh-cropper-toolbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--sh-line);
+  background: var(--sh-bg-2);
+  color: var(--sh-ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  flex: none;
+}
+.sh-cropper-toolbtn:hover {
+  background: var(--sh-line);
+}
+.sh-cropper-toolbtn--text {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.sh-cropper-slider {
+  flex: 1 1 auto;
+  accent-color: var(--sh-brand);
+  cursor: pointer;
+}
+.sh-cropper-zoomval {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sh-muted);
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sh-cropper-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sh-cropper-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sh-cropper-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--sh-muted);
+}
+.sh-cropper-aspects {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.sh-cropper-aspect {
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--sh-line);
+  background: #ffffff;
+  border-radius: 6px;
+  color: var(--sh-ink-2);
+  cursor: pointer;
+  text-align: center;
+  transition: all .15s;
+}
+.sh-cropper-aspect:hover {
+  border-color: var(--sh-brand);
+  color: var(--sh-brand);
+}
+.sh-cropper-aspect.is-active {
+  background: var(--sh-brand);
+  border-color: var(--sh-brand);
+  color: #ffffff;
+}
+
+.sh-cropper-card-preview {
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.sh-cropper-card-preview .sh-category-card__media {
+  background: #14171f;
+}
+.sh-cropper-card-preview canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.sh-cropper-modal__foot {
+  padding: 12px 20px;
+  border-top: 1px solid var(--sh-line);
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .sh-cropper-modal .sh-cropper-modal__card { width: 98%; max-height: 96vh; }
+  .sh-cropper-layout { grid-template-columns: 1fr; gap: 14px; }
+  .sh-cropper-viewport { height: 260px; }
+  .sh-cropper-sidebar { flex-direction: column; }
+  .sh-cropper-card-preview { max-width: 180px; }
+}
+
 /* 17. ADMIN --------------------------------------------------------------- */
 .sh-admin { display: flex; min-height: 100vh; background: #f0f2f5; }
 .sh-admin-sidebar { width: 236px; background: #151b2b; color: #b9c2d4; flex: none; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
