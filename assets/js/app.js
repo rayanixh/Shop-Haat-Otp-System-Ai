@@ -289,10 +289,13 @@
               return;
             }
             suggestBox.innerHTML = r.items.map(function (it) {
-              return '<a class="sh-suggest__item" href="' + it.url + '">' +
-                '<img class="sh-suggest__img" src="' + it.image + '" alt="" loading="lazy">' +
+              // Attribute values come from the server, but they are escaped here
+              // as well: an unescaped quote in a product slug or image path would
+              // otherwise be able to close the attribute and add a handler.
+              return '<a class="sh-suggest__item" href="' + esc(it.url) + '">' +
+                '<img class="sh-suggest__img" src="' + esc(it.image) + '" alt="" loading="lazy">' +
                 '<span class="sh-suggest__name"></span>' +
-                '<span class="sh-suggest__price">' + it.price + '</span></a>';
+                '<span class="sh-suggest__price">' + esc(it.price) + '</span></a>';
             }).join('');
             $$('.sh-suggest__name', suggestBox).forEach(function (el, i) { el.textContent = r.items[i].name; });
             suggestBox.hidden = false;
@@ -351,33 +354,147 @@
     });
   }
 
-  /* ---------- Hero carousel -------------------------------------------- */
+  /* ---------- Homepage hero carousel ------------------------------------ */
+  /*
+   * Button-free crossfade. The rules it has to keep:
+   *   - the incoming slide fades in over the outgoing one, which stays fully
+   *     opaque until the fade has finished, so no frame can show the container
+   *     (that is what used to read as a blank/white flash);
+   *   - every slide is already in the DOM with its image decoded, so switching
+   *     never waits for a download;
+   *   - the next slide's image is warmed in advance;
+   *   - autoplay stops while the tab is hidden or the carousel is scrolled out
+   *     of view, and never runs at all under prefers-reduced-motion;
+   *   - a slide whose image fails to load keeps its gradient plate and text.
+   */
   var carousel = $('[data-carousel]');
   if (carousel) {
     var slides = $$('.sh-slide', carousel);
     var dots = $$('.sh-carousel__dot', carousel);
-    var idx = 0, auto = null;
-    function show(i) {
-      idx = (i + slides.length) % slides.length;
-      slides.forEach(function (s, n) { s.classList.toggle('sh-slide--on', n === idx); });
-      dots.forEach(function (d, n) { d.classList.toggle('sh-carousel__dot--on', n === idx); });
+    var motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    var interval = parseInt(carousel.getAttribute('data-carousel-interval') || '5200', 10);
+    if (!(interval >= 4000 && interval <= 6000)) { interval = 5200; }
+    var fade = parseInt(carousel.getAttribute('data-carousel-fade') || '700', 10);
+    if (!(fade >= 600 && fade <= 1000)) { fade = 700; }
+    carousel.style.setProperty('--sh-slide-fade', fade + 'ms');
+    var idx = 0, auto = null, settle = null, visible = true, warm = {};
+
+    function reduced() { return !!(motionQuery && motionQuery.matches); }
+    function at(i) { return slides[((i % slides.length) + slides.length) % slides.length]; }
+
+    /* Warm the next slide's image so the fade never waits on the network. */
+    function preload(i) {
+      var img = $('.sh-slide__img', at(i));
+      var src = img ? img.getAttribute('src') : null;
+      if (!src || warm[src]) { return; }
+      warm[src] = true;
+      var warmer = new Image();
+      warmer.decoding = 'async';
+      warmer.src = src;
     }
-    function start() { stop(); if (slides.length > 1) { auto = setInterval(function () { show(idx + 1); }, 5200); } }
+
+    function rest(slide) {
+      slide.classList.remove('sh-slide--on', 'sh-slide--in');
+      slide.setAttribute('aria-hidden', 'true');
+    }
+
+    function show(next, first) {
+      var to = at(next);
+      if (!to || (to === slides[idx] && !first)) { return; }
+      var from = slides[idx];
+      if (settle) { clearTimeout(settle); settle = null; }
+
+      /* Anything that is neither the current nor the incoming slide is at rest. */
+      slides.forEach(function (s) { if (s !== from && s !== to) { rest(s); } });
+
+      if (reduced() || first) {
+        /* Reduced motion: an instant cut, no zoom, nothing moving. */
+        if (from && from !== to) { rest(from); }
+        to.classList.remove('sh-slide--in');
+        to.classList.add('sh-slide--on');
+        to.removeAttribute('aria-hidden');
+      } else {
+        to.classList.add('sh-slide--in');
+        to.removeAttribute('aria-hidden');
+        /* The outgoing slide stays painted until the fade ends, but it is no
+           longer the slide being read out: the change is announced at once. */
+        if (from && from !== to) { from.setAttribute('aria-hidden', 'true'); }
+        void to.offsetWidth;             /* commit opacity:0 so the fade runs */
+        to.classList.add('sh-slide--on');
+        settle = setTimeout(function () {
+          if (from && from !== to) { rest(from); }
+          to.classList.remove('sh-slide--in');
+          settle = null;
+        }, fade + 120);
+      }
+
+      idx = slides.indexOf(to);
+      dots.forEach(function (d, n) {
+        d.classList.toggle('sh-carousel__dot--on', n === idx);
+        if (n === idx) { d.setAttribute('aria-current', 'true'); } else { d.removeAttribute('aria-current'); }
+      });
+      preload(idx + 1);
+    }
+
     function stop() { if (auto) { clearInterval(auto); auto = null; } }
-    dots.forEach(function (d, n) { d.addEventListener('click', function () { show(n); start(); }); });
-    var prev = $('[data-carousel-prev]', carousel), next = $('[data-carousel-next]', carousel);
-    if (prev) { prev.addEventListener('click', function () { show(idx - 1); start(); }); }
-    if (next) { next.addEventListener('click', function () { show(idx + 1); start(); }); }
+    function start() {
+      stop();
+      if (slides.length > 1 && !reduced() && visible && !document.hidden) {
+        auto = setInterval(function () { show(idx + 1); }, interval);
+      }
+    }
+
+    slides.forEach(function (slide) {
+      var img = $('.sh-slide__img', slide);
+      if (!img) { return; }
+      img.addEventListener('error', function () {
+        /* Missing or broken file: keep the plate, the heading and the text. */
+        slide.classList.add('sh-slide--noimg');
+        img.removeAttribute('src');
+      });
+    });
+
+    dots.forEach(function (d, n) {
+      d.addEventListener('click', function () { show(n); start(); });
+    });
+
     carousel.addEventListener('mouseenter', stop);
     carousel.addEventListener('mouseleave', start);
-    var sx = 0;
-    carousel.addEventListener('touchstart', function (e) { sx = e.touches[0].clientX; stop(); }, { passive: true });
+    carousel.addEventListener('focusin', stop);
+    carousel.addEventListener('focusout', start);
+
+    var swipeX = 0, swiping = false;
+    carousel.addEventListener('touchstart', function (e) {
+      swipeX = e.touches[0].clientX; swiping = true; stop();
+    }, { passive: true });
     carousel.addEventListener('touchend', function (e) {
-      var dx = e.changedTouches[0].clientX - sx;
-      if (Math.abs(dx) > 45) { show(idx + (dx < 0 ? 1 : -1)); }
+      var dx = e.changedTouches[0].clientX - swipeX;
+      if (swiping && Math.abs(dx) > 45) { show(idx + (dx < 0 ? 1 : -1)); }
+      swiping = false;
       start();
     }, { passive: true });
-    show(0); start();
+    carousel.addEventListener('touchcancel', function () { swiping = false; start(); }, { passive: true });
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { stop(); } else { start(); }
+    });
+
+    /* Off-screen carousels stop as well: nothing rotates where nobody looks. */
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        visible = entries[0].intersectionRatio > 0.15;
+        if (visible) { start(); } else { stop(); }
+      }, { threshold: [0, 0.15, 1] }).observe(carousel);
+    }
+
+    if (motionQuery) {
+      var onMotionChange = function () { show(idx, true); start(); };
+      if (motionQuery.addEventListener) { motionQuery.addEventListener('change', onMotionChange); }
+      else if (motionQuery.addListener) { motionQuery.addListener(onMotionChange); }
+    }
+
+    show(0, true);
+    start();
   }
 
   /* ---------- Countdown timers ----------------------------------------- */
@@ -555,6 +672,15 @@
    real provider result. Never claims success on its own.
    =================================================================== */
 (function () {
+  /* Select-on-focus fields (the provider webhook URL) — a small convenience that
+     keeps the markup free of inline handlers, which Content-Security-Policy blocks. */
+  document.addEventListener('focusin', function (ev) {
+    var el = ev.target;
+    if (el && el.matches && el.matches('[data-select-on-focus]') && typeof el.select === 'function') {
+      el.select();
+    }
+  });
+
   var buttons = document.querySelectorAll('[data-test-channel]');
   if (!buttons.length) return;
 
@@ -620,11 +746,17 @@
    =================================================================== */
 (function () {
   /* Preview the chosen file before it is uploaded. */
+  /* The preview target may be the old .sh-promoprev wrapper (with its own
+     caption element) or a plain <img> as the category editor uses. Both are
+     supported so no existing admin screen changes behaviour. */
   document.querySelectorAll('[data-image-preview]').forEach(function (input) {
-    var box = document.getElementById(input.getAttribute('data-image-preview'));
-    if (!box) return;
-    var img = box.querySelector('img');
-    var cap = box.querySelector('[data-preview-caption]');
+    var target = document.getElementById(input.getAttribute('data-image-preview'));
+    if (!target) return;
+    var box = target.tagName === 'IMG' ? target.parentNode : target;
+    var img = target.tagName === 'IMG' ? target : target.querySelector('img');
+    var cap = (box ? box.querySelector('[data-preview-caption]') : null)
+      || document.getElementById(input.getAttribute('data-image-preview') + '-cap');
+    var placeholder = img ? (img.getAttribute('data-placeholder-src') || '') : '';
     var original = img ? img.getAttribute('src') : '';
 
     input.addEventListener('change', function () {
@@ -642,6 +774,7 @@
       }
       var url = URL.createObjectURL(file);
       if (img) {
+        img.classList.remove('is-placeholder');
         img.onload = function () { URL.revokeObjectURL(url); };
         img.src = url;
       }
@@ -649,8 +782,27 @@
         ? (file.size / 1048576).toFixed(1) + ' MB'
         : Math.round(file.size / 1024) + ' KB';
       if (cap) cap.textContent = 'New image — ' + kb + ' (not saved yet)';
-      box.hidden = false;
+      if (box) box.hidden = false;
     });
+
+    // "Remove the current image" shows the neutral fallback straight away, so
+    // the operator sees what the storefront will show before saving.
+    var remove = document.querySelector('[data-image-remove="' + input.getAttribute('data-image-preview') + '"]');
+    if (remove && img) {
+      var syncRemoval = function () {
+        if (remove.checked && !(input.files && input.files[0])) {
+          img.classList.add('is-placeholder');
+          img.src = placeholder || original;
+          if (cap) cap.textContent = placeholder ? 'No image — placeholder shown' : 'Image will be removed';
+        } else if (!remove.checked && !(input.files && input.files[0])) {
+          img.classList.remove('is-placeholder');
+          img.src = original;
+          if (cap) cap.textContent = 'Current image';
+        }
+      };
+      remove.addEventListener('change', syncRemoval);
+      input.addEventListener('change', function () { if (remove.checked) { remove.checked = false; } });
+    }
   });
 
   /* Overlay strength: show the live value next to the slider. */
@@ -1367,27 +1519,48 @@
   var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var timers = [];
   var navigating = false;
+  /*
+   * Every transition owns a generation. A page load arms safety timers, and a
+   * click that comes after them must not be cancelled by them: each deferred
+   * callback only acts while its own generation is still the current one. That
+   * is what stops a stale "release the page" timer from aborting a navigation
+   * that started half a second ago (which silently swallowed the click).
+   */
+  var gen = 0;
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function clearTimers() { timers.forEach(clearTimeout); timers = []; }
   function setPageMs(ms) { if (page) page.style.setProperty('--sh-pt-page-ms', ms + 'ms'); }
+  function owned(g) { return g === undefined || g === gen; }
+  /** setTimeout that only runs while generation g still owns the overlay. */
+  function later(fn, ms, g) {
+    var id = setTimeout(function () { if (owned(g)) { fn(); } }, ms);
+    timers.push(id);
+    return id;
+  }
 
-  function hide() {
+  function hide(g) {
+    if (!owned(g)) return;
     clearTimers();
     navigating = false;
+    // The <head> fallback must never fire after the real reveal has run.
+    if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
     docEl.classList.remove('sh-pt-hold');
+    docEl.classList.remove('sh-pt-enter');
     if (overlay) { overlay.classList.remove('is-hold'); overlay.classList.remove('is-on'); }
     if (page) page.classList.remove('is-leaving');
   }
-  function show(ms) {
+  function show(ms, g) {
     if (!overlay) return;
     overlay.classList.add('is-on');
     if (page) page.classList.add('is-leaving');
-    timers.push(setTimeout(hide, (ms || duration) + 8000)); // safety net
+    later(hide, (ms || duration) + 8000, g); // safety net
   }
-  function release(outMs) {
-    // Overlay is visible (held); fade it out and bring the page in.
-    if (!overlay) return;
+  function release(outMs, g) {
+    // Overlay is visible (held); fade it out and bring the page in. Used by the
+    // arrival, initial-load and settings-preview paths alike.
+    if (!overlay || !owned(g)) return;
+    if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
     docEl.classList.add('sh-pt-enter');
     setPageMs(outMs);
     overlay.classList.remove('is-hold');
@@ -1396,7 +1569,7 @@
     requestAnimationFrame(function () { requestAnimationFrame(function () {
       overlay.classList.remove('is-on');
       if (page) page.classList.remove('is-leaving');
-      timers.push(setTimeout(function () { docEl.classList.remove('sh-pt-enter'); }, outMs + 50));
+      later(function () { docEl.classList.remove('sh-pt-enter'); }, outMs + 50, g);
     }); });
   }
 
@@ -1416,43 +1589,64 @@
         : '<div class="sh-pt__mark"><span></span><span></span><span></span></div>');
       if (media) overlay.querySelector('img').setAttribute('src', media);
       setPageMs(clamp(ms * .45, 160, 600));
-      show(ms);
-      timers.push(setTimeout(function () {
-        release(clamp(ms * .5, 240, 800));
-        timers.push(setTimeout(function () {
+      var testGen = ++gen;
+      show(ms, testGen);
+      later(function () {
+        release(clamp(ms * .5, 240, 800), testGen);
+        later(function () {
           overlay.className = saved.cls; overlay.setAttribute('style', saved.style || ''); overlay.innerHTML = saved.html;
-        }, 900));
-      }, ms));
+        }, 900, testGen);
+      }, ms, testGen);
     });
   }
 
   if (!enabled) { docEl.classList.remove('sh-pt-hold'); return; }
 
-  /* ---- arrival: continue the transition started on the previous page ---- */
-  var arrived = null;
-  try {
-    var raw = sessionStorage.getItem('sh-pt');
-    sessionStorage.removeItem('sh-pt');
-    if (raw) arrived = JSON.parse(raw);
-  } catch (e) { arrived = null; }
+  /* ---- arrival / initial load: finish what the <head> snippet started ----
+     The <head> snippet holds the overlay for every kind of page load and tells
+     us which one this is:
+
+       __shPtArrived  an internal navigation — timed from the moment of the click
+       __shPtCold     a first visit, refresh, bookmark, direct URL or new tab —
+                      timed from the start of the document itself
+
+     Only one is ever set, each is read once, and a stale marker can never hold
+     the page. Nothing here is required for the overlay to disappear: the
+     <head> snippet armed a fallback timer and the stylesheet carries a
+     CSS-only release, so a failure in this file still reveals the page. */
+  var arrived = window.__shPtArrived || null;
+  if (!arrived) {
+    // Defensive: if the <head> snippet was blocked (e.g. by a policy), the
+    // single-use marker may still be sitting in sessionStorage.
+    try {
+      var raw = sessionStorage.getItem('sh-pt');
+      sessionStorage.removeItem('sh-pt');
+      if (raw) { arrived = JSON.parse(raw); }
+    } catch (e) { arrived = null; }
+  }
+  var cold = window.__shPtCold || null;
+  window.__shPtArrived = null;
+  window.__shPtCold = null;
+  if (window.__shPtFallback) { clearTimeout(window.__shPtFallback); window.__shPtFallback = null; }
 
   var outMs = clamp(duration * 0.5, 240, 800);
-  if (arrived && docEl.classList.contains('sh-pt-hold') && !reduced) {
+  var hold = arrived || cold;
+  if (docEl.classList.contains('sh-pt-hold') && !reduced) {
+    var loadGen = ++gen;
     overlay.classList.add('is-hold');
     overlay.classList.add('is-on');
-    // Respect the configured total time (from the original click) without
-    // ever waiting on the page itself: the page has already loaded here.
-    var elapsed = Date.now() - (arrived.t || 0);
-    var remaining = clamp((arrived.d || duration) - elapsed, 0, duration);
-    timers.push(setTimeout(function () { release(outMs); }, remaining));
-    timers.push(setTimeout(hide, remaining + outMs + 4000));
+    // Respect the configured total time without ever waiting on the page
+    // itself: the page has already parsed here, so this is the remainder only.
+    var startedAt = hold && hold.t ? hold.t : Date.now();
+    var total = hold && hold.d ? hold.d : duration;
+    var remaining = clamp(total - (Date.now() - startedAt), 0, duration);
+    later(function () { release(outMs, loadGen); }, remaining, loadGen);
+    later(function () { hide(loadGen); }, remaining + outMs + 4000, loadGen);
   } else {
-    docEl.classList.remove('sh-pt-hold');
-    if (!reduced) {
-      setPageMs(360);
-      docEl.classList.add('sh-pt-enter');
-      setTimeout(function () { docEl.classList.remove('sh-pt-enter'); }, 500);
-    }
+    // Reduced motion, or a hold that was never applied. Deliberately no content
+    // animation: animating a page that is already painted is what produced the
+    // old flash of a fully rendered page on first load.
+    hide();
   }
 
   // Back/forward cache restores the DOM with the overlay still "on".
@@ -1466,7 +1660,7 @@
     if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return false;
     if (a.target && a.target !== '_self') return false;
     if (a.hasAttribute('download') || a.hasAttribute('data-no-transition')) return false;
-    if (a.getAttribute('role') === 'button' || a.hasAttribute('data-modal') || a.hasAttribute('data-toggle') || a.hasAttribute('data-dropdown')) return false;
+    if (a.getAttribute('role') === 'button' || a.hasAttribute('data-modal') || a.hasAttribute('data-modal-open') || a.hasAttribute('data-toggle') || a.hasAttribute('data-dropdown')) return false;
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#' || /^(javascript|mailto|tel|sms|whatsapp):/i.test(href)) return false;
     var url;
@@ -1489,13 +1683,16 @@
     navigating = true;
     // Leave phase: page fades out while the overlay fades in, then navigate.
     // The remaining visible time is served on the next page (see arrival).
+    // Owning a fresh generation retires the page-load timers above, so a click
+    // is never cancelled by the reveal that brought this page in.
+    var clickGen = ++gen;
     var leaveMs = clamp(duration * 0.45, 160, 600);
     setPageMs(leaveMs);
     try { sessionStorage.setItem('sh-pt', JSON.stringify({ t: Date.now(), d: duration })); } catch (e) {}
-    show(duration);
-    timers.push(setTimeout(function () { location.href = url.href; }, leaveMs));
+    show(duration, clickGen);
+    later(function () { location.href = url.href; }, leaveMs, clickGen);
     // If navigation is blocked (e.g. beforeunload cancel), recover.
-    timers.push(setTimeout(function () { try { sessionStorage.removeItem('sh-pt'); } catch (e) {} hide(); }, leaveMs + 6000));
+    later(function () { try { sessionStorage.removeItem('sh-pt'); } catch (e) {} hide(clickGen); }, leaveMs + 6000, clickGen);
   });
 })();
 
@@ -1591,4 +1788,49 @@
       });
     });
   });
+})();
+
+/* ==========================================================================
+   CSP-safe replacements for former inline event handlers.
+
+   The Content Security Policy restricts script execution to this file plus a
+   per-request nonce, so `onclick="…"` / `onchange="…"` attributes are no longer
+   allowed anywhere. These delegated listeners keep the original behaviour:
+   they run in the capture phase so the action happens before the element's own
+   handlers, exactly like the attribute did.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  /* <input readonly data-select-on-click> — click selects the whole value so it
+     can be copied, matching the previous onclick="this.select()". */
+  document.addEventListener('click', function (ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[data-select-on-click]') : null;
+    if (el && typeof el.select === 'function') { el.select(); }
+  }, true);
+
+  /* <select data-navigate-on-change> — go to the chosen option's value. */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-navigate-on-change')) { return; }
+    if (el.value) { window.location.href = el.value; }
+  }, true);
+
+  /* <select data-navigate-prefix="…" data-navigate-suffix="…"> — build the
+     target URL from the selected value (used for provider/SEO type pickers). */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-navigate-prefix')) { return; }
+    var target = el.getAttribute('data-navigate-prefix') + String(el.value)
+               + (el.getAttribute('data-navigate-suffix') || '');
+    if (el.value) { window.location.href = target; }
+  }, true);
+
+  /* <select data-submit-form-on-change> — submit the surrounding form. */
+  document.addEventListener('change', function (ev) {
+    var el = ev.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-submit-form-on-change')) { return; }
+    var form = el.form || (el.closest ? el.closest('form') : null);
+    if (form) { form.submit(); }
+  }, true);
 })();

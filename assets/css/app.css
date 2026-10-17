@@ -193,7 +193,9 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 }
 .sh-catmenu a { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 13.5px; color: var(--sh-ink-2); }
 .sh-catmenu a span { flex: 1 1 auto; }
-.sh-catmenu a em { font-style: normal; font-size: 11.5px; color: var(--sh-muted); }
+/* Category navigation thumbnail: the real upload in a nav row, sized in em so
+   the dropdown and the drawer share one rule. */
+.sh-catthumb { display: block; flex: 0 0 auto; width: 1.2em; height: 1.2em; border-radius: 4px; object-fit: cover; background: var(--sh-bg); }
 .sh-catmenu a:hover { background: var(--sh-brand-soft); color: var(--sh-brand); }
 .sh-nav__links { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .sh-nav__links::-webkit-scrollbar { display: none; }
@@ -223,19 +225,43 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-promo__panel a:hover { background: var(--sh-brand-soft); color: var(--sh-brand); }
 .sh-promo__panel a span { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sh-carousel { position: relative; border-radius: var(--sh-radius); overflow: hidden; background: #fff; box-shadow: var(--sh-shadow); min-height: 300px; }
-.sh-slide { display: none; height: 100%; min-height: 300px; color: #fff; position: relative; background: #23283a; }
-.sh-slide--on { display: block; animation: sh-fade .35s ease; }
+/* Smooth crossfade carousel.
+   Every slide stays in the DOM, painted and decoded, stacked on top of each
+   other: the incoming slide fades in over the still-opaque outgoing one, so a
+   frame can never show the container (no white flash, no blank frame). The
+   container background matches the slide background so any residual blend is
+   dark rather than bright, and the whole thing degrades to a hard cut when the
+   visitor asks for reduced motion. */
+.sh-carousel { position: relative; border-radius: var(--sh-radius); overflow: hidden;
+  background: #23283a; box-shadow: var(--sh-shadow); min-height: 300px;
+  --sh-slide-fade: 700ms; --sh-slide-ease: cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Fallback plate: shown while an image is still loading and whenever a slide has
+   no usable image at all, so text never sits on an empty white box. */
+.sh-slide { position: absolute; inset: 0; min-height: 300px; color: #fff; overflow: hidden;
+  background: linear-gradient(135deg, #2b3247 0%, #1d2230 55%, #141822 100%);
+  opacity: 0; z-index: 0; pointer-events: none;
+  transition: opacity var(--sh-slide-fade) var(--sh-slide-ease); }
+.sh-slide--on { opacity: 1; z-index: 1; pointer-events: auto; }
+/* The incoming slide sits above the outgoing one while it fades in. */
+.sh-slide--in { z-index: 2; }
+
 /* Background photo fills the slide at any aspect ratio without distortion. */
 .sh-slide__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  object-position: center right; display: block; }
+  object-position: center; display: block; border: 0; user-select: none;
+  transform: scale(1.05); transform-origin: 50% 55%;
+  transition: transform calc(var(--sh-slide-fade) * 2) var(--sh-slide-ease); }
+/* Very restrained settle: the photo drifts to rest as the slide finishes fading,
+   which reads as depth rather than as movement on its own. */
+.sh-slide--on .sh-slide__img { transform: scale(1); }
+.sh-slide--noimg .sh-slide__img, .sh-slide--noimg .sh-slide__scrim { display: none; }
+
 /* Readable scrim: strong on the text side, clear over the product side. */
 .sh-slide__scrim { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(15,18,28,.82) 0%, rgba(15,18,28,.66) 38%,
               rgba(15,18,28,.28) 62%, rgba(15,18,28,.10) 100%); }
-.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; height: 100%; min-width: 0;
+.sh-slide__inner { position: relative; z-index: 1; min-height: 300px; min-width: 0;
   display: flex; flex-direction: column; justify-content: center; padding: 34px 40px; }
-@keyframes sh-fade { from { opacity: .35; } to { opacity: 1; } }
 .sh-slide__tag { display: inline-block; align-self: flex-start; color: #fff; background: rgba(255,255,255,.18);
   border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px); padding: 4px 11px; border-radius: 20px;
   font-size: 11.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; margin-bottom: 12px; }
@@ -243,22 +269,15 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
   text-shadow: 0 2px 12px rgba(0,0,0,.35); }
 .sh-slide__text { color: rgba(255,255,255,.98); margin-top: 9px; font-size: 14.5px; max-width: 420px; opacity: 1;
   text-shadow: 0 1px 8px rgba(0,0,0,.3); }
-.sh-slide__btn { align-self: flex-start; margin-top: 18px; background: #fff; color: var(--sh-ink);
-  padding: 10px 22px; border-radius: 6px; font-weight: 700; font-size: 14px;
-  box-shadow: 0 4px 14px rgba(0,0,0,.22); transition: transform .14s ease, background .14s ease; }
-.sh-slide__btn:active { transform: translateY(1px); }
-.sh-slide__btn:hover { background: #f1f2f5; }
-.sh-carousel__dots { position: absolute; z-index: 2; bottom: 14px; left: 40px; display: flex; gap: 7px; }
-.sh-carousel__dot { cursor: pointer; }
-.sh-carousel__dot { width: 22px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.45); }
-.sh-carousel__dot--on { background: #fff; }
-.sh-carousel__arrow {
-  position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%;
-  background: rgba(255,255,255,.92); color: var(--sh-ink); display: grid; place-items: center;
-  box-shadow: 0 2px 10px rgba(0,0,0,.25); z-index: 2; transition: background .14s ease;
-}
-.sh-carousel__arrow:hover { background: #fff; }
-.sh-carousel__arrow--prev { left: 10px; } .sh-carousel__arrow--next { right: 10px; }
+
+/* Minimal pagination: small bars, no arrows. They are the only manual control,
+   so they stay keyboard reachable and carry the slide name for screen readers. */
+.sh-carousel__dots { position: absolute; z-index: 3; bottom: 14px; left: 40px; display: flex; gap: 7px; }
+.sh-carousel__dot { cursor: pointer; padding: 7px 0; background: none; border: 0; }
+.sh-carousel__dot::before { content: ''; display: block; width: 22px; height: 4px; border-radius: 3px;
+  background: rgba(255,255,255,.45); transition: background .25s var(--sh-slide-ease), width .25s var(--sh-slide-ease); }
+.sh-carousel__dot--on::before { background: #fff; width: 28px; }
+.sh-carousel__dot:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 4px; }
 
 .sh-promo__side { display: grid; grid-template-rows: repeat(3, 1fr); gap: 12px; }
 .sh-sidecard { position: relative; overflow: hidden; border-radius: var(--sh-radius); padding: 15px 16px;
@@ -276,27 +295,42 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-sidecard__link:hover { color: #fff; gap: 7px; }
 
 /* 7. CATEGORIES ----------------------------------------------------------- */
-.sh-catgrid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
+/* Product-category grid: a real photo on top, the name underneath. The image
+   frame is a fixed 4:3 so every card is the same height and the grid never
+   shifts while images load; the count is deliberately not shown any more. */
+.sh-catgrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .sh-category-card {
-  background: var(--sh-card); border-radius: var(--sh-radius); padding: 14px 8px; text-align: center;
-  box-shadow: var(--sh-shadow); transition: transform .13s ease, box-shadow .13s ease;
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: var(--sh-radius);
+  overflow: hidden; text-align: center;
+  box-shadow: var(--sh-shadow); transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
-.sh-category-card:hover { transform: translateY(-2px); box-shadow: var(--sh-shadow-lg); }
-.sh-category-card__icon {
-  width: 46px; height: 46px; margin: 0 auto 8px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--sh-brand-soft); color: var(--sh-brand); overflow: hidden; flex: none;
+.sh-category-card:hover, .sh-category-card:focus-visible {
+  transform: translateY(-3px); box-shadow: var(--sh-shadow-lg); border-color: var(--sh-brand);
 }
-/* Admin-uploaded photo: fill the circle, never stretch the picture. */
-.sh-category-card__icon--photo { background: var(--sh-bg); }
-.sh-category-card__icon img {
-  width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%;
+.sh-category-card:active { transform: translateY(-1px); }
+.sh-category-card:focus-visible { outline: 2px solid var(--sh-brand); outline-offset: 2px; }
+.sh-category-card__media {
+  display: block; position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--sh-bg-2);
 }
-@media (min-width: 768px) {
-  .sh-category-card__icon { width: 54px; height: 54px; }
+.sh-category-card__img {
+  width: 100%; height: 100%; display: block; object-fit: cover;
+  transition: transform .28s ease;
 }
-.sh-category-card__name { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.3; color: var(--sh-ink);
-  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 32px; }
-.sh-category-card__count { display: block; font-size: 11px; color: var(--sh-muted); margin-top: 3px; }
+/* A photograph looks better filling the frame; flat artwork should not be
+   cropped, so it is contained instead and keeps its whole composition. */
+.sh-category-card__img--fallback { object-fit: contain; padding: 14px; }
+.sh-category-card:hover .sh-category-card__img { transform: scale(1.045); }
+.sh-category-card__name {
+  display: flex; align-items: center; justify-content: center; flex: 1 1 auto;
+  padding: 9px 8px 11px; font-size: 12.5px; font-weight: 600; line-height: 1.34; color: var(--sh-ink);
+  min-height: 42px; overflow: hidden; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh-category-card, .sh-category-card__img { transition: none; }
+  .sh-category-card:hover .sh-category-card__img { transform: none; }
+}
 
 /* 8. PRODUCT CARDS -------------------------------------------------------- */
 .sh-product-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
@@ -367,7 +401,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-trust__text { font-size: 12px; color: var(--sh-muted); overflow-wrap: anywhere; }
 
 /* Banner strip */
-.sh-banner { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.sh-banner { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
+/* One real offer (a store with no coupon yet) gets the full width instead of
+   a half-empty row. */
+.sh-banner--single { grid-template-columns: 1fr; }
 .sh-banner__item { border-radius: var(--sh-radius); padding: 20px; color: #fff; min-height: 118px; display: flex; flex-direction: column; justify-content: center; box-shadow: var(--sh-shadow); }
 .sh-banner__title { color: #fff; font-size: 17px; font-weight: 800; }
 .sh-banner__text { color: rgba(255,255,255,.98); font-size: 12.5px; opacity: 1; margin-top: 4px; }
@@ -460,7 +497,6 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-cart-item:last-child { border-bottom: 0; }
 .sh-cart-item__img { width: 84px; height: 84px; object-fit: contain; background: #f7f8fa; border-radius: 6px; padding: 5px; }
 .sh-cart-item__name { font-size: 13.8px; font-weight: 600; line-height: 1.4; color: var(--sh-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.sh-cart-item__tag { display: inline-block; font-size: 11px; background: var(--sh-accent-soft); color: var(--sh-accent); padding: 1.5px 7px; border-radius: 3px; margin-top: 5px; font-weight: 600; }
 .sh-cart-item__price { font-size: 15px; font-weight: 800; color: var(--sh-brand); margin-top: 6px; }
 .sh-cart-item__side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 9px; }
 .sh-cart-item__total { font-size: 15px; font-weight: 800; white-space: nowrap; }
@@ -606,10 +642,6 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-order-card__date { font-size: 12px; color: var(--sh-muted); }
 .sh-order-card__body { padding: 13px 15px; }
 .sh-order-card__foot { display: flex; align-items: center; gap: 10px; padding: 11px 15px; border-top: 1px solid var(--sh-line-2); flex-wrap: wrap; }
-.sh-codebox { background: #101623; color: #d8f5e3; border-radius: var(--sh-radius); padding: 13px 15px; font-family: "Consolas", "Courier New", monospace; margin-top: 10px; }
-.sh-codebox__row { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
-.sh-codebox__label { font-size: 12px; color: #8fa3b8; flex: 1 1 auto; }
-.sh-codebox__code { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
 
 /* 15. ACCOUNT ------------------------------------------------------------- */
 .sh-account { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 14px; align-items: start; }
@@ -730,7 +762,10 @@ body.sh-modal-open { overflow: hidden; }
 .sh-field__label { display: block; font-size: 12.8px; font-weight: 700; margin-bottom: 5px; color: var(--sh-ink-2); }
 .sh-field__req { color: var(--sh-brand); }
 .sh-field__hint { font-size: 11.8px; color: var(--sh-muted); margin-top: 4px; }
-.sh-field__error { font-size: 12px; color: var(--sh-bad); margin-top: 4px; }
+.sh-field__error { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--sh-bad); margin-top: 4px; }
+.sh-field--bad .sh-input, .sh-field--bad .sh-select, .sh-field--bad .sh-textarea { border-color: var(--sh-bad); }
+.sh-alert__list { margin: 4px 0 0 16px; padding: 0; }
+.sh-alert__list li { margin-top: 2px; }
 .sh-input, .sh-select, .sh-textarea {
   width: 100%; padding: 9px 11px; border: 1px solid var(--sh-input-border); border-radius: 6px;
   font-size: 13.8px; background: var(--sh-input-bg); color: var(--sh-input-text); font-family: inherit;
@@ -751,6 +786,7 @@ body.sh-modal-open { overflow: hidden; }
 }
 .sh-btn:hover { background: var(--sh-btn-hover); border-color: var(--sh-btn-hover); }
 .sh-btn:disabled { opacity: .55; cursor: not-allowed; }
+.sh-btn--disabled { opacity: .5; cursor: not-allowed; }
 .sh-btn--block { width: 100%; }
 .sh-btn--lg { padding: 12px 24px; font-size: 15px; }
 .sh-btn--sm { padding: 6px 11px; font-size: 12.3px; border-radius: 5px; }
@@ -819,7 +855,7 @@ body.sh-modal-open { overflow: hidden; }
 /* 21. RESPONSIVE ---------------------------------------------------------- */
 @media (max-width: 1200px) {
   .sh-promo { grid-template-columns: 200px 1fr 236px; }
-  .sh-catgrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .sh-catgrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .sh-product-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .sh-product-grid--5 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
@@ -864,11 +900,11 @@ body.sh-modal-open { overflow: hidden; }
   .sh-toast { max-width: 100%; }
   .sh-promo { grid-template-columns: 1fr; }
   .sh-promo__side { grid-template-rows: none; grid-template-columns: repeat(3, 1fr); }
-  .sh-carousel, .sh-slide { min-height: 208px; }
-  .sh-slide { padding: 22px; }
+  .sh-carousel, .sh-slide, .sh-slide__inner { min-height: 208px; }
+  .sh-slide__inner { padding: 22px; }
   .sh-slide__title { font-size: 22px; }
   .sh-slide__text { font-size: 13px; }
-  .sh-carousel__dots { left: 22px; }
+  .sh-carousel__dots { left: 22px; bottom: 8px; }
   .sh-listing { grid-template-columns: 1fr; }
   .sh-filters {
     position: fixed; inset: 0; z-index: 210; max-height: none; border-radius: 0; overflow-y: auto;
@@ -896,7 +932,7 @@ body.sh-modal-open { overflow: hidden; }
   .sh-footer { padding-bottom: 56px; }
 }
 @media (max-width: 720px) {
-  .sh-catgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sh-catgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-product-grid, .sh-product-grid--5, .sh-product-grid--4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -904,7 +940,7 @@ body.sh-modal-open { overflow: hidden; }
   .sh-wrap { padding: 0 10px; }
   .sh-section { padding: 11px; border-radius: 7px; }
   .sh-section__title { font-size: 15.5px; }
-  .sh-catgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .sh-catgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .sh-product-grid, .sh-product-grid--5, .sh-product-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .sh-strip > * { flex: 0 0 150px; }
   .sh-grid2, .sh-grid3 { grid-template-columns: 1fr; }
@@ -962,6 +998,106 @@ body.sh-modal-open { overflow: hidden; }
 }
 
 /* ==========================================================================
+/* 21b. ADMIN LIST-PAGE SYSTEM ---------------------------------------------
+   One shared shape for every management screen: the section title, its
+   description and the Add/Create action at the top, filters directly beneath,
+   then the records. Creating and editing long records happens on its own
+   screen, never in a form appended under the listing. */
+/* The action bar under the top bar. The page title is rendered once by the
+   layout (admin/_layout.php prints $adminTitle as the top bar's <h1>), so this
+   row holds only a one-line note and the actions for the screen. */
+.sh-pagehead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.sh-pagehead__desc { min-width: 0; flex: 1 1 260px; font-size: 13px; color: var(--sh-muted); max-width: 88ch; line-height: 1.5; }
+.sh-pagehead__actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 640px) {
+  .sh-pagehead__actions { margin-left: 0; width: 100%; }
+  .sh-pagehead__actions > * { flex: 1 1 auto; }
+}
+
+.sh-crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--sh-muted); margin-bottom: 10px; }
+/* A breadcrumb immediately above the action bar: no double gap. */
+.sh-crumbs + .sh-pagehead--bar { margin-top: -4px; }
+.sh-crumbs a { color: var(--sh-muted); }
+.sh-crumbs a:hover { color: var(--sh-brand); }
+.sh-crumbs__sep { display: inline-flex; color: var(--sh-line); }
+.sh-crumbs__here { color: var(--sh-ink); font-weight: 600; }
+
+/* A form card: a panel with a sectioned body and a footer holding the action. */
+.sh-formcard { max-width: 1080px; }
+.sh-formcard__foot {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 13px 15px; border-top: 1px solid var(--sh-line); background: #fafbfc;
+}
+.sh-formcard__foot .sh-formcard__spacer { margin-left: auto; }
+/* The list footer: the range note sits with the pagination it describes. */
+.sh-listfoot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sh-listfoot .sh-pager { margin-left: auto; }
+/* Small parts of the list pages that used to carry a class with no rule: the
+   action word inside a row button, the "no image" thumbnail, a hint under a
+   form and the link that jumps from a record to its related records. */
+.sh-table__actionlabel { white-space: nowrap; }
+.sh-table__thumb--empty { display: grid; place-items: center; color: var(--sh-muted); }
+.sh-form__hint { color: var(--sh-muted); font-size: 12.5px; line-height: 1.55; }
+.sh-stat__hint { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--sh-brand); text-decoration: none; }
+.sh-stat__hint:hover { text-decoration: underline; }
+/* A form footer that sits inside a panel body (the product and payment-method
+   editors keep their whole form inside the body) still reads as the card's own
+   action bar: the body padding is cancelled so it lines up with the editors
+   that place the footer next to the body. */
+.sh-panel__body > .sh-formcard__foot,
+.sh-panel__body > form > .sh-formcard__foot { margin: 15px -15px -15px; }
+.sh-formcard__note { font-size: 12px; color: var(--sh-muted); }
+
+/* Sticky action bar for long forms. It sticks to the bottom of the viewport on
+   small screens only, where scrolling back to Save is the real problem; it is
+   not a floating overlay that covers the fields. */
+@media (max-width: 900px) {
+  .sh-formcard__foot--sticky { position: sticky; bottom: 0; z-index: 5; }
+}
+
+.sh-formsec { border-top: 1px solid var(--sh-line-2); padding-top: 15px; margin-top: 15px; }
+.sh-formsec:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.sh-formsec__title {
+  display: flex; align-items: center; gap: 8px; font-size: 13.2px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .5px; color: var(--sh-muted); margin-bottom: 12px;
+}
+.sh-formsec__title svg { color: var(--sh-brand); }
+.sh-formsec__desc { font-size: 12.5px; color: var(--sh-muted); margin: -6px 0 12px; }
+
+/* Filter bar that sits directly under the page header. */
+.sh-filterbar--top { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.sh-filterbar--top .sh-field { margin-bottom: 0; min-width: 150px; flex: 1 1 150px; }
+.sh-filterbar--top .sh-btn { flex: 0 0 auto; }
+@media (max-width: 640px) { .sh-filterbar--top .sh-field { min-width: 0; flex: 1 1 100%; } }
+
+/* On phones the records table becomes one card per row. The header row is
+   hidden and each cell shows the label held in data-label. */
+@media (max-width: 760px) {
+  .sh-tablewrap--cards .sh-table { min-width: 0; }
+  .sh-tablewrap--cards .sh-table thead { display: none; }
+  .sh-tablewrap--cards .sh-table tbody tr {
+    display: block; border: 1px solid var(--sh-line); border-radius: 8px; margin-bottom: 10px;
+    padding: 6px 10px; background: #fff;
+  }
+  .sh-tablewrap--cards .sh-table td {
+    display: flex; align-items: flex-start; gap: 10px; border-bottom: 0; padding: 6px 0;
+  }
+  .sh-tablewrap--cards .sh-table td::before {
+    content: attr(data-label); flex: 0 0 92px; font-size: 11.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .4px; color: var(--sh-muted); padding-top: 2px;
+  }
+  .sh-tablewrap--cards .sh-table td[data-label=""]::before { display: none; }
+  .sh-tablewrap--cards .sh-table__actions { justify-content: flex-end; width: 100%; }
+}
+/* Category image editor: preview on the left, upload controls on the right. */
+.sh-catimage { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.sh-catimage__preview { border: 1px solid var(--sh-line); border-radius: 8px; overflow: hidden; background: var(--sh-bg-2); }
+.sh-catimage__preview img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #fff; }
+.sh-catimage__preview img.is-placeholder { object-fit: contain; padding: 16px; background: var(--sh-bg-2); }
+.sh-catimage__cap { display: block; padding: 7px 10px; font-size: 11.8px; color: var(--sh-muted); background: #fff; border-top: 1px solid var(--sh-line-2); }
+.sh-catimage__fields { min-width: 0; }
+@media (max-width: 700px) { .sh-catimage { grid-template-columns: minmax(0, 1fr); } }
+
    22. ADMIN PANEL
    ========================================================================== */
 /* --- Admin: homepage promo manager --------------------------------- */
@@ -1131,7 +1267,7 @@ body.sh-modal-open { overflow: hidden; }
 .sh-table__thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--sh-bg); flex: 0 0 auto; }
 .sh-table__cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sh-table__name { font-weight: 600; color: var(--sh-ink); line-height: 1.35; }
-.sh-table__meta { font-size: 11.5px; color: var(--sh-muted); margin-top: 1px; }
+.sh-table__meta { white-space: normal; font-size: 11.5px; color: var(--sh-muted); margin-top: 1px; }
 .sh-table__actions { display: flex; gap: 6px; justify-content: flex-end; }
 .sh-table--empty td { text-align: center; color: var(--sh-muted); padding: 30px 12px; font-size: 13px; }
 
@@ -1214,8 +1350,13 @@ body.sh-modal-open { overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sh-sidecard__img, .sh-slide__btn { transition: none; }
+  .sh-sidecard__img { transition: none; }
   .sh-sidecard:hover .sh-sidecard__img { transform: none; }
+  /* Slides still change (the visitor asked for less motion, not for a broken
+     page), but the crossfade becomes an instant cut and the photo never zooms. */
+  .sh-carousel { --sh-slide-fade: 1ms; }
+  .sh-slide, .sh-slide__img, .sh-carousel__dot::before { transition: none; }
+  .sh-slide__img { transform: none; }
 }
 
 /* ==========================================================================
@@ -1760,6 +1901,8 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 @media (max-width: 1100px) { .sh-perm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sh-health-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
   .sh-perm-grid { grid-template-columns: minmax(0, 1fr); }
+  /* A 300px minimum column would overflow a 320px phone: one column, always. */
+  .sh-vp-grid { grid-template-columns: minmax(0, 1fr); }
   .sh-stats--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-health-row { flex-wrap: wrap; }
 }
@@ -2040,3 +2183,9 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-admin-body .sh-notif-log .sh-table--empty { width: auto; margin: 0; padding: 0; border: 0; }
   .sh-admin-body .sh-notif-log .sh-table--empty td { padding: 18px 12px; }
 }
+
+/* --- SEO fields (admin product / category forms and the SEO Manager) --------
+   Only the live character counters need styling; the preview boxes are laid out
+   inline in the partial so they keep working with JavaScript switched off. */
+.sh-seo-count--near { color: var(--sh-warn); font-weight: 600; }
+.sh-seo-count--over { color: var(--sh-bad); font-weight: 700; }

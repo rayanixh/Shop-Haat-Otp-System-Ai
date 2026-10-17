@@ -85,9 +85,6 @@ require_once SH_ROOT . '/includes/header.php';
                 <a href="<?= e(sh_url('product.php?slug=' . urlencode($it['slug']))) ?>">
                   <p class="sh-cart-item__name"><?= e($it['name']) ?></p>
                 </a>
-                <?php if ($it['product_type'] === 'digital'): ?>
-                  <span class="sh-cart-item__tag">Digital delivery</span>
-                <?php endif; ?>
                 <p class="sh-cart-item__price"><?= e(sh_money($it['unit_price'])) ?>
                   <?php if ($it['compare_price'] > $it['unit_price']): ?>
                     <span style="font-size:12px;color:var(--sh-muted);text-decoration:line-through;font-weight:400">

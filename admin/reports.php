@@ -234,7 +234,7 @@ try {
                         $row['product_name'], $row['product_variant'], $row['sku'], $row['product_type'],
                         (int)$row['quantity_sold'], number_format($gross, 2, '.', ''), number_format($discount, 2, '.', ''),
                         number_format($gross - $discount, 2, '.', ''), (int)$row['order_count'],
-                        $row['product_type'] === 'digital' ? 'Digital' : ($row['stock'] === null ? 'Removed' : (string)(int)$row['stock']),
+                        $row['stock'] === null ? 'Removed' : (string)(int)$row['stock'],
                     ];
                 }
             }
@@ -340,10 +340,9 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head sh-panel__head--wrap">
-    <div>
-      <h1 class="sh-panel__title"><?= sh_icon('bar-chart', 18) ?> <?= e($tabs[$tab]) ?> Report</h1>
-      <p class="sh-panel__note">Order-created dates <?= e($range['from']) ?> to <?= e($range['to']) ?> · Bangladesh business calendar.</p>
-    </div>
+    <p class="sh-panel__note">
+      <?= sh_icon('bar-chart', 15) ?> Order-created dates <?= e($range['from']) ?> to <?= e($range['to']) ?> · Bangladesh business calendar.
+    </p>
     <div class="sh-panel__actions">
       <?php if ($reportError === '' && ($hasData || $tab === 'sales') && sh_admin_can('reports.export')): ?>
         <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e($reportUrl(['export' => 'csv', 'page' => null])) ?>"><?= sh_icon('download', 14) ?> Export CSV</a>
@@ -470,7 +469,7 @@ require __DIR__ . '/_layout.php';
             <td data-label="Discounts"><?= e(sh_money($discount)) ?></td>
             <td data-label="Net item sales"><strong><?= e(sh_money($gross - $discount)) ?></strong></td>
             <td data-label="Orders"><?= number_format((int)$row['order_count']) ?></td>
-            <td data-label="Stock"><?= (string)$row['product_type'] === 'digital' ? 'Digital' : ($row['stock'] === null ? 'Removed' : (string)(int)$row['stock']) ?></td>
+            <td data-label="Stock"><?= $row['stock'] === null ? 'Removed' : (string)(int)$row['stock'] ?></td>
           </tr>
         <?php endforeach; endif; ?>
       </tbody></table></div>

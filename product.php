@@ -6,6 +6,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/catalog.php';
+// The SEO helpers are used while this page builds its metadata, before
+// includes/header.php is loaded, so the engine must be required here.
+require_once SH_ROOT . '/includes/seo.php';
 
 $slug = sh_get('slug');
 $product = $slug !== '' ? sh_product_by_slug($slug) : null;
@@ -75,37 +78,61 @@ $shWishlist = sh_wishlist_ids();
 
 $off = sh_discount_percent($product['price'], $product['compare_price']);
 $stock = (int)$product['stock'];
-$isDigital = $product['product_type'] === 'digital';
+// Digital products were fulfilled by the code-delivery feature that has been
+// removed. Their rows are left untouched, but they must not take an order the
+// store can no longer fill, so they are shown as not orderable online.
+$isPhysical = (string)($product['product_type'] ?? 'physical') === 'physical';
+$orderable  = $isPhysical && $stock > 0;
 
-$pageTitle = $product['meta_title'] ?: $product['name'];
-$pageDescription = $product['meta_description'] ?: sh_excerpt($product['short_description'] ?: $product['description'], 158);
-$pageCanonical = rtrim(sh_site_url(), '/') . '/product.php?slug=' . urlencode($product['slug']);
+/*
+ * SEO. The product row carries the owner's custom title, description, keywords,
+ * social image, canonical override and noindex flag, so the whole row is handed
+ * to the SEO engine and the generated values below are only fallbacks.
+ *
+ * The canonical always uses the slug form. Filter, sort and tracking parameters
+ * are dropped by sh_seo_canonical_url(), so one product has exactly one indexable
+ * URL no matter how a shopper arrived at it.
+ */
+$pageSeoKey     = 'product';
+$pageSeoEntity  = $product;
+$pageOgType     = 'product';
+$pageImage      = sh_seo_product_image($product);
+$pageTitle      = (string)$product['name'];
+$pageDescription = sh_seo_plain((string)($product['short_description'] ?: $product['description']));
+$pageCanonical  = 'product.php?slug=' . rawurlencode((string)$product['slug']);
+$pageKeywords   = trim((string)($product['seo_focus_keyword'] ?? '') . ',' . (string)($product['meta_keywords'] ?? ''), ',');
 
-$structuredData = [
-    '@context' => 'https://schema.org',
-    '@type' => 'Product',
-    'name' => $product['name'],
-    'description' => sh_excerpt($product['short_description'] ?: $product['description'], 300),
-    'sku' => $product['sku'] ?: ('SH-' . $pid),
-    'image' => [rtrim(sh_site_url(), '/') . '/' . ltrim(str_replace(sh_base_url() . '/', '', sh_product_image($product['image'])), '/')],
-    'offers' => [
-        '@type' => 'Offer',
-        'price' => number_format((float)$product['price'], 2, '.', ''),
-        'priceCurrency' => (string)sh_setting('currency_code', 'BDT'),
-        'availability' => $stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-        'url' => $pageCanonical,
-    ],
-];
-if ($product['brand_name']) {
-    $structuredData['brand'] = ['@type' => 'Brand', 'name' => $product['brand_name']];
-}
-if ((int)$product['review_count'] > 0 && (float)$product['rating'] > 0) {
-    $structuredData['aggregateRating'] = [
-        '@type' => 'AggregateRating',
-        'ratingValue' => number_format((float)$product['rating'], 1),
-        'reviewCount' => (int)$product['review_count'],
+// Breadcrumbs mirror the navigation the shopper actually sees on the page.
+$pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php']];
+if (!empty($product['category_name']) && !empty($product['category_slug'])) {
+    $pageBreadcrumbs[] = [
+        'name' => (string)$product['category_name'],
+        'url'  => 'category.php?slug=' . rawurlencode((string)$product['category_slug']),
     ];
 }
+$pageBreadcrumbs[] = ['name' => (string)$product['name'], 'url' => ''];
+
+// Gallery images join the structured data so image results show the real
+// product photography rather than a stock placeholder.
+$galleryImages = [];
+foreach ($images as $imgRow) {
+    $galleryImages[] = 'uploads/products/' . rawurlencode(basename((string)$imgRow['image']));
+}
+
+// Resolve the metadata first, then build the Product node against the final
+// canonical URL so the JSON-LD and the <link rel="canonical"> can never disagree.
+$shProductMeta = sh_seo_meta([
+    'key' => 'product',
+    'entity' => $product,
+    'fallback_title' => (string)$product['name'],
+    'fallback_desc' => $pageDescription,
+    'canonical' => $pageCanonical,
+    'image' => $pageImage,
+    'type' => 'product',
+    'keywords' => $pageKeywords,
+    'breadcrumbs' => $pageBreadcrumbs,
+]);
+$structuredData = sh_seo_product_schema($product, $shProductMeta, $galleryImages);
 
 require_once SH_ROOT . '/includes/header.php';
 ?>
@@ -157,22 +184,21 @@ require_once SH_ROOT . '/includes/header.php';
 
       <dl class="sh-pdp__rows">
         <div class="sh-pdp__row"><dt>Availability</dt><dd>
-          <?php if ($stock <= 0): ?><span class="sh-badge sh-badge--bad"><?= sh_icon('x-circle', 13) ?> Out of stock</span>
+          <?php if (!$isPhysical): ?><span class="sh-badge sh-badge--warn"><?= sh_icon('info', 13) ?> Not orderable online</span>
+          <?php elseif ($stock <= 0): ?><span class="sh-badge sh-badge--bad"><?= sh_icon('x-circle', 13) ?> Out of stock</span>
           <?php elseif ($stock <= 10): ?><span class="sh-badge sh-badge--warn"><?= sh_icon('clock', 13) ?> Only <?= $stock ?> left</span>
           <?php else: ?><span class="sh-badge sh-badge--ok"><?= sh_icon('check-circle', 13) ?> In stock</span><?php endif; ?>
         </dd></div>
-        <div class="sh-pdp__row"><dt>Product type</dt><dd><?= $isDigital ? 'Digital — instant code delivery' : 'Physical — shipped to your address' ?></dd></div>
         <div class="sh-pdp__row"><dt>Delivery</dt><dd>
-          <?= $isDigital
-            ? 'Delivered to your account immediately after payment verification'
-            : 'Inside city ' . e(sh_money(sh_setting('delivery_fee_inside', '60'))) . ' · Outside city ' . e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?>
+          Inside city <?= e(sh_money(sh_setting('delivery_fee_inside', '60'))) ?> ·
+          Outside city <?= e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?>
         </dd></div>
         <?php if ($product['sku']): ?>
           <div class="sh-pdp__row"><dt>SKU</dt><dd><?= e($product['sku']) ?></dd></div>
         <?php endif; ?>
       </dl>
 
-      <?php if ($stock > 0): ?>
+      <?php if ($orderable): ?>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:700;color:var(--sh-ink-2)">Quantity</span>
           <div class="sh-qty">
@@ -185,10 +211,10 @@ require_once SH_ROOT . '/includes/header.php';
       <?php endif; ?>
 
       <div class="sh-pdp__buy">
-        <button class="sh-btn sh-btn--lg" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" <?= $stock <= 0 ? 'disabled' : '' ?>>
+        <button class="sh-btn sh-btn--lg" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" <?= $orderable ? '' : 'disabled' ?>>
           <?= sh_icon('shopping-cart', 17) ?> Add to Cart
         </button>
-        <button class="sh-btn sh-btn--lg sh-btn--dark" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" data-then-checkout <?= $stock <= 0 ? 'disabled' : '' ?>>
+        <button class="sh-btn sh-btn--lg sh-btn--dark" type="button" data-add-cart="<?= $pid ?>" data-qty-source="sh-pdp-qty" data-then-checkout <?= $orderable ? '' : 'disabled' ?>>
           <?= sh_icon('zap', 17) ?> Buy Now
         </button>
         <button class="sh-btn sh-btn--lg sh-btn--ghost" type="button" data-wishlist="<?= $pid ?>"
@@ -196,6 +222,11 @@ require_once SH_ROOT . '/includes/header.php';
           <?= sh_icon('heart', 17) ?> Wishlist
         </button>
       </div>
+
+      <?php if (!$isPhysical): ?>
+        <div class="sh-alert sh-alert--info"><?= sh_icon('info', 16) ?>
+          <span>This item can no longer be ordered online. Please contact our support team if you need it.</span></div>
+      <?php endif; ?>
 
       <div class="sh-secure-note">
         <?= sh_icon('shield', 16) ?>

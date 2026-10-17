@@ -57,7 +57,6 @@ $nav = [
         ['brands',     'brands.php',            'tag',   'Brands', 0, 'catalog.manage'],
         ['stock',      'stock.php?view=all',    'list',  'Inventory', 0, 'products.stock'],
         ['stock:low',  'stock.php?view=alerts', 'alert', 'Low Stock', 0, 'products.stock'],
-        ['codes',      'digital-codes.php',     'key',   'Digital Codes', 0, 'catalog.manage'],
         ['coupons',    'coupons.php',           'tag',   'Coupons', 0, 'catalog.manage'],
     ],
     'Customers' => [
@@ -74,6 +73,7 @@ $nav = [
         ['homepage',   'homepage.php',   'image',    'Homepage Images', 0, 'storefront.manage'],
         ['theme',      'theme.php',      'settings', 'Theme Customization', 0, 'storefront.manage'],
         ['transition', 'transition.php', 'zap',      'Page Transition', 0, 'storefront.manage'],
+        ['seo',        'seo.php',        'search',   'SEO Manager', 0, 'seo.manage'],
     ],
     'Settings' => [
         ['settings',     'settings.php',         'settings', 'General Settings', 0, 'settings.view'],
@@ -84,6 +84,7 @@ $nav = [
         ['whatsapp',     'whatsapp.php',         'message',  'WhatsApp', 0, 'integrations.manage'],
         ['messenger',    'messenger.php',        'message',  'Messenger', 0, 'integrations.manage'],
         ['email',        'email.php',            'mail',     'SMTP / Email', 0, 'integrations.manage'],
+        ['email_log',    'email-log.php',        'list',     'Email Delivery Log', 0, 'integrations.manage'],
         ['notifications','notifications.php',    'bell',     'Notification Channels', 0, 'integrations.manage'],
         ['google_login', 'google-login.php',     'log-in',   'Google Login', 0, '@superadmin'],
     ],
@@ -139,7 +140,7 @@ $adminFlash = sh_flash_pull();
 <title><?= e($adminTitle) ?> — Admin | <?= e(sh_setting('site_name', 'ShopHaat')) ?></title>
 <link rel="icon" href="data:image/svg+xml,<?= rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#151b2b"/><text x="16" y="22" font-family="Arial" font-size="14" font-weight="bold" fill="#e8501b" text-anchor="middle">A</text></svg>') ?>">
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
-<script>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
+<script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
 <?php require_once SH_ROOT . '/includes/transition.php'; $shTransition = sh_transition_config(); echo sh_transition_head($shTransition); ?>
 </head>
 <body<?= sh_transition_body_attrs($shTransition) ?>>
@@ -207,4 +208,4 @@ $adminFlash = sh_flash_pull();
           <span><?= e($f['message']) ?></span>
         </div>
       <?php endforeach; ?>
-      <?php if ($toastMsgs): ?><script type="application/json" id="sh-admin-toasts"><?= json_encode($toastMsgs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?></script><?php endif; ?>
+      <?php if ($toastMsgs): ?><script type="application/json" id="sh-admin-toasts"<?= sh_csp_nonce_attr() ?>><?= json_encode($toastMsgs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) ?></script><?php endif; ?>

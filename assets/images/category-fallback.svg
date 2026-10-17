@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-hidden="true" focusable="false">
+  <!-- Neutral placeholder for a category without an uploaded photo.
+       Deliberately flat and monochrome so it matches any theme and never
+       competes with real product photography. -->
+  <rect width="400" height="400" fill="#eef1f5"/>
+  <g fill="none" stroke="#c3cad4" stroke-width="11" stroke-linejoin="round">
+    <rect x="116" y="116" width="76" height="76" rx="14"/>
+    <rect x="208" y="116" width="76" height="76" rx="14"/>
+    <rect x="116" y="208" width="76" height="76" rx="14"/>
+    <rect x="208" y="208" width="76" height="76" rx="14"/>
+  </g>
+</svg>

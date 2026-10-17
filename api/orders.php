@@ -35,7 +35,7 @@ try {
             sh_json(['success' => false, 'error' => 'Enter both the order number and the phone number used at checkout.']);
         }
         // Requires BOTH values — prevents order enumeration.
-        $o = sh_one('SELECT id, order_number, status, payment_status, total, created_at, has_digital
+        $o = sh_one('SELECT id, order_number, status, payment_status, total, created_at
                      FROM orders WHERE order_number = ? AND customer_phone = ? LIMIT 1', [$number, $phone]);
         if ($o === null) {
             sh_json(['success' => false, 'error' => 'No order matched those details.']);
@@ -63,7 +63,6 @@ try {
         'status' => sh_status_label($order['status']),
         'status_key' => $order['status'],
         'payment_status' => sh_status_label($order['payment_status']),
-        'codes_delivered' => (int)$order['codes_delivered'] === 1,
     ]);
 } catch (Throwable $e) {
     sh_log_exception($e, 'api-orders');

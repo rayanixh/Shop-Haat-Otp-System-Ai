@@ -67,7 +67,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head sh-panel__head--wrap">
-    <h2 class="sh-panel__title"><?= sh_icon('bell', 17) ?> Notifications <?php if ($unread): ?><span class="sh-badge sh-badge--warn"><?= (int)$unread ?> unread</span><?php endif; ?></h2>
+    <span class="sh-formcard__note"><?php if ($unread): ?><span class="sh-badge sh-badge--warn"><?= (int)$unread ?> unread</span><?php else: ?>All caught up<?php endif; ?></span>
     <div class="sh-actions">
       <?php if ($unread): ?>
         <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="read_all"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('check-circle', 14) ?> Mark all as read</button></form>

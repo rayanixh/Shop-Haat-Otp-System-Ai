@@ -21,11 +21,11 @@ function sh_perms_catalog(): array
         'Dashboard' => ['dashboard.view' => 'View dashboard'],
         'Orders' => ['orders.view' => 'View orders', 'orders.details' => 'View order details', 'orders.update_status' => 'Update order status', 'orders.cancel' => 'Cancel / return orders'],
         'Payments' => ['payments.view' => 'View payments', 'payments.verify' => 'Verify payments', 'payments.reject' => 'Reject payments', 'payments.refund' => 'Mark refunds (where supported)'],
-        'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories, brands, coupons & digital codes'],
+        'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories, brands & coupons'],
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],
-        'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications'],
+        'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications', 'seo.manage' => 'SEO Manager: titles, descriptions, sitemap & search-engine settings'],
         'System' => ['system.health' => 'View system health', 'system.backups' => 'Manage database backups', 'system.audit' => 'View audit logs & settings history', 'system.logs' => 'View error / security logs', 'system.notifications' => 'Admin notifications inbox', 'ai.use' => 'AI tools'],
         'Admin Management' => ['admins.manage' => 'Manage admin accounts', 'roles.manage' => 'Manage roles & permissions'],
     ];

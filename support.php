@@ -39,8 +39,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// SEO: overridable from the SEO Manager, with a canonical and breadcrumb.
+$pageSeoKey = 'support';
 $pageTitle = 'Customer Support';
-$pageDescription = 'Contact our customer support team.';
+$pageDescription = 'Contact the ' . sh_setting('site_name', 'ShopHaat')
+    . ' support team about an order, a payment, a delivery or a return.';
+$pageCanonical = 'support.php';
+$pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php'], ['name' => 'Customer Support', 'url' => '']];
 require_once SH_ROOT . '/includes/header.php';
 ?>
 <div class="sh-wrap">

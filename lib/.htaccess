@@ -1,0 +1,10 @@
+# ShopHaat — vendor library code is included by the application, never requested
+# by a browser. Denying the directory keeps source files unreadable over HTTP on
+# hosts where the server would otherwise serve them as text.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

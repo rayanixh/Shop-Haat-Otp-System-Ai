@@ -43,9 +43,16 @@ function sh_cart_summary(?string $couponCode = null, string $deliveryZone = 'ins
         $qty = max(1, min(SH_MAX_QTY, (int)$r['quantity']));
         $available = (int)$r['stock'];
         $unavailable = ((int)$r['status'] !== 1);
+        // Digital products are no longer sold: the code-delivery feature that
+        // fulfilled them has been removed, so such a line is never ordered.
+        $notOrderable = (string)($r['product_type'] ?? 'physical') !== 'physical';
 
         if ($unavailable) {
             $issues[] = $r['name'] . ' is no longer available and was not included.';
+            continue;
+        }
+        if ($notOrderable) {
+            $issues[] = $r['name'] . ' can no longer be ordered online and was not included. Please contact support.';
             continue;
         }
         if ($available <= 0) {
@@ -144,9 +151,12 @@ function sh_cart_count(): int
 function sh_cart_add(int $productId, int $qty = 1): array
 {
     $qty = max(1, min(SH_MAX_QTY, $qty));
-    $p = sh_one('SELECT id, name, stock, status FROM products WHERE id = ? LIMIT 1', [$productId]);
+    $p = sh_one('SELECT id, name, stock, status, product_type FROM products WHERE id = ? LIMIT 1', [$productId]);
     if ($p === null || (int)$p['status'] !== 1) {
         return ['ok' => false, 'error' => 'This product is not available.'];
+    }
+    if ((string)($p['product_type'] ?? 'physical') !== 'physical') {
+        return ['ok' => false, 'error' => 'This product can no longer be ordered online. Please contact support.'];
     }
     if ((int)$p['stock'] <= 0) {
         return ['ok' => false, 'error' => 'This product is currently out of stock.'];
@@ -174,9 +184,12 @@ function sh_cart_update(int $productId, int $qty): array
     $cartId = sh_cart_id(false);
     if ($cartId <= 0) { return ['ok' => false, 'error' => 'Your cart is empty.']; }
     if ($qty <= 0) { return sh_cart_remove($productId); }
-    $p = sh_one('SELECT stock, status FROM products WHERE id = ? LIMIT 1', [$productId]);
+    $p = sh_one('SELECT stock, status, product_type FROM products WHERE id = ? LIMIT 1', [$productId]);
     if ($p === null || (int)$p['status'] !== 1) {
         return ['ok' => false, 'error' => 'This product is not available.'];
+    }
+    if ((string)($p['product_type'] ?? 'physical') !== 'physical') {
+        return ['ok' => false, 'error' => 'This product can no longer be ordered online. Please contact support.'];
     }
     $qty = min(SH_MAX_QTY, $qty);
     if ($qty > (int)$p['stock']) {

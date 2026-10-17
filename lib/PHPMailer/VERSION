@@ -1,0 +1,7 @@
+PHPMailer 7.1.1
+Source: https://github.com/PHPMailer/PHPMailer
+Tarball: https://codeload.github.com/PHPMailer/PHPMailer/tar.gz/refs/tags/v7.1.1
+Tarball sha256: 6c8210a20f2bdca42f398ea688042a17c572a52369449e80f5bf6ec7fbfce3e5
+License: LGPL-2.1-only (see LICENSE in this directory)
+Vendored because shared hosting often has no Composer and the repository ignores vendor/.
+Only src/ and LICENSE are copied; no PHPMailer tooling or tests are included.

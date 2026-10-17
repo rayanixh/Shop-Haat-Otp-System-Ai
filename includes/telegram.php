@@ -8,7 +8,7 @@
  *
  * Design rules:
  *  - Never re-implement business logic. sh_approve_payment(), sh_reject_payment(),
- *    sh_deliver_digital_codes() and sh_complete_order() already handle locking,
+ *    sh_complete_order() already handles locking,
  *    transactions, duplicate protection and customer notifications.
  *  - The bot token never appears in a message, a log line or a response.
  *  - Nothing here throws out to the webhook; every entry point returns a result.
@@ -296,10 +296,6 @@ function sh_tg_order_card(array $order, string $heading = ''): string
     $lines[] = '<b>Payment:</b> ' . sh_tg_payment_label((string)$order['payment_status']);
     $lines[] = '<b>Status:</b> ' . sh_tg_order_label((string)$order['status']);
 
-    if ((int)$order['has_digital'] === 1) {
-        $lines[] = '<b>Delivery:</b> ' . ((int)$order['codes_delivered'] === 1 ? '✅ Codes delivered' : '⏳ Pending');
-    }
-
     $lines[] = '';
     $lines[] = '<b>Placed:</b> ' . sh_tg_esc(date('d M Y, h:i A', strtotime((string)$order['created_at'])));
     $lines[] = $bar;
@@ -334,9 +330,6 @@ function sh_tg_order_keyboard(array $order): array
         $line = [];
         if ($status !== 'processing') {
             $line[] = ['text' => '⚙️ Processing', 'callback_data' => 'order_processing:' . $id];
-        }
-        if ((int)$order['has_digital'] === 1 && (int)$order['codes_delivered'] === 0) {
-            $line[] = ['text' => '📦 Delivery', 'callback_data' => 'order_delivery:' . $id];
         }
         if ($line) { $rows[] = $line; }
         $rows[] = [['text' => '✅ Complete', 'callback_data' => 'order_complete:' . $id]];
@@ -821,35 +814,6 @@ function sh_tg_run_action(string $action, int $orderId, string $adminId, string 
             sh_tg_audit($orderId, $adminId, $adminName, 'ORDER_PROCESSING', $prevStatus, 'processing');
             return ['toast' => '⚙️ Order moved to processing.', 'alert' => false, 'heading' => '⚙️ ORDER PROCESSING'];
 
-        case 'order_delivery':
-            if ($prevPay !== 'verified') {
-                sh_tg_audit($orderId, $adminId, $adminName, $action, $prevStatus, $prevStatus, 'denied', 'Payment not verified');
-                return ['toast' => '❌ Delivery needs a verified payment.', 'alert' => true, 'heading' => ''];
-            }
-            if (in_array($prevStatus, ['cancelled', 'payment_rejected'], true)) {
-                return ['toast' => '❌ A ' . $prevStatus . ' order cannot be delivered.', 'alert' => true, 'heading' => ''];
-            }
-            if ((int)$order['has_digital'] !== 1) {
-                sh_tg_audit($orderId, $adminId, $adminName, 'ORDER_DELIVERY', $prevStatus, $prevStatus, 'noop', 'No digital items');
-                return ['toast' => 'ℹ️ This order has no digital items to deliver.', 'alert' => false, 'heading' => ''];
-            }
-            if ((int)$order['codes_delivered'] === 1) {
-                return ['toast' => 'ℹ️ Codes have already been delivered.', 'alert' => false, 'heading' => ''];
-            }
-            // Existing routine: locks rows, never issues a code twice.
-            $r = sh_deliver_digital_codes($orderId);
-            if (empty($r['ok'])) {
-                sh_tg_audit($orderId, $adminId, $adminName, 'ORDER_DELIVERY', $prevStatus, $prevStatus, 'failed', (string)($r['error'] ?? ''));
-                return ['toast' => '❌ ' . (string)($r['error'] ?? 'Delivery failed.'), 'alert' => true,
-                        'heading' => '❌ DELIVERY FAILED'];
-            }
-            if (!empty($r['already'])) {
-                return ['toast' => 'ℹ️ Codes have already been delivered.', 'alert' => false, 'heading' => ''];
-            }
-            $n = count($r['codes'] ?? []);
-            sh_tg_audit($orderId, $adminId, $adminName, 'ORDER_DELIVERY', $prevStatus, (string)sh_order_get($orderId)['status']);
-            return ['toast' => '📦 Delivered ' . $n . ' code(s).', 'alert' => false, 'heading' => '📦 DELIVERY SUCCESSFUL'];
-
         case 'order_complete':
             if ($prevStatus === 'completed') {
                 return ['toast' => 'ℹ️ Order is already complete.', 'alert' => false, 'heading' => ''];
@@ -861,10 +825,6 @@ function sh_tg_run_action(string $action, int $orderId, string $adminId, string 
             if ($prevPay !== 'verified') {
                 sh_tg_audit($orderId, $adminId, $adminName, $action, $prevStatus, $prevStatus, 'denied', 'Payment not verified');
                 return ['toast' => '❌ Verify the payment before completing.', 'alert' => true, 'heading' => ''];
-            }
-            if ((int)$order['has_digital'] === 1 && (int)$order['codes_delivered'] !== 1) {
-                sh_tg_audit($orderId, $adminId, $adminName, $action, $prevStatus, $prevStatus, 'denied', 'Codes not delivered');
-                return ['toast' => '❌ Deliver the digital codes first.', 'alert' => true, 'heading' => ''];
             }
             $r = sh_complete_order($orderId);
             if (empty($r['ok'])) {
@@ -885,14 +845,11 @@ function sh_tg_run_action(string $action, int $orderId, string $adminId, string 
             $pdo = sh_db();
             try {
                 $pdo->beginTransaction();
-                $row = sh_one('SELECT status, codes_delivered FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+                $row = sh_one('SELECT status FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
                 if ($row === null) { throw new RuntimeException('Order not found.'); }
                 if ($row['status'] === 'cancelled') { $pdo->commit(); return ['toast' => 'ℹ️ Order is already cancelled.', 'alert' => false, 'heading' => '']; }
                 if ($row['status'] === 'completed') { throw new RuntimeException('A completed order cannot be cancelled.'); }
                 sh_query('UPDATE orders SET status = \'cancelled\' WHERE id = ?', [$orderId]);
-                // Release any codes that were reserved but not yet handed over.
-                sh_query('UPDATE product_codes SET status = \'available\', order_id = NULL, order_item_id = NULL
-                          WHERE order_id = ? AND status = \'reserved\'', [$orderId]);
                 $pdo->commit();
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) { $pdo->rollBack(); }

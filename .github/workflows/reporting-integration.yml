@@ -4,15 +4,59 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - arena/9fe3cb2b-shop-haat-otp-system-ai
+      - arena/403101d1-shop-haat-otp-system-ai
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  security-regression:
+    name: Security regression suite and static scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, gd
+          coverage: none
+      - name: PHP syntax check every file
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
+      - name: Static security scan (fails on high or critical)
+        run: php tools/security-scan.php --fail-on=high
+      - name: Security regression suite
+        run: php tests/security-regression.php
+      # Both harnesses drive the REAL rendered markup (tests/page-transition-
+      # fixtures.php and tests/slider-fixtures.php, which call the shipped
+      # helpers), the real stylesheet and the real script inside jsdom:
+      #   - the page transition state machine: first paint, refresh, direct URL,
+      #     admin panel, one-shot marker, no stuck overlay, no bfcache replay;
+      #   - the homepage slider: crossfade layering, autoplay interval, pause on
+      #     a hidden tab / off-screen carousel, reduced motion, image warm-up,
+      #     a missing image and the button-free markup.
+      # Test-only: the store itself still runs on plain PHP with no Node.js.
+      - name: Front-end behaviour harnesses (page transition and slider)
+        env:
+          SH_PT_REQUIRE_JSDOM: '1'
+          SH_SLIDER_REQUIRE_JSDOM: '1'
+        run: |
+          npm install --no-save --no-package-lock jsdom@26.1.0
+          node tests/page-transition-behavior.mjs
+          node tests/slider-behavior.mjs
+      - name: Confirm no live credentials are tracked
+        run: |
+          if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
+            echo "::error::config/database.php is tracked by git"
+            exit 1
+          fi
+          echo "config/database.php is not tracked."
+
   reporting-integration:
     name: PHP and MySQL reports and timeline workflow
+    needs: security-regression
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -34,7 +78,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, pdo_mysql
+          extensions: mbstring, pdo_mysql, dom, libxml
           coverage: none
       - name: Configure the isolated test database
         run: |
@@ -50,7 +94,37 @@ jobs:
           ];
           PHP
           touch config/installed.lock
+      # Installer seeding, through the same function the setup form calls: a
+      # demo-OFF install creates structure and essential settings only, a demo-ON
+      # install creates the starter catalogue exactly once, a self-chosen
+      # administrator password is stored only as a hash and verified with the
+      # exact bytes typed, and a repeated install can never reset an existing
+      # account or delete real records. It leaves the disposable database empty
+      # again for the reporting test below.
+      - name: Installer seeding decision (demo data on and off)
+        run: php tests/installer-demo-data.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
       - name: Exercise session expiry through customer HTTP routes
         run: bash tests/session-expiration-http.sh
+      # The real authentication pages over real HTTP: they render without a PHP
+      # diagnostic, the recovery flow runs against a capture SMTP server (the
+      # six-digit code is read out of the delivered message, a wrong code is
+      # refused, the used code cannot be reused, only the new password signs in,
+      # and the change notification is really accepted), an unconfigured store
+      # says so instead of claiming a send, the reply is identical for an
+      # address that exists and one that does not, and the admin email screens
+      # never echo the stored SMTP password.
+      - name: Email pages and the recovery flow over HTTP
+        run: bash tests/email-pages-http.sh
+      # The email system, end to end: a real PHPMailer submission against a
+      # capture SMTP server on loopback (submission, AUTH, UTF-8, both MIME
+      # alternatives, honest failure categorisation) and the whole challenge
+      # lifecycle in MySQL (hashed-only storage, expiry, attempt lock, single
+      # use, resend cooldown, rate limits, purpose isolation, cleanup), plus the
+      # signed provider webhook and the retry policy. No provider and no
+      # credentials are needed, and nothing fakes a delivery: a message counts
+      # as sent only when the SMTP server accepts it.
+      - name: Email delivery, verification codes and webhook
+        run: php tests/email-system.php
+

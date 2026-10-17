@@ -102,16 +102,69 @@ function sh_transition_body_attrs(array $cfg): string
 }
 
 /**
- * Tiny synchronous <head> snippet: if we arrived through a transition the
- * overlay is shown before first paint so there is no flash between pages.
- * A CSS animation removes the hold automatically if JS never finishes.
+ * The few rules the overlay needs before the stylesheet is in the picture.
+ *
+ * app.css owns the whole overlay, but this keeps the first paint correct even if
+ * the stylesheet is unavailable: the overlay covers the viewport while the page
+ * is held and is invisible (and click-through) as soon as the hold is released.
+ */
+function sh_transition_critical_css(): string
+{
+    return '.sh-pt{position:fixed;inset:0;z-index:4000;display:grid;place-items:center;padding:24px;'
+        . 'overflow:hidden;opacity:0;visibility:hidden;pointer-events:none;background:var(--sh-pt-bg,#111827)}'
+        . 'html.sh-pt-hold .sh-pt,.sh-pt.is-on{opacity:1;visibility:visible;pointer-events:auto}';
+}
+
+/**
+ * Synchronous <head> snippet — the reason the transition now runs on the very
+ * first page load instead of only after an internal link.
+ *
+ * It runs before the browser can paint anything, so it decides what the visitor
+ * sees first:
+ *
+ *   1. arriving from an internal link (single-use marker in sessionStorage):
+ *      hold the overlay that app.js will fade out — the established behaviour.
+ *   2. first visit, refresh, bookmark, direct URL, new tab: hold the overlay
+ *      too, so the configured transition is what the visitor sees, with no
+ *      unanimated page appearing first.
+ *   3. prefers-reduced-motion: no hold at all.
+ *
+ * Two independent release paths exist because a stuck overlay is worse than no
+ * transition: app.js releases it as soon as the page is ready, and this snippet
+ * arms a timer that releases it if app.js never runs. The stylesheet carries a
+ * third, CSS-only release for the case where neither script can finish.
  */
 function sh_transition_head(array $cfg): string
 {
     if (!$cfg['enabled']) { return ''; }
-    return '<script>(function(){try{var r=sessionStorage.getItem("sh-pt");if(!r)return;var o=JSON.parse(r);'
-        . 'if(o&&Date.now()-o.t<8000){document.documentElement.className+=" sh-pt-hold";}'
-        . 'else{sessionStorage.removeItem("sh-pt");}}catch(e){}})();</script>';
+    $dur = max(150, min(5000, (int)$cfg['duration']));
+    // Matches --sh-pt-out in app.css: the fade the overlay is released with.
+    $out = max(240, (int)round($dur * 0.5));
+    $grace = 3500;
+
+    $js = '(function(){var d=document.documentElement,t;'
+        . 'function take(k){try{var v=sessionStorage.getItem(k);if(v){sessionStorage.removeItem(k);return v;}}catch(e){}return null;}'
+        // A page can still be loading its very first stylesheet: never let the
+        // decision itself throw and leave the page held.
+        . 'try{var reduced=!!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches);'
+        . 'var raw=take("sh-pt"),arrived=null;'
+        . 'if(raw){try{var o=JSON.parse(raw);if(o&&Date.now()-o.t<8000){arrived=o;}}catch(e){}}'
+        . 'if(!reduced){'
+        . 'd.classList.add("sh-pt-hold");'
+        . 'if(arrived){window.__shPtArrived=arrived;}else{window.__shPtCold={t:Date.now(),d:' . $dur . '};}'
+        // Fallback release: the same class changes app.js makes, without it.
+        . 'window.__shPtFallbackRelease=function(){'
+        . 'if(!d.classList.contains("sh-pt-hold")){return;}'
+        . 'd.classList.remove("sh-pt-hold");d.classList.add("sh-pt-enter");'
+        . 'setTimeout(function(){d.classList.remove("sh-pt-enter");},' . $out . ');};'
+        . 't=setTimeout(function(){try{window.__shPtFallbackRelease();}catch(e){}},'
+        . ($dur + $grace) . ');window.__shPtFallback=t;'
+        . '}'
+        . '}catch(e){try{d.classList.remove("sh-pt-hold");}catch(e2){}}'
+        . '})();';
+
+    return '<style>' . sh_transition_critical_css() . '</style>'
+        . '<script' . sh_csp_nonce_attr() . '>' . $js . '</script>';
 }
 
 /** Full-screen overlay markup (only when enabled). */

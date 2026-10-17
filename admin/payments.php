@@ -62,7 +62,7 @@ $viewId = sh_int($_GET['id'] ?? 0);
 if ($viewId > 0) {
     $pay = sh_one(
         'SELECT p.*, o.order_number, o.customer_name, o.customer_email, o.customer_phone, o.user_id,
-                o.total AS order_total, o.status AS order_status, o.payment_status, o.has_digital,
+                o.total AS order_total, o.status AS order_status, o.payment_status,
                 a.name AS verified_by_name
          FROM payments p
          JOIN orders o ON o.id = p.order_id
@@ -147,7 +147,7 @@ if ($viewId > 0) {
             <?php else: ?>
               <p class="sh-panel__note" style="margin-bottom:12px">
                 Check the transaction ID against your <?= e((string)$pay['method_name']) ?> merchant statement before deciding.
-                Approving releases the order<?= (int)$pay['has_digital'] === 1 ? ' and delivers the digital codes' : '' ?>.
+                Approving releases the order to processing.
               </p>
               <form method="post">
                 <?= sh_csrf_field() ?>
@@ -237,7 +237,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head">
-    <h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Payments (<?= number_format($total) ?>)</h2>
+    <span class="sh-formcard__note"><?= number_format($total) ?> payment<?= $total === 1 ? '' : 's' ?> match the filters</span>
   </div>
   <div class="sh-panel__body" style="padding-bottom:0">
     <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">

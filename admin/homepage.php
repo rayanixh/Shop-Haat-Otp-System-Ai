@@ -10,19 +10,7 @@ $admin = sh_require_admin();
 require_once SH_ROOT . '/includes/admin-perms.php';
 sh_require_perm('storefront.manage');
 
-$errors = [];
 $editId = sh_int($_GET['edit'] ?? 0);
-
-/** Save an uploaded promo image, returning the stored filename or null. */
-function sh_promo_handle_upload(array $file, array &$errors, string $field = 'image'): ?string
-{
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) { return null; }
-    // Dimensions capped generously; size is limited only by the server's PHP ceiling.
-    $up = sh_upload_image($file, 'promo', 0, 6000);
-    if (!empty($up['ok'])) { return $up['file']; }
-    $errors[$field] = $up['error'] ?? 'The image could not be uploaded.';
-    return null;
-}
 
 /** Delete an uploaded promo file (never the bundled defaults). */
 function sh_promo_delete_file(?string $image): void
@@ -64,14 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/homepage.php');
     }
 
-    if ($form === 'delete_image' && $row) {
-        sh_promo_delete_file($row['image']);
-        sh_query('UPDATE promo_slides SET image = NULL WHERE id = ?', [$id]);
-        sh_log_line('promo', 'Image removed from promo #' . $id . ' by ' . $admin['email']);
-        sh_flash('success', 'Image removed. Upload a new one to replace it.');
-        sh_redirect('admin/homepage.php?edit=' . $id);
-    }
-
     if ($form === 'delete' && $row) {
         if ($row['placement'] === 'card') {
             sh_flash('error', 'The three feature cards cannot be deleted — edit them or switch them off instead.');
@@ -84,108 +64,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/homepage.php');
     }
 
-    if ($form === 'save') {
-        $placement = sh_post('placement') === 'card' ? 'card' : 'slider';
-        if ($row) { $placement = $row['placement']; }
-
-        $v = new ShValidator($_POST);
-        $v->required('title', 'Title')->maxLen('title', 160, 'Title')
-          ->maxLen('subtitle', 255, 'Description')
-          ->maxLen('button_text', 60, 'Button text')
-          ->maxLen('button_url', 255, 'Button link')
-          ->maxLen('tag', 60, 'Badge');
-        $errors = $v->errors();
-
-        $btnText = trim(sh_post('button_text'));
-        $btnUrl = trim(sh_post('button_url'));
-        if ($btnText !== '' && $btnUrl === '') {
-            $errors['button_url'] = 'Add a link for the button, or clear the button text.';
-        }
-        // Block javascript: and other script-ish schemes.
-        if ($btnUrl !== '' && preg_match('#^\s*(javascript|data|vbscript):#i', $btnUrl)) {
-            $errors['button_url'] = 'That link type is not allowed.';
-        }
-
-        $overlay = sh_int($_POST['overlay'] ?? 70);
-        if ($overlay < 0 || $overlay > 100) { $errors['overlay'] = 'Overlay must be between 0 and 100.'; }
-
-        $image = $row['image'] ?? null;
-        $uploaded = null;
-        if (isset($_FILES['image'])) {
-            $uploaded = sh_promo_handle_upload($_FILES['image'], $errors);
-            if ($uploaded !== null) { $image = $uploaded; }
-        }
-        if (!$row && $image === null && !$errors) {
-            $errors['image'] = 'Choose an image for this slide.';
-        }
-
-        if ($errors) {
-            // Do not leave an orphan file behind if validation failed afterwards.
-            if ($uploaded !== null) { sh_promo_delete_file($uploaded); }
+    // Slider timing. Both values are clamped to the band the storefront is built
+    // for (4-6 s per slide, 600-1000 ms crossfade) and re-clamped on read by
+    // sh_slider_interval_ms()/sh_slider_fade_ms(), so a bad value can never
+    // reach the homepage even by editing the settings table directly.
+    if ($form === 'slider_timing') {
+        $intervalMs = sh_int($_POST['slider_interval_ms'] ?? 0);
+        $fadeMs     = sh_int($_POST['slider_fade_ms'] ?? 0);
+        if ($intervalMs < 4000 || $intervalMs > 6000) {
+            sh_flash('error', 'Time per slide must be between 4000 and 6000 milliseconds (4-6 seconds).');
+        } elseif ($fadeMs < 600 || $fadeMs > 1000) {
+            sh_flash('error', 'Transition length must be between 600 and 1000 milliseconds.');
         } else {
-            $data = [
-                'tag'         => trim(sh_post('tag')) ?: null,
-                'title'       => trim(sh_post('title')),
-                'subtitle'    => trim(sh_post('subtitle')) ?: null,
-                'button_text' => $btnText ?: null,
-                'button_url'  => $btnUrl ?: null,
-                'image'       => $image,
-                'overlay'     => $overlay,
-                'status'      => !empty($_POST['status']) ? 1 : 0,
-            ];
-            try {
-                if ($row) {
-                    // Replacing the image? remove the old upload.
-                    if ($uploaded !== null && $row['image'] !== $uploaded) { sh_promo_delete_file($row['image']); }
-                    sh_update('promo_slides', $data, 'id = ?', [$id]);
-                    sh_flash('success', 'Saved. The homepage is updated.');
-                } else {
-                    $next = (int)sh_val('SELECT COALESCE(MAX(sort_order),0)+1 FROM promo_slides WHERE placement = ?',
-                        [$placement], 1);
-                    $data['placement'] = $placement;
-                    $data['sort_order'] = $next;
-                    sh_insert('promo_slides', $data);
-                    sh_flash('success', 'Slide added. It is now live on the homepage.');
-                }
-                sh_log_line('promo', 'Promo content saved by ' . $admin['email']);
-                sh_redirect('admin/homepage.php');
-            } catch (Throwable $e) {
-                sh_log_exception($e, 'promo-save');
-                $errors['general'] = 'The changes could not be saved. The error has been logged.';
-            }
+            sh_setting_save('slider_interval_ms', (string)$intervalMs);
+            sh_setting_save('slider_fade_ms', (string)$fadeMs);
+            sh_log_line('promo', 'Slider timing updated by ' . $admin['email']);
+            sh_flash('success', 'Slider timing saved.');
         }
-        $editId = $id;
+        sh_redirect('admin/homepage.php');
+    }
+
+    // The form now lives on admin/homepage-edit.php. Anything that still posts
+    // a save here (a tab opened before the change) is forwarded rather than
+    // dropped, and nothing from the body is stored.
+    if ($form === 'save' || $form === 'delete_image') {
+        sh_flash('info', 'The homepage image form has moved to its own page. Please submit again there.');
+        sh_redirect('admin/homepage-edit.php' . ($id > 0 ? '?edit=' . $id : '?new=slider'));
     }
 }
 
-$editing = $editId > 0 ? sh_one('SELECT * FROM promo_slides WHERE id = ? LIMIT 1', [$editId]) : null;
-$val = static function (string $k, $fb = '') use ($editing, $errors) {
-    if ($errors && isset($_POST[$k])) { return (string)$_POST[$k]; }
-    return (string)($editing[$k] ?? $fb);
-};
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    if ($editId > 0) { sh_redirect('admin/homepage-edit.php?edit=' . $editId); }
+    $newPlacement = sh_get('new');
+    if ($newPlacement === 'slider' || $newPlacement === 'card') {
+        sh_redirect('admin/homepage-edit.php?new=' . $newPlacement);
+    }
+}
 $slides = sh_all("SELECT * FROM promo_slides WHERE placement = 'slider' ORDER BY sort_order ASC, id ASC");
 $cards  = sh_all("SELECT * FROM promo_slides WHERE placement = 'card'   ORDER BY sort_order ASC, id ASC");
-$isCard = $editing && $editing['placement'] === 'card';
 
 $adminPage = 'homepage';
 $adminTitle = 'Homepage Images';
 require __DIR__ . '/_layout.php';
 ?>
-<?php if ($errors): ?>
-  <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 17) ?>
-    <div><ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div>
-<?php endif; ?>
+<?= sh_admin_header(
+    'Homepage images',
+    '',
+    sh_admin_add_button('Add slide', sh_url('admin/homepage-edit.php?new=slider'))
+    . sh_admin_add_button('Add feature card', sh_url('admin/homepage-edit.php?new=card'), '', 'sh-btn sh-btn--sm sh-btn--ghost'),
+    'layout'
+) ?>
 
 <div class="sh-promoadmin">
   <div style="min-width:0;display:flex;flex-direction:column;gap:14px">
 
     <div class="sh-panel">
       <div class="sh-panel__head">
-        <h2 class="sh-panel__title"><?= sh_icon('layout', 17) ?> Slider slides (<?= count($slides) ?>)</h2>
-        <div class="sh-panel__actions">
-          <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('admin/homepage.php?new=slider')) ?>">
-            <?= sh_icon('plus', 14) ?> Add slide</a>
-        </div>
+        <h2 class="sh-panel__title"><?= sh_icon('layout', 17) ?> Slider slides</h2>
+        <div class="sh-panel__actions"><span class="sh-formcard__note"><?= count($slides) ?> slide<?= count($slides) === 1 ? '' : 's' ?></span></div>
       </div>
       <div class="sh-panel__body" style="display:flex;flex-direction:column;gap:10px">
         <?php if (!$slides): ?>
@@ -203,8 +139,9 @@ require __DIR__ . '/_layout.php';
               <div class="sh-promorow__title"><?= e($sl['title']) ?></div>
               <div class="sh-promorow__meta">
                 <?= $sl['tag'] ? e($sl['tag']) . ' &middot; ' : '' ?>
-                <?= $sl['button_text'] ? e($sl['button_text']) . ' &rarr; ' . e($sl['button_url']) : 'No button' ?>
+                <?= e(mb_strimwidth(trim((string)$sl['subtitle']), 0, 90, '…')) ?>
               </div>
+              <div class="sh-promorow__meta">Badge, heading and text only — slides no longer show a button.</div>
               <?php if ($img === '' && trim((string)$sl['image']) !== ''): ?>
                 <div class="sh-promorow__meta" style="color:#c62828">Image file missing — re-upload it.</div>
               <?php endif; ?>
@@ -280,93 +217,50 @@ require __DIR__ . '/_layout.php';
   </div>
 
   <div class="sh-panel" style="align-self:start">
-    <div class="sh-panel__head">
-      <h2 class="sh-panel__title"><?= sh_icon($editing ? 'pencil' : 'plus', 17) ?>
-        <?= $editing ? ($isCard ? 'Edit card' : 'Edit slide') : 'New slide' ?></h2>
-    </div>
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('zap', 17) ?> Slider timing</h2></div>
     <div class="sh-panel__body">
-      <form method="post" enctype="multipart/form-data" novalidate>
+      <p class="sh-panel__note" style="margin:0 0 12px">
+        Slides move on their own with a crossfade — the outgoing image stays in place until the next one has
+        finished fading in, so a slide change never shows a blank frame or a white flash. Visitors whose browser
+        asks for reduced motion get an instant change instead, and the rotation pauses while the tab is hidden.
+      </p>
+      <form method="post" novalidate>
         <?= sh_csrf_field() ?>
-        <input type="hidden" name="form" value="save">
-        <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
-        <input type="hidden" name="placement" value="<?= e($editing['placement'] ?? 'slider') ?>">
-
+        <input type="hidden" name="form" value="slider_timing">
         <div class="sh-field">
-          <label class="sh-field__label" for="pm-img">Image<?= $editing ? '' : ' <span class="sh-field__req">*</span>' ?></label>
-          <input class="sh-input" id="pm-img" type="file" name="image" accept="image/*"
-                 data-image-preview="promo-preview">
-          <span class="sh-field__hint">
-            JPG, PNG, WebP or GIF. Up to <?= e(sh_bytes_label(sh_server_upload_limit())) ?>.
-            <?= $isCard ? 'Around 1200&times;520 px works well.' : 'Around 1600&times;600 px works well.' ?>
-            <?= $editing ? 'Leave empty to keep the current image.' : '' ?>
-          </span>
-        </div>
-
-        <?php $curImg = sh_promo_image($val('image')); ?>
-        <div class="sh-promoprev" id="promo-preview" <?= $curImg === '' ? 'hidden' : '' ?>>
-          <img src="<?= e($curImg) ?>" alt="Current image">
-          <span class="sh-promoprev__cap" data-preview-caption>Current image</span>
-        </div>
-        <?php if ($curImg === '' && trim($val('image')) !== ''): ?>
-          <p class="sh-field__hint" style="color:#c62828;margin:-4px 0 12px">
-            The saved file (<?= e($val('image')) ?>) is missing from the server. Upload a replacement.</p>
-        <?php endif; ?>
-
-        <?php if (!$isCard): ?>
-          <div class="sh-field">
-            <label class="sh-field__label" for="pm-tag">Badge</label>
-            <input class="sh-input" id="pm-tag" name="tag" maxlength="60" value="<?= e($val('tag')) ?>" placeholder="Flash Sale Live">
-            <span class="sh-field__hint">Small pill above the title. Leave blank to hide it.</span>
-          </div>
-        <?php endif; ?>
-
-        <div class="sh-field">
-          <label class="sh-field__label" for="pm-title">Title <span class="sh-field__req">*</span></label>
-          <input class="sh-input" id="pm-title" name="title" required maxlength="160" value="<?= e($val('title')) ?>">
+          <label class="sh-field__label" for="sl-interval">Time on each slide (ms)</label>
+          <input class="sh-input" id="sl-interval" name="slider_interval_ms" type="number" inputmode="numeric"
+                 min="4000" max="6000" step="100" required value="<?= (int)sh_slider_interval_ms() ?>" style="max-width:160px">
+          <p class="sh-form__hint">4000–6000 (4–6 seconds). Default 5200.</p>
         </div>
         <div class="sh-field">
-          <label class="sh-field__label" for="pm-sub">Description</label>
-          <textarea class="sh-textarea" id="pm-sub" name="subtitle" rows="2" maxlength="255"><?= e($val('subtitle')) ?></textarea>
+          <label class="sh-field__label" for="sl-fade">Crossfade length (ms)</label>
+          <input class="sh-input" id="sl-fade" name="slider_fade_ms" type="number" inputmode="numeric"
+                 min="600" max="1000" step="50" required value="<?= (int)sh_slider_fade_ms() ?>" style="max-width:160px">
+          <p class="sh-form__hint">600–1000. Default 700.</p>
         </div>
-        <div class="sh-grid2">
-          <div class="sh-field">
-            <label class="sh-field__label" for="pm-bt">Button text</label>
-            <input class="sh-input" id="pm-bt" name="button_text" maxlength="60" value="<?= e($val('button_text')) ?>">
-          </div>
-          <div class="sh-field">
-            <label class="sh-field__label" for="pm-bu">Button link</label>
-            <input class="sh-input" id="pm-bu" name="button_url" maxlength="255" value="<?= e($val('button_url')) ?>"
-                   placeholder="products.php?flash=1">
-          </div>
+        <div class="sh-actions">
+          <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('check-circle', 14) ?> Save timing</button>
         </div>
-        <div class="sh-field">
-          <label class="sh-field__label" for="pm-ov">Text readability overlay — <span data-overlay-out><?= e($val('overlay', '70')) ?></span>%</label>
-          <input id="pm-ov" type="range" name="overlay" min="0" max="100" step="5"
-                 value="<?= e($val('overlay', '70')) ?>" style="width:100%" data-overlay-range>
-          <span class="sh-field__hint">Darkens the image so the text stays readable. Higher is darker.</span>
-        </div>
-        <label class="sh-check" style="margin-bottom:12px">
-          <input type="checkbox" name="status" value="1" <?= ($errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1) ? 'checked' : '' ?>>
-          <span>Show on the homepage</span></label>
-
-        <button class="sh-btn sh-btn--block" type="submit">
-          <?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Add slide' ?></button>
-        <?php if ($editing): ?>
-          <a class="sh-btn sh-btn--ghost sh-btn--block" style="margin-top:8px" href="<?= e(sh_url('admin/homepage.php')) ?>">Cancel</a>
-        <?php endif; ?>
       </form>
+    </div>
+  </div>
 
-      <?php if ($editing && trim((string)$editing['image']) !== ''): ?>
-        <form method="post" style="margin-top:8px" data-confirm="Remove this image?">
-          <?= sh_csrf_field() ?>
-          <input type="hidden" name="form" value="delete_image">
-          <input type="hidden" name="id" value="<?= (int)$editing['id'] ?>">
-          <button class="sh-btn sh-btn--sm sh-btn--bad sh-btn--block" type="submit">
-            <?= sh_icon('trash', 14) ?> Delete current image</button>
-        </form>
-      <?php endif; ?>
-
-      <p class="sh-panel__note" style="margin-top:12px">
+  <div class="sh-panel" style="align-self:start">
+    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('info', 17) ?> How this page works</h2></div>
+    <div class="sh-panel__body">
+      <p class="sh-panel__note" style="margin:0 0 10px">
+        Slides rotate at the top of the homepage; the three feature cards sit beneath them.
+        Use <strong>Add slide</strong> or <strong>Edit</strong> to open the form on its own page —
+        the listing stays short so ordering and visibility are easy to manage on a phone.</p>
+      <ul class="sh-panel__note" style="margin:0 0 12px 16px;padding:0">
+        <li>JPG, PNG, WebP or GIF images.</li>
+        <li>Order is changed with the ↑ ↓ buttons, not by editing numbers.</li>
+        <li>Feature cards cannot be deleted — switch one off instead.</li>
+        <li>Slides show the image, badge, heading and description. Slides have no button; use a feature card when you need one.</li>
+        <li>A slide switched off is removed from the homepage — it is not loaded, not just hidden.</li>
+      </ul>
+      <p class="sh-panel__note">
         <a href="<?= e(sh_url('index.php')) ?>" target="_blank" rel="noopener">Open the homepage <?= sh_icon('external', 12) ?></a>
       </p>
     </div>

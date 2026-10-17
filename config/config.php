@@ -31,6 +31,12 @@ ini_set('error_log', SH_LOG_DIR . '/php-error.log');
 require_once SH_ROOT . '/includes/errors.php';
 sh_register_error_handlers();
 
+// Security response headers (CSP, nosniff, clickjacking, Referrer-Policy, HSTS).
+// Applied before any page logic runs so no route can forget them; the module
+// degrades to safe defaults when the database is unavailable.
+require_once SH_ROOT . '/includes/security.php';
+sh_security_headers_apply();
+
 // ---------------------------------------------------------------------------
 // Base URL detection (works in subfolders on shared hosting)
 // ---------------------------------------------------------------------------

@@ -4,12 +4,36 @@ require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/firebase.php';
+require_once SH_ROOT . '/includes/mail.php';
 require_once SH_ROOT . '/includes/reporting.php';
 
 sh_session_start();
 $user = sh_require_login();
+sh_email_schema_ensure();
 $errors = [];
-$fbOn = sh_fb_enabled() && sh_fb_applies($user);
+// Which verifier owns the "email verified" flag: the store's own emailed code
+// when SMTP is configured, Firebase when that is the only one set up. The
+// Firebase-only panels disappear once the store sends its own codes, so a
+// customer is never asked to complete two different verification systems.
+$mailVerifier = sh_email_verifier() === 'smtp_otp';
+$fbOn = !$mailVerifier && sh_fb_enabled() && sh_fb_applies($user);
+
+// Resend our own verification code (rate limits live in the challenge layer).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form'] ?? '') === 'resend_email_code') {
+    sh_csrf_require();
+    if (!sh_email_verify_enabled()) {
+        sh_flash('error', 'Email verification is not available on this store right now. No code was sent.');
+    } else {
+        $r = sh_email_send_verification_code((string)$user['email'], (int)$user['id']);
+        sh_flash(
+            !empty($r['ok']) ? 'success' : 'error',
+            !empty($r['ok'])
+                ? 'A new verification code was emailed to you.'
+                : 'The code could not be emailed: ' . (string)($r['error'] ?? 'the mail server refused the message.')
+        );
+    }
+    sh_redirect('account.php#account-verification');
+}
 
 // Resend the Firebase verification email (rate-limited).
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form'] ?? '') === 'resend_verification') {
@@ -149,7 +173,7 @@ require_once SH_ROOT . '/includes/header.php';
           <div class="sh-field">
             <label class="sh-field__label" for="ac-email">Email address <span style="color:var(--sh-muted);font-weight:400">(optional)</span></label>
             <input class="sh-input" id="ac-email" type="email" name="email" value="<?= e($form['email']) ?>">
-            <p class="sh-field__hint">Only used for order updates and digital delivery receipts.</p>
+            <p class="sh-field__hint">Only used for order updates.</p>
           </div>
           <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save changes</button>
         </form>
@@ -158,7 +182,7 @@ require_once SH_ROOT . '/includes/header.php';
         </p>
       </div>
 
-      <?php if ($fbOn): $emailOk = !empty($user['email_verified']); ?>
+      <?php if ($fbOn || $mailVerifier): $emailOk = !empty($user['email_verified']); ?>
       <div class="sh-section" id="account-verification">
         <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('shield', 18) ?> Account Verification</h2></div>
         <div class="sh-ver">
@@ -173,7 +197,17 @@ require_once SH_ROOT . '/includes/header.php';
               <span class="sh-verify-badge sh-verify-badge--no"><?= sh_icon('alert', 13) ?> Email Not Verified</span>
             <?php endif; ?>
           </div>
-          <?php if (!$emailOk): ?>
+          <?php if (!$emailOk && $mailVerifier): ?>
+            <p class="sh-ver__hint">
+              Verify your email to secure your account. We email a <?= (int)sh_email_otp_code_length() ?>-digit code
+              that expires in <?= (int)sh_email_otp_expiry_minutes() ?> minutes — the address is only marked verified after that code is entered.
+            </p>
+            <div class="sh-ver__actions">
+              <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('verify-email.php')) ?>"><?= sh_icon('mail', 14) ?> Enter verification code</a>
+              <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="resend_email_code">
+                <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= sh_icon('send', 14) ?> Send a new code</button></form>
+            </div>
+          <?php elseif (!$emailOk): ?>
             <p class="sh-ver__hint">Verify your email to secure your account. We send the link through Google Firebase — open it from your inbox, then return here.</p>
             <div class="sh-ver__actions">
               <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="resend_verification">

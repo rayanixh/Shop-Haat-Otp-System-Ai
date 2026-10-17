@@ -101,7 +101,7 @@ require __DIR__ . '/_layout.php';
               <span class="sh-tp__mark">SH</span><strong class="sh-tp__brand"><?= e(sh_setting('site_name', 'ShopHaat')) ?></strong>
               <span class="sh-tp__search"><span>Search products…</span><i></i></span>
             </div>
-            <div class="sh-tp__nav"><b>Home</b><span>Electronics</span><span>Fashion</span><span>Digital</span></div>
+            <div class="sh-tp__nav"><b>Home</b><span>Electronics</span><span>Fashion</span></div>
             <div class="sh-tp__body">
               <h4>Featured products</h4>
               <div class="sh-tp__cards">
@@ -146,7 +146,7 @@ require __DIR__ . '/_layout.php';
 </form>
 <?php endif; ?>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   var form = document.getElementById('sh-theme-form');
   var preview = document.getElementById('sh-theme-preview');

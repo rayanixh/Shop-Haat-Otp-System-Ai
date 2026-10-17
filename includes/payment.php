@@ -1,6 +1,6 @@
 <?php
 /**
- * Order lifecycle, manual payment handling, digital code delivery and the
+ * Order lifecycle, manual payment handling and the
  * modular automatic-gateway architecture.
  *
  * Everything money-related runs inside a database transaction and is
@@ -58,7 +58,7 @@ function sh_payment_method_available_for_order(array $method, bool $hasPhysical 
 {
     $type = (string)($method['type'] ?? '');
     if (!in_array($type, ['manual', 'cod', 'gateway'], true)) { return false; }
-    if ($type === 'cod') { return $hasPhysical; } // no COD for digital-only orders
+    if ($type === 'cod') { return $hasPhysical; } // COD needs at least one shipped item
     if ($type === 'manual') { return trim((string)($method['account_number'] ?? '')) !== ''; }
     $gatewayId = (int)($method['gateway_id'] ?? 0);
     $gateway = $gatewayId > 0 ? sh_gateway_by_id($gatewayId) : null;
@@ -446,10 +446,6 @@ function sh_create_order(array $input): array
             }
         }
 
-        $hasDigital = false;
-        foreach ($summary['items'] as $it) {
-            if ($it['product_type'] === 'digital') { $hasDigital = true; break; }
-        }
 
         $orderId = sh_insert('orders', $verificationFields + [
             'order_number'        => 'TMP' . bin2hex(random_bytes(6)),
@@ -473,7 +469,6 @@ function sh_create_order(array $input): array
             'discount'            => $summary['discount'],
             'delivery_fee'        => $summary['delivery'],
             'total'               => $summary['total'],
-            'has_digital'         => $hasDigital ? 1 : 0,
             'status'              => $method['type'] === 'cod' ? 'processing' : 'awaiting_payment',
             'payment_status'      => 'unpaid',
         ]);
@@ -1197,12 +1192,8 @@ function sh_approve_payment(int $paymentId, int $adminId, string $note = ''): ar
         sh_notify('payment_approved', sh_order_notify_payload($order));
         sh_notify('order_processing', sh_order_notify_payload($order));
 
-        // Digital fulfilment happens only after verified payment.
-        if ((int)$order['has_digital'] === 1) {
-            sh_deliver_digital_codes($orderId);
-        } else {
-            sh_check_low_stock_for_order($orderId);
-        }
+        // Stock alerts are raised once the payment is confirmed.
+        sh_check_low_stock_for_order($orderId);
     } catch (Throwable $e) {
         // Approval is committed even if a post-commit notification/reload has a
         // transient problem. Never report it to the admin as an undone payment.
@@ -1263,118 +1254,6 @@ function sh_reject_payment(int $paymentId, int $adminId, string $note = ''): arr
         sh_log_exception($e, 'payment-reject-post-commit');
     }
     return ['ok' => true];
-}
-
-// ---------------------------------------------------------------------------
-// Digital code delivery (never issues the same code twice)
-// ---------------------------------------------------------------------------
-function sh_deliver_digital_codes(int $orderId): array
-{
-    if ($orderId <= 0) { return ['ok' => false, 'error' => 'Order not found.']; }
-    $pdo = sh_db();
-    if ($pdo->inTransaction()) {
-        sh_log_line('code-delivery', 'Refused digital delivery while the shared PDO connection already has a transaction.');
-        return ['ok' => false, 'error' => 'Code delivery could not be recorded safely.'];
-    }
-    $delivered = [];
-    $shortfall = [];
-    $transactionStarted = false;
-    try {
-        $pdo->beginTransaction();
-        $transactionStarted = true;
-        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
-        if ($order === null) { throw new DomainException('Order not found.'); }
-        if ((string)$order['payment_status'] !== 'verified') {
-            throw new DomainException('Codes can only be delivered after the payment is verified.');
-        }
-        if ((int)$order['codes_delivered'] === 1) {
-            if (!$pdo->inTransaction()) { throw new LogicException('Code-delivery transaction ended unexpectedly before idempotent commit.'); }
-            $pdo->commit();
-            $transactionStarted = false;
-            return ['ok' => true, 'codes' => [], 'already' => true];
-        }
-
-        foreach (sh_all("SELECT * FROM order_items WHERE order_id = ? AND product_type = 'digital'", [$orderId]) as $item) {
-            $need = (int)$item['quantity'];
-            $already = (int)sh_val('SELECT COUNT(*) FROM product_codes WHERE order_item_id = ?', [(int)$item['id']], 0);
-            $need -= $already;
-            if ($need <= 0) { continue; }
-
-            // Lock available codes so a concurrent order cannot take them.
-            $rows = sh_all(
-                "SELECT id, code FROM product_codes
-                 WHERE product_id = ? AND status = 'available'
-                 ORDER BY id ASC LIMIT " . $need . ' FOR UPDATE',
-                [(int)$item['product_id']]
-            );
-            if (count($rows) < $need) {
-                $shortfall[] = $item['product_name'] . ' (needed ' . $need . ', available ' . count($rows) . ')';
-            }
-            foreach ($rows as $c) {
-                sh_query(
-                    "UPDATE product_codes SET status = 'used', order_id = ?, order_item_id = ?, delivered_at = NOW()
-                     WHERE id = ? AND status = 'available'",
-                    [$orderId, (int)$item['id'], (int)$c['id']]
-                );
-                $delivered[] = ['product' => $item['product_name'], 'code' => $c['code']];
-            }
-            // Digital stock mirrors the number of remaining codes.
-            sh_query(
-                "UPDATE products SET stock = (SELECT COUNT(*) FROM product_codes WHERE product_id = ? AND status = 'available')
-                 WHERE id = ?",
-                [(int)$item['product_id'], (int)$item['product_id']]
-            );
-        }
-
-        if ($shortfall) {
-            // Do not half-deliver: roll back and let the admin restock.
-            throw new DomainException('Not enough digital codes in stock for: ' . implode('; ', $shortfall));
-        }
-
-        $hasPhysicalItems = (int)sh_val("SELECT COUNT(*) FROM order_items WHERE order_id = ? AND product_type = 'physical'", [$orderId], 0) > 0;
-        // A mixed basket can receive its digital codes now, but its physical
-        // shipment remains in processing rather than falsely completing the
-        // entire order.
-        sh_query("UPDATE orders SET codes_delivered = 1, status = ? WHERE id = ?", [$hasPhysicalItems ? 'processing' : 'completed', $orderId]);
-        if (!$pdo->inTransaction()) { throw new LogicException('Code-delivery transaction ended unexpectedly before commit.'); }
-        $pdo->commit();
-        $transactionStarted = false;
-    } catch (Throwable $e) {
-        if ($transactionStarted && $pdo->inTransaction()) {
-            try { $pdo->rollBack(); }
-            catch (Throwable $rollbackError) { sh_log_exception($rollbackError, 'code-delivery-rollback'); }
-        }
-        sh_log_exception($e, 'code-delivery');
-        return ['ok' => false, 'error' => $e instanceof DomainException ? $e->getMessage() : 'Code delivery failed.'];
-    }
-
-    try {
-        $order = sh_order_get($orderId);
-        if ($order === null) { throw new RuntimeException('The committed order could not be reloaded.'); }
-        $payload = sh_order_notify_payload($order);
-        $payload['codes'] = $delivered;
-        sh_notify('code_delivered', $payload);
-        if ((string)$order['status'] === 'completed') {
-            sh_notify('order_completed', sh_order_notify_payload($order));
-        }
-        sh_check_low_stock_for_order($orderId);
-    } catch (Throwable $e) {
-        // The irreversible code allocation is committed; notification trouble is
-        // logged for recovery and never represented as a failed delivery action.
-        sh_log_exception($e, 'code-delivery-post-commit');
-    }
-    return ['ok' => true, 'codes' => $delivered];
-}
-
-function sh_order_codes(int $orderId): array
-{
-    return sh_all(
-        'SELECT pc.code, pc.delivered_at, oi.product_name
-         FROM product_codes pc
-         JOIN order_items oi ON oi.id = pc.order_item_id
-         WHERE pc.order_id = ? ORDER BY oi.product_name, pc.id',
-        [$orderId]
-    );
 }
 
 function sh_check_low_stock_for_order(int $orderId): void
@@ -1645,7 +1524,7 @@ function sh_gateway_settle(int $orderId, int $gatewayId, string $reference, arra
             sh_log_line('gateway-settle', 'Verified payment could not be reloaded for order ' . $orderId);
         }
         sh_notify('payment_approved', sh_order_notify_payload($order));
-        if ((int)$order['has_digital'] === 1) { sh_deliver_digital_codes($orderId); }
+        sh_check_low_stock_for_order($orderId);
     } else {
         sh_notify('payment_rejected', sh_order_notify_payload($order));
         try {

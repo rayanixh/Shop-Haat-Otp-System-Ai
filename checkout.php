@@ -18,8 +18,13 @@ $retryOrderHint = sh_int($_GET['retry_order'] ?? 0);
 $checkoutReturn = $retryOrderHint > 0 ? 'checkout.php?retry_order=' . $retryOrderHint : 'checkout.php';
 $user = sh_require_login($checkoutReturn);
 require_once SH_ROOT . '/includes/firebase.php';
-if (sh_fb_checkout_blocked($user)) {
-    sh_flash('error', 'Please verify your email address before placing an order.');
+require_once SH_ROOT . '/includes/mail.php';
+// One gate for both verifiers: the store's own emailed code when SMTP is
+// configured, Firebase when that is what the store uses. It stays inert until
+// an administrator switches the requirement on.
+$verifyBlocked = sh_email_gate_blocked($user, 'checkout');
+if ($verifyBlocked !== null) {
+    sh_flash('error', $verifyBlocked);
     sh_redirect('account.php#account-verification');
 }
 $coupon = $_SESSION['coupon_code'] ?? null;
@@ -353,7 +358,7 @@ require_once SH_ROOT . '/includes/header.php';
             <label class="sh-field__label" for="ck-email">Email address</label>
             <input class="sh-input <?= isset($errors['customer_email']) ? 'sh-input--error' : '' ?>" id="ck-email"
                    type="email" name="customer_email" value="<?= e($form['customer_email']) ?>" placeholder="you@example.com">
-            <p class="sh-field__hint">Optional — order updates<?= $summary['has_physical'] ? '' : ' and digital codes' ?> are sent to this address.</p>
+            <p class="sh-field__hint">Optional — order updates are sent to this address.</p>
           </div>
         </section>
 
@@ -398,14 +403,6 @@ require_once SH_ROOT . '/includes/header.php';
             <label class="sh-field__label" for="ck-note">Order note (optional)</label>
             <textarea class="sh-textarea" id="ck-note" name="note" maxlength="480"
                       placeholder="Delivery instructions, landmark, preferred time…"><?= e($form['note']) ?></textarea>
-          </div>
-        </section>
-        <?php else: ?>
-        <section class="sh-checkout-card">
-          <h2 class="sh-checkout-card__title"><?= sh_icon('download', 17) ?> Digital Delivery</h2>
-          <div class="sh-alert sh-alert--info" style="margin:0">
-            <?= sh_icon('info', 16) ?>
-            <span>Your order contains digital products only. Codes are delivered to your account and email as soon as the payment is verified — no shipping address is required.</span>
           </div>
         </section>
         <?php endif; ?>

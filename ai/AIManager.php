@@ -409,10 +409,7 @@ function sh_ai_normalise_seo(array $d): array
 function sh_ai_clean_html(string $html): string
 {
     $html = preg_replace('/^```(?:html)?\s*|\s*```$/m', '', trim($html)) ?? $html;
-    $clean = strip_tags($html, '<p><br><ul><ol><li><strong><em><h2><h3><h4>');
-    // Strip any attribute (blocks onclick=, style=, href=javascript: and friends).
-    $clean = preg_replace('/<([a-z0-9]+)\s+[^>]*>/i', '<$1>', $clean) ?? $clean;
-    return trim($clean);
+    return sh_sanitize_html_allowlist($html);
 }
 
 /** Write generated image bytes into the existing product upload folder. */

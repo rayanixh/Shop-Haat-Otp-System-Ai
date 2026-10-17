@@ -118,12 +118,12 @@ require dirname(__DIR__) . '/_layout.php';
   <div class="sh-panel__body">
     <form method="get" class="sh-aimodel-filter">
       <label class="sh-field__label" for="md-provider" style="margin:0">Provider</label>
-      <select class="sh-select" id="md-provider" name="provider" style="max-width:260px" onchange="this.form.submit()">
+      <select class="sh-select" id="md-provider" name="provider" style="max-width:260px" data-submit-form-on-change>
         <?php foreach ($providers as $p): ?>
           <option value="<?= (int)$p['id'] ?>" <?= (int)$p['id'] === $pid ? 'selected' : '' ?>><?= e((string)$p['name']) ?> (<?= e(sh_ai_driver_label((string)$p['driver'])) ?>)</option>
         <?php endforeach; ?>
       </select>
-      <select class="sh-select" name="cap" style="max-width:170px" onchange="this.form.submit()">
+      <select class="sh-select" name="cap" style="max-width:170px" data-submit-form-on-change>
         <option value="">All capabilities</option>
         <option value="text" <?= $fCap === 'text' ? 'selected' : '' ?>>Text output</option>
         <option value="image" <?= $fCap === 'image' ? 'selected' : '' ?>>Image output</option>

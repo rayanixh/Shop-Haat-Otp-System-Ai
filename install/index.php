@@ -24,6 +24,36 @@ if ($shState['status'] === 'ok' && sh_is_locked()) {
     sh_redirect('index.php');
 }
 
+// ---------------------------------------------------------------------------
+// Installer access decision (see includes/install-guard.php for the rationale).
+//
+// A store that was installed before resolves to "repair" mode. In that mode the
+// installer will only re-create missing tables over the SAVED connection: it
+// ignores every database credential in the request, never modifies an existing
+// administrator account, and never rewrites config/database.php. Full setup
+// (or an administrator reset) additionally requires the owner's unlock token.
+// ---------------------------------------------------------------------------
+require_once SH_ROOT_INSTALL . '/includes/install-guard.php';
+
+$shUnlockGiven = (string)($_POST['install_unlock'] ?? '');
+$shUnlockOk = $shUnlockGiven !== '' && sh_install_unlock_matches($shUnlockGiven);
+$shAccess = sh_install_access(
+    sh_is_locked(),
+    sh_db_config() !== null,
+    $shUnlockOk,
+    sh_install_unlock_configured()
+);
+// Unlock attempts are rate limited per IP so the token cannot be brute forced
+// from the open internet.
+$shUnlockThrottled = !$shUnlockOk && $shUnlockGiven !== ''
+    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    sh_log_line('install', 'Installer accessed: mode=' . $shAccess['mode']
+        . ' state=' . (string)$shState['status']
+        . ' unlock_supplied=' . ($shUnlockGiven !== '' ? 'yes' : 'no'));
+}
+
 $errors = [];
 $notice = '';
 $done = false;
@@ -31,11 +61,20 @@ $done = false;
 $form = [
     'db_host' => 'localhost', 'db_name' => '', 'db_user' => '', 'db_pass' => '',
     'site_name' => 'ShopHaat', 'admin_email' => '', 'admin_password' => '',
-    'admin_password2' => '', 'demo_data' => '1',
+    'admin_password2' => '', 'demo_data' => '0',
 ];
+// Credentials are taken exactly as typed: trimming a password silently changes
+// what the administrator chose, and a database password may legitimately begin
+// or end with a space.
+$verbatim = ['db_pass', 'admin_password', 'admin_password2'];
 foreach ($form as $k => $v) {
-    if (isset($_POST[$k]) && is_string($_POST[$k])) { $form[$k] = trim($_POST[$k]); }
+    if (!isset($_POST[$k]) || !is_string($_POST[$k])) { continue; }
+    $form[$k] = in_array($k, $verbatim, true) ? (string)$_POST[$k] : trim((string)$_POST[$k]);
 }
+// One radio control, normalised to exactly '0' or '1' so the seeding decision
+// can never be flipped by an unexpected value (including a crafted duplicate
+// field) and the rendered control always reflects what the backend will do.
+$form['demo_data'] = ($form['demo_data'] === '1') ? '1' : '0';
 
 // On a repair, pre-fill the saved connection so the operator mostly confirms what is there.
 // The stored password is deliberately NOT pre-filled into the HTML.
@@ -70,6 +109,109 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Your session expired. Please submit the form again.';
     } elseif (!$reqOk) {
         $errors[] = 'Please resolve the server requirement issues listed above before installing.';
+    } elseif (($_POST['form'] ?? '') === 'unlock') {
+        // A deliberate unlock attempt: give the owner explicit feedback instead
+        // of silently running a repair.
+        if ($shUnlockThrottled) {
+            $errors[] = 'Too many unlock attempts from this address. Please wait 15 minutes and try again.';
+        } elseif ($shUnlockOk) {
+            $notice = 'Installer unlocked. This applies to the submission you send next, so keep the page open and '
+                . 'complete the form below.';
+        } else {
+            $errors[] = 'That unlock text did not match the file on the server. '
+                . 'Check the file content — the whole line is compared, including case.';
+        }
+    } elseif ($shAccess['mode'] === 'repair') {
+        // ------------------------------------------------------------------
+        // Repair only. Nothing from the request body is used to reach the
+        // database, so an anonymous visitor cannot redirect this store at a
+        // database of their choosing or add themselves as an administrator.
+        // ------------------------------------------------------------------
+        if ($shAccess['can_repair'] === false) {
+            $errors[] = 'The installation lock file is present but config/database.php is missing, so there is '
+                . 'no saved connection to repair. Restore config/database.php from your backup, or unlock the '
+                . 'installer as the store owner to configure a new database.';
+        } else {
+            $saved = sh_db_config();
+            try {
+                // Step 1: reach the server with the SAVED credentials.
+                $pdo = sh_db_connect($saved['host'], null, $saved['user'], $saved['pass'], (int)$saved['port'], $saved['charset']);
+                // Step 2: the database named in the saved configuration may
+                // itself be gone (dropped or renamed by the host). Recreate only
+                // that name.
+                $exists = $pdo->prepare('SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?');
+                $exists->execute([$saved['name']]);
+                if ((int)$exists->fetchColumn() === 0) {
+                    $pdo->exec('CREATE DATABASE `' . str_replace('`', '', (string)$saved['name'])
+                        . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+                }
+                $pdo = sh_db_connect($saved['host'], $saved['name'], $saved['user'], $saved['pass'], (int)$saved['port'], $saved['charset']);
+
+                // Step 3: re-create anything missing. CREATE TABLE IF NOT EXISTS
+                // never drops or alters a table that already holds data.
+                foreach (sh_schema_sql() as $ddl) { $pdo->exec($ddl); }
+
+                $missing = [];
+                $chk = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?');
+                foreach (sh_schema_tables() as $t) {
+                    $chk->execute([$saved['name'], $t]);
+                    if ((int)$chk->fetchColumn() === 0) { $missing[] = $t; }
+                }
+                if ($missing) {
+                    throw new RuntimeException('Tables not created: ' . implode(', ', $missing));
+                }
+
+                // Step 4: existing administrators are never touched. Only a
+                // store that has no administrator at all may create its first
+                // one — that state can only be produced through real database
+                // access, which an anonymous visitor does not have.
+                $adminCount = (int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn();
+                if ($adminCount > 0) {
+                    $done = true;
+                    $notice = 'Database repaired against ' . $saved['name']
+                        . '. The existing administrator account was left untouched — sign in with your usual credentials.';
+                } else {
+                    // A first administrator for an empty admins table. The
+                    // submitted values are validated exactly as on a fresh
+                    // install and inserted once, never as an upsert.
+                    $v = new ShValidator($_POST);
+                    $v->required('admin_email', 'Admin email')->email('admin_email', 'Admin email')
+                      ->required('admin_password', 'Admin password')->password('admin_password', 'admin')
+                      ->matchesRaw('admin_password2', 'admin_password', 'Password confirmation');
+                    if ($v->fails()) {
+                        $errors = array_merge($errors, array_values($v->errors()));
+                        $errors[] = 'The database was repaired, but no administrator exists yet. '
+                            . 'Enter the email address and password for the first administrator account.';
+                    } else {
+                        $ins = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status) VALUES (?,?,?,?,?)');
+                        $ins->execute([
+                            'Store Administrator',
+                            trim((string)$_POST['admin_email']),
+                            password_hash((string)$_POST['admin_password'], PASSWORD_DEFAULT),
+                            'superadmin',
+                            'active',
+                        ]);
+                        sh_log_line('install', 'Repair created the first administrator account.');
+                        $done = true;
+                        $notice = 'Database repaired against ' . $saved['name'] . ' and the store administrator was created.';
+                    }
+                }
+
+                if ($done) {
+                    file_put_contents(SH_LOCK_FILE, json_encode([
+                        'installed_at' => date('c'),
+                        'version'      => '1.0.0',
+                        'php'          => PHP_VERSION,
+                        'repair'       => true,
+                    ], JSON_PRETTY_PRINT));
+                }
+            } catch (Throwable $e) {
+                sh_log_exception($e, 'install-repair');
+                $errors[] = 'The repair could not reach the saved database. Your configuration was not changed. '
+                    . 'Check that the MySQL server is running and that the database user in config/database.php '
+                    . 'still exists.';
+            }
+        }
     } else {
         $v = new ShValidator($_POST);
         $v->required('db_host', 'Database host')
@@ -77,8 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->required('db_user', 'Database username')
           ->required('site_name', 'Website name')->maxLen('site_name', 100, 'Website name')
           ->required('admin_email', 'Admin email')->email('admin_email', 'Admin email')
-          ->required('admin_password', 'Admin password')->password('admin_password')
-          ->matches('admin_password2', 'admin_password', 'Password confirmation');
+          ->required('admin_password', 'Admin password')->password('admin_password', 'admin')
+          ->matchesRaw('admin_password2', 'admin_password', 'Password confirmation');
         if ($v->fails()) { $errors = array_merge($errors, array_values($v->errors())); }
 
         $logoFile = null;
@@ -143,30 +285,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $siteUrl = rtrim(sh_site_url(), '/');
-                sh_schema_seed($pdo, [
-                    'site_name'   => $form['site_name'],
-                    'site_url'    => $siteUrl,
-                    'logo'        => $logoFile ?? '',
-                    'admin_email' => $form['admin_email'],
-                ]);
 
-                // Admin account
-                $adm = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status)
-                                      VALUES (?,?,?,?,\'active\')
-                                      ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), status = \'active\'');
-                $adm->execute([
-                    'Store Administrator',
-                    $form['admin_email'],
-                    password_hash($form['admin_password'], PASSWORD_DEFAULT),
-                    'superadmin',
-                ]);
-
-                if ($form['demo_data'] === '1') {
-                    sh_install_demo_data($pdo);
-                }
+                // One shared call creates the administrator and applies the Demo
+                // Data choice in a single transaction (see
+                // sh_install_create_store()). It refuses to run when an
+                // administrator already exists, so a repeated install can never
+                // silently reset somebody's password. Recovery is the owner
+                // unlock path, not a re-run of this form.
+                //
+                // $form['demo_data'] is normalised to exactly '0' or '1' during
+                // validation, so a crafted "demo_data=0,1" or an empty value cannot
+                // slip past this compare. The backend makes the decision from the
+                // validated value, never from the state of a control in the browser.
+                $ownerRecovery = $shAccess['mode'] === 'unlocked';
+                $shSeedReport = sh_install_create_store($pdo, $form, $logoFile ?? '', $siteUrl, $ownerRecovery);
+                sh_log_line('install', ($ownerRecovery ? 'Owner-authorized install/recovery: ' : 'Seeding: ')
+                    . json_encode($shSeedReport));
 
                 // Write config
-                $cfgContent = "<?php\n// Generated by the ShopHaat installer on " . date('Y-m-d H:i:s') . ".\n"
+                $cfgContent = "<?php
+// Note: the setup wizard deliberately does NOT render the Page Transition. It
+// runs before the store has any settings to read (the transition is stored in
+// the settings table) and it must stay usable with no JavaScript at all.
+?>
+<?php\n// Generated by the ShopHaat installer on " . date('Y-m-d H:i:s') . ".\n"
                     . "// Do not share this file. Keep it outside version control.\nreturn "
                     . var_export([
                         'host'    => $form['db_host'],
@@ -211,7 +353,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], JSON_PRETTY_PRINT));
 
                 $done = true;
-                $notice = 'Installation completed successfully.';
+                $notice = !empty($shSeedReport['recovered'])
+                    ? 'The existing administrator password was reset through the owner unlock.'
+                    : 'Installation completed successfully.';
             } catch (Throwable $e) {
                 sh_log_exception($e, 'install');
                 $errors[] = 'Installation failed: ' . $e->getMessage();
@@ -269,24 +413,26 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 .pw-live--ok{color:#1a7f4b}
 .pw-live--bad{color:#c62828}
 .hint code{background:#f1f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
-.steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;font-size:12px;color:var(--muted);justify-content:center}
-.steps b{color:var(--ink)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="head">
     <div class="mark"><span>SH</span> ShopHaat</div>
-    <h1><?= $done ? 'Installation complete' : 'Install your store' ?></h1>
-    <p><?= $done ? 'Your marketplace is ready to use.' : 'Enter your cPanel MySQL details and create the admin account.' ?></p>
+    <h1><?= $done ? 'Installation complete' : ($shAccess['mode'] === 'repair' ? 'Repair this store' : 'Install your store') ?></h1>
+    <p><?php
+        if ($done) { echo 'Your marketplace is ready to use.'; }
+        elseif ($shAccess['mode'] === 'repair') { echo 'Re-create the missing database tables over the saved connection.'; }
+        else { echo 'Enter your cPanel MySQL details and create the admin account.'; }
+    ?></p>
   </div>
 
 <?php if ($done): ?>
   <div class="card done">
     <h2>Setup finished</h2>
-    <p>The database tables were created and verified, the administrator account is active and the installation lock file has been written. The installer will not appear again.</p>
+    <p>The installer is locked and will not run again.</p>
     <div class="alert alert--bad" style="text-align:left">
-      <strong>Final security step:</strong> delete the <code>/install</code> folder from your hosting account now that setup is complete.
+      <strong>Delete the <code>/install</code> folder</strong> from your hosting account now.
     </div>
     <div class="actions">
       <a class="a1" href="<?= e(sh_url('index.php')) ?>">Open the website</a>
@@ -294,8 +440,6 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
     </div>
   </div>
 <?php else: ?>
-  <div class="steps"><b>1.</b> Requirements <span>›</span> <b>2.</b> Database <span>›</span> <b>3.</b> Admin account <span>›</span> <b>4.</b> Finish</div>
-
   <?php if ($errors): ?>
     <div class="alert alert--bad"><strong>Installation could not continue:</strong>
       <ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul>
@@ -310,20 +454,89 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
     </ul>
   </div>
 
+<?php if ($shAccess['mode'] === 'repair'): ?>
+  <div class="card">
+    <h2>Restricted: this store is already installed</h2>
+    <p style="margin:0 0 14px;font-size:13.5px">
+      Repair re-creates missing tables over the saved connection in <code>config/database.php</code>.
+      Existing tables, orders and administrator accounts are left as they are, and no credentials are accepted here.
+    </p>
+    <?php if ($shAccess['can_repair']): ?>
+      <form method="post" novalidate>
+        <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+        <input type="hidden" name="form" value="repair">
+        <div class="grid" style="margin-bottom:14px">
+          <div>
+            <label for="admin_email">First administrator email (only used if no administrator exists)</label>
+            <input class="f-in" id="admin_email" name="admin_email" type="email" value="<?= e($form['admin_email']) ?>">
+          </div>
+          <div>
+            <label for="admin_password">Password for that account</label>
+            <input class="f-in" id="admin_password" name="admin_password" type="password"
+                   minlength="<?= (int)sh_password_min_length('admin') ?>" maxlength="200"
+                   autocomplete="new-password">
+          </div>
+          <div>
+            <label for="admin_password2">Confirm password</label>
+            <input class="f-in" id="admin_password2" name="admin_password2" type="password" autocomplete="new-password">
+          </div>
+        </div>
+        <p class="hint">At least <?= (int)sh_password_min_length('admin') ?> characters. Only used if no administrator exists.</p>
+        <button class="btn" type="submit" <?= $reqOk ? '' : 'disabled' ?>>Repair database tables</button>
+      </form>
+    <?php else: ?>
+      <div class="alert alert--bad" style="margin-bottom:0">
+        <strong>config/database.php is missing</strong>, so there is no saved connection to repair.
+        Restore that file from your backup and reload this page.
+      </div>
+    <?php endif; ?>
+  </div>
+
+  <div class="card">
+    <h2>Store owner: unlock full setup</h2>
+    <p style="margin:0 0 10px;font-size:13.5px">
+      Re-installing or resetting the administrator password requires proof that you control the server files.
+    </p>
+    <ol style="margin:0 0 14px;padding-left:20px;font-size:13px;color:#3a4152">
+      <?php foreach (sh_install_unlock_instructions() as $line): ?><li style="margin-bottom:6px"><?= $line ?></li><?php endforeach; ?>
+    </ol>
+    <?php if (!$shAccess['unlock_configured']): ?>
+      <div class="alert alert--bad">
+        No unlock file was found. Create it as described above, then reload this page.
+      </div>
+    <?php endif; ?>
+    <form method="post" novalidate>
+      <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+      <input type="hidden" name="form" value="unlock">
+      <label for="install_unlock">Unlock text (contents of the file)</label>
+      <input class="f-in" id="install_unlock" name="install_unlock" autocomplete="off" spellcheck="false"
+             placeholder="Paste the exact line you saved">
+      <button class="btn" type="submit" style="margin-top:12px">Unlock the installer</button>
+    </form>
+  </div>
+<?php else: ?>
+  <?php if ($shAccess['mode'] === 'unlocked'): ?>
+    <div class="alert alert--ok">
+      <strong>Owner unlock accepted.</strong> Changes made here affect an installed store. The unlock text is
+      required again for the next submission, so finish in this same page.
+    </div>
+  <?php endif; ?>
   <form method="post" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
+    <?php if ($shAccess['mode'] === 'unlocked'): ?>
+      <input type="hidden" name="install_unlock" value="<?= e($shUnlockGiven) ?>">
+    <?php endif; ?>
     <div class="card">
       <h2>Database connection</h2>
       <div class="grid">
         <div>
           <label for="db_host">Database host</label>
           <input class="f-in" id="db_host" name="db_host" value="<?= e($form['db_host']) ?>" required>
-          <p class="hint">Usually <code>localhost</code> on cPanel.</p>
+          <p class="hint">Usually <code>localhost</code>.</p>
         </div>
         <div>
           <label for="db_name">Database name</label>
           <input class="f-in" id="db_name" name="db_name" value="<?= e($form['db_name']) ?>" required>
-          <p class="hint">e.g. <code>cpuser_shop</code></p>
         </div>
         <div>
           <label for="db_user">Database username</label>
@@ -349,10 +562,18 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
           <p class="hint">PNG/JPG/WEBP, max 1 MB.</p>
         </div>
       </div>
-      <div style="margin-top:14px" class="check">
-        <input type="checkbox" id="demo_data" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
-        <label for="demo_data" style="font-weight:500;margin:0">Install starter catalogue (categories, brands, sample products and banners). Recommended for a first install — you can delete these items later from the admin panel.</label>
-      </div>
+      <fieldset style="margin:16px 0 0;padding:0;border:0">
+        <legend style="font-size:13px;font-weight:600;margin-bottom:6px">Install Demo Data</legend>
+        <div class="check">
+          <input type="radio" id="demo_on" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
+          <label for="demo_on" style="font-weight:500;margin:0">ON</label>
+        </div>
+        <div class="check" style="margin-top:6px">
+          <input type="radio" id="demo_off" name="demo_data" value="0" <?= $form['demo_data'] === '1' ? '' : 'checked' ?>>
+          <label for="demo_off" style="font-weight:500;margin:0">OFF</label>
+        </div>
+        <p class="hint" style="margin:6px 0 0 22px">ON adds sample products, categories and homepage content. OFF starts empty.</p>
+      </fieldset>
     </div>
 
     <div class="card">
@@ -365,13 +586,9 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
         <div>
           <label for="admin_password">Admin password</label>
           <input class="f-in" id="admin_password" name="admin_password" type="password" required
-                 minlength="8" autocomplete="new-password"
-                 aria-describedby="pw-rules" placeholder="e.g. Shop2024pass">
-          <p class="hint" id="pw-rules">
-            <strong>Must be at least 8 characters and contain both a letter and a number.</strong><br>
-            Good examples: <code>Shop2024pass</code> or <code>MyStore99</code><br>
-            Symbols are allowed. Letters and digits from any language are accepted.
-          </p>
+                 minlength="<?= (int)sh_password_min_length('admin') ?>" maxlength="200"
+                 autocomplete="new-password" aria-describedby="pw-rules">
+          <p class="hint" id="pw-rules">At least <?= (int)sh_password_min_length('admin') ?> characters. Any characters you like.</p>
           <p class="pw-live" id="pw-live" hidden></p>
         </div>
         <div>
@@ -383,36 +600,31 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 
     <button class="btn" type="submit" <?= $reqOk ? '' : 'disabled' ?>>Install ShopHaat</button>
   </form>
+<?php endif; // end restricted-mode / full-form branch ?>
 <?php endif; ?>
 </div>
 
-<script>
+<script<?= sh_csp_nonce_attr() ?>>
 (function () {
   var pw = document.getElementById('admin_password');
   var pw2 = document.getElementById('admin_password2');
   var live = document.getElementById('pw-live');
   if (!pw || !live) { return; }
 
+  var MIN = <?= (int)sh_password_min_length('admin') ?>;
+
   function evaluate() {
     var v = pw.value;
     if (v === '') { live.hidden = true; pw.setCustomValidity(''); return; }
-    var longEnough = v.length >= 8;
-    var hasLetter = /\p{L}/u.test(v);
-    var hasNumber = /\p{N}/u.test(v);
-    var missing = [];
-    if (!longEnough) { missing.push('8 characters'); }
-    if (!hasLetter) { missing.push('a letter'); }
-    if (!hasNumber) { missing.push('a number'); }
-
     live.hidden = false;
-    if (missing.length === 0) {
-      live.textContent = 'Password meets the requirements.';
+    if (v.length >= MIN) {
+      live.textContent = 'Password length is fine.';
       live.className = 'pw-live pw-live--ok';
       pw.setCustomValidity('');
     } else {
-      live.textContent = 'Still needs: ' + missing.join(', ') + '.';
+      live.textContent = 'At least ' + MIN + ' characters (' + (MIN - v.length) + ' more).';
       live.className = 'pw-live pw-live--bad';
-      pw.setCustomValidity('Password needs ' + missing.join(', ') + '.');
+      pw.setCustomValidity('Password must be at least ' + MIN + ' characters.');
     }
   }
   pw.addEventListener('input', evaluate);

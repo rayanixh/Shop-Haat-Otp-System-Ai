@@ -210,11 +210,11 @@ require __DIR__ . '/_layout.php';
 
     <div class="sh-field">
       <label class="sh-field__label" for="wa-url">Callback URL</label>
-      <input class="sh-input" id="wa-url" value="<?= e(sh_wa_webhook_url()) ?>" readonly onclick="this.select()">
+      <input class="sh-input" id="wa-url" value="<?= e(sh_wa_webhook_url()) ?>" readonly data-select-on-click>
     </div>
     <div class="sh-field">
       <label class="sh-field__label" for="wa-vt">Verify token</label>
-      <input class="sh-input" id="wa-vt" value="<?= e($waCfg['verify_token']) ?>" readonly onclick="this.select()"
+      <input class="sh-input" id="wa-vt" value="<?= e($waCfg['verify_token']) ?>" readonly data-select-on-click
              placeholder="Not set — save one above or generate it">
     </div>
     <form method="post" style="margin-bottom:14px"
