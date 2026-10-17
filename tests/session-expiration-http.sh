@@ -984,94 +984,28 @@ php "$TMP_DIR/slider.php" cleanup >/dev/null
 echo "::notice title=Homepage slider::slides=${slide_count} dots=${dot_count} interval=${interval}ms fade=${fade}ms disabled=absent noimg=plate"
 
 # ---------------------------------------------------------------------------
-# 10b. Demo-data review screen: it must load for an operator, list the sample
-#      records it thinks it found, refuse to remove anything without the typed
-#      confirmation phrase, and then remove exactly those sample records while
-#      leaving every other product alone.
+# 10b. The sample-content review screen is gone: no page, no menu entry, and
+#      nothing behind the old route that could still touch records.
 # ---------------------------------------------------------------------------
-cat > "$TMP_DIR/demo-probe.php" <<'PHP'
-<?php
-$cfg = require getcwd() . '/config/database.php';
-try {
-    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass'],
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-} catch (Throwable $e) { fwrite(STDERR, 'demo probe: ' . $e->getMessage() . "\n"); exit(1); }
-// A row that carries one of the starter catalogue's own slugs, which is exactly
-// what the review screen matches on.
-$slug = 'voltaro-pulse-60-wireless-headphones';
-$cmd = $argv[1] ?? '';
-try {
-    if ($cmd === 'seed') {
-        $pdo->prepare('DELETE FROM products WHERE slug = ?')->execute([$slug]);
-        $pdo->prepare('INSERT INTO products (name, slug, sku, price, stock, product_type, status)
-                       VALUES (?,?,?,?,?,?,1)')->execute(['Voltaro Pulse 60 Wireless Headphones', $slug, 'DEMO-PROBE', 100.00, 5, 'physical']);
-        echo (string)$pdo->lastInsertId();
-    } elseif ($cmd === 'count') {
-        $st = $pdo->prepare('SELECT COUNT(*) FROM products WHERE slug = ?');
-        $st->execute([$slug]);
-        echo (string)$st->fetchColumn();
-    } elseif ($cmd === 'cleanup') {
-        $pdo->prepare('DELETE FROM products WHERE slug = ?')->execute([$slug]);
-        echo 'ok';
-    } else {
-        echo 'unknown';
-    }
-} catch (Throwable $e) {
-    fwrite(STDERR, 'demo probe: ' . $e->getMessage() . "\n");
-    exit(1);
+assert_not_contains() {
+  local haystack="$1" needle="$2" message="$3"
+  [[ "$haystack" != *"$needle"* ]] || fail "$message"
 }
-PHP
 
-demo_probe_id="$(php "$TMP_DIR/demo-probe.php" seed)" || fail 'the demo-data probe product could not be created'
-[[ -n "$demo_probe_id" ]] || fail 'the demo-data probe product was not inserted'
+admin_nav="$(fetch_page '/admin/dashboard.php')"
+assert_not_contains "$admin_nav" 'Demo Data Review' 'the admin navigation still offers the removed demo-data review'
+assert_not_contains "$admin_nav" 'admin/demo-data.php' 'the admin navigation still links to the removed demo-data page'
 
-demo_page="$(fetch_page '/admin/demo-data.php')"
-assert_contains "$demo_page" 'Demo data review' 'the demo-data review screen did not render'
-assert_contains "$demo_page" 'Voltaro Pulse 60 Wireless Headphones' 'the review screen did not list the sample product it matched'
-assert_contains "$demo_page" 'name="confirm_phrase"' 'the review screen has no confirmation field'
-demo_token="$(printf '%s' "$demo_page" | csrf_from_html)"
-[[ -n "$demo_token" ]] || fail 'the review screen did not provide a CSRF token'
-demo_phrase="$(printf '%s' "$demo_page" | grep -o 'Type <code>[^<]*</code>' | head -n 1 | sed 's/.*<code>//; s|</code>.*||')"
-[[ -n "$demo_phrase" ]] || fail 'the review screen does not state the confirmation phrase it wants'
-
-# A wrong phrase (and no acknowledgement) must change nothing at all.
-curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-  -X POST --data-urlencode "csrf_token=${demo_token}" \
-  --data-urlencode 'form=cleanup' --data-urlencode 'confirm_phrase=delete it' --data-urlencode 'acknowledge=1' \
-  "${BASE}/admin/demo-data.php"
-demo_refused="$(fetch_page '/admin/demo-data.php')"
-assert_contains "$demo_refused" 'Nothing was removed' 'the review screen did not refuse an unconfirmed removal'
-[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '1' ]] || fail 'an unconfirmed removal deleted a product'
-# Re-read the token from the freshly rendered screen so this section keeps
-# working if the application ever rotates the token per submission.
-demo_token="$(printf '%s' "$demo_refused" | csrf_from_html)"
-[[ -n "$demo_token" ]] || fail 'the review screen stopped providing a CSRF token'
-
-# Ticking the box but not typing the phrase must change nothing either.
-curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-  -X POST --data-urlencode "csrf_token=${demo_token}" \
-  --data-urlencode 'form=cleanup' --data-urlencode "confirm_phrase=${demo_phrase}" \
-  "${BASE}/admin/demo-data.php"
-[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '1' ]] || fail 'a removal without the acknowledgement ran anyway'
-
-# The full, explicit confirmation removes the sample row ...
-curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-  -X POST --data-urlencode "csrf_token=${demo_token}" \
-  --data-urlencode 'form=cleanup' --data-urlencode "confirm_phrase=${demo_phrase}" --data-urlencode 'acknowledge=1' \
-  "${BASE}/admin/demo-data.php"
-[[ "$(php "$TMP_DIR/demo-probe.php" count)" == '0' ]] || fail 'the confirmed removal did not delete the sample product'
-demo_done="$(fetch_page '/admin/demo-data.php')"
-assert_contains "$demo_done" 'No sample content found' 'the review screen still reports sample content after the confirmed removal'
-
-# ... and the products that are not part of the catalogue are still there.
-real_products="$(php -r '
-$cfg = require getcwd() . "/config/database.php";
-try {
-    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
-    echo (string)$pdo->query("SELECT COUNT(*) FROM products WHERE slug NOT LIKE \"voltaro%\"")->fetchColumn();
-} catch (Throwable $e) { echo "0"; }' 2>/dev/null || true)"
-[[ "${real_products:-0}" -ge 1 ]] || fail 'the demo-data cleanup removed products that were not sample content'
-echo "::notice title=Demo data review::refused=wrong-phrase,no-ack | removed=sample-product | real products kept=${real_products}"
+# The router may answer a deleted route with the storefront rather than a 404, so
+# the assertion is about content: nothing of the removed review screen is served.
+demo_status="$(curl -sS -o "$TMP_DIR/demo-page.html" -w '%{http_code}' \
+  -A "$DESKTOP_UA" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/admin/demo-data.php" || true)"
+demo_body="$(cat "$TMP_DIR/demo-page.html" 2>/dev/null || true)"
+assert_not_contains "$demo_body" 'Demo data review' 'the removed demo-data review screen is still being served'
+assert_not_contains "$demo_body" 'confirm_phrase' 'a removed demo-data form is still being served'
+assert_not_contains "$demo_body" 'Delete the sample content' 'the removed cleanup action is still reachable'
+rm -f "$TMP_DIR/demo-page.html"
+echo "::notice title=Demo data review removed::route=${demo_status} nav=clean"
 
 php "$TMP_DIR/admin-cleanup.php"
 echo 'Admin panel HTTP integration passed'

@@ -240,10 +240,15 @@ require_once SH_ROOT . '/includes/header.php';
 
       <?php if (!$result['items']): ?>
         <div class="sh-empty">
-          <span class="sh-empty__icon"><?= sh_icon('search', 26) ?></span>
+          <span class="sh-empty__icon"><?= sh_icon($hasFilters ? 'search' : 'box', 26) ?></span>
+          <?php if ($hasFilters): ?>
           <h2 class="sh-empty__title">No products found</h2>
           <p class="sh-empty__text">We could not find anything matching those filters. Try widening your price range or clearing some filters.</p>
           <a class="sh-btn" href="<?= e(sh_url('products.php')) ?>">Browse all products</a>
+          <?php else: ?>
+          <h2 class="sh-empty__title">No products yet</h2>
+          <p class="sh-empty__text">New items will appear here soon.</p>
+          <?php endif; ?>
         </div>
       <?php else: ?>
         <div class="sh-product-grid sh-product-grid--5">

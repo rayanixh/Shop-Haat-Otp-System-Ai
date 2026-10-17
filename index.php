@@ -36,6 +36,32 @@ foreach ($cats as $c) {
     if (count($showcase) >= 3) { break; }
 }
 $more = sh_product_search(['sort' => 'popular', 'per_page' => 18, 'page' => 1]);
+$shSlides = sh_promo_items('slider');
+$shCards  = sh_promo_items('card');
+
+// The coupon strip is only real if that coupon exists on this store. A fresh
+// install has no coupons, so it must not advertise one that would be rejected
+// at checkout.
+$shIntroCoupon = null;
+try {
+    $shIntroCoupon = sh_one(
+        "SELECT code, type, value FROM coupons
+         WHERE code = 'WELCOME10' AND status = 1
+           AND (expires_at IS NULL OR expires_at > NOW())
+           AND (usage_limit = 0 OR used_count < usage_limit) LIMIT 1"
+    );
+} catch (Throwable $e) {
+    $shIntroCoupon = null;
+}
+if ($shIntroCoupon !== null) {
+    // Only advertise the offer on products, where a coupon box exists; with an
+    // empty catalogue the link would lead to a page that cannot use it.
+    $shIntroCoupon = (bool)$more['items'] ? $shIntroCoupon : null;
+}
+
+// True only when the owner has published something. An empty store then shows a
+// short, calm empty state instead of a page of empty sections.
+$shHasContent = (bool)($cats || $flash || $featured || $best || $newest || $more['items'] || $shSlides || $shCards);
 
 require_once SH_ROOT . '/includes/header.php';
 ?>
@@ -43,6 +69,7 @@ require_once SH_ROOT . '/includes/header.php';
 <div class="sh-wrap">
 
   <!-- Marketplace promotional area -->
+  <?php if ($cats || $shSlides || $shCards): ?>
   <section class="sh-promo" aria-label="Promotions">
     <nav class="sh-promo__panel" aria-label="Category shortcuts">
       <?php foreach (array_slice($cats, 0, 10) as $c): ?>
@@ -56,10 +83,9 @@ require_once SH_ROOT . '/includes/header.php';
     // The hero slider markup (and its no-CTA, stacked-crossfade rules) lives in
     // includes/functions.php so the storefront and the behaviour harness render
     // exactly the same string.
-    echo sh_slider_markup(sh_promo_items('slider'));
+    echo sh_slider_markup($shSlides);
 ?>
 
-<?php $shCards = sh_promo_items('card'); ?>
     <?php if ($shCards): ?>
     <div class="sh-promo__side">
       <?php foreach ($shCards as $c): $img = sh_promo_image($c['image']); ?>
@@ -81,6 +107,7 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 
   <!-- Popular categories -->
   <?php if ($cats): ?>
@@ -157,19 +184,25 @@ require_once SH_ROOT . '/includes/header.php';
   </section>
   <?php endforeach; ?>
 
-  <!-- Promotional banner strip -->
-  <section class="sh-banner" aria-label="Offers">
+  <!-- Promotional banner strip. An empty store has nothing to advertise. -->
+  <?php if ($shHasContent): ?>
+  <section class="sh-banner<?= $shIntroCoupon === null ? ' sh-banner--single' : '' ?>" aria-label="Offers">
     <div class="sh-banner__item" style="background:linear-gradient(135deg,#1d4ed8,#38bdf8)">
       <p class="sh-banner__title">Free delivery over <?= e(sh_money(sh_setting('free_delivery_over', '3000'))) ?></p>
       <p class="sh-banner__text">On eligible orders inside the city</p>
       <a class="sh-banner__link" href="<?= e(sh_url('products.php')) ?>">Shop now <?= sh_icon('chevron-right', 13) ?></a>
     </div>
+    <?php if ($shIntroCoupon !== null): ?>
     <div class="sh-banner__item" style="background:linear-gradient(135deg,#b45309,#fbbf24)">
-      <p class="sh-banner__title">Save with coupon WELCOME10</p>
-      <p class="sh-banner__text">10% off your first qualifying order</p>
-      <a class="sh-banner__link" href="<?= e(sh_url('products.php?discount=10')) ?>">Grab the deal <?= sh_icon('chevron-right', 13) ?></a>
+      <p class="sh-banner__title">Save with coupon <?= e($shIntroCoupon['code']) ?></p>
+      <p class="sh-banner__text"><?= $shIntroCoupon['type'] === 'percent'
+            ? e(rtrim(rtrim(number_format((float)$shIntroCoupon['value'], 2, '.', ''), '0'), '.')) . '% off'
+            : e(sh_money((float)$shIntroCoupon['value'])) . ' off' ?> your order</p>
+      <a class="sh-banner__link" href="<?= e(sh_url('products.php')) ?>">Shop now <?= sh_icon('chevron-right', 13) ?></a>
     </div>
+    <?php endif; ?>
   </section>
+  <?php endif; ?>
 
   <!-- New arrivals -->
   <?php if ($newest): ?>
@@ -197,7 +230,20 @@ require_once SH_ROOT . '/includes/header.php';
   </section>
   <?php endif; ?>
 
-  <!-- Trust / service -->
+  <?php if (!$shHasContent): ?>
+  <!-- Genuinely empty store: a short, factual state instead of empty sections. -->
+  <section class="sh-section" aria-labelledby="sh-empty-h">
+    <div class="sh-empty">
+      <span class="sh-empty__icon"><?= sh_icon('box', 26) ?></span>
+      <h2 class="sh-empty__title" id="sh-empty-h">No products yet</h2>
+      <p class="sh-empty__text">New items will appear here soon.</p>
+    </div>
+  </section>
+  <?php endif; ?>
+
+  <!-- Trust / service. These are the store's own promises; with no catalogue
+       yet there is nothing to promise them for. -->
+  <?php if ($shHasContent): ?>
   <section class="sh-trust" aria-label="Our services">
     <div class="sh-trust__item">
       <span class="sh-trust__icon"><?= sh_icon('truck', 20) ?></span>
@@ -216,6 +262,7 @@ require_once SH_ROOT . '/includes/header.php';
       <div><p class="sh-trust__title">Support every day</p><p class="sh-trust__text">Chat, phone and email</p></div>
     </div>
   </section>
+  <?php endif; ?>
 
 </div>
 

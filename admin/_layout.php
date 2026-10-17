@@ -86,7 +86,6 @@ $nav = [
         ['email',        'email.php',            'mail',     'SMTP / Email', 0, 'integrations.manage'],
         ['email_log',    'email-log.php',        'list',     'Email Delivery Log', 0, 'integrations.manage'],
         ['notifications','notifications.php',    'bell',     'Notification Channels', 0, 'integrations.manage'],
-        ['demo_data',    'demo-data.php',        'box',      'Demo Data Review', 0, 'catalog.manage'],
         ['google_login', 'google-login.php',     'log-in',   'Google Login', 0, '@superadmin'],
     ],
     'Security' => [

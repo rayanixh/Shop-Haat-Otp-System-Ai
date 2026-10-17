@@ -601,11 +601,36 @@ function sh_courier_schema_sql(): array
 }
 
 /**
+ * Record whether this store was given the built-in courier accounts.
+ *
+ * The registry is sample content. Writing the decision means no later request
+ * can decide to fill an empty list: only an install that chose Demo Data = ON
+ * gets the entries, and a store that predates this marker gets them once during
+ * its upgrade.
+ */
+function sh_courier_state_save(PDO $pdo, string $state): void
+{
+    $ok = $state === 'installed' ? 'installed' : 'none';
+    $st = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1');
+    $st->execute(['courier_registry_state']);
+    if ($st->fetchColumn() === false) {
+        $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)')
+            ->execute(['courier_registry_state', $ok]);
+    }
+}
+
+/**
  * Default courier registry. Every entry is added disabled so nothing is
  * "active" until the merchant explicitly enables it and supplies credentials.
+ *
+ * Called only for an install that chose Demo Data = ON (see
+ * sh_install_seed_all()) and once for a pre-registry upgrade.
  */
 function sh_courier_seed(PDO $pdo): void
 {
+    // Courier accounts are business records, so an empty store must not claim
+    // to have accounts with any courier. Every row starts disabled until the
+    // owner supplies real credentials.
     $rows = [
         ['Steadfast',              'steadfast', 'steadfast', 'On-demand nationwide courier. Merchant API uses Api-Key + Secret-Key headers.'],
         ['Pathao Courier',         'pathao',    'pathao',    'Pathao merchant delivery. API integration registered — credentials pending.'],
@@ -1055,31 +1080,127 @@ function sh_seed_essential_starters(PDO $pdo): void
  */
 function sh_install_seed_all(PDO $pdo, array $opts, bool $withDemo): array
 {
-    sh_schema_seed($pdo, $opts);
-    sh_seed_essential_starters($pdo);
+    // One transaction for the whole decision: if any part of the seed fails the
+    // store is left without a half-written catalogue, and the installer can be
+    // run again. DDL has already run (and auto-committed) before this point.
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) { $pdo->beginTransaction(); }
+    try {
+        sh_schema_seed($pdo, $opts);
+        sh_seed_essential_starters($pdo);
 
-    if ($withDemo) {
-        return ['demo' => true, 'report' => sh_install_demo_data($pdo, true)];
-    }
+        if ($withDemo) {
+            // Courier accounts are registered business relationships, not
+            // structure: they are part of the sample dataset, so a demo-OFF
+            // install starts with an empty courier list for the owner to fill in.
+            sh_courier_seed($pdo);
+            sh_courier_state_save($pdo, 'installed');
+            $report = sh_install_demo_data($pdo, true);
+            if ($ownTransaction) { $pdo->commit(); }
+            return ['demo' => true, 'report' => $report];
+        }
 
-    $st = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1');
-    $st->execute(['demo_data_state']);
-    if ($st->fetchColumn() === false) {
-        $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)')
-            ->execute(['demo_data_state', 'none']);
+        $st = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1');
+        $st->execute(['demo_data_state']);
+        if ($st->fetchColumn() === false) {
+            $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)')
+                ->execute(['demo_data_state', 'none']);
+        }
+        sh_courier_state_save($pdo, 'none');
+        if ($ownTransaction) { $pdo->commit(); }
+        return ['demo' => false, 'report' => []];
+    } catch (Throwable $e) {
+        if ($ownTransaction && $pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
     }
-    return ['demo' => false, 'report' => []];
+}
+
+/**
+ * Create the store: the first administrator account, plus the seeding decision.
+ *
+ * This is the only place a fresh install writes an administrator, and it is a
+ * function so the installer and the MySQL test suite exercise the very same
+ * code. Inside one transaction it:
+ *
+ *   - refuses to run when the database already holds an administrator, so a
+ *     repeated install can never reset somebody's password;
+ *   - hashes the password exactly as submitted (never trimmed, never compared
+ *     against a sample) with password_hash();
+ *   - runs sh_install_seed_all() with the validated Demo Data choice.
+ *
+ * With $ownerRecovery (set only after the installer accepted the owner unlock
+ * file) an existing account is not duplicated: the one row whose address was
+ * submitted gets the new password and is activated. Nothing else is changed and
+ * no sample content is added, so the authorised recovery path cannot reshape a
+ * live store.
+ *
+ * @param array{site_name?:string,admin_email?:string,admin_password?:string,demo_data?:string} $form
+ * @return array<string,mixed> the seeding report
+ * @throws RuntimeException when an administrator exists and recovery was not authorised
+ */
+function sh_install_create_store(PDO $pdo, array $form, string $logo = '', string $siteUrl = '', bool $ownerRecovery = false): array
+{
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) { $pdo->beginTransaction(); }
+    try {
+        $existing = (int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn();
+        if ($existing > 0) {
+            if (!$ownerRecovery) {
+                throw new RuntimeException(
+                    'This database already contains an administrator account, so no new one was created '
+                    . 'and its password was left unchanged. Sign in with the existing account. If you have '
+                    . 'lost that password, unlock the installer as the store owner and run the full setup '
+                    . 'again to reset that one account.'
+                );
+            }
+            // Authorised recovery: exactly one row, matched by the submitted
+            // address. No other administrator is read or written.
+            $find = $pdo->prepare('SELECT id FROM admins WHERE email = ? LIMIT 1');
+            $find->execute([(string)($form['admin_email'] ?? '')]);
+            $id = (int)$find->fetchColumn();
+            if ($id === 0) {
+                throw new RuntimeException(
+                    'No administrator account uses that email address, so no password was changed. '
+                    . 'Enter the address of an existing administrator.'
+                );
+            }
+            $upd = $pdo->prepare("UPDATE admins SET password_hash = ?, status = 'active' WHERE id = ?");
+            $upd->execute([password_hash((string)($form['admin_password'] ?? ''), PASSWORD_DEFAULT), $id]);
+            if ($ownTransaction) { $pdo->commit(); }
+            return ['demo' => false, 'report' => [], 'recovered' => true];
+        }
+        $adm = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status) VALUES (?,?,?,?,\'active\')');
+        $adm->execute([
+            'Store Administrator',
+            (string)($form['admin_email'] ?? ''),
+            password_hash((string)($form['admin_password'] ?? ''), PASSWORD_DEFAULT),
+            'superadmin',
+        ]);
+
+        $report = sh_install_seed_all($pdo, [
+            'site_name'   => (string)($form['site_name'] ?? ''),
+            'site_url'    => $siteUrl,
+            'logo'        => $logo,
+            'admin_email' => (string)($form['admin_email'] ?? ''),
+        ], ($form['demo_data'] ?? '0') === '1');
+
+        if ($ownTransaction) { $pdo->commit(); }
+        return $report;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
 }
 
 /**
  * Structure-level starters only: the settings a store needs to render at all,
- * the notification matrix, courier registry and OTP defaults.
+ * the notification matrix, the payment routes and the OTP/email defaults.
  *
  * This runs on every install, including installs where the operator declined the
  * starter catalogue, so it must never insert business records — no products,
- * categories, customers, orders, reviews, slides, promotions or placeholder
- * company details. Those live in install/demo-data.php and only run when the
- * operator asks for them.
+ * categories, brands, customers, orders, reviews, coupons, slides, promotions,
+ * courier accounts or placeholder company details. Those live in
+ * install/demo-data.php and only run when the operator asks for them.
  */
 function sh_schema_seed(PDO $pdo, array $opts): void
 {
@@ -1147,9 +1268,6 @@ function sh_schema_seed(PDO $pdo, array $opts): void
     foreach (['telegram', 'whatsapp', 'messenger', 'email'] as $ch) {
         foreach ($events as $ev) { $ns->execute([$ch, $ev]); }
     }
-
-    // Courier registry (all entries disabled by default).
-    sh_courier_seed($pdo);
 
     // Phone verification settings (defaults; provider is offline/test until configured).
     sh_otp_seed_settings($pdo);

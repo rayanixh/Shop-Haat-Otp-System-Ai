@@ -139,6 +139,5 @@ function sh_install_unlock_instructions(): array
         'Re-open the installer and paste the same text into the box below. Deleting the file afterwards locks '
             . 'the installer again.',
         'A quick way to generate the text: <code>php -r "echo bin2hex(random_bytes(16));"</code>',
-        'When you are finished, delete the file and the <code>/install</code> folder.',
     ];
 }

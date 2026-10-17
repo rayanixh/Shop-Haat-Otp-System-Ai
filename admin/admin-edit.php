@@ -49,8 +49,14 @@ if ($form === 'save') {
     if ($name === '' || mb_strlen($name) > 120) { $errors['name'] = 'Please enter a name (max 120 characters).'; }
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $errors['email'] = 'Please enter a valid email address.'; }
     if (!isset($roleById[$roleId])) { $errors['role_id'] = 'Please choose a role.'; }
-    if ($id === 0 && strlen($password) < 8) { $errors['password'] = 'A password of at least 8 characters is required.'; }
-    if ($id > 0 && $password !== '' && strlen($password) < 8) { $errors['password'] = 'New password must be at least 8 characters.'; }
+    // Administrator policy: a minimum length (12 by default) and nothing else.
+    // Any characters are accepted, including spaces inside a passphrase, and the
+    // exact bytes the operator typed are hashed.
+    if ($id === 0 && $password === '') {
+        $errors['password'] = 'A password is required.';
+    } elseif ($password !== '' && ($pwProblem = sh_admin_password_problem($password)) !== null) {
+        $errors['password'] = $pwProblem;
+    }
     $dupe = sh_one('SELECT id FROM admins WHERE email = ? AND id <> ?', [$email, $id]);
     if ($dupe) { $errors['email'] = 'Another admin already uses this email.'; }
     if ($id === (int)$admin['id'] && $status === 'disabled') { $errors['status'] = 'You cannot disable your own account.'; }
@@ -157,8 +163,8 @@ require __DIR__ . '/_layout.php';
       <div class="sh-formsec">
         <h3 class="sh-formsec__title"><?= sh_icon('key', 15) ?> Password</h3>
         <?= sh_admin_field($isNew ? 'Password' : 'New password',
-            '<input class="sh-input" id="a-pass" type="password" name="password" minlength="8" autocomplete="new-password"' . ($isNew ? ' required' : '') . '>',
-            $isNew ? 'At least 8 characters.' : 'Leave blank to keep the current password.',
+            '<input class="sh-input" id="a-pass" type="password" name="password" minlength="' . (int)sh_password_min_length('admin') . '" autocomplete="new-password"' . ($isNew ? ' required' : '') . '>',
+            $isNew ? 'At least ' . (int)sh_password_min_length('admin') . ' characters.' : 'Leave blank to keep the current password.',
             $errors['password'] ?? null, 'a-pass', $isNew) ?>
       </div>
 

@@ -81,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($row === null || !password_verify($current, $row['password_hash'])) {
             $errors['current_password'] = 'Your current password is not correct.';
         }
-        $problem = sh_password_problem($new);
+        $problem = sh_admin_password_problem($new);
         if ($problem !== null) { $errors['new_password'] = $problem; }
         if ($new !== $confirm) { $errors['confirm_password'] = 'The new passwords do not match.'; }
         if (!$errors) {
@@ -288,8 +288,9 @@ require __DIR__ . '/_layout.php';
       <div class="sh-field"><label class="sh-field__label" for="pw-cur">Current password</label>
         <input class="sh-input" id="pw-cur" type="password" name="current_password" required autocomplete="current-password"></div>
       <div class="sh-field"><label class="sh-field__label" for="pw-new">New password</label>
-        <input class="sh-input" id="pw-new" type="password" name="new_password" required autocomplete="new-password">
-        <span class="sh-field__hint">At least 8 characters, including a letter and a number.</span></div>
+        <input class="sh-input" id="pw-new" type="password" name="new_password" required
+               minlength="<?= (int)sh_password_min_length('admin') ?>" maxlength="200" autocomplete="new-password">
+        <span class="sh-field__hint">At least <?= (int)sh_password_min_length('admin') ?> characters. Any characters you like.</span></div>
       <div class="sh-field"><label class="sh-field__label" for="pw-conf">Confirm new password</label>
         <input class="sh-input" id="pw-conf" type="password" name="confirm_password" required autocomplete="new-password"></div>
       <button class="sh-btn" type="submit"><?= sh_icon('lock', 15) ?> Change password</button>

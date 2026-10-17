@@ -37,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $v->required('name', 'Full name')->minLen('name', 2, 'Full name')->maxLen('name', 110, 'Full name')
           ->required('email', 'Email address')->email('email', 'Email address')
           ->required('password', 'Password')->password('password')
-          ->matches('password2', 'password', 'Password confirmation');
+          ->matchesRaw('password2', 'password', 'Password confirmation');
         if (empty($_POST['terms'])) { $v->custom('terms', false, 'You must accept the terms and conditions.'); }
         $errors = $v->errors();
         if ($signupBlocked) { $errors['general'] = 'Too many accounts have been created from this connection. Please try again later.'; }

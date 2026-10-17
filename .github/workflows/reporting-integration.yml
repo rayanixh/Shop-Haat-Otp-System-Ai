@@ -94,10 +94,13 @@ jobs:
           ];
           PHP
           touch config/installed.lock
-      # Installer seeding: a demo-OFF install must create structure and essential
-      # settings only, a demo-ON install must create the starter catalogue exactly
-      # once, and the cleanup screen must never destroy real records. It leaves
-      # the disposable database empty again for the reporting test below.
+      # Installer seeding, through the same function the setup form calls: a
+      # demo-OFF install creates structure and essential settings only, a demo-ON
+      # install creates the starter catalogue exactly once, a self-chosen
+      # administrator password is stored only as a hash and verified with the
+      # exact bytes typed, and a repeated install can never reset an existing
+      # account or delete real records. It leaves the disposable database empty
+      # again for the reporting test below.
       - name: Installer seeding decision (demo data on and off)
         run: php tests/installer-demo-data.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery

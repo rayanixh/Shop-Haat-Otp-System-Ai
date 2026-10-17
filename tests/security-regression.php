@@ -1108,11 +1108,18 @@ sh_t('the storefront layout is balanced for two banner cards and no code box', f
     foreach (['.sh-codebox', '.sh-cart-item__tag'] as $dead) {
         if (str_contains($css, $dead)) { return 'the unused ' . $dead . ' rules are still shipped'; }
     }
-    // The homepage strip must render exactly the two surviving cards: a third
-    // card in the markup would sit alone on the second row of a 2-column grid.
+    // The homepage strip renders the free-delivery card always and the welcome
+    // coupon card only when that coupon really exists. The markup therefore has
+    // exactly two card blocks; the second one is inside an `if`.
     $index = (string)file_get_contents(SH_ROOT . '/index.php');
     if (preg_match_all('~class="sh-banner__item"~', $index) !== 2) {
-        return 'index.php does not render exactly two banner cards';
+        return 'index.php does not render exactly two banner cards in the markup';
+    }
+    if (!str_contains($index, 'sh-banner--single')) {
+        return 'a store with no welcome coupon would leave a half-empty banner row';
+    }
+    if (preg_match('~Save with coupon WELCOME10~', $index) === 1) {
+        return 'the homepage advertises a coupon unconditionally instead of reading the coupon table';
     }
     if (str_contains($index, 'q=code')) { return 'index.php still links to the removed code search'; }
     // Those cards are sample content: they live in the optional starter catalogue,
@@ -1759,6 +1766,16 @@ sh_t('the installer never writes sample business records into an ordinary instal
               'INSERT INTO coupons', 'INSERT INTO reviews', 'INSERT INTO orders', 'INSERT INTO users'] as $bad) {
         if (str_contains($fn, $bad)) { return 'sh_schema_seed() still inserts business content: ' . $bad; }
     }
+    // Courier accounts are business records too: the lazy upgrade may create them
+    // only once, for a store that predates the recorded demo-data choice.
+    $courier = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (!str_contains($courier, 'courier_registry_state')) {
+        return 'the lazy courier upgrade does not read the recorded demo-data choice';
+    }
+    if (strpos($courier, 'sh_courier_seed($pdo)') !== false
+        && strpos($courier, 'if ($marked === 0)') === false) {
+        return 'the lazy courier upgrade reseeds an empty registry on every request';
+    }
     // Invented company details must not ship as if they were the real business.
     foreach (["'+880 1700-000000'", "'Level 4, Bijoy Sarani", "'We deliver genuine products across Bangladesh"] as $fake) {
         if (str_contains($fn, $fake)) { return 'sh_schema_seed() still invents business details: ' . $fake; }
@@ -1782,7 +1799,9 @@ sh_t('the setup wizard defaults to "no sample content" and honours the posted ch
     if (preg_match('~\$_POST\[.demo_data.\]\s*(===|==|!==|!=)\s*~', $src) === 1) {
         return 'the installer decides from the raw POST value instead of the validated one';
     }
-    if (!str_contains($src, 'sh_install_seed_all(')) { return 'the installer does not use the shared seeding decision'; }
+    if (!str_contains((string)file_get_contents(SH_ROOT . '/install/schema.php'), 'sh_install_seed_all(')) {
+        return 'the installer does not use the shared seeding decision';
+    }
     return true;
 });
 
@@ -1824,42 +1843,115 @@ sh_t('the starter catalogue is idempotent and cannot be re-created by a normal r
     return true;
 });
 
-sh_t('removing sample content needs an explicit, permission-checked confirmation', function () {
-    $src = (string)file_get_contents(SH_ROOT . '/admin/demo-data.php');
-    foreach (['sh_require_perm(', 'sh_csrf_require()', 'sh_csrf_field()', 'sh_audit('] as $must) {
-        if (!str_contains($src, $must)) { return 'admin/demo-data.php is missing ' . $must; }
+sh_t('the sample-content review screen and its navigation are gone', function () {
+    // The demo choice belongs in the installer only. There must be no admin page,
+    // no menu entry, no route and no leftover backend helper for reviewing or
+    // removing sample content.
+    if (file_exists(SH_ROOT . '/admin/demo-data.php')) { return 'admin/demo-data.php still exists'; }
+    foreach (['install/demo-data.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        foreach (['sh_demo_inventory(', 'sh_demo_cleanup(', 'DEMO SAMPLE DATA', 'confirm_phrase'] as $gone) {
+            if (str_contains($src, $gone)) { return $rel . ' still carries the review backend: ' . $gone; }
+        }
     }
-    if (preg_match('~\\$confirmPhrase = \'([^\']+)\'~', $src, $m) !== 1) { return 'the cleanup screen has no confirmation phrase'; }
-    if (mb_strlen($m[1]) < 8) { return 'the confirmation phrase is too easy to type by accident'; }
-    if (!str_contains($src, '$typed !== $confirmPhrase')) { return 'the typed confirmation phrase is never compared'; }
-    if (!str_contains($src, "!empty(\$_POST['acknowledge'])")) { return 'the cleanup screen has no acknowledgement checkbox'; }
-    // The cleanup itself must be all-or-nothing.
-    $seeder = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
-    $start = (int)strpos($seeder, 'function sh_demo_cleanup(');
-    $end = (int)strpos($seeder, "\n}\n", $start);
-    if ($start === 0 || $end <= $start) { return 'sh_demo_cleanup() could not be read'; }
-    $fn = substr($seeder, $start, $end - $start);
-    foreach (['beginTransaction()', 'rollBack()', 'commit()'] as $must) {
-        if (!str_contains($fn, $must)) { return 'the cleanup is not wrapped in a transaction (' . $must . ')'; }
+    foreach (['admin/_layout.php', 'admin/dashboard.php', 'admin/settings.php', 'admin/index.php'] as $rel) {
+        if (!file_exists(SH_ROOT . '/' . $rel)) { continue; }
+        $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (preg_match('~demo-data\.php|Demo Data Review~', $src) === 1) {
+            return $rel . ' still links to the removed review screen';
+        }
     }
-    foreach (["DELETE FROM users", "DELETE FROM orders", "DELETE FROM order_items", "DELETE FROM payments",
-              "DELETE FROM admins", "DELETE FROM settings", "DELETE FROM payment_methods", "DELETE FROM payment_gateways"] as $bad) {
-        if (str_contains($fn, $bad)) { return 'the cleanup can delete protected records: ' . $bad; }
+    // No replacement page was added under another name.
+    foreach ((array)glob(SH_ROOT . '/admin/*.php') as $file) {
+        $src = (string)file_get_contents($file);
+        if (preg_match('~sh_demo_(?:inventory|cleanup)\s*\(~', $src) === 1) {
+            return basename($file) . ' still drives the removed review backend';
+        }
+    }
+    // The installer offers exactly one explicit two-state choice.
+    $installer = (string)file_get_contents(SH_ROOT . '/install/index.php');
+    if (preg_match('~name="demo_data"~', $installer) !== 1) { return 'the installer no longer offers the Demo Data choice'; }
+    if (preg_match('~name="demo_data"[^>]*value="1"~', $installer) !== 1
+        || preg_match('~name="demo_data"[^>]*value="0"~', $installer) !== 1) {
+        return 'the Demo Data choice is not an explicit ON/OFF pair';
+    }
+    if (preg_match('~type="radio"[^>]*name="demo_data"~', $installer) !== 1) { return 'the Demo Data choice is not a radio control'; }
+    return true;
+});
+
+sh_t('a fresh install never overwrites an existing administrator', function () {
+    $installer = (string)file_get_contents(SH_ROOT . '/install/index.php');
+    $creator   = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    foreach ([$installer, $creator] as $src) {
+        if (stripos($src, 'ON DUPLICATE KEY UPDATE password_hash') !== false) {
+            return 'the installer still upserts an administrator, which resets an existing password on a re-run';
+        }
+    }
+    if (!str_contains($installer, 'sh_install_create_store(')) {
+        return 'the installer does not use the shared create-store path';
+    }
+    if (!str_contains($creator, 'SELECT COUNT(*) FROM admins')) {
+        return 'the installer does not check whether an administrator already exists';
+    }
+    // The administrator insert and the seed share one transaction.
+    if (!str_contains($creator, '$pdo->beginTransaction();')) { return 'the installer seeds without a transaction'; }
+    if (!str_contains($creator, '$pdo->rollBack();')) { return 'the installer never rolls back a failed seed'; }
+    // The typed password is hashed, never compared against a sample or default.
+    if (!str_contains($creator, 'password_hash((string)($form[\'admin_password\'] ?? \'\'), PASSWORD_DEFAULT)')) {
+        return 'the installer does not hash the chosen administrator password';
+    }
+    // An existing account may only be reset through the owner unlock path.
+    if (!str_contains($creator, '$ownerRecovery')) { return 'the creator has no owner-recovery authorisation'; }
+    if (!str_contains($installer, "\$shAccess['mode'] === 'unlocked'")) {
+        return 'the installer does not tie recovery to the unlock mode';
     }
     return true;
 });
 
-sh_t('removing sample content never destroys records that may be real', function () {
-    $src = (string)file_get_contents(SH_ROOT . '/install/demo-data.php');
-    $start = (int)strpos($src, 'function sh_demo_cleanup(');
-    $end = (int)strpos($src, "\n}\n", $start);
-    $fn = substr($src, $start, $end - $start);
-    // Products in order history and products carrying a visitor review are
-    // deactivated; a used coupon is disabled; a category or brand still in use is
-    // kept. Deleting any of those would take real data with it.
-    foreach (["\$p['order_lines'] > 0 || (\$p['foreign_reviews'] ?? 0) > 0", 'products_deactivated',
-              'coupons_disabled', "SELECT COUNT(*) FROM products WHERE category_id = ?" ] as $must) {
-        if (!str_contains($fn, $must)) { return 'the cleanup no longer protects: ' . $must; }
+sh_t('no fixed or example password is shipped anywhere', function () {
+    $files = array_merge(
+        (array)glob(SH_ROOT . '/*.php'), (array)glob(SH_ROOT . '/admin/*.php'),
+        (array)glob(SH_ROOT . '/includes/*.php'), (array)glob(SH_ROOT . '/install/*.php'),
+        (array)glob(SH_ROOT . '/api/*.php'), [SH_ROOT . '/README.md']
+    );
+    foreach ($files as $file) {
+        if (!is_file($file)) { continue; }
+        $src = (string)file_get_contents($file);
+        foreach (['Shop2024pass', 'MyStore99', 'ShopHatt123', 'Shop123hatt'] as $sample) {
+            if (str_contains($src, $sample)) { return basename($file) . ' still ships the sample password ' . $sample; }
+        }
+    }
+    // The installer must not pre-fill or auto-generate a password either.
+    $installer = (string)file_get_contents(SH_ROOT . '/install/index.php');
+    if (preg_match('~name="admin_password"[^>]*value=~', $installer) === 1) {
+        return 'the installer pre-fills the administrator password field';
+    }
+    // A credential is never trimmed before it is hashed.
+    if (!str_contains($installer, "in_array(\$k, \$verbatim, true)")) {
+        return 'the installer trims the posted administrator password';
+    }
+    return true;
+});
+
+sh_t('the administrator password policy is length-only and configurable', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/validation.php');
+    if (!str_contains($src, 'function sh_password_min_length(')) { return 'the password minimum is not configurable'; }
+    if (!str_contains($src, "SH_ADMIN_PASSWORD_MIN_LENGTH")) { return 'the administrator minimum cannot be overridden'; }
+    if (!str_contains($src, "return max(\$admin ? 12 : 8, min(64, \$configured));")) {
+        return 'the administrator minimum is no longer 12 by default';
+    }
+    if (preg_match('~Shop2024pass|ShopHatt123|Shop123hatt|MyStore99~', $src) === 1) {
+        return 'the shared policy still cites a sample password';
+    }
+    if (!str_contains($src, '$this->raw($f)')) {
+        return 'password validation and confirmation no longer use the exact submitted bytes';
+    }
+    // The installer and the admin screens both use the administrator context.
+    foreach (['install/index.php', 'admin/settings.php', 'admin/admin-edit.php'] as $rel) {
+        $file = (string)file_get_contents(SH_ROOT . '/' . $rel);
+        if (!str_contains($file, 'admin_password_problem') && !str_contains($file, "password('admin_password', 'admin')")) {
+            return $rel . ' does not use the administrator password policy';
+        }
     }
     return true;
 });

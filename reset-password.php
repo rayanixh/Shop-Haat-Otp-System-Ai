@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $mode === 'code' && $action === 're
     $confirm = (string)($_POST['password2'] ?? '');
     $v = new ShValidator($_POST);
     $v->required('password', 'Password')->password('password')
-      ->matches('password2', 'password', 'Password confirmation');
+      ->matchesRaw('password2', 'password', 'Password confirmation');
     if ($v->fails()) {
         $errors = array_merge($errors, array_values($v->errors()));
     } else {

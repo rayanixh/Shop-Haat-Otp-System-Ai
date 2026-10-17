@@ -2,15 +2,13 @@
 /**
  * Optional starter catalogue ("demo data").
  *
- * Everything here runs only when the operator ticked the demo-data box in the
- * installer (or runs the same seeding from the admin panel). The storefront
- * never calls this file, so a page view, a login or a background request cannot
- * insert sample content.
+ * Everything here runs only when the operator selected Demo Data → ON in the
+ * installer. The storefront never calls this file, so a page view, a login, an
+ * upgrade or a background request cannot insert sample content, and there is no
+ * admin screen that can seed or remove it: the choice is made once, at install
+ * time, and afterwards the owner manages real content in the normal admin pages.
  *
- * sh_demo_manifest() is the single source of truth for the sample content. The
- * installer seeds from it, and Admin → Demo Data Review uses the same manifest
- * to recognise sample rows on an older install, so the two can never disagree
- * about what "demo data" means.
+ * sh_demo_manifest() is the single source of truth for the sample content.
  *
  * Original content only — no third-party brand assets, no external images.
  * Placeholder artwork is generated locally as SVG.
@@ -154,8 +152,8 @@ function sh_demo_manifest(): array
     return [
         'version'    => 1,
         'palette'    => $palette,
-        // Clearly-fake wallet numbers used only by a demo install. The review
-        // screen reports them so the owner replaces them before taking orders.
+        // Clearly-fake wallet numbers used only by a demo install, so the manual
+        // routes are testable immediately. A demo-OFF install leaves them blank.
         'demo_accounts' => [
             'bkash'  => '01700000000',
             'nagad'  => '01800000000',
@@ -171,12 +169,12 @@ function sh_demo_manifest(): array
 }
 
 /**
- * Whether the sample content has been installed on this store.
+ * Whether the sample content was installed on this store.
  *
- * 'installed'  — the seeder completed (the marker is written by the seeder itself)
- * 'none'       — the installer recorded explicitly that no sample content was wanted
- * ''           — an older install that predates the marker: unknown, so the
- *                cleanup screen classifies rows from the manifest instead
+ * 'installed' — the seeder completed (the marker is written by the seeder itself)
+ * 'none'      — the installer recorded explicitly that no sample content was wanted
+ * ''          — an install that predates the marker; treated as "do not seed", so
+ *               a legacy store is never filled with sample content by accident
  */
 function sh_demo_state(PDO $pdo): string
 {
@@ -196,11 +194,11 @@ function sh_demo_state(PDO $pdo): string
  * (slug, code or title) before it is inserted, so running this again cannot
  * duplicate anything.
  *
- * Safety: once this install has recorded a decision ('installed', 'none' or
- * 'cleaned') the function refuses to run again unless the caller passes
- * $explicitRequest = true, which only the installer does after the operator
- * ticked the box. That keeps a page view, a login, an upgrade or a stray call
- * from ever re-creating sample content the owner declined or already removed.
+ * Safety: the catalogue is only ever written when the caller passes
+ * $explicitRequest = true, which only the installer does for a validated
+ * Demo Data = ON submission. A page view, a login, an upgrade or a stray call
+ * can therefore never insert sample content, and a store that already recorded
+ * 'installed' is never written to twice.
  *
  * @return array<string,int|string|bool> counts of what was actually inserted
  */
@@ -218,8 +216,12 @@ function sh_install_demo_data(PDO $pdo, bool $explicitRequest = false): array
         $report['reason'] = 'already installed';
         return $report;
     }
-    if (!$explicitRequest && $state !== '') {
-        $report['reason'] = 'this store already recorded that it does not want sample content (' . $state . ')';
+    // Only the installer's validated Demo Data = ON submission passes true. A
+    // stray call from any other code path is a no-op, whatever the state says.
+    if (!$explicitRequest) {
+        $report['reason'] = $state === ''
+            ? 'no explicit demo-data request'
+            : 'this store already recorded its demo-data choice (' . $state . ')';
         return $report;
     }
 
@@ -345,219 +347,4 @@ function sh_install_demo_data(PDO $pdo, bool $explicitRequest = false): array
 
     $report['installed'] = true;
     return $report;
-}
-
-/**
- * Every row on this store that matches the bundled starter catalogue.
- *
- * Read-only and deliberately conservative: a row is only listed when its own
- * unique key (slug, code or title) matches the manifest. Nothing here can
- * classify a customer, an order, a payment or an administrator — those are never
- * touched by the cleanup at any point.
- *
- * @return array<string,mixed>
- */
-function sh_demo_inventory(PDO $pdo): array
-{
-    $m = sh_demo_manifest();
-    $ids = static function (array $rows, array $ids): array {
-        if (!$ids) { return []; }
-        $ph = implode(',', array_fill(0, count($ids), '?'));
-        return [$ph, $ids];
-    };
-
-    $inv = [
-        'state' => sh_demo_state($pdo),
-        'categories' => [], 'brands' => [], 'products' => [],
-        'coupons' => [], 'slides' => [], 'reviews' => 0, 'review_ids' => [],
-    ];
-
-    [$ph, $args] = $ids([], array_map(static fn($c) => sh_slug($c[0]), $m['categories']));
-    $st = $pdo->prepare('SELECT id, name, slug, (SELECT COUNT(*) FROM products p WHERE p.category_id = categories.id) AS product_count
-                         FROM categories WHERE slug IN (' . $ph . ') ORDER BY name');
-    $st->execute($args);
-    foreach ($st->fetchAll() as $r) {
-        $inv['categories'][] = ['id' => (int)$r['id'], 'label' => (string)$r['name'],
-            'detail' => (int)$r['product_count'] . ' product(s) in this category'];
-    }
-
-    [$ph, $args] = $ids([], array_map('sh_slug', $m['brands']));
-    $st = $pdo->prepare('SELECT id, name, (SELECT COUNT(*) FROM products p WHERE p.brand_id = brands.id) AS product_count
-                         FROM brands WHERE slug IN (' . $ph . ') ORDER BY name');
-    $st->execute($args);
-    foreach ($st->fetchAll() as $r) {
-        $inv['brands'][] = ['id' => (int)$r['id'], 'label' => (string)$r['name'],
-            'detail' => (int)$r['product_count'] . ' product(s) use this brand'];
-    }
-
-    $bodies = array_flip(array_map(static fn($t) => (string)$t[2], $m['review_pool']['texts']));
-    $names  = array_flip($m['review_pool']['names']);
-    $sampleReviewIds = [];
-
-    [$ph, $args] = $ids([], array_map(static fn($r) => sh_slug($r[0]), $m['products']));
-    $st = $pdo->prepare('SELECT p.id, p.name, p.slug, p.image, p.status,
-                                (SELECT COUNT(*) FROM order_items oi WHERE oi.product_id = p.id) AS order_lines
-                         FROM products p WHERE p.slug IN (' . $ph . ') ORDER BY p.name');
-    $st->execute($args);
-    $productRows = $st->fetchAll();
-    $productIds = array_map(static fn($r) => (int)$r['id'], $productRows);
-
-    // Sample reviews are matched on both the manifest body text and the manifest
-    // author name. Anything else on a sample product belongs to a real visitor and
-    // must survive: it blocks the product from being deleted (the foreign key would
-    // cascade it away), so that product is deactivated instead.
-    $foreignByProduct = [];
-    if ($productIds) {
-        $ph2 = implode(',', array_fill(0, count($productIds), '?'));
-        $rs = $pdo->prepare('SELECT id, product_id, author_name, body FROM reviews WHERE product_id IN (' . $ph2 . ')');
-        $rs->execute($productIds);
-        foreach ($rs->fetchAll() as $r) {
-            if (isset($bodies[trim((string)$r['body'])]) && isset($names[(string)$r['author_name']])) {
-                $sampleReviewIds[] = (int)$r['id'];
-            } else {
-                $foreignByProduct[(int)$r['product_id']] = ($foreignByProduct[(int)$r['product_id']] ?? 0) + 1;
-            }
-        }
-    }
-
-    foreach ($productRows as $r) {
-        $id = (int)$r['id'];
-        $orderLines = (int)$r['order_lines'];
-        $foreign = $foreignByProduct[$id] ?? 0;
-        if ($orderLines > 0) {
-            $detail = 'appears in ' . $orderLines . ' order line(s) — will be deactivated, not deleted';
-        } elseif ($foreign > 0) {
-            $detail = 'carries ' . $foreign . ' review(s) from real visitors — will be deactivated, not deleted';
-        } else {
-            $detail = 'no order history and no visitor reviews';
-        }
-        $inv['products'][] = ['id' => $id, 'label' => (string)$r['name'], 'image' => (string)($r['image'] ?? ''),
-            'status' => (int)$r['status'], 'order_lines' => $orderLines, 'foreign_reviews' => $foreign,
-            'detail' => $detail];
-    }
-
-    [$ph, $args] = $ids([], array_column($m['coupons'], 0));
-    $st = $pdo->prepare('SELECT c.id, c.code, c.used_count,
-                                (SELECT COUNT(*) FROM orders o WHERE o.coupon_code = c.code) AS order_count
-                         FROM coupons c WHERE c.code IN (' . $ph . ') ORDER BY c.code');
-    $st->execute($args);
-    foreach ($st->fetchAll() as $r) {
-        $inv['coupons'][] = ['id' => (int)$r['id'], 'label' => (string)$r['code'],
-            'detail' => (int)$r['order_count'] > 0
-                ? 'used on ' . (int)$r['order_count'] . ' order(s) — will be disabled, not deleted'
-                : 'never used'];
-    }
-
-    [$ph, $args] = $ids([], array_column($m['promos'], 3));
-    $st = $pdo->prepare('SELECT id, placement, title, status FROM promo_slides WHERE title IN (' . $ph . ') ORDER BY placement, sort_order, id');
-    $st->execute($args);
-    foreach ($st->fetchAll() as $r) {
-        $inv['slides'][] = ['id' => (int)$r['id'], 'placement' => (string)$r['placement'],
-            'label' => (string)$r['title'], 'status' => (int)$r['status'],
-            'detail' => $r['placement'] === 'card' ? 'homepage feature card' : 'homepage slider slide'];
-    }
-
-    $inv['review_ids'] = $sampleReviewIds;
-    $inv['reviews'] = count($sampleReviewIds);
-
-    return $inv;
-}
-
-/**
- * Remove the sample content an earlier install created.
- *
- * Called only from Admin -> Demo Data Review, only after the owner typed the
- * confirmation phrase. Rules it will not break:
- *   - products that appear in order history are deactivated, never deleted;
- *   - categories and brands that still hold other products are kept;
- *   - coupons used on a real order are disabled, never deleted;
- *   - customers, orders, order items, payments, gateways, administrators,
- *     settings and every other business record are never touched.
- * Generated placeholder artwork is unlinked only for the rows actually removed.
- *
- * @return array<string,int> per-group counts of rows removed / deactivated / kept
- */
-function sh_demo_cleanup(PDO $pdo): array
-{
-    $inv = sh_demo_inventory($pdo);
-    $out = ['products_deleted' => 0, 'products_deactivated' => 0, 'categories_deleted' => 0,
-            'brands_deleted' => 0, 'coupons_deleted' => 0, 'coupons_disabled' => 0,
-            'slides_deleted' => 0, 'reviews_deleted' => 0, 'images_deleted' => 0,
-            'kept' => 0];
-
-    $pdo->beginTransaction();
-    try {
-        // Products (reviews, wishlist and cart rows cascade; order lines keep their snapshot).
-        foreach ($inv['products'] as $p) {
-            if ($p['order_lines'] > 0 || ($p['foreign_reviews'] ?? 0) > 0) {
-                sh_query('UPDATE products SET status = 0 WHERE id = ?', [$p['id']]);
-                $out['products_deactivated']++;
-                continue;
-            }
-            sh_query('DELETE FROM products WHERE id = ?', [$p['id']]);
-            $out['products_deleted']++;
-            if ($p['image'] !== '' && preg_match('/^demo-[0-9a-f]{12}\.svg$/', $p['image'])) {
-                $path = SH_UPLOAD_DIR . '/products/' . $p['image'];
-                if (is_file($path) && @unlink($path)) { $out['images_deleted']++; }
-            }
-        }
-        // Only manifest-matched reviews are deleted, and only ever from products
-        // that were actually removed (the rest cascade with their product).
-        $deletedIds = [];
-        foreach ($inv['products'] as $p) {
-            if ($p['order_lines'] === 0 && ($p['foreign_reviews'] ?? 0) === 0) { $deletedIds[] = $p['id']; }
-        }
-        $reviewIds = array_values(array_filter($inv['review_ids'], static function (int $id) use ($pdo, $deletedIds): bool {
-            if (!$deletedIds) { return false; }
-            $ph = implode(',', array_fill(0, count($deletedIds), '?'));
-            return (int)sh_val('SELECT COUNT(*) FROM reviews WHERE id = ? AND product_id IN (' . $ph . ')', array_merge([$id], $deletedIds), 0) > 0;
-        }));
-        if ($reviewIds) {
-            $ph = implode(',', array_fill(0, count($reviewIds), '?'));
-            $out['reviews_deleted'] = (int)sh_query('DELETE FROM reviews WHERE id IN (' . $ph . ')', $reviewIds)->rowCount();
-        }
-
-        foreach ($inv['categories'] as $c) {
-            $left = (int)sh_val('SELECT COUNT(*) FROM products WHERE category_id = ?', [$c['id']], 0);
-            if ($left > 0) { $out['kept']++; continue; }
-            sh_query('DELETE FROM categories WHERE id = ?', [$c['id']]);
-            $out['categories_deleted']++;
-        }
-        foreach ($inv['brands'] as $b) {
-            $left = (int)sh_val('SELECT COUNT(*) FROM products WHERE brand_id = ?', [$b['id']], 0);
-            if ($left > 0) { $out['kept']++; continue; }
-            sh_query('DELETE FROM brands WHERE id = ?', [$b['id']]);
-            $out['brands_deleted']++;
-        }
-        foreach ($inv['coupons'] as $c) {
-            $code = (string)$c['label'];
-            $used = (int)sh_val('SELECT COUNT(*) FROM orders WHERE coupon_code = ?', [$code], 0);
-            if ($used > 0) {
-                sh_query('UPDATE coupons SET status = 0 WHERE id = ?', [$c['id']]);
-                $out['coupons_disabled']++;
-                continue;
-            }
-            sh_query('DELETE FROM coupons WHERE id = ?', [$c['id']]);
-            $out['coupons_deleted']++;
-        }
-        foreach ($inv['slides'] as $s) {
-            sh_query('DELETE FROM promo_slides WHERE id = ?', [$s['id']]);
-            $out['slides_deleted']++;
-        }
-
-        $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
-                       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)')
-            ->execute(['demo_data_state', 'cleaned']);
-
-        // Product rating aggregates follow the remaining (real) reviews.
-        $pdo->exec("UPDATE products p SET
-            rating = COALESCE((SELECT ROUND(AVG(r.rating),2) FROM reviews r WHERE r.product_id = p.id AND r.status = 'approved'), 0),
-            review_count = (SELECT COUNT(*) FROM reviews r WHERE r.product_id = p.id AND r.status = 'approved')");
-
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-    return $out;
 }

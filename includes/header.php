@@ -187,6 +187,7 @@ $shTransition = sh_transition_config();
   <nav class="sh-nav" aria-label="Primary">
     <div class="sh-wrap sh-nav__inner">
       <div class="sh-nav__cats">
+        <?php if ($shCategories): ?>
         <button class="sh-nav__catbtn" type="button" data-catmenu-toggle aria-expanded="false" aria-controls="sh-catmenu">
           <?= sh_icon('menu', 17) ?> Categories <?= sh_icon('chevron-down', 15) ?>
         </button>
@@ -197,6 +198,7 @@ $shTransition = sh_transition_config();
             </a></li>
           <?php endforeach; ?>
         </ul>
+        <?php endif; ?>
       </div>
       <ul class="sh-nav__links">
         <li><a href="<?= e(sh_url('index.php')) ?>">Home</a></li>
@@ -220,6 +222,7 @@ $shTransition = sh_transition_config();
       <button type="button" data-drawer-close aria-label="Close menu"><?= sh_icon('x', 20) ?></button>
     </div>
     <div class="sh-drawer__body">
+      <?php if ($shCategories): ?>
       <p class="sh-drawer__title">Shop by category</p>
       <ul class="sh-drawer__list">
         <?php foreach ($shCategories as $c): ?>
@@ -227,6 +230,7 @@ $shTransition = sh_transition_config();
             <?= sh_category_nav_thumb($c, 17) ?><span><?= e($c['name']) ?></span></a></li>
         <?php endforeach; ?>
       </ul>
+      <?php endif; ?>
       <p class="sh-drawer__title">Quick links</p>
       <ul class="sh-drawer__list">
         <li><a href="<?= e(sh_url('products.php?flash=1')) ?>"><?= sh_icon('zap', 17) ?><span>Flash Sale</span></a></li>

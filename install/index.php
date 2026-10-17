@@ -63,12 +63,17 @@ $form = [
     'site_name' => 'ShopHaat', 'admin_email' => '', 'admin_password' => '',
     'admin_password2' => '', 'demo_data' => '0',
 ];
+// Credentials are taken exactly as typed: trimming a password silently changes
+// what the administrator chose, and a database password may legitimately begin
+// or end with a space.
+$verbatim = ['db_pass', 'admin_password', 'admin_password2'];
 foreach ($form as $k => $v) {
-    if (isset($_POST[$k]) && is_string($_POST[$k])) { $form[$k] = trim($_POST[$k]); }
+    if (!isset($_POST[$k]) || !is_string($_POST[$k])) { continue; }
+    $form[$k] = in_array($k, $verbatim, true) ? (string)$_POST[$k] : trim((string)$_POST[$k]);
 }
-// A checkbox posts only when ticked. Normalise the raw value to exactly '0' or
-// '1' so the seeding decision can never be flipped by an unexpected value, and
-// so the rendered checkbox always reflects what the backend will actually do.
+// One radio control, normalised to exactly '0' or '1' so the seeding decision
+// can never be flipped by an unexpected value (including a crafted duplicate
+// field) and the rendered control always reflects what the backend will do.
 $form['demo_data'] = ($form['demo_data'] === '1') ? '1' : '0';
 
 // On a repair, pre-fill the saved connection so the operator mostly confirms what is there.
@@ -168,11 +173,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     // A first administrator for an empty admins table. The
                     // submitted values are validated exactly as on a fresh
-                    // install and inserted once (no ON DUPLICATE KEY UPDATE).
+                    // install and inserted once, never as an upsert.
                     $v = new ShValidator($_POST);
                     $v->required('admin_email', 'Admin email')->email('admin_email', 'Admin email')
-                      ->required('admin_password', 'Admin password')->password('admin_password')
-                      ->matches('admin_password2', 'admin_password', 'Password confirmation');
+                      ->required('admin_password', 'Admin password')->password('admin_password', 'admin')
+                      ->matchesRaw('admin_password2', 'admin_password', 'Password confirmation');
                     if ($v->fails()) {
                         $errors = array_merge($errors, array_values($v->errors()));
                         $errors[] = 'The database was repaired, but no administrator exists yet. '
@@ -214,8 +219,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->required('db_user', 'Database username')
           ->required('site_name', 'Website name')->maxLen('site_name', 100, 'Website name')
           ->required('admin_email', 'Admin email')->email('admin_email', 'Admin email')
-          ->required('admin_password', 'Admin password')->password('admin_password')
-          ->matches('admin_password2', 'admin_password', 'Password confirmation');
+          ->required('admin_password', 'Admin password')->password('admin_password', 'admin')
+          ->matchesRaw('admin_password2', 'admin_password', 'Password confirmation');
         if ($v->fails()) { $errors = array_merge($errors, array_values($v->errors())); }
 
         $logoFile = null;
@@ -281,35 +286,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $siteUrl = rtrim(sh_site_url(), '/');
 
-                // Admin account
-                $adm = $pdo->prepare('INSERT INTO admins (name, email, password_hash, role, status)
-                                      VALUES (?,?,?,?,\'active\')
-                                      ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), status = \'active\'');
-                $adm->execute([
-                    'Store Administrator',
-                    $form['admin_email'],
-                    password_hash($form['admin_password'], PASSWORD_DEFAULT),
-                    'superadmin',
-                ]);
-
-                // Payment routes and disabled gateway definitions are structural
-                // configuration, not demo content: a store that declined the starter
-                // catalogue still has to be able to record an order. Blank account
-                // numbers keep the manual methods hidden from checkout until the
-                // owner enters a real merchant number in Admin -> Payment Methods.
+                // One shared call creates the administrator and applies the Demo
+                // Data choice in a single transaction (see
+                // sh_install_create_store()). It refuses to run when an
+                // administrator already exists, so a repeated install can never
+                // silently reset somebody's password. Recovery is the owner
+                // unlock path, not a re-run of this form.
                 //
                 // $form['demo_data'] is normalised to exactly '0' or '1' during
                 // validation, so a crafted "demo_data=0,1" or an empty value cannot
-                // slip past this compare. Passing the flag straight through means the
-                // backend makes the decision from the validated value, not from the
-                // state of a checkbox in the browser.
-                $shSeedReport = sh_install_seed_all($pdo, [
-                    'site_name'   => $form['site_name'],
-                    'site_url'    => $siteUrl,
-                    'logo'        => $logoFile ?? '',
-                    'admin_email' => $form['admin_email'],
-                ], $form['demo_data'] === '1');
-                sh_log_line('install', 'Seeding: ' . json_encode($shSeedReport));
+                // slip past this compare. The backend makes the decision from the
+                // validated value, never from the state of a control in the browser.
+                $ownerRecovery = $shAccess['mode'] === 'unlocked';
+                $shSeedReport = sh_install_create_store($pdo, $form, $logoFile ?? '', $siteUrl, $ownerRecovery);
+                sh_log_line('install', ($ownerRecovery ? 'Owner-authorized install/recovery: ' : 'Seeding: ')
+                    . json_encode($shSeedReport));
 
                 // Write config
                 $cfgContent = "<?php
@@ -362,7 +353,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], JSON_PRETTY_PRINT));
 
                 $done = true;
-                $notice = 'Installation completed successfully.';
+                $notice = !empty($shSeedReport['recovered'])
+                    ? 'The existing administrator password was reset through the owner unlock.'
+                    : 'Installation completed successfully.';
             } catch (Throwable $e) {
                 sh_log_exception($e, 'install');
                 $errors[] = 'Installation failed: ' . $e->getMessage();
@@ -420,24 +413,26 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 .pw-live--ok{color:#1a7f4b}
 .pw-live--bad{color:#c62828}
 .hint code{background:#f1f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
-.steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;font-size:12px;color:var(--muted);justify-content:center}
-.steps b{color:var(--ink)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="head">
     <div class="mark"><span>SH</span> ShopHaat</div>
-    <h1><?= $done ? 'Installation complete' : 'Install your store' ?></h1>
-    <p><?= $done ? 'Your marketplace is ready to use.' : 'Enter your cPanel MySQL details and create the admin account.' ?></p>
+    <h1><?= $done ? 'Installation complete' : ($shAccess['mode'] === 'repair' ? 'Repair this store' : 'Install your store') ?></h1>
+    <p><?php
+        if ($done) { echo 'Your marketplace is ready to use.'; }
+        elseif ($shAccess['mode'] === 'repair') { echo 'Re-create the missing database tables over the saved connection.'; }
+        else { echo 'Enter your cPanel MySQL details and create the admin account.'; }
+    ?></p>
   </div>
 
 <?php if ($done): ?>
   <div class="card done">
     <h2>Setup finished</h2>
-    <p>The database tables were created and verified, the administrator account is active and the installation lock file has been written. The installer will not appear again.</p>
+    <p>The installer is locked and will not run again.</p>
     <div class="alert alert--bad" style="text-align:left">
-      <strong>Final security step:</strong> delete the <code>/install</code> folder from your hosting account now that setup is complete.
+      <strong>Delete the <code>/install</code> folder</strong> from your hosting account now.
     </div>
     <div class="actions">
       <a class="a1" href="<?= e(sh_url('index.php')) ?>">Open the website</a>
@@ -445,8 +440,6 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
     </div>
   </div>
 <?php else: ?>
-  <div class="steps"><b>1.</b> Requirements <span>›</span> <b>2.</b> Database <span>›</span> <b>3.</b> Admin account <span>›</span> <b>4.</b> Finish</div>
-
   <?php if ($errors): ?>
     <div class="alert alert--bad"><strong>Installation could not continue:</strong>
       <ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul>
@@ -464,16 +457,10 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 <?php if ($shAccess['mode'] === 'repair'): ?>
   <div class="card">
     <h2>Restricted: this store is already installed</h2>
-    <p style="margin:0 0 10px;font-size:13.5px">
-      A ShopHaat installation is already registered in this folder, so the installer will not accept new database
-      credentials or create an administrator account from a web form. That restriction is what stops a stranger
-      from taking over your store while the database is briefly unreachable.
+    <p style="margin:0 0 14px;font-size:13.5px">
+      Repair re-creates missing tables over the saved connection in <code>config/database.php</code>.
+      Existing tables, orders and administrator accounts are left as they are, and no credentials are accepted here.
     </p>
-    <p style="margin:0 0 4px;font-size:13.5px"><strong>What you can do here:</strong></p>
-    <ul style="margin:0 0 14px;padding-left:18px;font-size:13.5px">
-      <li>Re-create any missing database tables over your saved connection (<code>config/database.php</code>).</li>
-      <li>Nothing else. Existing tables, orders and administrator accounts are left exactly as they are.</li>
-    </ul>
     <?php if ($shAccess['can_repair']): ?>
       <form method="post" novalidate>
         <input type="hidden" name="csrf_token" value="<?= e($token) ?>">
@@ -485,29 +472,18 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
           </div>
           <div>
             <label for="admin_password">Password for that account</label>
-            <input class="f-in" id="admin_password" name="admin_password" type="password" minlength="8"
-                   autocomplete="new-password" placeholder="At least 8 characters, letters and numbers">
+            <input class="f-in" id="admin_password" name="admin_password" type="password"
+                   minlength="<?= (int)sh_password_min_length('admin') ?>" maxlength="200"
+                   autocomplete="new-password">
           </div>
           <div>
             <label for="admin_password2">Confirm password</label>
             <input class="f-in" id="admin_password2" name="admin_password2" type="password" autocomplete="new-password">
           </div>
         </div>
-        <p class="hint" style="margin:0 0 12px">
-          These fields are ignored completely when an administrator account already exists.
-        </p>
+        <p class="hint">At least <?= (int)sh_password_min_length('admin') ?> characters. Only used if no administrator exists.</p>
         <button class="btn" type="submit" <?= $reqOk ? '' : 'disabled' ?>>Repair database tables</button>
       </form>
-      <?php if ($shState['status'] !== 'ok'): ?>
-        <p class="hint" style="margin-top:10px">
-          Detected state: <strong><?= e($shState['status']) ?></strong>.
-          The repair uses the connection already stored in <code>config/database.php</code>.
-        </p>
-      <?php endif; ?>
-      <p class="hint" style="margin-top:10px">
-        If a repair reports that no administrator exists, the page will ask for the first administrator's
-        email address and password. That can only happen when the <code>admins</code> table is completely empty.
-      </p>
     <?php else: ?>
       <div class="alert alert--bad" style="margin-bottom:0">
         <strong>config/database.php is missing</strong>, so there is no saved connection to repair.
@@ -519,8 +495,7 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
   <div class="card">
     <h2>Store owner: unlock full setup</h2>
     <p style="margin:0 0 10px;font-size:13.5px">
-      Re-installing, moving to a different database or resetting the administrator password requires proof that you
-      control the server files, not just the website address.
+      Re-installing or resetting the administrator password requires proof that you control the server files.
     </p>
     <ol style="margin:0 0 14px;padding-left:20px;font-size:13px;color:#3a4152">
       <?php foreach (sh_install_unlock_instructions() as $line): ?><li style="margin-bottom:6px"><?= $line ?></li><?php endforeach; ?>
@@ -557,12 +532,11 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
         <div>
           <label for="db_host">Database host</label>
           <input class="f-in" id="db_host" name="db_host" value="<?= e($form['db_host']) ?>" required>
-          <p class="hint">Usually <code>localhost</code> on cPanel.</p>
+          <p class="hint">Usually <code>localhost</code>.</p>
         </div>
         <div>
           <label for="db_name">Database name</label>
           <input class="f-in" id="db_name" name="db_name" value="<?= e($form['db_name']) ?>" required>
-          <p class="hint">e.g. <code>cpuser_shop</code></p>
         </div>
         <div>
           <label for="db_user">Database username</label>
@@ -588,18 +562,18 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
           <p class="hint">PNG/JPG/WEBP, max 1 MB.</p>
         </div>
       </div>
-      <div style="margin-top:14px" class="check">
-        <input type="checkbox" id="demo_data" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
-        <label for="demo_data" style="font-weight:500;margin:0">Install the optional starter catalogue</label>
-        <p class="hint" style="margin:6px 0 0 22px">
-          Adds the seven sample categories, eight brands, twenty-nine sample products, sample reviews,
-          three sample coupons and the two homepage slides. Leave this unticked for a clean store:
-          you get the full database structure, your settings and the four payment routes, and no
-          sample products, customers, orders, reviews or banners. Nothing here is ever inserted
-          again by a page view, a login or an upgrade, and leaving the box unticked never deletes
-          records that already exist in this database.
-        </p>
-      </div>
+      <fieldset style="margin:16px 0 0;padding:0;border:0">
+        <legend style="font-size:13px;font-weight:600;margin-bottom:6px">Install Demo Data</legend>
+        <div class="check">
+          <input type="radio" id="demo_on" name="demo_data" value="1" <?= $form['demo_data'] === '1' ? 'checked' : '' ?>>
+          <label for="demo_on" style="font-weight:500;margin:0">ON</label>
+        </div>
+        <div class="check" style="margin-top:6px">
+          <input type="radio" id="demo_off" name="demo_data" value="0" <?= $form['demo_data'] === '1' ? '' : 'checked' ?>>
+          <label for="demo_off" style="font-weight:500;margin:0">OFF</label>
+        </div>
+        <p class="hint" style="margin:6px 0 0 22px">ON adds sample products, categories and homepage content. OFF starts empty.</p>
+      </fieldset>
     </div>
 
     <div class="card">
@@ -612,13 +586,9 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
         <div>
           <label for="admin_password">Admin password</label>
           <input class="f-in" id="admin_password" name="admin_password" type="password" required
-                 minlength="8" autocomplete="new-password"
-                 aria-describedby="pw-rules" placeholder="e.g. Shop2024pass">
-          <p class="hint" id="pw-rules">
-            <strong>Must be at least 8 characters and contain both a letter and a number.</strong><br>
-            Good examples: <code>Shop2024pass</code> or <code>MyStore99</code><br>
-            Symbols are allowed. Letters and digits from any language are accepted.
-          </p>
+                 minlength="<?= (int)sh_password_min_length('admin') ?>" maxlength="200"
+                 autocomplete="new-password" aria-describedby="pw-rules">
+          <p class="hint" id="pw-rules">At least <?= (int)sh_password_min_length('admin') ?> characters. Any characters you like.</p>
           <p class="pw-live" id="pw-live" hidden></p>
         </div>
         <div>
@@ -641,26 +611,20 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
   var live = document.getElementById('pw-live');
   if (!pw || !live) { return; }
 
+  var MIN = <?= (int)sh_password_min_length('admin') ?>;
+
   function evaluate() {
     var v = pw.value;
     if (v === '') { live.hidden = true; pw.setCustomValidity(''); return; }
-    var longEnough = v.length >= 8;
-    var hasLetter = /\p{L}/u.test(v);
-    var hasNumber = /\p{N}/u.test(v);
-    var missing = [];
-    if (!longEnough) { missing.push('8 characters'); }
-    if (!hasLetter) { missing.push('a letter'); }
-    if (!hasNumber) { missing.push('a number'); }
-
     live.hidden = false;
-    if (missing.length === 0) {
-      live.textContent = 'Password meets the requirements.';
+    if (v.length >= MIN) {
+      live.textContent = 'Password length is fine.';
       live.className = 'pw-live pw-live--ok';
       pw.setCustomValidity('');
     } else {
-      live.textContent = 'Still needs: ' + missing.join(', ') + '.';
+      live.textContent = 'At least ' + MIN + ' characters (' + (MIN - v.length) + ' more).';
       live.className = 'pw-live pw-live--bad';
-      pw.setCustomValidity('Password needs ' + missing.join(', ') + '.');
+      pw.setCustomValidity('Password must be at least ' + MIN + ' characters.');
     }
   }
   pw.addEventListener('input', evaluate);
