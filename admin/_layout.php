@@ -83,7 +83,7 @@ $nav = [
         ['telegram',     'telegram.php',         'send',     'Telegram', 0, 'integrations.manage'],
         ['whatsapp',     'whatsapp.php',         'message',  'WhatsApp', 0, 'integrations.manage'],
         ['messenger',    'messenger.php',        'message',  'Messenger', 0, 'integrations.manage'],
-        ['email',        'email.php',            'mail',     'SMTP / Email', 0, 'integrations.manage'],
+        ['email',        'email.php',            'mail',     'Email & Verification Settings', 0, 'integrations.manage'],
         ['email_log',    'email-log.php',        'list',     'Email Delivery Log', 0, 'integrations.manage'],
         ['notifications','notifications.php',    'bell',     'Notification Channels', 0, 'integrations.manage'],
         ['google_login', 'google-login.php',     'log-in',   'Google Login', 0, '@superadmin'],

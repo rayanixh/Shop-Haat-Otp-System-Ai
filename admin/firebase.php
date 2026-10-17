@@ -59,6 +59,16 @@ require __DIR__ . '/_layout.php';
 <?php if ($errors): ?><div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 17) ?><div><ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div><?php endif; ?>
 <?php if ($test): ?><div class="sh-alert <?= $test['ok'] ? 'sh-alert--success' : 'sh-alert--error' ?>"><?= sh_icon($test['ok'] ? 'check-circle' : 'x-circle', 17) ?><div><?= e($test['msg']) ?></div></div><?php endif; ?>
 
+<div class="sh-alert sh-alert--info" style="margin-bottom:16px">
+  <?= sh_icon('info', 16) ?>
+  <div>
+    Looking for full email verification controls or custom SMTP setup?
+    <a href="<?= e(sh_url('admin/email.php')) ?>" style="font-weight:700;color:inherit;text-decoration:underline">Go to Email &amp; Verification Settings &rarr;</a>
+    or
+    <a href="<?= e(sh_url('admin/guides/firebase')) ?>" style="font-weight:700;color:inherit;text-decoration:underline">See Full Firebase Guide &rarr;</a>
+  </div>
+</div>
+
 <div class="sh-cards">
   <section class="sh-panel">
     <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('mail', 17) ?> Verifying provider</h2></div>

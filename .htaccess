@@ -46,6 +46,10 @@ DirectoryIndex index.php index.html
   RewriteRule ^sitemap-([0-9]+)\.xml$ sitemap.php?file=$1 [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteRule ^robots\.txt$ robots.php [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^admin/guides/smtp/?$ admin/guides/smtp.php [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^admin/guides/firebase/?$ admin/guides/firebase.php [L]
 </IfModule>
 
 # --- Never serve files that can leak data or code ---------------------------

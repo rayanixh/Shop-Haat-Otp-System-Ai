@@ -93,10 +93,25 @@ function sh_email_schema_ensure(): void
 
 function sh_email_verifier(): string
 {
+    $provider = (string)sh_setting('email_delivery_provider', 'smtp');
     $mail = sh_mail_service_status();
+    if ($provider === 'firebase' && function_exists('sh_fb_enabled') && sh_fb_enabled()) {
+        return 'firebase';
+    }
     if (sh_setting('email_verify_enabled', '1') === '1' && (bool)$mail['ready']) { return 'smtp_otp'; }
     if (function_exists('sh_fb_enabled') && sh_fb_enabled()) { return 'firebase'; }
     return (bool)$mail['ready'] ? 'smtp_otp' : 'none';
+}
+
+function sh_email_delivery_provider(): string
+{
+    $p = (string)sh_setting('email_delivery_provider', 'smtp');
+    return in_array($p, ['smtp', 'firebase'], true) ? $p : 'smtp';
+}
+
+function sh_email_verify_method(): string
+{
+    return 'otp_code';
 }
 
 /** Can the store send an authentication email right now? */
@@ -536,13 +551,14 @@ function sh_email_send_verification_code(string $email, ?int $userId = null, arr
     }
     $b = sh_email_brand();
     $message = sh_email_layout([
-        'subject'    => 'Verify your ' . $b['site'] . ' email address',
+        'subject'    => 'Verify your ' . $b['site'] . ' email',
         'heading'    => 'Confirm your email address',
         'paragraphs' => [
-            'Use this code to finish setting up your ' . $b['site'] . ' account.',
+            'Use this six-digit verification code to complete your ' . $b['site'] . ' account verification.',
+            'This code expires in ' . (int)sh_email_otp_expiry_minutes() . ' minutes.',
         ],
         'code'       => (string)$issue['code'],
-        'note'       => 'If you did not create an account, ignore this message — no account becomes active because of it.',
+        'note'       => 'For your security, never share this verification code with anyone. ' . $b['site'] . ' staff will never ask for your code. If you did not create an account, you can safely ignore this email.',
     ]);
     $result = sh_email_dispatch($email, SH_EMAIL_PURPOSE_SIGNUP, $message, (int)($userId ?? 0));
     sh_email_challenge_sent((int)$issue['challenge_id'], $result);
