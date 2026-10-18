@@ -11,7 +11,7 @@ require_once SH_ROOT . '/includes/notifications.php';
 sh_session_start();
 // Payment confirmation requires an authenticated account — guests are sent to
 // Login/Signup and returned here after authenticating (cart/order preserved).
-sh_require_login();
+sh_require_login('', false);
 
 $orderId = sh_int($_GET['id'] ?? $_POST['order_id'] ?? 0);
 $order = $orderId > 0 ? sh_order_get($orderId) : null;

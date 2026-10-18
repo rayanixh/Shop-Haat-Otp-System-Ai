@@ -65,7 +65,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($gate !== null) {
                         $target = sh_customer_return_target($redirect, 'account.php');
                         sh_email_verify_pending_set($u, $target, 'login');
-                        if (sh_email_verify_enabled()) { sh_email_send_verification_code((string)$u['email'], (int)$u['id']); }
+                        $verifier = sh_email_verifier();
+                        if ($verifier === 'firebase') {
+                            require_once SH_ROOT . '/includes/firebase.php';
+                            sh_fb_send_verification($u);
+                        } elseif ($verifier === 'smtp_otp') {
+                            if (sh_email_verify_enabled()) { sh_email_send_verification_code((string)$u['email'], (int)$u['id']); }
+                        }
                         sh_login_reset('user_login');
                         if (function_exists('sh_security_log')) {
                             sh_security_log('login_blocked_unverified_email', (int)$u['id'], ['email' => sh_email_mask((string)$u['email'])]);

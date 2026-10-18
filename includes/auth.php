@@ -119,7 +119,7 @@ function sh_customer_return_target(string $raw, string $fallback = 'account.php'
     }
     $blocked = [
         'login.php', 'register.php', 'logout.php', 'otp.php', 'forgot-password.php',
-        'reset-password.php', 'auth/google/login.php', 'auth/google/callback.php',
+        'reset-password.php', 'verify-email.php', 'auth/google/login.php', 'auth/google/callback.php',
     ];
     return in_array($path, $blocked, true) ? $fallback : $target;
 }
@@ -145,7 +145,45 @@ function sh_customer_auth_required_payload(string $returnTo = '', ?bool $expired
     ];
 }
 
-function sh_require_login(string $redirectTo = ''): array
+/**
+ * Does this customer account require email verification before accessing protected areas?
+ *
+ * True only when email verification is enabled by the administrator, the account
+ * uses a real (non-synthetic) email address, and email_verified is not 1.
+ */
+function sh_user_needs_email_verification(?array $user = null): bool
+{
+    if ($user === null) {
+        $user = sh_user();
+    }
+    if ($user === null) {
+        return false;
+    }
+    if (sh_auth_mode() !== 'email_password') {
+        return false;
+    }
+
+    if (!function_exists('sh_email_verify_enabled')) {
+        require_once SH_ROOT . '/includes/mail.php';
+    }
+    if (!sh_email_verify_enabled()) {
+        return false;
+    }
+
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email === '' || (function_exists('sh_is_synthetic_email') && sh_is_synthetic_email($email))) {
+        return false;
+    }
+    if (function_exists('sh_valid_email')) {
+        if (!sh_valid_email($email)) { return false; }
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    return empty($user['email_verified']);
+}
+
+function sh_require_login(string $redirectTo = '', bool $requireVerified = true): array
 {
     $u = sh_user();
     if ($u === null) {
@@ -158,6 +196,25 @@ function sh_require_login(string $redirectTo = ''): array
         if ($expired) { sh_consume_customer_session_expired_notice(); }
         sh_redirect(sh_login_url($target));
     }
+
+    if ($requireVerified && sh_user_needs_email_verification($u)) {
+        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        $target = sh_customer_return_target($target, 'account.php');
+        if (function_exists('sh_email_verify_pending_set')) {
+            sh_email_verify_pending_set($u, $target, 'protected');
+        }
+        if (sh_wants_json()) {
+            sh_json([
+                'success'          => false,
+                'error'            => 'Please verify your email address to continue.',
+                'email_unverified' => true,
+                'verify_url'       => sh_url('verify-email.php'),
+            ], 403);
+        }
+        sh_flash('warning', 'Please verify your email address before continuing.');
+        sh_redirect('verify-email.php');
+    }
+
     return $u;
 }
 

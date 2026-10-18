@@ -44,16 +44,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$errors) {
             try {
-                $exists = sh_one('SELECT id FROM users WHERE email = ? LIMIT 1', [$form['email']]);
+                $exists = sh_one('SELECT id, email, email_verified FROM users WHERE email = ? LIMIT 1', [$form['email']]);
                 if ($exists) {
-                    $errors['email'] = 'An account with this email address already exists.';
+                    if (empty($exists['email_verified']) && sh_email_verify_enabled()) {
+                        $target = sh_customer_return_target($redirect, 'account.php');
+                        $existUid = (int)$exists['id'];
+                        sh_email_verify_pending_set(['id' => $existUid, 'email' => $form['email']], $target, 'signup');
+                        $verifier = sh_email_verifier();
+                        if ($verifier === 'firebase') {
+                            require_once SH_ROOT . '/includes/firebase.php';
+                            $sent = sh_fb_send_verification(['id' => $existUid, 'email' => $form['email'], 'email_verified' => 0]);
+                            $msg = !empty($sent['ok'])
+                                ? 'An account with this email address is pending verification. We sent a verification link to ' . $form['email'] . ' — please check your inbox.'
+                                : 'An account with this email address is pending verification. You can request a fresh link on the verification page.';
+                        } else {
+                            $send = sh_email_send_verification_code($form['email'], $existUid);
+                            $msg = !empty($send['ok'])
+                                ? 'An account with this email address is pending verification. We sent a verification code to ' . $form['email'] . '.'
+                                : 'An account with this email address is pending verification. You can request a fresh code on the verification page.';
+                        }
+                        sh_flash('info', $msg);
+                        sh_redirect('verify-email.php');
+                    } else {
+                        $errors['email'] = 'An account with this email address already exists. Please log in instead.';
+                    }
                 } else {
                     $target = sh_customer_return_target($redirect, 'account.php');
                     $uid = sh_insert('users', [
-                        'name'          => $form['name'],
-                        'email'         => $form['email'],
-                        'password_hash' => password_hash((string)$_POST['password'], PASSWORD_DEFAULT),
-                        'status'        => 'active',
+                        'name'           => $form['name'],
+                        'email'          => $form['email'],
+                        'password_hash'  => password_hash((string)$_POST['password'], PASSWORD_DEFAULT),
+                        'status'         => 'active',
+                        'email_verified' => 0,
                     ]);
                     sh_login_user($uid);
                     sh_security_log('account_created', $uid, ['email' => mb_substr($form['email'], 0, 3) . '***']);
@@ -64,26 +86,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         require_once SH_ROOT . '/includes/mail.php';
                         sh_email_schema_ensure();
                         if (sh_email_verify_enabled()) {
-                            // The store's own verification: a six-digit code emailed
-                            // through the configured SMTP transport. The account is
-                            // NOT marked verified here and a refused message is
-                            // reported as a failure, never as a success.
+                            $verifier = sh_email_verifier();
                             $needsVerification = true;
                             sh_email_verify_pending_set(['id' => $uid, 'email' => $form['email']], $target, 'signup');
-                            $send = sh_email_send_verification_code($form['email'], $uid);
-                            $welcome .= !empty($send['ok'])
-                                ? ' We emailed a verification code to ' . $form['email'] . '.'
-                                : ' Your verification code could not be emailed (' . (string)($send['error'] ?? 'the mail server refused the message')
-                                  . '). Open the verification page to try again — nothing was verified for you.';
-                        } elseif (function_exists('sh_fb_enabled')) {
-                            // No SMTP yet, but Firebase is configured: keep using the
-                            // provider that actually exists instead of pretending.
-                            require_once SH_ROOT . '/includes/firebase.php';
-                            if (sh_fb_enabled()) {
+
+                            if ($verifier === 'firebase') {
+                                require_once SH_ROOT . '/includes/firebase.php';
                                 $sent = sh_fb_send_verification(['id' => $uid, 'email' => $form['email'], 'email_verified' => 0]);
                                 $welcome .= !empty($sent['ok'])
                                     ? ' We sent a verification link to ' . $form['email'] . ' — please check your inbox.'
-                                    : ' You can verify your email address from your profile.';
+                                    : ' A verification email could not be sent (' . (string)($sent['error'] ?? 'the service was unavailable')
+                                      . '). You can request a new link on the verification page.';
+                            } else {
+                                $send = sh_email_send_verification_code($form['email'], $uid);
+                                $welcome .= !empty($send['ok'])
+                                    ? ' We emailed a verification code to ' . $form['email'] . '.'
+                                    : ' Your verification code could not be emailed (' . (string)($send['error'] ?? 'the mail server refused the message')
+                                      . '). Open the verification page to try again — nothing was verified for you.';
                             }
                         }
                     } catch (Throwable $e) { sh_log_exception($e, 'register-verify'); }

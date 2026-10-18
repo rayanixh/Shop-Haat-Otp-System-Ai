@@ -4,20 +4,22 @@
  *
  * Serves:
  *   1. An incoming provider link (?mode=verifyEmail&oobCode=…) — validated
- *      server-side against Firebase, never trusted from the browser.
+ *      server-side against Firebase, never trusted blindly from the browser.
  *   2. The store's own SMTP verification code — six digits, emailed by
- *      includes/mail.php, stored only as a bcrypt hash, 10-minute expiry,
+ *      includes/mail.php, stored only as a bcrypt hash, expiry,
  *      attempt limit, resend cooldown, single use.
- *   3. Fresh-signup, login-gate and account-settings verification states.
+ *   3. Fresh-signup, login-gate and protected customer route verification states.
  *
- * Nothing here ever claims an email was sent when the transport refused it, and
- * the account is only marked verified after a code or link really validated.
+ * The two delivery methods (Firebase verification link vs Custom SMTP OTP) are
+ * strictly separated: the UI and backend logic match the active provider.
+ * The account is only marked verified after a code or link really validates.
  */
 declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/mail.php';
+require_once SH_ROOT . '/includes/firebase.php';
 
 sh_email_schema_ensure();
 sh_email_challenge_cleanup();
@@ -53,7 +55,7 @@ function sh_verify_cooldown_remaining(string $email, string $verifier, ?array $u
 }
 
 // ---------------------------------------------------------------------------
-// 1. A verification link that points straight at this site
+// 1. Firebase Action Link callback (?mode=verifyEmail&oobCode=…)
 // ---------------------------------------------------------------------------
 $oob = trim((string)($_GET['oobCode'] ?? ''));
 $mode = trim((string)($_GET['mode'] ?? ''));
@@ -64,17 +66,20 @@ if ($oob !== '') {
     $applied = sh_fb_apply_oob_code($oob);
     if (!empty($applied['ok'])) {
         $verifiedUid = (int)($applied['user_id'] ?? 0);
+        $verifiedEmail = (string)($applied['email'] ?? '');
         if ($verifiedUid > 0) {
             sh_email_mark_verified($verifiedUid, 'firebase_link');
-            sh_email_verify_pending_clear();
-            $currUser = sh_user();
-            if ($currUser === null || (int)$currUser['id'] !== $verifiedUid) {
-                sh_login_user($verifiedUid);
-            }
         }
+        sh_email_verify_pending_clear();
+        $_SESSION['sh_email_just_verified'] = [
+            'uid'   => $verifiedUid,
+            'email' => $verifiedEmail,
+            'at'    => time(),
+        ];
         sh_redirect('verify-email.php?verified=1');
     }
-    sh_flash('error', 'That verification link could not be used: ' . (string)($applied['error'] ?? 'the code is invalid or has expired.'));
+    $errorMsg = (string)($applied['error'] ?? 'The verification link is invalid or has expired.');
+    sh_flash('error', $errorMsg);
     sh_redirect('verify-email.php');
 }
 
@@ -120,22 +125,48 @@ if ($user !== null) {
     }
 }
 
-// If Firebase is configured and the user is unverified, check for external verification
-if (!$verified && $dbUser !== null && function_exists('sh_fb_enabled') && sh_fb_enabled() && sh_fb_applies($dbUser)) {
+// Check session flag for recently verified address
+$justVerified = false;
+if (isset($_GET['verified'])) {
+    if (!empty($_SESSION['sh_email_just_verified'])) {
+        $justData = $_SESSION['sh_email_just_verified'];
+        unset($_SESSION['sh_email_just_verified']);
+        if ($email === '') {
+            $email = (string)($justData['email'] ?? '');
+        }
+        $verified = true;
+        $justVerified = true;
+    } elseif ($verified) {
+        $justVerified = true;
+    }
+}
+
+// Active verification delivery method
+$verifier = sh_email_verifier();
+
+// If Firebase is configured and user is unverified, check for external verification sync
+if (!$verified && $verifier === 'firebase' && $dbUser !== null && function_exists('sh_fb_enabled') && sh_fb_enabled() && sh_fb_applies($dbUser)) {
     if (isset($_GET['sync']) || isset($_GET['verify']) || empty($dbUser['email_verify_checked_at']) || time() - (int)strtotime((string)$dbUser['email_verify_checked_at']) > 300) {
         $sync = sh_fb_sync_verified($dbUser);
         if (!empty($sync['verified'])) {
             $verified = true;
+            $justVerified = true;
+            sh_email_verify_pending_clear();
+            if (isset($_GET['sync']) || isset($_GET['verify'])) {
+                sh_flash('success', 'Your email address is now verified.');
+                sh_redirect('verify-email.php?verified=1');
+            }
+        } elseif (isset($_GET['sync']) || isset($_GET['verify'])) {
+            sh_flash('info', 'Your email is not verified yet. Open the link in the verification email first.');
+            sh_redirect('verify-email.php');
         }
     }
 }
 
-$verifier = sh_email_verifier();
 $canSend = sh_email_verify_enabled() && $email !== '' && sh_valid_email($email) && !$verified;
 $errors = [];
 $notice = '';
 $noticeKind = 'info';
-$justVerified = isset($_GET['verified']) && $verified;
 
 // ---------------------------------------------------------------------------
 // 3. Pull existing flashes before header to prevent duplicate top banners
@@ -150,12 +181,18 @@ foreach ($pulledFlashes as $f) {
     } elseif ($f['type'] === 'success') {
         if (str_contains(strtolower($f['message']), 'verified')) {
             $justVerified = true;
+        } else {
+            $notice = $f['message'];
+            $noticeKind = 'success';
         }
+    } elseif ($f['type'] === 'info') {
+        $notice = $f['message'];
+        $noticeKind = 'info';
     }
 }
 
 // ---------------------------------------------------------------------------
-// 4. POST: verify code or send a new code/link
+// 4. POST: verify code or resend code/link
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
@@ -166,57 +203,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($verified) {
         $justVerified = true;
     } elseif ($action === 'verify') {
-        $code = trim((string)sh_post('code'));
-        if ($code === '') {
-            $errors[] = 'Please enter your 6-digit verification code.';
+        if ($verifier !== 'smtp_otp') {
+            $errors[] = 'Code verification is not supported for this verification method.';
         } else {
-            $check = sh_email_challenge_verify($email, SH_EMAIL_PURPOSE_SIGNUP, $code, $uid ?: null);
-            if (!empty($check['ok'])) {
-                if ($uid <= 0) {
-                    $row = sh_one('SELECT id FROM users WHERE email = ? LIMIT 1', [$email]);
-                    $uid = (int)($row['id'] ?? 0);
-                }
-                if ($uid > 0) {
-                    sh_email_mark_verified($uid, 'smtp_otp');
-                    sh_email_verify_pending_clear();
-                    if ($context === 'login' || $user === null) {
-                        sh_login_user($uid);
-                    }
-                    $verified = true;
-                    $justVerified = true;
-                } else {
-                    $errors[] = 'The code was correct but the account could not be found. Please sign in again.';
-                }
+            $code = trim((string)sh_post('code'));
+            if ($code === '') {
+                $errors[] = 'Please enter your 6-digit verification code.';
             } else {
-                $errors[] = (string)($check['error'] ?? 'The verification code is invalid or has expired.');
-                if (function_exists('sh_security_log')) {
-                    sh_security_log('email_verification_failed', $uid, ['email' => sh_email_mask($email), 'state' => (string)($check['state'] ?? 'invalid')]);
+                $check = sh_email_challenge_verify($email, SH_EMAIL_PURPOSE_SIGNUP, $code, $uid ?: null);
+                if (!empty($check['ok'])) {
+                    if ($uid <= 0) {
+                        $row = sh_one('SELECT id FROM users WHERE email = ? LIMIT 1', [$email]);
+                        $uid = (int)($row['id'] ?? 0);
+                    }
+                    if ($uid > 0) {
+                        sh_email_mark_verified($uid, 'smtp_otp');
+                        sh_email_verify_pending_clear();
+                        if ($context === 'login' || $user === null) {
+                            sh_login_user($uid);
+                        }
+                        $verified = true;
+                        $justVerified = true;
+                        $_SESSION['sh_email_just_verified'] = [
+                            'uid'   => $uid,
+                            'email' => $email,
+                            'at'    => time(),
+                        ];
+                        sh_redirect('verify-email.php?verified=1');
+                    } else {
+                        $errors[] = 'The code was correct but the account could not be found. Please sign in again.';
+                    }
+                } else {
+                    $errors[] = (string)($check['error'] ?? 'The verification code is invalid or has expired.');
+                    if (function_exists('sh_security_log')) {
+                        sh_security_log('email_verification_failed', $uid, ['email' => sh_email_mask($email), 'state' => (string)($check['state'] ?? 'invalid')]);
+                    }
                 }
             }
         }
     } elseif ($action === 'send') {
-        if ($verifier === 'firebase' && !sh_email_verify_enabled()) {
+        if ($verifier === 'firebase') {
             $target = $dbUser ?? ($uid > 0 ? sh_one('SELECT * FROM users WHERE id = ? LIMIT 1', [$uid]) : null);
-            $sentFirebase = $target !== null ? sh_fb_send_verification($target) : ['ok' => false, 'error' => 'Account not found.'];
-            if (!empty($sentFirebase['ok'])) {
-                if (!empty($sentFirebase['already'])) {
-                    $verified = true;
-                    $justVerified = true;
-                } else {
-                    $notice = 'A verification email was sent to ' . sh_email_mask($email) . '.';
-                    $noticeKind = 'success';
-                }
+            if ($target === null && $email !== '') {
+                $target = sh_one('SELECT * FROM users WHERE email = ? LIMIT 1', [$email]);
+            }
+            if ($target === null) {
+                $errors[] = 'Account could not be found. Please sign in or register again.';
             } else {
-                $errors[] = (string)($sentFirebase['error'] ?? 'The verification email could not be sent.');
+                require_once SH_ROOT . '/includes/firebase.php';
+                $sentFirebase = sh_fb_send_verification($target);
+                if (!empty($sentFirebase['ok'])) {
+                    if (!empty($sentFirebase['already'])) {
+                        $verified = true;
+                        $justVerified = true;
+                        sh_redirect('verify-email.php?verified=1');
+                    } else {
+                        sh_flash('success', 'A verification link was sent to ' . sh_email_mask($email) . '. Please check your inbox.');
+                        sh_redirect('verify-email.php');
+                    }
+                } else {
+                    $errors[] = (string)($sentFirebase['error'] ?? 'The verification email could not be sent.');
+                }
             }
         } else {
             $result = sh_email_send_verification_code($email, $uid ?: null);
             if (!empty($result['ok'])) {
-                $notice = 'A new 6-digit code was sent to ' . sh_email_mask($email) . '.';
-                $noticeKind = 'success';
+                sh_flash('success', 'A new 6-digit code was sent to ' . sh_email_mask($email) . '.');
                 if (function_exists('sh_security_log')) {
-                    sh_security_log('email_verification_sent', $uid, ['email' => sh_email_mask($email)]);
+                    sh_security_log('email_verification_sent', $uid, ['email' => sh_email_mask($email), 'via' => 'smtp_otp']);
                 }
+                sh_redirect('verify-email.php');
             } else {
                 $errors[] = 'The code could not be emailed: ' . (string)($result['error'] ?? 'the mail server refused the message.');
                 if (function_exists('sh_security_log')) {
@@ -244,7 +300,8 @@ $remainingCooldown = ($viewState === 'required')
     ? sh_verify_cooldown_remaining($email, $verifier, $dbUser)
     : 0;
 
-$returnTarget = ($returnTo !== '' && $returnTo !== 'verify-email.php') ? $returnTo : 'index.php';
+$rawReturn = ($returnTo !== '' && !str_contains($returnTo, 'verify-email.php')) ? $returnTo : 'account.php';
+$returnTarget = sh_customer_return_target($rawReturn, 'account.php');
 
 $pageTitle = ($viewState === 'success' || $viewState === 'already_verified')
     ? 'Email Verified'
@@ -288,32 +345,43 @@ require_once SH_ROOT . '/includes/header.php';
       <div class="sh-verify-card__badge sh-verify-card__badge--ok"><?= sh_icon('check-circle', 22) ?></div>
       <h1 class="sh-verify-card__title">Verification successful</h1>
       <p class="sh-verify-card__desc">Your email address <strong><?= e(sh_email_mask($email)) ?></strong> has been verified successfully. You can now continue shopping.</p>
-      <a class="sh-verify-card__btn-primary" href="<?= e(sh_url($returnTarget)) ?>">
-        <?= sh_icon('arrow-right', 15) ?> Continue to ShopHaat
-      </a>
-      <div class="sh-verify-card__footer">
-        <a href="<?= e(sh_url('account.php')) ?>">Go to your account</a>
-      </div>
+      <?php if ($user !== null): ?>
+        <a class="sh-verify-card__btn-primary" href="<?= e(sh_url($returnTarget)) ?>">
+          <?= sh_icon('arrow-right', 15) ?> Continue to ShopHaat
+        </a>
+        <div class="sh-verify-card__footer">
+          <a href="<?= e(sh_url('account.php')) ?>">Go to your account</a>
+        </div>
+      <?php else: ?>
+        <a class="sh-verify-card__btn-primary" href="<?= e(sh_url('login.php' . ($returnTarget !== 'account.php' ? '?redirect=' . urlencode($returnTarget) : ''))) ?>">
+          <?= sh_icon('user', 15) ?> Sign in to your account
+        </a>
+        <div class="sh-verify-card__footer">
+          <a href="<?= e(sh_url('index.php')) ?>">Return to ShopHaat</a>
+        </div>
+      <?php endif; ?>
 
     <?php else: ?>
       <!-- State A & D: Verification required / retry -->
       <div class="sh-verify-card__badge"><?= sh_icon('mail', 22) ?></div>
       <h1 class="sh-verify-card__title">Verify your email</h1>
 
-      <?php if ($verifier === 'firebase' && !sh_email_verify_enabled()): ?>
+      <?php if ($verifier === 'firebase'): ?>
+        <!-- Method A: Firebase Link Flow -->
         <p class="sh-verify-card__desc">
           We sent a verification link to <strong><?= e(sh_email_mask($email)) ?></strong>.
           Please open your email and click the link to confirm your address.
         </p>
-      <?php elseif ($verifier === 'none'): ?>
-        <p class="sh-verify-card__desc">
-          Email verification is currently not available for <strong><?= e(sh_email_mask($email)) ?></strong>.
-          An administrator needs to configure email delivery settings.
-        </p>
-      <?php else: ?>
+      <?php elseif ($verifier === 'smtp_otp'): ?>
+        <!-- Method B: Custom SMTP 6-digit OTP Flow -->
         <p class="sh-verify-card__desc">
           We sent a <?= (int)sh_email_otp_code_length() ?>-digit verification code to <strong><?= e(sh_email_mask($email)) ?></strong>.
           Enter it below to confirm your address.
+        </p>
+      <?php else: ?>
+        <p class="sh-verify-card__desc">
+          Email verification is currently not available for <strong><?= e(sh_email_mask($email)) ?></strong>.
+          An administrator needs to configure email delivery settings.
         </p>
       <?php endif; ?>
 
@@ -329,7 +397,8 @@ require_once SH_ROOT . '/includes/header.php';
         </div>
       <?php endif; ?>
 
-      <?php if ($verifier === 'firebase' && !sh_email_verify_enabled()): ?>
+      <?php if ($verifier === 'firebase'): ?>
+        <!-- Method A Actions: Status check and resend link -->
         <a class="sh-verify-card__btn-primary" href="<?= e(sh_url('verify-email.php?sync=1')) ?>">
           <?= sh_icon('rotate', 14) ?> Check verification status
         </a>
@@ -344,7 +413,8 @@ require_once SH_ROOT . '/includes/header.php';
             <span id="sh-resend-label">Resend verification email<?= $remainingCooldown > 0 ? ' (' . (int)$remainingCooldown . 's)' : '' ?></span>
           </button>
         </form>
-      <?php elseif ($verifier !== 'none'): ?>
+      <?php elseif ($verifier === 'smtp_otp'): ?>
+        <!-- Method B Actions: 6-digit OTP form and resend code -->
         <form class="sh-verify-card__form" method="post" novalidate>
           <?= sh_csrf_field() ?>
           <input type="hidden" name="action" value="verify">
@@ -378,9 +448,9 @@ require_once SH_ROOT . '/includes/header.php';
 
       <div class="sh-verify-card__footer">
         <?php if ($user !== null): ?>
-          <a href="<?= e(sh_url('account.php')) ?>">Change email</a>
+          <a href="<?= e(sh_url('logout.php')) ?>">Sign out</a>
           <span class="sh-verify-card__dot">•</span>
-          <a href="<?= e(sh_url('account.php')) ?>">Back to account</a>
+          <a href="<?= e(sh_url('index.php')) ?>">Return to store</a>
         <?php elseif ($context === 'signup'): ?>
           <a href="<?= e(sh_url('register.php')) ?>">Register with another email</a>
           <span class="sh-verify-card__dot">•</span>

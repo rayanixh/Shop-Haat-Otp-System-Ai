@@ -11,10 +11,15 @@ $orderId = sh_int($_GET['id'] ?? 0);
 $order = $orderId > 0 ? sh_order_get($orderId) : null;
 
 // A customer-owned order opened after automatic logout should resume through
-// Login, not look like an unknown order. Deliberately logged-out/guessed IDs
-// still take the ordinary IDOR-safe 404 path below.
-if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
-    sh_require_login('order-details.php?id=' . $orderId);
+// Login, not look like an unknown order. Logged-in customers must satisfy
+// the server-side email verification requirement before viewing order details.
+// Deliberately logged-out/guessed IDs still take the ordinary IDOR-safe 404 path below.
+if ($order !== null && (int)($order['user_id'] ?? 0) > 0) {
+    if (sh_user() === null && sh_customer_session_expired()) {
+        sh_require_login('order-details.php?id=' . $orderId);
+    } elseif (sh_user() !== null) {
+        sh_require_login('order-details.php?id=' . $orderId);
+    }
 }
 
 // IDOR protection: only the owner (or the guest session that created it) may view.

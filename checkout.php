@@ -16,7 +16,7 @@ sh_session_start();
 // the customer was trying to recover.
 $retryOrderHint = sh_int($_GET['retry_order'] ?? 0);
 $checkoutReturn = $retryOrderHint > 0 ? 'checkout.php?retry_order=' . $retryOrderHint : 'checkout.php';
-$user = sh_require_login($checkoutReturn);
+$user = sh_require_login($checkoutReturn, false);
 require_once SH_ROOT . '/includes/firebase.php';
 require_once SH_ROOT . '/includes/mail.php';
 // One gate for both verifiers: the store's own emailed code when SMTP is
@@ -24,8 +24,9 @@ require_once SH_ROOT . '/includes/mail.php';
 // an administrator switches the requirement on.
 $verifyBlocked = sh_email_gate_blocked($user, 'checkout');
 if ($verifyBlocked !== null) {
+    sh_email_verify_pending_set($user, $checkoutReturn, 'checkout');
     sh_flash('error', $verifyBlocked);
-    sh_redirect('account.php#account-verification');
+    sh_redirect('verify-email.php');
 }
 $coupon = $_SESSION['coupon_code'] ?? null;
 $zone = ($_SESSION['delivery_zone'] ?? 'inside');

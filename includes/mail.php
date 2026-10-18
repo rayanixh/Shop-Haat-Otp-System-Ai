@@ -93,14 +93,23 @@ function sh_email_schema_ensure(): void
 
 function sh_email_verifier(): string
 {
+    if (!function_exists('sh_fb_enabled')) {
+        require_once SH_ROOT . '/includes/firebase.php';
+    }
     $provider = (string)sh_setting('email_delivery_provider', 'smtp');
+    $fbReady = function_exists('sh_fb_enabled') && sh_fb_enabled();
     $mail = sh_mail_service_status();
-    if ($provider === 'firebase' && function_exists('sh_fb_enabled') && sh_fb_enabled()) {
+    $smtpReady = (bool)($mail['ready'] ?? false);
+
+    if ($provider === 'firebase' && $fbReady) {
         return 'firebase';
     }
-    if (sh_setting('email_verify_enabled', '1') === '1' && (bool)$mail['ready']) { return 'smtp_otp'; }
-    if (function_exists('sh_fb_enabled') && sh_fb_enabled()) { return 'firebase'; }
-    return (bool)$mail['ready'] ? 'smtp_otp' : 'none';
+    if ($provider === 'smtp' && $smtpReady) {
+        return 'smtp_otp';
+    }
+    if ($fbReady) { return 'firebase'; }
+    if ($smtpReady) { return 'smtp_otp'; }
+    return 'none';
 }
 
 function sh_email_delivery_provider(): string
@@ -123,7 +132,10 @@ function sh_email_can_send(): bool
 
 function sh_email_verify_enabled(): bool
 {
-    return sh_setting('email_verify_enabled', '1') === '1' && sh_email_can_send();
+    if (sh_setting('email_verify_enabled', '1') !== '1') {
+        return false;
+    }
+    return sh_email_verifier() !== 'none';
 }
 
 function sh_email_forgot_enabled(): bool

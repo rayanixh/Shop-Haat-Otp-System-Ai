@@ -20,7 +20,18 @@ sh_session_start();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { sh_json(['success' => false, 'error' => 'POST required.'], 405); }
 // This endpoint only serves the authenticated Checkout page. Check auth first
 // so a lost login becomes a recoverable JSON redirect signal, never a raw error page.
-sh_require_login('checkout.php');
+$u = sh_require_login('checkout.php', false);
+if (function_exists('sh_email_gate_blocked')) {
+    $gate = sh_email_gate_blocked($u, 'checkout');
+    if ($gate !== null) {
+        sh_json([
+            'success'          => false,
+            'error'            => $gate,
+            'email_unverified' => true,
+            'verify_url'       => sh_url('verify-email.php'),
+        ], 403);
+    }
+}
 sh_csrf_require();
 
 try {

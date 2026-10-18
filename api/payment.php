@@ -30,7 +30,7 @@ try {
         // Authenticate before CSRF so an expired browser session receives the
         // structured 401/login response rather than a token-mismatch response.
         // The gateway callback below intentionally remains server-to-server.
-        sh_require_login($orderId > 0 ? 'payment.php?id=' . $orderId : 'orders.php');
+        sh_require_login($orderId > 0 ? 'payment.php?id=' . $orderId : 'orders.php', false);
         sh_csrf_require();
         $res = sh_submit_manual_payment($orderId, sh_post('transaction_id'), sh_post('sender_phone'));
         if (!$res['ok']) { sh_json(['success' => false, 'error' => $res['error']]); }
