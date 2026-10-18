@@ -28,6 +28,15 @@ $continueUrl = (string)sh_fb_continue_url();
 
 <div class="sh-guide-wrap">
 
+  <!-- Breadcrumb Navigation -->
+  <nav class="sh-guide-crumb" aria-label="Breadcrumb">
+    <a href="<?= e(sh_url('admin/dashboard.php')) ?>">Admin</a>
+    <span class="sh-guide-crumb__sep">/</span>
+    <a href="<?= e(sh_url('admin/email.php')) ?>">Email &amp; Verification Settings</a>
+    <span class="sh-guide-crumb__sep">/</span>
+    <span class="sh-guide-crumb__cur">Firebase Integration Guide</span>
+  </nav>
+
   <!-- Guide Header / Hero -->
   <header class="sh-guide-hero">
     <div class="sh-guide-hero__nav">
@@ -52,11 +61,11 @@ $continueUrl = (string)sh_fb_continue_url();
       <p>
         Firebase provides managed identity services backed by Google Cloud infrastructure. To begin:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">Visit the <a href="https://console.firebase.google.com" target="_blank" rel="noopener" style="color:var(--sh-brand);text-decoration:underline">Firebase Console (console.firebase.google.com)</a> and sign in with your Google Account.</li>
-        <li style="margin-bottom:6px">Click <strong>Add Project</strong> (or select your existing project).</li>
-        <li style="margin-bottom:6px">Enter your store name (e.g., <code>ShopHaat Store</code>) and accept the terms. Google Analytics is optional.</li>
-        <li style="margin-bottom:6px">Click <strong>Create Project</strong> and wait for the initialization to complete.</li>
+      <ol>
+        <li>Visit the <a href="https://console.firebase.google.com" target="_blank" rel="noopener" style="color:var(--sh-brand);text-decoration:underline">Firebase Console (console.firebase.google.com)</a> and sign in with your Google Account.</li>
+        <li>Click <strong>Add Project</strong> (or select your existing project).</li>
+        <li>Enter your store name (e.g., <code>ShopHaat Store</code>) and accept the terms. Google Analytics is optional.</li>
+        <li>Click <strong>Create Project</strong> and wait for the initialization to complete.</li>
       </ol>
     </div>
   </section>
@@ -71,13 +80,13 @@ $continueUrl = (string)sh_fb_continue_url();
       <p>
         Before ShopHaat can communicate with Firebase Authentication, the Email/Password provider must be activated:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">In the left sidebar of the Firebase Console, navigate to <strong>Build &rarr; Authentication</strong>.</li>
-        <li style="margin-bottom:6px">Click <strong>Get Started</strong> if Authentication has not been initialized yet.</li>
-        <li style="margin-bottom:6px">Click the <strong>Sign-in method</strong> tab.</li>
-        <li style="margin-bottom:6px">Select <strong>Email/Password</strong> from the provider list.</li>
-        <li style="margin-bottom:6px">Toggle the first switch to <strong>Enable</strong>. Leave <em>Email link (passwordless sign-in)</em> disabled unless specifically required.</li>
-        <li style="margin-bottom:6px">Click <strong>Save</strong>.</li>
+      <ol>
+        <li>In the left sidebar of the Firebase Console, navigate to <strong>Build &rarr; Authentication</strong>.</li>
+        <li>Click <strong>Get Started</strong> if Authentication has not been initialized yet.</li>
+        <li>Click the <strong>Sign-in method</strong> tab.</li>
+        <li>Select <strong>Email/Password</strong> from the provider list.</li>
+        <li>Toggle the first switch to <strong>Enable</strong>. Leave <em>Email link (passwordless sign-in)</em> disabled unless specifically required.</li>
+        <li>Click <strong>Save</strong>.</li>
       </ol>
       <div class="sh-guide-callout sh-guide-callout--warn">
         <?= sh_icon('alert', 16) ?>
@@ -98,11 +107,11 @@ $continueUrl = (string)sh_fb_continue_url();
       <p>
         Next, register a Web App within your Firebase project to generate your store's client configuration:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">Click the gear icon &rarr; <strong>Project settings</strong> in the top-left corner.</li>
-        <li style="margin-bottom:6px">Under the <strong>General</strong> tab, scroll down to <em>Your apps</em> and click the <strong>Web icon (&lt;/&gt;)</strong>.</li>
-        <li style="margin-bottom:6px">Enter an app nickname (e.g. <code>ShopHaat Web</code>) and click <strong>Register app</strong>.</li>
-        <li style="margin-bottom:6px">Firebase will display a JavaScript configuration snippet containing your public configuration keys.</li>
+      <ol>
+        <li>Click the gear icon &rarr; <strong>Project settings</strong> in the top-left corner.</li>
+        <li>Under the <strong>General</strong> tab, scroll down to <em>Your apps</em> and click the <strong>Web icon (&lt;/&gt;)</strong>.</li>
+        <li>Enter an app nickname (e.g. <code>ShopHaat Web</code>) and click <strong>Register app</strong>.</li>
+        <li>Firebase will display a JavaScript configuration snippet containing your public configuration keys.</li>
       </ol>
 
       <div class="sh-guide-callout sh-guide-callout--info">
@@ -136,13 +145,13 @@ $continueUrl = (string)sh_fb_continue_url();
       <p>
         Firebase blocks authentication requests, OAuth redirects, and verification callbacks originating from unauthorized domain names. You must add your store's live domain:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">In the Firebase Console, go to <strong>Authentication &rarr; Settings &rarr; Authorized domains</strong>.</li>
-        <li style="margin-bottom:6px">Click <strong>Add domain</strong>.</li>
-        <li style="margin-bottom:6px">
+      <ol>
+        <li>In the Firebase Console, go to <strong>Authentication &rarr; Settings &rarr; Authorized domains</strong>.</li>
+        <li>Click <strong>Add domain</strong>.</li>
+        <li>
           Enter your website's domain: <span class="sh-copy-chip"><?= e($siteDomain) ?></span> (do not include <code>https://</code> or trailing slashes).
         </li>
-        <li style="margin-bottom:6px">If using a staging or test environment, add the staging hostname as well.</li>
+        <li>If using a staging or test environment, add the staging hostname as well.</li>
       </ol>
       <div class="sh-guide-callout sh-guide-callout--success">
         <?= sh_icon('check-circle', 16) ?>
@@ -161,12 +170,12 @@ $continueUrl = (string)sh_fb_continue_url();
       <h2 class="sh-guide-card__title">Enter Firebase Configuration in ShopHaat</h2>
     </div>
     <div class="sh-guide-card__body">
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">Navigate to <strong>Admin &rarr; Email &amp; Verification Settings</strong>.</li>
-        <li style="margin-bottom:6px">Under <strong>Setup Method Selection</strong>, click <strong>Firebase Integration</strong>.</li>
-        <li style="margin-bottom:6px">Paste your <strong>Firebase Web API Key</strong> into the field. It is encrypted in the database using AES-256-GCM.</li>
-        <li style="margin-bottom:6px">Enter your <strong>Firebase Project ID</strong>.</li>
-        <li style="margin-bottom:6px">Check <strong>Enable Firebase Integration</strong> and click <strong>Save Firebase Settings</strong>.</li>
+      <ol>
+        <li>Navigate to <strong>Admin &rarr; Email &amp; Verification Settings</strong>.</li>
+        <li>Under <strong>Setup Method Selection</strong>, click <strong>Option B: Firebase Integration</strong>.</li>
+        <li>Paste your <strong>Firebase Web API Key</strong> into the field. It is encrypted in the database using AES-256-GCM.</li>
+        <li>Enter your <strong>Firebase Project ID</strong>.</li>
+        <li>Check <strong>Enable Firebase Integration</strong> and click <strong>Save Firebase Settings</strong>.</li>
       </ol>
     </div>
   </section>
@@ -182,8 +191,8 @@ $continueUrl = (string)sh_fb_continue_url();
         Click the <strong>Test Firebase Connection</strong> button in the Firebase settings panel. ShopHaat initiates a secure server-side handshake against Google's Identity Toolkit REST API (<code>identitytoolkit.googleapis.com</code>).
       </p>
       <ul>
-        <li style="margin-bottom:6px"><strong>Success:</strong> Confirms the Web API Key is valid and the Email/Password authentication provider is active on the project.</li>
-        <li style="margin-bottom:6px"><strong>Failure:</strong> Reports the exact Google API error code (e.g. <code>API_KEY_INVALID</code> or <code>OPERATION_NOT_ALLOWED</code>) so you can fix the project settings immediately.</li>
+        <li><strong>Success:</strong> Confirms the Web API Key is valid and the Email/Password authentication provider is active on the project.</li>
+        <li><strong>Failure:</strong> Reports the exact Google API error code (e.g. <code>API_KEY_INVALID</code> or <code>OPERATION_NOT_ALLOWED</code>) so you can fix the project settings immediately.</li>
       </ul>
     </div>
   </section>
@@ -206,10 +215,10 @@ $continueUrl = (string)sh_fb_continue_url();
         In ShopHaat:
       </p>
       <ul>
-        <li style="margin-bottom:8px">
+        <li>
           <strong>If you require 6-digit numeric verification codes:</strong> Use <strong>Option A (Custom SMTP Server)</strong>. ShopHaat's backend generates the random 6-digit OTP, securely hashes it in the MySQL database, sends it through your SMTP server, and validates it when entered by the customer.
         </li>
-        <li style="margin-bottom:8px">
+        <li>
           <strong>If Firebase is enabled:</strong> Customers who sign in through Firebase or Google OAuth have their identity verified by Firebase. ShopHaat validates the Firebase user on the server side and synchronizes their account record in MySQL without trusting client-side claims.
         </li>
       </ul>
@@ -251,7 +260,7 @@ $continueUrl = (string)sh_fb_continue_url();
         </table>
       </div>
 
-      <div style="margin-top:20px;text-align:center">
+      <div style="margin-top:24px;text-align:center">
         <a href="<?= e(sh_url('admin/email.php?tab=firebase')) ?>" class="sh-btn">
           <?= sh_icon('settings', 15) ?> Open Firebase Configuration in Admin &rarr;
         </a>

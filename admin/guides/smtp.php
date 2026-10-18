@@ -30,6 +30,15 @@ if ($fromEmail === '') {
 
 <div class="sh-guide-wrap">
 
+  <!-- Breadcrumb Navigation -->
+  <nav class="sh-guide-crumb" aria-label="Breadcrumb">
+    <a href="<?= e(sh_url('admin/dashboard.php')) ?>">Admin</a>
+    <span class="sh-guide-crumb__sep">/</span>
+    <a href="<?= e(sh_url('admin/email.php')) ?>">Email &amp; Verification Settings</a>
+    <span class="sh-guide-crumb__sep">/</span>
+    <span class="sh-guide-crumb__cur">SMTP Setup Guide</span>
+  </nav>
+
   <!-- Guide Header / Hero -->
   <header class="sh-guide-hero">
     <div class="sh-guide-hero__nav">
@@ -52,7 +61,7 @@ if ($fromEmail === '') {
     </div>
     <div class="sh-guide-card__body">
       <p>
-        <strong>Simple Mail Transfer Protocol (SMTP)</strong> is the standard protocol for sending emails across the internet. By default, unconfigured web servers attempt to send email using local mail programs (like <code>sendmail</code>). On modern web hosts and shared hosting providers, unauthenticated local mail is either outright blocked by firewalls (ports 25 and 587) or classified as spam by major receiving providers such as Gmail, Outlook, and Yahoo.
+        <strong>Simple Mail Transfer Protocol (SMTP)</strong> is the industry-standard protocol for sending emails across the internet. By default, unconfigured web servers attempt to send email using local server utilities (such as PHP's unauthenticated <code>mail()</code> or local <code>sendmail</code>). On modern web hosts and cloud infrastructure, unauthenticated local mail is either blocked outright by firewall restrictions (e.g. closed ports 25 and 587) or classified as spam by major receiving providers such as Gmail, Microsoft Outlook, and Yahoo.
       </p>
       <p>
         Connecting ShopHaat directly to an authenticated SMTP server routes all store emails through a verified sending IP with proper cryptographic reputation, preventing false claims, delivery drops, and spam folder placement.
@@ -83,11 +92,11 @@ if ($fromEmail === '') {
           <p>
             Dedicated transactional providers offer high inbox placement rates and generous free monthly tiers.
           </p>
-          <ol style="margin:8px 0 12px 20px;padding:0">
-            <li style="margin-bottom:6px">Create an account with your chosen provider (e.g., <strong>Brevo / Sendinblue</strong>, <strong>SendGrid</strong>, or <strong>Amazon SES</strong>).</li>
-            <li style="margin-bottom:6px">Navigate to <strong>SMTP &amp; API</strong> settings in their dashboard.</li>
-            <li style="margin-bottom:6px">Generate a new <strong>SMTP Key</strong> (this will serve as your SMTP Password).</li>
-            <li style="margin-bottom:6px">Verify your sending domain (e.g. <code><?= e($siteDomain) ?></code>) by adding the DNS TXT records supplied by the provider.</li>
+          <ol>
+            <li>Create an account with your chosen provider (e.g., <strong>Brevo / Sendinblue</strong>, <strong>SendGrid</strong>, or <strong>Amazon SES</strong>).</li>
+            <li>Navigate to <strong>SMTP &amp; API</strong> settings in their dashboard.</li>
+            <li>Generate a new <strong>SMTP Key</strong> (this will serve as your SMTP Password).</li>
+            <li>Verify your sending domain (e.g. <code><?= e($siteDomain) ?></code>) by adding the DNS TXT records supplied by the provider.</li>
           </ol>
           <div class="sh-tablewrap">
             <table class="sh-guide-table">
@@ -109,12 +118,12 @@ if ($fromEmail === '') {
           <p>
             Google does not permit standard account passwords for third-party SMTP connections. You must generate a dedicated <strong>App Password</strong>:
           </p>
-          <ol style="margin:8px 0 12px 20px;padding:0">
-            <li style="margin-bottom:6px">Log into your Google Account and go to <strong>Manage your Google Account &rarr; Security</strong>.</li>
-            <li style="margin-bottom:6px">Ensure <strong>2-Step Verification</strong> is enabled on the account.</li>
-            <li style="margin-bottom:6px">Search for or navigate to <strong>App passwords</strong>.</li>
-            <li style="margin-bottom:6px">Create a new app named <strong>ShopHaat Store</strong> and copy the generated 16-character password.</li>
-            <li style="margin-bottom:6px">Use host <code>smtp.gmail.com</code>, port <code>587</code> (STARTTLS) or <code>465</code> (SSL/TLS), your full Gmail address as the username, and the 16-character App Password.</li>
+          <ol>
+            <li>Log into your Google Account and go to <strong>Manage your Google Account &rarr; Security</strong>.</li>
+            <li>Ensure <strong>2-Step Verification</strong> is enabled on the account.</li>
+            <li>Search for or navigate to <strong>App passwords</strong>.</li>
+            <li>Create a new app named <strong>ShopHaat Store</strong> and copy the generated 16-character password.</li>
+            <li>Use host <code>smtp.gmail.com</code>, port <code>587</code> (STARTTLS) or <code>465</code> (SSL/TLS), your full Gmail address as the username, and the 16-character App Password.</li>
           </ol>
         </div>
       </details>
@@ -122,11 +131,11 @@ if ($fromEmail === '') {
       <details class="sh-guide-accordion">
         <summary>Option C: cPanel / Plesk / Shared Hosting Webmail</summary>
         <div class="sh-guide-accordion__content">
-          <ol style="margin:8px 0 12px 20px;padding:0">
-            <li style="margin-bottom:6px">Log into your cPanel or hosting control panel and open <strong>Email Accounts</strong>.</li>
-            <li style="margin-bottom:6px">Create or locate your store mailbox (e.g., <code>noreply@<?= e($siteDomain) ?></code>).</li>
-            <li style="margin-bottom:6px">Click <strong>Connect Devices</strong> (or <em>Mail Client Manual Settings</em>) to view your Outgoing Server settings.</li>
-            <li style="margin-bottom:6px">Recommended configuration: Port <code>465</code> with <strong>SSL/TLS</strong> (or Port <code>587</code> with STARTTLS). Use your full email address as the username.</li>
+          <ol>
+            <li>Log into your cPanel or hosting control panel and open <strong>Email Accounts</strong>.</li>
+            <li>Create or locate your store mailbox (e.g., <code>noreply@<?= e($siteDomain) ?></code>).</li>
+            <li>Click <strong>Connect Devices</strong> (or <em>Mail Client Manual Settings</em>) to view your Outgoing Server settings.</li>
+            <li>Recommended configuration: Port <code>465</code> with <strong>SSL/TLS</strong> (or Port <code>587</code> with STARTTLS). Use your full email address as the username.</li>
           </ol>
         </div>
       </details>
@@ -225,11 +234,11 @@ if ($fromEmail === '') {
       <p>
         ShopHaat provides two separate diagnostic actions so you can verify each layer of the SMTP handshake before enabling verification gates:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:8px">
+      <ol>
+        <li>
           <strong>Test SMTP Connection:</strong> Performs a live TCP socket connection, validates TLS certificate negotiation, and conducts SMTP authentication (<code>EHLO &rarr; STARTTLS &rarr; AUTH LOGIN</code>) without dispatching any message. This isolates credential or network issues immediately.
         </li>
-        <li style="margin-bottom:8px">
+        <li>
           <strong>Send Test Email:</strong> Sends a real, branded test message to your specified email address and displays the server's exact return status and Message-ID.
         </li>
       </ol>
@@ -252,11 +261,11 @@ if ($fromEmail === '') {
       <p>
         Once the test email is confirmed, verify the customer registration flow:
       </p>
-      <ol style="margin:8px 0 14px 20px;padding:0">
-        <li style="margin-bottom:6px">In <strong>Email &amp; Verification Settings</strong> &rarr; <em>Subsection A</em>, ensure <strong>Enable signup email verification</strong> is checked.</li>
-        <li style="margin-bottom:6px">Open an incognito or private browser window and register a new test customer account using your personal email address.</li>
-        <li style="margin-bottom:6px">You should immediately be redirected to the <strong>Verify Email</strong> page, and an email with a 6-digit numeric OTP will arrive in your inbox.</li>
-        <li style="margin-bottom:6px">Enter the 6-digit code. The account status will update to <code>Verified</code> and unlock customer features.</li>
+      <ol>
+        <li>In <strong>Email &amp; Verification Settings</strong> &rarr; <em>Subsection A</em>, ensure <strong>Enable signup email verification</strong> is checked.</li>
+        <li>Open an incognito or private browser window and register a new test customer account using your personal email address.</li>
+        <li>You should immediately be redirected to the <strong>Verify Email</strong> page, and an email with a 6-digit numeric OTP will arrive in your inbox.</li>
+        <li>Enter the 6-digit code. The account status will update to <code>Verified</code> and unlock customer features.</li>
       </ol>
       <p>
         If a customer does not receive the code, the verification page provides a live 60-second cooldown timer before allowing them to request a fresh code.
@@ -275,7 +284,7 @@ if ($fromEmail === '') {
         Major email providers (Google, Yahoo, Microsoft) strictly enforce DNS authentication for senders. Add these records at your DNS host (Cloudflare, cPanel, Namecheap, etc.):
       </p>
 
-      <h4 style="margin:14px 0 6px;font-size:14px;color:var(--sh-heading)">1. SPF (Sender Policy Framework)</h4>
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">1. SPF (Sender Policy Framework)</h3>
       <p>
         Specifies which mail servers are permitted to send email on behalf of your domain.
       </p>
@@ -289,12 +298,12 @@ if ($fromEmail === '') {
         </div>
       </div>
 
-      <h4 style="margin:14px 0 6px;font-size:14px;color:var(--sh-heading)">2. DKIM (DomainKeys Identified Mail)</h4>
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">2. DKIM (DomainKeys Identified Mail)</h3>
       <p>
         Provides a cryptographic signature verifying the message was not altered in transit. Obtain the exact DKIM selector and public key from your email provider or configure server-side DKIM signing in ShopHaat's Subsection C.
       </p>
 
-      <h4 style="margin:14px 0 6px;font-size:14px;color:var(--sh-heading)">3. DMARC (Domain-based Message Authentication)</h4>
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">3. DMARC (Domain-based Message Authentication)</h3>
       <p>
         Instructs recipient servers what to do if an incoming email fails SPF or DKIM validation. Start with a monitoring policy (<code>p=none</code>) or quarantine (<code>p=quarantine</code>):
       </p>
@@ -344,7 +353,7 @@ if ($fromEmail === '') {
         </table>
       </div>
 
-      <div style="margin-top:20px;text-align:center">
+      <div style="margin-top:24px;text-align:center">
         <a href="<?= e(sh_url('admin/email.php?tab=smtp')) ?>" class="sh-btn">
           <?= sh_icon('settings', 15) ?> Open SMTP Configuration in Admin &rarr;
         </a>

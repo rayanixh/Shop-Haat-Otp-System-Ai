@@ -33,6 +33,14 @@ if ($path === '/robots.txt' || $path === '/sitemap.xml' || preg_match('~^/sitema
     return true;
 }
 
+// Guide endpoints (/admin/guides/smtp and /admin/guides/firebase) mirror .htaccess
+if (preg_match('~^/admin/guides/(smtp|firebase)/?$~', $path, $m) === 1) {
+    $script = '/admin/guides/' . $m[1] . '.php';
+    $_SERVER['SCRIPT_NAME'] = $script;
+    require __DIR__ . $script;
+    return true;
+}
+
 if ($path !== '/' && is_dir($file) && is_file(rtrim($file, '/') . '/index.php')) {
     $_SERVER['SCRIPT_NAME'] = rtrim($path, '/') . '/index.php';
     require rtrim($file, '/') . '/index.php';

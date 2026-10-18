@@ -49,8 +49,8 @@ function sh_base_url(): string
     $dir = str_replace('\\', '/', dirname($script));
     // Pages inside /admin, /api or /install resolve up to the project root.
     // Trailing segments are stripped repeatedly so nested folders such as
-    // /admin/ai also resolve correctly rather than becoming the base URL.
-    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google'];
+    // /admin/ai or /admin/guides also resolve correctly rather than becoming the base URL.
+    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google', 'guides'];
     $parts = array_values(array_filter(explode('/', $dir), static fn($p) => $p !== ''));
     while ($parts !== [] && in_array(end($parts), $known, true)) {
         array_pop($parts);
