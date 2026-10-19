@@ -287,11 +287,20 @@ if ($fromEmail === '') {
       <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">Recommended supported route: Brevo HTTPS API</h3>
       <p>
         Go to <strong>Email &amp; Verification Settings → Option C: Brevo HTTPS API</strong>. Create a v3 API key in
-        Brevo (SMTP &amp; API → API Keys), save it, enable the transport, click <em>Use Brevo HTTPS API for delivery</em>,
-        then run <em>Test Brevo API Connection</em> and send a real test email. The API uses
-        <code>https://api.brevo.com/v3/smtp/email</code> with a <code>*.brevo.com</code> certificate and standard CA
-        validation. The API key is stored encrypted server-side and is never rendered or sent to browser JavaScript;
-        it is a separate credential from the SMTP key.
+        Brevo (SMTP &amp; API → API Keys &amp; MCP), save it, enable the transport, click
+        <em>Use Brevo HTTPS API for delivery</em>, then run <em>Run Brevo API Diagnostics (A/B/C)</em> and send a real
+        test email. The API uses <code>https://api.brevo.com/v3/smtp/email</code> with a <code>*.brevo.com</code>
+        certificate and standard CA validation. The API key is stored encrypted server-side and is never rendered or
+        sent to browser JavaScript; it is a separate credential from the SMTP key.
+      </p>
+      <p>
+        <strong>If the diagnostics report <code>HTTP 403 — api key is not authorized for resource “account”</code>:</strong>
+        that answer comes from <code>GET /v3/account</code>. It means Brevo recognised the key but the key is not
+        permitted to read account details — it is <em>not</em> proof that the key cannot send email. Test B
+        (<code>GET /v3/smtp/emails</code>) and a real <em>Send Test Email</em> decide that. If the send is also refused,
+        create a key owned by a user who may send transactional email; check Brevo → Security → Authorized IPs if the
+        hosting server's address is restricted, and check the plan's sending credits. Nothing here needs the key to be
+        pasted into a chat or a log.
       </p>
 
       <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">If you must use SMTP</h3>

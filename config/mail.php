@@ -183,23 +183,69 @@ function sh_mail_selected_transport(): string
 }
 
 /**
- * Decrypt the Brevo HTTPS API key.
+ * Inspect the stored Brevo API credential without revealing it.
  *
- * The key is stored encrypted with the same at-rest helper as the Firebase
- * key. It is never placed in the transport array, rendered, logged or
- * returned by a diagnostic. API keys and SMTP keys are separate credentials:
- * a Brevo SMTP key (xsmtpsib-...) cannot authenticate against the v3 API.
+ * A prefix check is a hint, never proof of validity. A key that does not look
+ * like a v3 key is still offered to Brevo, which is the only authority on
+ * whether it is valid. The one case refused outright is an SMTP key in the API
+ * field: sending it could not authenticate anything and would leak a second
+ * credential to the wrong endpoint.
+ *
+ * States: ok (looks like a v3 key), unverified (unexpected shape, still
+ * tested), smtp_key (refused), missing, unreadable.
+ *
+ * @return array{state:string,key:string,prefix:string,message:string}
  */
-function sh_brevo_api_key(): string
+function sh_brevo_api_key_info(): array
 {
+    $out = ['state' => 'missing', 'key' => '', 'prefix' => '', 'message' => 'No Brevo API key is stored.'];
     $stored = trim((string)sh_setting('brevo_api_key', ''));
-    if ($stored === '') { return ''; }
+    if ($stored === '') { return $out; }
+
     if (!function_exists('sh_verify_decrypt')) {
         $helper = SH_ROOT . '/includes/verification.php';
         if (is_file($helper)) { require_once $helper; }
     }
-    if (!function_exists('sh_verify_decrypt')) { return ''; }
-    return trim((string)sh_verify_decrypt($stored));
+    if (!function_exists('sh_verify_decrypt')) {
+        $out['state'] = 'unreadable';
+        $out['message'] = 'The stored Brevo API key could not be decrypted on this server. Save the key again.';
+        return $out;
+    }
+    $key = trim((string)sh_verify_decrypt($stored));
+    if ($key === '') {
+        $out['state'] = 'unreadable';
+        $out['message'] = 'The stored Brevo API key is empty after decryption. Save the key again.';
+        return $out;
+    }
+
+    $out['key'] = $key;
+    $out['prefix'] = str_starts_with($key, 'xkeysib-') ? 'xkeysib-'
+        : (str_starts_with($key, 'xsmtpsib-') ? 'xsmtpsib-' : 'other');
+
+    if (str_starts_with($key, 'xsmtpsib-')) {
+        // Never send an SMTP key to the API endpoint. It is the wrong
+        // credential and would be a cross-transport credential leak.
+        $out['state'] = 'smtp_key';
+        $out['key'] = '';
+        $out['message'] = 'The stored credential is a Brevo SMTP key (xsmtpsib-...). SMTP keys cannot authenticate API requests. '
+            . 'Create a v3 API key in Brevo → SMTP & API → API Keys & MCP and store it here; the SMTP key stays with the SMTP transport.';
+        return $out;
+    }
+    if (!str_starts_with($key, 'xkeysib-')) {
+        $out['state'] = 'unverified';
+        $out['message'] = 'The stored credential does not look like a Brevo v3 API key (they normally start with xkeysib-). '
+            . 'It will still be tested against Brevo, because only Brevo can confirm whether a key is valid.';
+        return $out;
+    }
+    $out['state'] = 'ok';
+    return $out;
+}
+
+/** The usable API key, or an empty string when the stored credential must not be sent. */
+function sh_brevo_api_key(): string
+{
+    $info = sh_brevo_api_key_info();
+    return in_array($info['state'], ['ok', 'unverified'], true) ? (string)$info['key'] : '';
 }
 
 function sh_brevo_api_key_set(): bool
@@ -833,6 +879,154 @@ function sh_mail_tls_error_kind(string $text): string
 // ---------------------------------------------------------------------------
 
 /**
+ * Reduce a Brevo error/success body to the fields an operator may see.
+ *
+ * The provider body can echo the request. Only the documented error fields are
+ * kept, they are length-capped and passed through the same redaction as every
+ * other transport message. The API key is never part of a response body, and
+ * even if it were, sh_mail_redact() removes it.
+ *
+ * @param mixed $body
+ * @return array{code:string,message:string,detail:string,fields:array<int,string>}
+ */
+function sh_brevo_api_provider($body): array
+{
+    $out = ['code' => '', 'message' => '', 'detail' => '', 'fields' => []];
+    if (!is_array($body)) {
+        $raw = is_string($body) ? $body : '';
+        $out['detail'] = mb_substr(sh_mail_redact($raw), 0, 300);
+        return $out;
+    }
+    $out['code'] = mb_substr(sh_mail_redact((string)($body['code'] ?? '')), 0, 80);
+    $message = (string)($body['message'] ?? ($body['error'] ?? ''));
+    if (is_array($body['error'] ?? null)) {
+        $message = (string)($body['error']['message'] ?? $message);
+    }
+    $out['message'] = mb_substr(sh_mail_redact($message), 0, 300);
+    // Validation detail is often nested; flatten the first level of names only
+    // so the operator sees which field Brevo objected to without a body dump.
+    foreach (['errors', 'details'] as $listKey) {
+        if (!empty($body[$listKey]) && is_array($body[$listKey])) {
+            foreach (array_slice($body[$listKey], 0, 5) as $item) {
+                if (is_array($item)) {
+                    $name = (string)($item['field'] ?? $item['parameter'] ?? $item['name'] ?? '');
+                    $text = (string)($item['message'] ?? $item['description'] ?? '');
+                    $line = trim($name . ($name !== '' && $text !== '' ? ': ' : '') . $text);
+                    if ($line !== '') { $out['fields'][] = mb_substr(sh_mail_redact($line), 0, 160); }
+                } elseif (is_string($item) && trim($item) !== '') {
+                    $out['fields'][] = mb_substr(sh_mail_redact(trim($item)), 0, 160);
+                }
+            }
+        }
+    }
+    if ($out['message'] === '' && $out['fields'] !== []) { $out['message'] = $out['fields'][0]; }
+    $out['detail'] = trim(implode('; ', array_filter([$out['code'], $out['message']])));
+    return $out;
+}
+
+/**
+ * Give one Brevo HTTP status a precise meaning for the endpoint that produced it.
+ *
+ * 403 is deliberately not folded into 401: Brevo documents 401 as an invalid or
+ * missing key and 403 as insufficient permission for the requested resource.
+ * Converting a 403 into "authentication failed" is what made a restricted key
+ * look unusable for email sending when it was not.
+ *
+ * @param array{code:string,message:string,detail:string,fields:array<int,string>} $provider
+ * @return array{kind:string,label:string,cause:string,action:string,retry_after:int}
+ */
+function sh_brevo_api_status_meaning(int $status, array $provider, string $resource = '', int $retryAfter = 0): array
+{
+    $resource = $resource !== '' ? $resource : 'the requested resource';
+    $providerText = trim((string)($provider['code'] ?? '') . (($provider['message'] ?? '') !== '' ? ' — ' . $provider['message'] : ''));
+    $suffix = $providerText !== '' ? ' Brevo said: ' . $providerText : '';
+    $retry = max(0, $retryAfter);
+
+    if ($status >= 200 && $status < 300) {
+        return ['kind' => 'ok', 'label' => 'Accepted', 'cause' => 'Brevo accepted the request.', 'action' => '', 'retry_after' => $retry];
+    }
+    if ($status === 0) {
+        return [
+            'kind' => 'network', 'label' => 'No HTTP response',
+            'cause' => 'The HTTPS request did not produce an HTTP response. This is a network, DNS, TLS or timeout problem, not an API authorization result.',
+            'action' => 'Check outbound HTTPS (port 443), DNS and the CA bundle on the hosting server, then retry. Do not disable certificate verification.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 400 || $status === 422) {
+        return [
+            'kind' => 'invalid_request', 'label' => 'Request rejected (HTTP ' . $status . ')',
+            'cause' => 'Brevo rejected the request payload as invalid.' . $suffix,
+            'action' => 'Correct the highlighted field and retry. A rejected payload means the key authenticated.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 401) {
+        return [
+            'kind' => 'invalid_credentials', 'label' => 'API key not accepted (HTTP 401)',
+            'cause' => 'Brevo did not recognise the API key.' . $suffix,
+            'action' => 'Create or copy a v3 API key in Brevo → SMTP & API → API Keys & MCP, paste it into the API key field and save. Never use the SMTP key here.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 402) {
+        return [
+            'kind' => 'payment_required', 'label' => 'Account not activated or out of credits (HTTP 402)',
+            'cause' => 'The key authenticated, but the Brevo account cannot process this request: activation, billing or sending credits are blocking it.' . $suffix,
+            'action' => 'Check the Brevo plan, sending credits and transactional-email activation in the Brevo account, then retry. No API setting on this server can bypass it.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 403) {
+        return [
+            'kind' => 'permission_denied', 'label' => 'Authenticated but not permitted for ' . $resource . ' (HTTP 403)',
+            'cause' => 'The API key is valid, but it is not authorized for ' . $resource . '.' . $suffix
+                . ' This is a permission result for that resource; it is not proof that transactional email is forbidden.',
+            'action' => 'Use a key whose owner has access to transactional email (Brevo → SMTP & API → API Keys & MCP), or run the transactional-email test to confirm sending. Do not treat this as a broken key.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 404) {
+        return [
+            'kind' => 'not_found', 'label' => 'Endpoint not found (HTTP 404)',
+            'cause' => 'The API base URL does not expose ' . $resource . '.' . $suffix,
+            'action' => 'Check the API endpoint configuration (it must be https://api.brevo.com/v3).',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 405) {
+        return [
+            'kind' => 'method_not_allowed', 'label' => 'Method not allowed (HTTP 405)',
+            'cause' => 'Brevo rejected the HTTP method for ' . $resource . '.' . $suffix,
+            'action' => 'This is a client defect; report the method shown in the request line.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status === 429) {
+        return [
+            'kind' => 'rate_limited', 'label' => 'Rate limited (HTTP 429)',
+            'cause' => 'Brevo is rate-limiting this account or endpoint.' . $suffix,
+            'action' => 'Wait before retrying' . ($retry > 0 ? ' (Brevo asked for ' . $retry . ' seconds).' : '.') . ' The request was not retried automatically.',
+            'retry_after' => $retry,
+        ];
+    }
+    if ($status >= 500) {
+        return [
+            'kind' => 'provider_error', 'label' => 'Brevo server error (HTTP ' . $status . ')',
+            'cause' => 'Brevo returned a server-side error.' . $suffix,
+            'action' => 'Retry later and check the Brevo status page. This is not a credential problem.',
+            'retry_after' => $retry,
+        ];
+    }
+    return [
+        'kind' => 'unexpected', 'label' => 'Unexpected response (HTTP ' . $status . ')',
+        'cause' => 'Brevo returned an unexpected status for ' . $resource . '.' . $suffix,
+        'action' => 'Compare the request line and body above with the Brevo API reference, then retry.',
+        'retry_after' => $retry,
+    ];
+}
+
+/**
  * Perform one HTTPS request against the Brevo v3 API.
  *
  * TLS verification is always enabled (peer + hostname + trust store). The API
@@ -841,20 +1035,43 @@ function sh_mail_tls_error_kind(string $text): string
  *
  * @return array{ok:bool,status:int,body:mixed,error:string,certificate?:array<string,mixed>,url:string}
  */
-function sh_brevo_api_request(string $method, string $path, ?array $payload = null, int $timeout = 20): array
+function sh_brevo_api_request(string $method, string $path, ?array $payload = null, int $timeout = 20, bool $withCredentials = true): array
 {
     $method = strtoupper($method) === 'POST' ? 'POST' : 'GET';
     $timeout = max(5, min(60, $timeout));
     $url = sh_brevo_api_base() . '/' . ltrim($path, '/');
-    $out = ['ok' => false, 'status' => 0, 'body' => null, 'error' => '', 'url' => $url];
-    if (!str_starts_with(strtolower($url), 'https://')) {
+    $out = [
+        'ok' => false, 'status' => 0, 'body' => null, 'error' => '', 'url' => $url,
+        'request' => [
+            'method' => $method,
+            'path' => '/' . ltrim($path, '/'),
+            'endpoint' => sh_brevo_api_base(),
+            'host' => (string)(parse_url($url, PHP_URL_HOST) ?: ''),
+            'https' => str_starts_with(strtolower($url), 'https://'),
+            'credential_field' => $withCredentials ? 'brevo_api_key' : '',
+            'credential_sent' => false,
+        ],
+        'provider' => ['code' => '', 'message' => '', 'detail' => '', 'fields' => []],
+        'retry_after' => 0,
+        'headers' => [],
+    ];
+    if (!$out['request']['https']) {
         $out['error'] = 'The Brevo API endpoint must use HTTPS.';
         return $out;
     }
-    $key = sh_brevo_api_key();
-    if ($key === '') {
-        $out['error'] = 'The Brevo API key is not configured.';
-        return $out;
+    $key = '';
+    if ($withCredentials) {
+        $cred = sh_brevo_api_key_info();
+        if ($cred['state'] !== 'ok' && $cred['state'] !== 'unverified') {
+            // The credential problem is reported before any request is made,
+            // so we never post an SMTP key to the API endpoint.
+            $out['error'] = $cred['message'];
+            $out['credential_state'] = $cred['state'];
+            return $out;
+        }
+        $key = (string)$cred['key'];
+        $out['credential_state'] = $cred['state'];
+        $out['request']['credential_sent'] = true;
     }
 
     $json = null;
@@ -865,11 +1082,8 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
             return $out;
         }
     }
-    $headers = [
-        'accept: application/json',
-        'api-key: ' . $key,
-        'user-agent: ShopHaat mail transport',
-    ];
+    $headers = ['accept: application/json', 'user-agent: ShopHaat mail transport'];
+    if ($key !== '') { $headers[] = 'api-key: ' . $key; }
     if ($json !== null) { $headers[] = 'content-type: application/json'; }
 
     $ca = sh_mail_find_ca_bundle();
@@ -893,9 +1107,22 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
             $opts[CURLOPT_CERTINFO] = true;
         }
         if ($json !== null) { $opts[CURLOPT_POSTFIELDS] = $json; }
+        $responseHeaders = [];
+        $opts[CURLOPT_HEADERFUNCTION] = static function ($ch, string $line) use (&$responseHeaders): int {
+            $trimmed = trim($line);
+            if ($trimmed !== '' && str_contains($trimmed, ':')) {
+                [$hk, $hv] = explode(':', $trimmed, 2);
+                $responseHeaders[strtolower(trim($hk))] = trim($hv);
+            }
+            return strlen($line);
+        };
         curl_setopt_array($ch, $opts);
         $raw = curl_exec($ch);
         $out['status'] = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $out['headers'] = $responseHeaders;
+        if (isset($responseHeaders['retry-after']) && ctype_digit($responseHeaders['retry-after'])) {
+            $out['retry_after'] = (int)$responseHeaders['retry-after'];
+        }
         $err = (string)curl_error($ch);
         if (defined('CURLINFO_CERTINFO')) {
             $ci = @curl_getinfo($ch, CURLINFO_CERTINFO);
@@ -967,6 +1194,14 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
         if (isset($http_response_header[0]) && preg_match('~\s(\d{3})\s~', $http_response_header[0], $m)) {
             $out['status'] = (int)$m[1];
         }
+        foreach ($http_response_header ?? [] as $headerLine) {
+            if (!str_contains($headerLine, ':')) { continue; }
+            [$hk, $hv] = explode(':', $headerLine, 2);
+            $out['headers'][strtolower(trim($hk))] = trim($hv);
+        }
+        if (isset($out['headers']['retry-after']) && ctype_digit((string)$out['headers']['retry-after'])) {
+            $out['retry_after'] = (int)$out['headers']['retry-after'];
+        }
         if ($raw === false) {
             $out['error'] = sh_mail_redact($warnings ? implode('; ', array_slice($warnings, 0, 3)) : 'The HTTPS request failed.');
             return $out;
@@ -975,10 +1210,16 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
 
     $out['body'] = json_decode((string)$raw, true);
     if (!is_array($out['body'])) { $out['body'] = mb_substr((string)$raw, 0, 2000); }
+    $out['provider'] = sh_brevo_api_provider($out['body']);
     $out['ok'] = $out['status'] >= 200 && $out['status'] < 300;
+    $out['meaning'] = sh_brevo_api_status_meaning(
+        (int)$out['status'],
+        $out['provider'],
+        $out['request']['method'] . ' ' . $out['request']['path'],
+        (int)$out['retry_after']
+    );
     if (!$out['ok']) {
-        $message = is_array($out['body']) ? (string)($out['body']['message'] ?? ($out['body']['code'] ?? '')) : '';
-        $out['error'] = sh_mail_redact('HTTP ' . $out['status'] . ($message !== '' ? ': ' . mb_substr($message, 0, 300) : ''));
+        $out['error'] = sh_mail_redact('HTTP ' . $out['status'] . (($out['provider']['detail'] ?? '') !== '' ? ': ' . $out['provider']['detail'] : ''));
     }
     return $out;
 }
@@ -991,6 +1232,14 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
 function sh_brevo_api_send(string $to, string $subject, string $textBody, ?string $htmlBody, array $t, array $opts = []): array
 {
     $out = ['ok' => false, 'recipient' => $to, 'transport' => 'brevo_api', 'category' => 'unknown'];
+    $cred = sh_brevo_api_key_info();
+    if (!in_array($cred['state'], ['ok', 'unverified'], true)) {
+        // Do not send an SMTP key (or nothing) to the API endpoint.
+        $out['category'] = 'credential';
+        $out['skipped'] = true;
+        $out['error'] = $cred['message'];
+        return $out;
+    }
     $fromEmail = trim((string)($t['from_email'] ?? ''));
     $fromName = trim((string)($t['from_name'] ?? 'ShopHaat'));
     $replyTo = trim((string)($t['reply_to'] ?? ''));
@@ -1012,45 +1261,64 @@ function sh_brevo_api_send(string $to, string $subject, string $textBody, ?strin
     $res = sh_brevo_api_request('POST', '/smtp/email', $payload, (int)($t['timeout'] ?? 20));
     $body = is_array($res['body']) ? $res['body'] : [];
     $messageId = trim((string)($body['messageId'] ?? ''));
+    $status = (int)$res['status'];
+    $provider = is_array($res['provider'] ?? null) ? $res['provider'] : sh_brevo_api_provider($body);
+    $meaning = is_array($res['meaning'] ?? null)
+        ? $res['meaning']
+        : sh_brevo_api_status_meaning($status, $provider, 'POST /v3/smtp/email');
+    $out['request'] = $res['request'] ?? ['method' => 'POST', 'path' => '/smtp/email'];
+    $out['http_status'] = $status;
+    $out['provider'] = $provider;
     if ($res['ok']) {
         $out['ok'] = true;
         $out['category'] = 'accepted';
         $out['message_id'] = $messageId;
-        $out['response'] = 'Accepted by the Brevo HTTPS API' . ($messageId !== '' ? ' (messageId ' . $messageId . ')' : '') . '.';
+        $out['response'] = 'Brevo accepted the message for processing'
+            . ($messageId !== '' ? ' (messageId ' . $messageId . ')' : '') . '.'
+            . ' Acceptance is not inbox delivery; check the Brevo transactional log for the final status.';
+        $out['acceptance_ok'] = true;
     } else {
-        $message = trim((string)($body['message'] ?? ''));
-        $message = $message !== '' ? sh_mail_redact(mb_substr($message, 0, 300)) : $res['error'];
-        $status = (int)$res['status'];
-        if ($status === 401 || $status === 403) {
-            $out['category'] = 'auth';
-            $out['error'] = 'Brevo API authentication failed (HTTP ' . $status . '): ' . $message;
-        } elseif ($status === 429) {
-            $out['category'] = 'throttled';
-            $out['error'] = 'Brevo API rate limit reached (HTTP 429): ' . $message;
-        } elseif ($status === 400 || $status === 422) {
-            $out['category'] = 'rejected';
-            $out['error'] = 'Brevo rejected the message (HTTP ' . $status . '): ' . $message;
-        } elseif ($status >= 500) {
-            $out['category'] = 'temporary';
-            $out['error'] = 'Brevo API is temporarily unavailable (HTTP ' . $status . '): ' . $message;
-        } elseif ($status === 0) {
-            $out['category'] = sh_mail_tls_error_kind($res['error']) !== 'unknown' ? 'tls' : 'connection';
-            $out['error'] = 'Could not reach the Brevo HTTPS API: ' . $message;
-        } else {
-            $out['category'] = sh_mail_category($res['error']);
-            $out['error'] = 'Brevo API request failed (HTTP ' . $status . '): ' . $message;
-        }
+        $kind = (string)($meaning['kind'] ?? 'unexpected');
+        $out['category'] = match ($kind) {
+            'invalid_credentials' => 'auth',
+            'permission_denied' => 'permission',
+            'payment_required' => 'billing',
+            'rate_limited' => 'throttled',
+            'invalid_request' => 'rejected',
+            'provider_error' => 'temporary',
+            'network' => sh_mail_tls_error_kind((string)$res['error']) !== 'unknown' ? 'tls' : 'connection',
+            default => sh_mail_category((string)$res['error']),
+        };
+        $out['error'] = trim($meaning['label'] . '. ' . $meaning['cause']);
+        $out['cause'] = $meaning['cause'];
+        $out['action'] = $meaning['action'];
+        $out['retry_after'] = (int)($meaning['retry_after'] ?? 0);
+        if ($out['error'] === '.') { $out['error'] = (string)$res['error']; }
     }
     if (!empty($opts['debug'])) {
-        $out['transcript'] = sh_mail_redact('POST ' . sh_brevo_api_base() . "/smtp/email\nHTTP " . (int)$res['status']
-            . ($messageId !== '' ? "\nmessageId: " . $messageId : ''));
+        $out['transcript'] = sh_mail_redact('POST ' . sh_brevo_api_base() . "/smtp/email\nHTTP " . $status
+            . ($messageId !== '' ? "\nmessageId: " . $messageId : '')
+            . (($provider['detail'] ?? '') !== '' ? "\nprovider: " . $provider['detail'] : ''));
     }
     return $out;
 }
 
 /**
- * Verify the Brevo API key and HTTPS endpoint without sending a message.
- * GET /v3/account is the documented account endpoint and returns 401 for a bad key.
+ * Run the Brevo HTTPS API diagnostics as three separate, honest checks.
+ *
+ * A. HTTPS and TLS — an unauthenticated request proves DNS, TCP, TLS and HTTP
+ *    work. No credential is sent, so this can never be confused with an
+ *    authentication result.
+ * B. Account access — GET /v3/account, informational only. A 403 here means
+ *    the key cannot read account settings. It is not a delivery blocker.
+ * C. Credential in the transactional scope — GET /v3/smtp/emails. Brevo
+ *    answers 401 for a key it does not know and 403 for a key that is valid
+ *    but not permitted for the resource; those are reported differently. This
+ *    check never sends a message.
+ *
+ * Sending is never attempted here. Only a POST /v3/smtp/email that Brevo
+ * accepts can mark transactional email as verified, and that happens from the
+ * explicit Send Test Email action.
  *
  * @return array<string,mixed>
  */
@@ -1059,77 +1327,289 @@ function sh_brevo_api_test_connection(array $t = []): array
     $timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
     $host = (string)(parse_url(sh_brevo_api_base(), PHP_URL_HOST) ?: 'api.brevo.com');
     $port = (int)(parse_url(sh_brevo_api_base(), PHP_URL_PORT) ?: 443);
+    $cred = sh_brevo_api_key_info();
     $base = [
-        'ok' => false, 'step' => 'config', 'transport' => 'brevo_api',
-        'host' => $host, 'port' => $port, 'encryption' => 'HTTPS',
-        'certificate' => null, 'transcript' => '',
+        'ok' => false,
+        'transport' => 'brevo_api',
+        'host' => $host,
+        'port' => $port,
+        'encryption' => 'HTTPS',
+        'certificate' => null,
+        'resolved_ips' => [],
+        'checks' => [],
+        'credential' => ['state' => $cred['state'], 'prefix' => $cred['prefix'], 'field' => 'brevo_api_key'],
+        'verdict' => 'incomplete',
+        'step' => 'config',
+        'transcript' => '',
     ];
-    if (!sh_brevo_api_key_set()) {
-        return $base + [
-            'error' => 'Brevo API key is not configured.',
-            'cause' => 'The HTTPS API transport needs a Brevo v3 API key. It is a different credential from the SMTP key.',
-            'action' => 'Create an API key in Brevo → SMTP & API → API Keys, paste it in the Brevo API settings, save, and test again.',
-        ];
-    }
 
+    // ---- A. HTTPS and TLS -------------------------------------------------
+    $tlsCheck = ['key' => 'tls', 'label' => 'Test A — HTTPS and TLS reachability', 'status' => 'pending', 'http_status' => 0];
     $dns = sh_mail_resolve_host($host);
+    $base['resolved_ips'] = $dns['ipv4'];
     if ($dns['selected'] === '') {
+        $tlsCheck['status'] = 'failed';
+        $tlsCheck['detail'] = $dns['error'];
+        $base['checks']['tls'] = $tlsCheck;
         return array_merge($base, [
             'step' => 'dns',
+            'verdict' => 'unreachable',
             'error' => $dns['error'],
             'cause' => "The hosting server could not resolve '{$host}'.",
             'action' => 'Check the server resolver or hosting firewall. The API endpoint must resolve before HTTPS can start.',
-            'resolved_ips' => $dns['ipv4'],
+            'message' => 'Test A failed at DNS.',
         ]);
     }
 
-    $res = sh_brevo_api_request('GET', '/account', null, $timeout);
-    $cert = $res['certificate'] ?? null;
+    // Deliberately unauthenticated: this measures reachability only.
+    $probe = sh_brevo_api_request('GET', '/account', null, $timeout, false);
+    $tlsCheck['http_status'] = (int)$probe['status'];
+    $tlsCheck['endpoint'] = sh_brevo_api_base();
+    $tlsCheck['request'] = $probe['request'] ?? ['method' => 'GET', 'path' => '/account'];
+    $cert = $probe['certificate'] ?? null;
     if ($cert === null) {
-        $probe = sh_mail_probe_certificate($host, $port, 'https', $timeout);
-        if (!empty($probe['ok'])) { $cert = $probe; }
+        $certProbe = sh_mail_probe_certificate($host, $port, 'https', $timeout);
+        if (!empty($certProbe['ok'])) { $cert = $certProbe; }
     }
     $base['certificate'] = $cert;
-    $base['resolved_ips'] = $dns['ipv4'];
-    $base['transcript'] = 'GET ' . sh_brevo_api_base() . "/account\nHTTP " . (int)$res['status'];
 
-    if ($res['ok']) {
-        $body = is_array($res['body']) ? $res['body'] : [];
-        $company = trim((string)($body['companyName'] ?? ''));
-        return array_merge($base, [
-            'ok' => true,
-            'step' => 'complete',
-            'message' => 'Brevo HTTPS API verified: TLS certificate and hostname are valid and the API key was accepted'
-                . ($company !== '' ? ' for ' . $company : '') . '. No email was sent by this test.',
-        ]);
-    }
-
-    $status = (int)$res['status'];
-    if ($status === 401 || $status === 403) {
-        return array_merge($base, [
-            'step' => 'api_auth',
-            'error' => 'Brevo API key was rejected (HTTP ' . $status . '): ' . (string)$res['error'],
-            'cause' => 'The HTTPS connection and certificate verification succeeded, but Brevo rejected the API key.',
-            'action' => 'Use a Brevo v3 API key (xkeysib-...), not an SMTP key (xsmtpsib-...). Check that the key is active and allowed to send transactional email.',
-        ]);
-    }
-    if ($status === 0) {
-        $kind = sh_mail_tls_error_kind((string)$res['error']);
+    if ((int)$probe['status'] === 0) {
+        $kind = sh_mail_tls_error_kind((string)$probe['error']);
+        $tlsCheck['status'] = 'failed';
+        $tlsCheck['detail'] = (string)$probe['error'];
+        $base['checks']['tls'] = $tlsCheck;
         return array_merge($base, [
             'step' => $kind === 'hostname' ? 'tls_hostname' : ($kind === 'chain' ? 'tls_cert' : 'connect'),
-            'error' => (string)$res['error'],
+            'verdict' => 'unreachable',
+            'error' => (string)$probe['error'],
             'cause' => $kind !== 'unknown'
                 ? 'The HTTPS connection to the Brevo API failed TLS validation.'
                 : 'The server could not open an HTTPS connection to the Brevo API.',
             'action' => 'Check outbound HTTPS (443) access and the CA bundle on the hosting server. Do not disable certificate verification.',
+            'message' => 'Test A failed: the HTTPS endpoint is not reachable.',
         ]);
     }
-    return array_merge($base, [
-        'step' => 'api',
-        'error' => (string)$res['error'],
-        'cause' => 'The Brevo API returned an unexpected response.',
-        'action' => 'Check the Brevo status page and the API key permissions, then retry.',
-    ]);
+    // Any HTTP status proves the HTTPS stack worked. 401 is the expected
+    // answer for a request without a key.
+    $tlsCheck['status'] = 'passed';
+    $tlsCheck['detail'] = 'HTTPS response received (HTTP ' . (int)$probe['status'] . ')'
+        . ((int)$probe['status'] === 401 ? ' — 401 is expected without a key.' : '.');
+    $base['checks']['tls'] = $tlsCheck;
+    $base['step'] = 'tls';
+
+    // ---- Credential shape -------------------------------------------------
+    if (!in_array($cred['state'], ['ok', 'unverified'], true)) {
+        $base['checks']['credentials'] = [
+            'key' => 'credentials', 'label' => 'Test C — Transactional-email API access', 'status' => 'not_configured',
+            'http_status' => 0, 'endpoint' => 'GET /v3/smtp/emails', 'detail' => $cred['message'],
+        ];
+        $base['checks']['account'] = [
+            'key' => 'account', 'label' => 'Test B — Account API access (informational)', 'status' => 'skipped',
+            'http_status' => 0, 'endpoint' => 'GET /v3/account', 'detail' => 'No usable API key is stored.',
+        ];
+        $base['verdict'] = 'incomplete';
+        $base['step'] = 'config';
+        return array_merge($base, [
+            'error' => $cred['message'],
+            'cause' => $cred['state'] === 'smtp_key'
+                ? 'An SMTP key was found in the API credential field. It is never sent to the API.'
+                : 'The API credential is missing or cannot be read.',
+            'action' => 'Open Brevo → SMTP & API → API Keys & MCP, create a v3 API key (xkeysib-...), paste it into the API key field and save. Do not paste the SMTP key.',
+            'message' => 'Test A passed. Test B was not run: ' . $cred['message'],
+        ]);
+    }
+
+    // ---- C. Credential, checked inside the transactional-email scope ------
+    $credRes = sh_brevo_api_request('GET', '/smtp/emails?limit=1', null, $timeout, true);
+    $credProvider = is_array($credRes['provider'] ?? null) ? $credRes['provider'] : sh_brevo_api_provider($credRes['body']);
+    $credMeaning = is_array($credRes['meaning'] ?? null)
+        ? $credRes['meaning']
+        : sh_brevo_api_status_meaning((int)$credRes['status'], $credProvider, 'GET /v3/smtp/emails');
+    $credStatus = 'failed';
+    if ((int)$credRes['status'] >= 200 && (int)$credRes['status'] < 300) {
+        $credStatus = 'passed';
+    } elseif ((int)$credRes['status'] === 401) {
+        $credStatus = 'invalid_key';
+    } elseif ((int)$credRes['status'] === 403) {
+        $credStatus = 'permission_denied';
+    } elseif ((int)$credRes['status'] === 402) {
+        $credStatus = 'payment_required';
+    } elseif ((int)$credRes['status'] === 429) {
+        $credStatus = 'rate_limited';
+    } elseif ((int)$credRes['status'] === 0) {
+        $credStatus = 'unreachable';
+    }
+    $base['checks']['credentials'] = [
+        'key' => 'credentials',
+        'label' => 'Test C — Transactional-email API access',
+        'status' => $credStatus,
+        'http_status' => (int)$credRes['status'],
+        'endpoint' => 'GET /v3/smtp/emails?limit=1',
+        'request' => $credRes['request'] ?? null,
+        'provider' => $credProvider,
+        'detail' => trim((string)($credMeaning['label'] ?? '') . (($credMeaning['cause'] ?? '') !== '' ? ': ' . $credMeaning['cause'] : '')),
+        'cause' => (string)($credMeaning['cause'] ?? ''),
+        'action' => (string)($credMeaning['action'] ?? ''),
+        'retry_after' => (int)($credMeaning['retry_after'] ?? 0),
+    ];
+    $base['request'] = $credRes['request'] ?? null;
+    $base['provider'] = $credProvider;
+    $base['http_status'] = (int)$credRes['status'];
+
+    // ---- B. Account access, informational only ---------------------------
+    $acctRes = sh_brevo_api_request('GET', '/account', null, $timeout, true);
+    $acctProvider = is_array($acctRes['provider'] ?? null) ? $acctRes['provider'] : sh_brevo_api_provider($acctRes['body']);
+    $acctMeaning = is_array($acctRes['meaning'] ?? null)
+        ? $acctRes['meaning']
+        : sh_brevo_api_status_meaning((int)$acctRes['status'], $acctProvider, 'GET /v3/account');
+    $acctStatus = 'failed';
+    if ((int)$acctRes['status'] >= 200 && (int)$acctRes['status'] < 300) {
+        $acctStatus = 'passed';
+    } elseif ((int)$acctRes['status'] === 401) {
+        $acctStatus = 'invalid_key';
+    } elseif ((int)$acctRes['status'] === 403) {
+        $acctStatus = 'permission_denied';
+    } elseif ((int)$acctRes['status'] === 402) {
+        $acctStatus = 'payment_required';
+    } elseif ((int)$acctRes['status'] === 429) {
+        $acctStatus = 'rate_limited';
+    } elseif ((int)$acctRes['status'] === 0) {
+        $acctStatus = 'unreachable';
+    }
+    $account = [
+        'key' => 'account',
+        'label' => 'Test B — Account API access (informational)',
+        'status' => $acctStatus,
+        'http_status' => (int)$acctRes['status'],
+        'endpoint' => 'GET /v3/account',
+        'request' => $acctRes['request'] ?? null,
+        'provider' => $acctProvider,
+        'detail' => trim((string)($acctMeaning['label'] ?? '') . (($acctMeaning['cause'] ?? '') !== '' ? ': ' . $acctMeaning['cause'] : '')),
+        'cause' => (string)($acctMeaning['cause'] ?? ''),
+        'action' => (string)($acctMeaning['action'] ?? ''),
+        'retry_after' => (int)($acctMeaning['retry_after'] ?? 0),
+    ];
+    if ($acctStatus === 'permission_denied') {
+        // The exact condition behind the reported failure. Say plainly that
+        // the key is authentic and that this resource is simply out of scope.
+        $account['cause'] = 'Brevo accepted the key but this key is not authorized for the account resource.'
+            . (($acctProvider['message'] ?? '') !== '' ? ' Brevo said: ' . $acctProvider['message'] : '');
+        $account['detail'] = 'HTTP 403 — the key is valid, but account information is not in its permissions. '
+            . 'This does not by itself block transactional email; Test B and the Send Test Email result decide that.';
+        $account['action'] = 'No action is required for email delivery if Test B passes. If you want account details here, use a key created by the account owner with account access.';
+    }
+    $base['checks']['account'] = $account;
+
+    // ---- Verdict ----------------------------------------------------------
+    $serverInfo = is_array($acctRes['body']) ? trim((string)($acctRes['body']['companyName'] ?? '')) : '';
+    if ($acctStatus === 'passed' && $serverInfo !== '') {
+        $base['company'] = $serverInfo;
+        $relay = is_array($acctRes['body']['relay'] ?? null) ? $acctRes['body']['relay'] : null;
+        if (is_array($relay)) {
+            $base['relay_enabled'] = !empty($relay['enabled']);
+        }
+    }
+
+    $base['transcript'] = 'A: GET ' . sh_brevo_api_base() . "/account (no key) -> HTTP " . (int)$probe['status'] . "\n"
+        . 'B: GET ' . sh_brevo_api_base() . "/smtp/emails?limit=1 -> HTTP " . (int)$credRes['status'] . "\n"
+        . 'C: GET ' . sh_brevo_api_base() . "/account -> HTTP " . (int)$acctRes['status'];
+
+    if ($credStatus === 'passed') {
+        $base['ok'] = true;
+        $base['verdict'] = 'verified';
+        $base['step'] = 'complete';
+        $base['message'] = 'Test A passed (HTTPS/TLS) and Test B passed: the API key can use the transactional-email API. '
+            . 'No message was sent by these tests — send a test email to prove delivery acceptance.';
+        if ($acctStatus === 'permission_denied') {
+            $base['message'] .= ' Test C returned 403: the key is valid but not authorized for account details. That does not affect email delivery.';
+        }
+        return $base;
+    }
+
+    // No 200 from the email scope. Decide how honest we can be.
+    $anyUnauthorized = ($credStatus === 'invalid_key' || $acctStatus === 'invalid_key');
+    $allPermission = in_array($credStatus, ['permission_denied', 'payment_required'], true)
+        && in_array($acctStatus, ['permission_denied', 'payment_required', 'skipped'], true);
+    if ($allPermission && !$anyUnauthorized) {
+        $base['verdict'] = 'permission_limited';
+        $base['step'] = 'permission';
+        $base['message'] = 'Test A passed. The API key authenticated, but Brevo did not permit the resources checked here. '
+            . 'That is a permission result, not necessarily a delivery blocker: run Send Test Email to find out whether '
+            . 'this key may submit transactional email.';
+        $base['error'] = 'API key authenticated but has no access to the checked resources (HTTP '
+            . (int)$credRes['status'] . ').';
+        $base['cause'] = (string)$credMeaning['cause'];
+        $base['action'] = 'Send a test email to a controlled mailbox to determine whether this key can submit transactional email. '
+            . 'If that is also refused, create a key for a user with transactional-email permission.';
+        return $base;
+    }
+    if ($anyUnauthorized) {
+        $meaning = $credStatus === 'invalid_key' ? $credMeaning : $acctMeaning;
+        $base['verdict'] = 'invalid_credentials';
+        $base['step'] = 'credentials';
+        $base['error'] = 'Brevo did not accept the API key (HTTP ' . (int)$credRes['status'] . '): '
+            . (string)($credProvider['detail'] ?? '');
+        $base['cause'] = (string)($meaning['cause'] ?? 'The API key was not recognised.');
+        $base['action'] = (string)($meaning['action'] ?? 'Create a new v3 API key in Brevo and save it in the API key field.');
+        return $base;
+    }
+    $base['verdict'] = 'incomplete';
+    $base['step'] = 'credentials';
+    $base['error'] = 'Test B did not succeed (HTTP ' . (int)$credRes['status'] . ').';
+    $base['cause'] = (string)($credMeaning['cause'] ?? 'The transactional-email API did not accept the request.');
+    $base['action'] = (string)($credMeaning['action'] ?? 'Check the key, the account status and the endpoint.');
+    return $base;
+}
+
+/**
+ * True when the host belongs to Brevo's relay infrastructure.
+ *
+ * Used only to make credential-mixup messages precise; verification and
+ * connection behaviour are identical for every provider.
+ */
+function sh_mail_host_is_brevo(string $host): bool
+{
+    $h = strtolower(rtrim(trim($host), '.'));
+    if ($h === '') { return false; }
+    return $h === 'brevo.com' || str_ends_with($h, '.brevo.com')
+        || $h === 'sendinblue.com' || str_ends_with($h, '.sendinblue.com');
+}
+
+/**
+ * Detect an API key stored where an SMTP credential belongs (or vice versa).
+ *
+ * A prefix test is a hint, not proof of validity, so it is only used to refuse
+ * a credential that demonstrably belongs to the other transport. Nothing is
+ * swapped automatically: guessing would send one provider credential to a
+ * service it was not issued for.
+ *
+ * @param array<string,mixed> $t transport array
+ * @return array{code:string,message:string}|null
+ */
+function sh_mail_credential_mismatch(array $t): ?array
+{
+    if ((string)($t['driver'] ?? '') !== 'smtp') { return null; }
+    if (!sh_mail_host_is_brevo((string)($t['host'] ?? ''))) { return null; }
+    $username = trim((string)($t['username'] ?? ''));
+    $password = trim((string)($t['password'] ?? ''));
+    if (str_starts_with($password, 'xkeysib-')) {
+        return [
+            'code' => 'api_key_in_smtp_password',
+            'message' => 'The saved SMTP password is a Brevo API key (xkeysib-...). SMTP authentication needs the SMTP login and SMTP key '
+                . 'from Brevo → SMTP & API → SMTP, not the API key. Nothing was sent. Use the Brevo API transport for the API key, '
+                . 'or replace the SMTP password with the SMTP key.',
+        ];
+    }
+    if (str_starts_with($username, 'xkeysib-') || str_starts_with($username, 'xsmtpsib-')) {
+        return [
+            'code' => 'key_in_smtp_username',
+            'message' => 'The SMTP username looks like a Brevo key. The username must be the SMTP login shown in Brevo → SMTP & API → SMTP '
+                . '(usually the account email or [ID]@smtp-brevo.com); the key belongs in the password field. Nothing was sent.',
+        ];
+    }
+    // Any other password is left alone: providers use many key shapes, and a
+    // prefix is a hint, never proof that a credential is wrong.
+    return null;
 }
 
 /**
@@ -1186,16 +1666,35 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
         return $result;
     }
     if (($t['driver'] ?? 'mail') === 'brevo_api') {
-        if (empty($t['brevo_api_enabled']) || !sh_brevo_api_key_set()) {
+        $apiCred = sh_brevo_api_key_info();
+        if (!$t['brevo_api_enabled'] || !in_array($apiCred['state'], ['ok', 'unverified'], true)) {
             $result['skipped'] = true;
-            $result['error'] = 'The Brevo API transport is selected but is not fully configured (enable the switch and store a v3 API key).';
             $result['category'] = 'not_configured';
+            if ($apiCred['state'] === 'smtp_key') {
+                $result['category'] = 'credential';
+                $result['error'] = $apiCred['message'];
+            } elseif (!$t['brevo_api_enabled']) {
+                $result['error'] = 'The Brevo API transport is selected but the switch is off. Enable it and store a v3 API key.';
+            } else {
+                $result['error'] = 'The Brevo API transport is selected but no usable v3 API key is stored. ' . $apiCred['message'];
+            }
             sh_email_delivery_log($result + ['subject' => $subject, 'opts' => $opts]);
             return $result;
         }
         $apiResult = sh_brevo_api_send($to, $subject, $textBody, $htmlBody, $t, $opts);
         sh_email_delivery_log($apiResult + ['subject' => $subject, 'opts' => $opts]);
         return $apiResult;
+    }
+
+    if (($t['driver'] ?? 'mail') === 'smtp') {
+        $mismatch = sh_mail_credential_mismatch($t);
+        if ($mismatch !== null) {
+            $result['skipped'] = true;
+            $result['category'] = 'credential';
+            $result['error'] = $mismatch['message'];
+            sh_email_delivery_log($result + ['subject' => $subject, 'opts' => $opts]);
+            return $result;
+        }
     }
 
     $transcript = [];
@@ -1480,9 +1979,11 @@ function sh_mail_send_test(string $to, array $transport, array $opts = []): arra
  *
  * SMTP path: DNS -> TCP -> greeting -> EHLO -> STARTTLS advertised ->
  * STARTTLS -> certificate and hostname validation -> encrypted-socket check ->
- * EHLO again -> AUTH. The Brevo API path verifies HTTPS/TLS and the API key
- * with GET /v3/account. Nothing is authenticated before the secure channel is
- * established, and no message is sent by this function.
+ * EHLO again -> AUTH. The Brevo API path runs three separate checks: HTTPS/TLS
+ * (unauthenticated), the credential in the transactional-email scope
+ * (GET /v3/smtp/emails), and account access (GET /v3/account, informational).
+ * A 403 on the account resource is reported as a resource permission, never as
+ * a failed connection. No message is sent by this function.
  *
  * @param array<string,mixed> $t
  * @return array<string,mixed>
@@ -1638,6 +2139,16 @@ function sh_mail_test_connection_smtp(array $t): array
     if ($port < 1 || $port > 65535) { $port = 587; }
     $enc = strtolower((string)($t['encryption'] ?? 'tls'));
     if (!in_array($enc, ['tls', 'ssl', 'none'], true)) { $enc = 'tls'; }
+    $mismatch = sh_mail_credential_mismatch(array_merge($t, ['driver' => 'smtp', 'host' => trim((string)($t['host'] ?? ''))]));
+    if ($mismatch !== null) {
+        return array_merge($base, [
+            'step' => 'credentials',
+            'category' => 'credential',
+            'error' => $mismatch['message'],
+            'cause' => 'The stored credential belongs to the other Brevo transport. It was not sent anywhere.',
+            'action' => 'Put the API key only in the Brevo API key field, and the SMTP key only in the SMTP password field, then retest. Nothing is switched automatically.',
+        ]);
+    }
     if ($enc === 'none' && trim((string)($t['username'] ?? '')) !== '') {
         return array_merge($base, [
             'step' => 'config',

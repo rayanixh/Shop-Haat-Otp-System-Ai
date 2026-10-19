@@ -4,9 +4,18 @@
  *
  * Usage: php tests/brevo-api-server.php <port> <cert.pem> <key.pem> <output-dir>
  *
- * Accepts a valid test key (test-api-key) and answers GET /v3/account and
- * POST /v3/smtp/email. Any other key gets 401. It records the request path and
- * payload summary, never the api-key header value.
+ * Usage: php tests/brevo-api-server.php <port> <cert.pem> <key.pem> <output-dir> [mode]
+ *
+ * Keys and what they simulate (any other key gets 401, like Brevo's
+ * `unauthorized` answer for a key it does not know):
+ *   test-api-key        full access: account 200, list 200, send 201
+ *   account-denied-key  the reported condition: account 403 permission_denied
+ *                       while the transactional endpoints keep working
+ *   send-denied-key     authenticated but not permitted for anything: 403
+ *   rate-limited-key    account 403, list 429 with Retry-After: 7
+ *   payment-required-key account 402 not_enough_credits
+ *
+ * It records method/path and a payload summary, never the api-key value.
  */
 declare(strict_types=1);
 
@@ -32,18 +41,21 @@ if ($server === false) {
 }
 @file_put_contents($dir . '/ready', '1');
 
-$respond = static function ($conn, int $status, string $body): void {
-    $reason = $status === 201 ? 'Created' : ($status === 200 ? 'OK' : ($status === 401 ? 'Unauthorized' : 'Not Found'));
+$respond = static function ($conn, int $status, string $body, array $extraHeaders = []): void {
+    $reasons = [200 => 'OK', 201 => 'Created', 400 => 'Bad Request', 401 => 'Unauthorized',
+        402 => 'Payment Required', 403 => 'Forbidden', 404 => 'Not Found', 429 => 'Too Many Requests'];
+    $reason = $reasons[$status] ?? 'Error';
     $raw = "HTTP/1.1 {$status} {$reason}\r\n"
         . "Content-Type: application/json\r\n"
-        . 'Content-Length: ' . strlen($body) . "\r\n"
-        . "Connection: close\r\n\r\n" . $body;
+        . 'Content-Length: ' . strlen($body) . "\r\n";
+    foreach ($extraHeaders as $header) { $raw .= $header . "\r\n"; }
+    $raw .= "Connection: close\r\n\r\n" . $body;
     fwrite($conn, $raw);
 };
 
-$deadline = time() + 90;
+$deadline = time() + 120;
 $handled = 0;
-while (time() < $deadline && $handled < 6) {
+while (time() < $deadline && $handled < 12) {
     $conn = @stream_socket_accept($server, 5);
     if ($conn === false) { continue; }
     $handled++;
@@ -83,12 +95,37 @@ while (time() < $deadline && $handled < 6) {
     }
     @file_put_contents($dir . '/request-' . $handled . '.json', json_encode($entry, JSON_PRETTY_PRINT));
 
-    if ($apiKey !== 'test-api-key') {
+    $route = (string)parse_url($path, PHP_URL_PATH);
+    $known = ['test-api-key', 'account-denied-key', 'send-denied-key', 'rate-limited-key', 'payment-required-key'];
+    if ($apiKey === '' ) {
+        // Brevo's answer when no api-key header is present at all.
         $respond($conn, 401, '{"message":"authentication not found in headers","code":"unauthorized"}');
-    } elseif ($method === 'GET' && $path === '/v3/account') {
-        $respond($conn, 200, '{"companyName":"ShopHaat TLS Test","email":"test@example.test"}');
-    } elseif ($method === 'POST' && $path === '/v3/smtp/email') {
-        $respond($conn, 201, '{"messageId":"<test-message@brevo>"}');
+    } elseif (!in_array($apiKey, $known, true)) {
+        $respond($conn, 401, '{"message":"Key not found","code":"unauthorized"}');
+    } elseif ($method === 'GET' && $route === '/v3/account') {
+        if ($apiKey === 'test-api-key') {
+            $respond($conn, 200, '{"companyName":"ShopHaat TLS Test","email":"test@example.test"}');
+        } elseif ($apiKey === 'payment-required-key') {
+            $respond($conn, 402, '{"code":"not_enough_credits","message":"Not enough credits"}');
+        } elseif ($apiKey === 'rate-limited-key') {
+            $respond($conn, 429, '{"code":"too_many_requests","message":"Rate limit reached"}', ['Retry-After: 7']);
+        } else {
+            $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "account"']));
+        }
+    } elseif ($method === 'GET' && $route === '/v3/smtp/emails') {
+        if (in_array($apiKey, ['test-api-key', 'account-denied-key'], true)) {
+            $respond($conn, 200, '{"count":0,"transactionalEmails":[]}');
+        } elseif ($apiKey === 'rate-limited-key') {
+            $respond($conn, 429, '{"code":"too_many_requests","message":"Rate limit reached"}', ['Retry-After: 7']);
+        } else {
+            $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "smtp"']));
+        }
+    } elseif ($method === 'POST' && $route === '/v3/smtp/email') {
+        if (in_array($apiKey, ['test-api-key', 'account-denied-key'], true)) {
+            $respond($conn, 201, '{"messageId":"<test-message@brevo>"}');
+        } else {
+            $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "smtp"']));
+        }
     } else {
         $respond($conn, 404, '{"message":"not found","code":"not_found"}');
     }

@@ -276,20 +276,29 @@ try {
     $api = sh_mail_test_connection(['transport' => 'brevo_api', 'timeout' => 8]);
     tls_assert(!empty($api['ok']), 'The Brevo API connection test failed: ' . ($api['error'] ?? ''));
     tls_same('complete', $api['step'], 'The Brevo API test did not reach complete.');
+    tls_same('passed', $api['checks']['tls']['status'], 'Test A (HTTPS/TLS) did not pass.');
+    tls_same('passed', $api['checks']['credentials']['status'], 'Test B (credential) did not pass.');
+    tls_same('passed', $api['checks']['account']['status'], 'Test C (account) did not pass.');
 
     $apiSent = sh_mail_send_test('inbox@example.test', sh_mail_transport(), ['admin_id' => 1]);
     tls_assert(!empty($apiSent['ok']), 'The Brevo API test message failed: ' . ($apiSent['error'] ?? ''));
     tls_same('brevo_api', $apiSent['transport'], 'The Brevo API message used the wrong transport.');
     tls_same('<test-message@brevo>', $apiSent['message_id'] ?? '', 'The Brevo message id was not recorded.');
     tls_assert(!str_contains(json_encode($apiSent), 'test-api-key'), 'The API key leaked into the send result.');
-    $request = json_decode((string)@file_get_contents($apiDir . '/request-2.json'), true);
-    tls_assert(is_array($request) && $request['path'] === '/v3/smtp/email', 'The API stub did not receive the expected POST.');
-    tls_assert(($request['recipient'] ?? '') === 'inbox@example.test', 'The API request did not contain the recipient.');
+    $apiPost = null;
+    foreach (glob($apiDir . '/request-*.json') ?: [] as $file) {
+        $row = json_decode((string)@file_get_contents($file), true);
+        if (is_array($row) && ($row['method'] ?? '') === 'POST') { $apiPost = $row; }
+    }
+    tls_assert(is_array($apiPost) && ($apiPost['path'] ?? '') === '/v3/smtp/email', 'The API stub did not receive the expected POST.');
+    tls_assert(($apiPost['recipient'] ?? '') === 'inbox@example.test', 'The API request did not contain the recipient.');
 
     $GLOBALS['test_settings']['brevo_api_key'] = 'wrong-api-key';
     $badApi = sh_brevo_api_test_connection();
     tls_assert(empty($badApi['ok']), 'A wrong Brevo API key was accepted.');
-    tls_same('api_auth', $badApi['step'], 'The wrong API key was not reported at api_auth.');
+    tls_same('credentials', $badApi['step'], 'The wrong API key was not reported at the credential stage.');
+    tls_same('invalid_credentials', $badApi['verdict'], 'The wrong API key was not classified as invalid credentials.');
+    tls_same('invalid_key', $badApi['checks']['credentials']['status'], 'The 401 was not reported as an invalid key.');
     tls_assert(str_contains((string)($badApi['error'] ?? ''), '401'), 'The wrong-key error did not include HTTP 401.');
 
     echo "6. an incomplete API configuration never falls back to SMTP or mail()\n";

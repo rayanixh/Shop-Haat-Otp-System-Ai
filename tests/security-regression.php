@@ -2514,6 +2514,75 @@ sh_t('the Brevo API key is server-side only and delivery TLS verification is nev
     return true;
 });
 
+sh_t('a 403 from the Brevo account resource is reported as a permission, not an auth failure', function () {
+    $mail = sh_email_src('config/mail.php');
+    $at = strpos($mail, 'function sh_brevo_api_test_connection(');
+    $end = $at === false ? false : strpos($mail, 'function sh_mail_send(', $at);
+    if ($at === false || $end === false) { return 'sh_brevo_api_test_connection() could not be read'; }
+    $fn = substr($mail, $at, $end - $at);
+
+    // The three checks must stay separate and the account check must be
+    // described as informational, so a 403 there can never read as "the API is
+    // broken" or "the key is invalid".
+    if (!str_contains($fn, "GET /v3/smtp/emails")) { return 'the credential is not tested in the transactional-email scope'; }
+    if (!str_contains($fn, 'informational')) { return 'the account check is not labelled informational'; }
+    if (!str_contains($fn, "=== 403")) { return '403 is not handled separately in the API diagnostics'; }
+    if (!str_contains($fn, "'permission_denied'")) { return 'the diagnostics never report a resource permission result'; }
+    if (str_contains($fn, "'api_auth'")) { return 'the conflating api_auth stage is still reported'; }
+
+    $statusAt = strpos($mail, 'function sh_brevo_api_status_meaning(');
+    $statusEnd = $statusAt === false ? false : strpos($mail, 'function sh_brevo_api_request(', $statusAt);
+    if ($statusAt === false || $statusEnd === false) { return 'sh_brevo_api_status_meaning() could not be read'; }
+    $status = substr($mail, $statusAt, $statusEnd - $statusAt);
+    foreach (['402', '403', '429', '401'] as $code) {
+        if (!str_contains($status, '=== ' . $code)) { return 'HTTP ' . $code . ' is not handled separately'; }
+    }
+    if (preg_match('~\$status\s*>=\s*200\s*&&\s*\$status\s*<\s*300~', $status) !== 1) {
+        return 'success is not restricted to 2xx; a 403 could be treated as success';
+    }
+    if (str_contains($status, "kind' => 'ok'") && !str_contains($status, 'Accepted')) {
+        return 'the success branch is not explicit';
+    }
+    return true;
+});
+
+sh_t('Brevo credentials never cross transports and a denied send is never retried', function () {
+    $mail = sh_email_src('config/mail.php');
+
+    $keyAt = strpos($mail, 'function sh_brevo_api_key_info(');
+    $keyEnd = $keyAt === false ? false : strpos($mail, 'function sh_brevo_api_key(', $keyAt);
+    if ($keyAt === false || $keyEnd === false) { return 'sh_brevo_api_key_info() could not be read'; }
+    $keyFn = substr($mail, $keyAt, $keyEnd - $keyAt);
+    if (!str_contains($keyFn, "'smtp_key'")) { return 'an SMTP key in the API field is not identified'; }
+    if (!str_contains($keyFn, "\$out['key'] = '';")) { return 'an SMTP key in the API field is not blanked before use'; }
+
+    if (!str_contains($mail, 'function sh_mail_credential_mismatch(')) { return 'the SMTP credential check is missing'; }
+    $mismatchAt = strpos($mail, 'function sh_mail_credential_mismatch(');
+    $mismatchEnd = strpos($mail, 'function sh_mail_send(', $mismatchAt);
+    $mismatch = substr($mail, $mismatchAt, $mismatchEnd - $mismatchAt);
+    if (!str_contains($mismatch, 'xkeysib-')) { return 'an API key in the SMTP password is not detected'; }
+
+    $sendAt = strpos($mail, 'function sh_mail_send(');
+    $sendEnd = $sendAt === false ? false : strpos($mail, 'function sh_mail_send_legacy(', $sendAt);
+    $send = substr($mail, $sendAt, $sendEnd - $sendAt);
+    if (substr_count($send, 'sh_mail_credential_mismatch(') < 1) { return 'sh_mail_send() does not refuse a cross-transport credential'; }
+
+    $apiSendAt = strpos($mail, 'function sh_brevo_api_send(');
+    $apiSendEnd = $apiSendAt === false ? false : strpos($mail, 'function sh_brevo_api_test_connection(', $apiSendAt);
+    $apiSend = substr($mail, $apiSendAt, $apiSendEnd - $apiSendAt);
+    if (str_contains($apiSend, 'sleep(')) { return 'the API send waits and retries instead of reporting the result'; }
+    if (!str_contains($apiSend, "'permission'")) { return 'a denied API send is not categorised as a permission failure'; }
+
+    // The API key header is added only when a key is actually sent.
+    $reqAt = strpos($mail, 'function sh_brevo_api_request(');
+    $reqEnd = strpos($mail, 'function sh_brevo_api_send(', $reqAt);
+    $req = substr($mail, $reqAt, $reqEnd - $reqAt);
+    if (!str_contains($req, "if (\$key !== '') { \$headers[] = 'api-key: ' . \$key; }")) {
+        return 'the api-key header is not conditional on a key being sent';
+    }
+    return true;
+});
+
 sh_t('email templates escape interpolated values and ship a text alternative', function () {
     $src = sh_email_src('includes/mail.php');
     if (!str_contains($src, 'function sh_email_e(')) { return 'the email escaper is missing'; }

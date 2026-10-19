@@ -35,6 +35,16 @@ jobs:
       # at auth), and a local HTTPS Brevo API stub (valid vs wrong key).
       - name: SMTP and Brevo TLS diagnostics
         run: php tests/smtp-tls-diagnostics.php
+      # The Brevo HTTPS API contract, against a local TLS stub that reproduces
+      # the reported failure: a key Brevo accepts for transactional email but
+      # refuses for GET /v3/account (403 permission_denied). It proves that a
+      # 403 on the account resource is reported as a resource permission, not
+      # as a broken key or a failed connection; that an SMTP key is never sent
+      # to the API endpoint; that a denied send is never reported as success
+      # and never retried; and that only an accepted POST /v3/smtp/email counts
+      # as a send.
+      - name: Brevo API diagnostics and credential isolation
+        run: php tests/brevo-api-diagnostics.php
       # Both harnesses drive the REAL rendered markup (tests/page-transition-
       # fixtures.php and tests/slider-fixtures.php, which call the shipped
       # helpers), the real stylesheet and the real script inside jsdom:
