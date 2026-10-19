@@ -19,13 +19,41 @@
  *  - Every attempt is logged to email_log with its error category, without the
  *    message body, without a verification code and without any secret.
  *
- * Settings used: smtp_enabled, smtp_host, smtp_port, smtp_encryption,
- * smtp_username, smtp_password, smtp_from_email, smtp_from_name,
- * smtp_allow_self_signed, dkim_domain, dkim_selector, dkim_private_key_path.
+ * Settings used: mail_transport (smtp | brevo_api), smtp_enabled, smtp_host,
+ * smtp_port, smtp_encryption, smtp_username, smtp_password, smtp_from_email,
+ * smtp_from_name, brevo_api_enabled, brevo_api_key, dkim_domain,
+ * dkim_selector, dkim_private_key_path.
+ *
+ * TLS policy: certificate-chain and hostname validation are always on for
+ * every delivery connection. smtp_allow_self_signed is a retired setting and
+ * is deliberately ignored; there is no supported way to turn verification off
+ * for a send. The one place a handshake is opened without automatic validation
+ * is sh_mail_probe_certificate(), a read-only inspection probe that sends no
+ * credentials and no mail. It exists precisely so an operator can see the
+ * certificate that a misconfigured endpoint presents, and it records the
+ * chain/hostname verdict itself.
  */
 declare(strict_types=1);
 
 require_once SH_ROOT . '/lib/PHPMailer/autoload.php';
+
+/**
+ * Diagnostic-only subclass that exposes the socket metadata of the live SMTP
+ * connection. PHPMailer keeps the stream protected; this lets the connection
+ * test prove that STARTTLS actually produced an encrypted socket before any
+ * credentials are sent. It is never used for delivery.
+ */
+if (!class_exists('ShMailDiagnosticSMTP', false)) {
+    final class ShMailDiagnosticSMTP extends \PHPMailer\PHPMailer\SMTP
+    {
+        /** @return array<string,mixed> */
+        public function socketMeta(): array
+        {
+            if (!is_resource($this->smtp_conn)) { return []; }
+            return stream_get_meta_data($this->smtp_conn);
+        }
+    }
+}
 
 /** Whether the mail library is actually loadable on this server. */
 function sh_phpmailer_available(): bool
@@ -97,6 +125,15 @@ function sh_mail_parse_host(string $rawHost, int $defaultPort = 587): array
  */
 function sh_mail_find_ca_bundle(): ?string
 {
+    // 0. Explicit deployment/test override. This is a trust anchor, not a way to
+    //    skip validation: the bundle is still used with verify_peer=true.
+    if (defined('SH_MAIL_CA_BUNDLE')) {
+        $explicit = (string)constant('SH_MAIL_CA_BUNDLE');
+        if ($explicit !== '' && is_file($explicit) && is_readable($explicit)) {
+            return $explicit;
+        }
+    }
+
     // 1. Configured php.ini settings
     $iniCa = ini_get('openssl.cafile');
     if (is_string($iniCa) && $iniCa !== '' && is_file($iniCa) && is_readable($iniCa)) {
@@ -138,12 +175,55 @@ function sh_mail_find_ca_bundle(): ?string
     return null;
 }
 
+/** The delivery transport selected by the administrator. */
+function sh_mail_selected_transport(): string
+{
+    $mode = strtolower(trim((string)sh_setting('mail_transport', 'smtp')));
+    return in_array($mode, ['smtp', 'brevo_api'], true) ? $mode : 'smtp';
+}
+
+/**
+ * Decrypt the Brevo HTTPS API key.
+ *
+ * The key is stored encrypted with the same at-rest helper as the Firebase
+ * key. It is never placed in the transport array, rendered, logged or
+ * returned by a diagnostic. API keys and SMTP keys are separate credentials:
+ * a Brevo SMTP key (xsmtpsib-...) cannot authenticate against the v3 API.
+ */
+function sh_brevo_api_key(): string
+{
+    $stored = trim((string)sh_setting('brevo_api_key', ''));
+    if ($stored === '') { return ''; }
+    if (!function_exists('sh_verify_decrypt')) {
+        $helper = SH_ROOT . '/includes/verification.php';
+        if (is_file($helper)) { require_once $helper; }
+    }
+    if (!function_exists('sh_verify_decrypt')) { return ''; }
+    return trim((string)sh_verify_decrypt($stored));
+}
+
+function sh_brevo_api_key_set(): bool
+{
+    return sh_brevo_api_key() !== '';
+}
+
+/** Base URL for the v3 API. A constant exists so the test suite can use a local HTTPS server. */
+function sh_brevo_api_base(): string
+{
+    $base = defined('SH_BREVO_API_BASE') ? (string)constant('SH_BREVO_API_BASE') : 'https://api.brevo.com/v3';
+    return rtrim($base, '/');
+}
+
 /**
  * Read the current transport configuration from settings.
  *
  * Falls back to sensible shared-hosting defaults: mail() enabled if SMTP
  * is not switched on, standard port 587 with STARTTLS, sender address
  * matching the store contact email.
+ *
+ * The Brevo API transport is only selected when the administrator has
+ * explicitly saved mail_transport=brevo_api, switched it on and stored a key.
+ * There is no automatic fallback between SMTP and the API.
  *
  * @return array<string,mixed>
  */
@@ -170,8 +250,21 @@ function sh_mail_transport(): array
     $timeout = (int)sh_setting('smtp_timeout', '20');
     if ($timeout < 5 || $timeout > 60) { $timeout = 20; }
 
+    $mode = sh_mail_selected_transport();
+    $apiEnabled = (string)sh_setting('brevo_api_enabled', '0') === '1';
+    $apiKeySet = sh_brevo_api_key_set();
+    if ($mode === 'brevo_api') {
+        // Never fall back to mail()/SMTP silently: an incomplete API
+        // configuration is reported as not configured, not delivered by a
+        // different route the administrator did not choose.
+        $driver = 'brevo_api';
+    } else {
+        $driver = ($enabled && $host !== '') ? 'smtp' : 'mail';
+    }
+
     return [
-        'driver'            => ($enabled && $host !== '') ? 'smtp' : 'mail',
+        'driver'            => $driver,
+        'transport'         => $mode,
         'host'              => $host,
         'raw_host'          => $rawHost,
         'port'              => $port,
@@ -181,7 +274,11 @@ function sh_mail_transport(): array
         'from_email'        => $fromEmail,
         'from_name'         => $fromName !== '' ? $fromName : 'ShopHaat',
         'reply_to'          => $replyTo,
-        'allow_self_signed' => (string)sh_setting('smtp_allow_self_signed', '0') === '1',
+        // Retired setting: verification is never optional. Kept in the array so
+        // older callers that read the key do not break, but always false.
+        'allow_self_signed' => false,
+        'brevo_api_enabled' => $apiEnabled,
+        'brevo_api_key_set' => $apiKeySet,
         'dkim_enabled'      => (string)sh_setting('dkim_enabled', '0') === '1',
         'timeout'           => $timeout,
     ];
@@ -201,21 +298,36 @@ function sh_mail_service_status(): array
     // a local relay that accepts unauthenticated mail is a real setup, and
     // blocking it would be a lie about what the store can do.
     $authOk = $t['username'] === '' || $t['password'] !== '';
-    $ready = $fromOk && ($t['driver'] === 'smtp' ? ($t['host'] !== '' && $authOk) : true);
+    $driver = (string)$t['driver'];
+
+    if ($driver === 'smtp') {
+        $ready = $fromOk && $t['host'] !== '' && $authOk;
+    } elseif ($driver === 'brevo_api') {
+        $ready = $fromOk && $t['brevo_api_enabled'] && $t['brevo_api_key_set'];
+    } else {
+        $ready = $fromOk;
+    }
+
     $missing = [];
     if (!$fromOk) { $missing[] = 'A valid sender email address (Sender email)'; }
-    if ($t['driver'] === 'smtp' && $t['host'] === '') { $missing[] = 'SMTP host'; }
-    if ($t['driver'] === 'smtp' && $t['username'] !== '' && $t['password'] === '') { $missing[] = 'SMTP password'; }
+    if ($driver === 'smtp' && $t['host'] === '') { $missing[] = 'SMTP host'; }
+    if ($driver === 'smtp' && $t['username'] !== '' && $t['password'] === '') { $missing[] = 'SMTP password'; }
+    if ($t['transport'] === 'brevo_api') {
+        if (!$t['brevo_api_enabled']) { $missing[] = 'Brevo API transport enabled'; }
+        if (!$t['brevo_api_key_set']) { $missing[] = 'Brevo API key'; }
+    }
 
     return [
         'ready'         => $ready,
-        'driver'        => (string)$t['driver'],
+        'driver'        => $driver,
+        'transport'     => (string)$t['transport'],
         'library'       => sh_phpmailer_source(),
-        'host'          => (string)$t['host'],
-        'port'          => (int)$t['port'],
-        'encryption'    => (string)$t['encryption'],
+        'host'          => $driver === 'brevo_api' ? 'api.brevo.com' : (string)$t['host'],
+        'port'          => $driver === 'brevo_api' ? 443 : (int)$t['port'],
+        'encryption'    => $driver === 'brevo_api' ? 'HTTPS' : (string)$t['encryption'],
         'username_set'  => $t['username'] !== '',
         'password_set'  => $t['password'] !== '',
+        'api_key_set'   => (bool)$t['brevo_api_key_set'],
         'from_email'    => (string)$t['from_email'],
         'from_name'     => (string)$t['from_name'],
         'reply_to'      => (string)($t['reply_to'] ?? ''),
@@ -224,6 +336,7 @@ function sh_mail_service_status(): array
         'missing'       => $missing,
         'ca_bundle'     => sh_mail_find_ca_bundle(),
         'openssl_ok'    => extension_loaded('openssl'),
+        'curl_ok'       => function_exists('curl_init'),
     ];
 }
 
@@ -271,6 +384,9 @@ function sh_mail_dkim_status(): array
 function sh_mail_redact(string $text): string
 {
     $text = function_exists('sh_scrub_secrets') ? sh_scrub_secrets($text) : $text;
+    // Brevo v3 API keys (xkeysib-...) and SMTP keys (xsmtpsib-...) are secrets
+    // even when they appear without a "key=" label.
+    $text = preg_replace('~\b(?:xkeysib|xsmtpsib)-[A-Za-z0-9_-]{8,}~', '[redacted]', $text) ?? $text;
     // SMTP AUTH exchanges are base64: redact the whole exchange, not the words.
     $text = preg_replace('~(?<=AUTH LOGIN\r\n)[A-Za-z0-9+/=]+~', '[redacted]', $text) ?? $text;
     $text = preg_replace('~\b(?:[A-Za-z0-9+/=]{24,})~', '[redacted]', $text) ?? $text;
@@ -284,6 +400,14 @@ function sh_mail_category(string $raw): string
     if ($r === '') { return 'ok'; }
     $code = 0;
     if (preg_match('~\b([245]\d\d)\b~', $r, $m) === 1) { $code = (int)$m[1]; }
+    // Hostname verification is a distinct failure from a chain/trust failure.
+    // The OpenSSL wording differs across PHP versions, so match all of it
+    // before the generic TLS bucket and never label it "cryptographic".
+    foreach (['subjectaltname did not match', 'did not match expected name', 'peer certificate',
+              'hostname mismatch', 'certificate is not valid for', 'certificate subject name',
+              'does not match the expected name', 'ip address mismatch'] as $needle) {
+        if (str_contains($r, $needle)) { return 'tls_hostname'; }
+    }
     if (str_contains($r, 'could not authenticate') || str_contains($r, 'auth') && $code === 535) { return 'auth'; }
     if ($code === 535 || $code === 534 || $code === 530) { return 'auth'; }
     if ($code === 550 || $code === 551 || $code === 553 || $code === 554 || str_contains($r, 'reject')) { return 'rejected'; }
@@ -302,6 +426,710 @@ function sh_mail_category(string $raw): string
     if (str_contains($r, 'not configured') || str_contains($r, 'missing')) { return 'not_configured'; }
     if (str_contains($r, 'invalid recipient')) { return 'invalid_recipient'; }
     return 'unknown';
+}
+
+
+// ---------------------------------------------------------------------------
+// TLS evidence (read-only certificate inspection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a hostname to every address PHP can see, keeping the first IPv4 as
+ * the preferred target. Used by the diagnostic report so an operator can see
+ * which endpoint the hosting resolver actually selected.
+ *
+ * @return array{host:string,ipv4:array<int,string>,ipv6:array<int,string>,selected:string,error:string}
+ */
+function sh_mail_resolve_host(string $host): array
+{
+    $out = ['host' => $host, 'ipv4' => [], 'ipv6' => [], 'selected' => '', 'error' => ''];
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) { $out['ipv6'][] = $host; }
+        else { $out['ipv4'][] = $host; }
+        $out['selected'] = $host;
+        return $out;
+    }
+
+    if (function_exists('dns_get_record')) {
+        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        if (is_array($records)) {
+            foreach ($records as $row) {
+                if (!is_array($row)) { continue; }
+                if (!empty($row['ip']) && filter_var($row['ip'], FILTER_VALIDATE_IP)) {
+                    $out['ipv4'][] = (string)$row['ip'];
+                } elseif (!empty($row['ipv6']) && filter_var($row['ipv6'], FILTER_VALIDATE_IP)) {
+                    $out['ipv6'][] = (string)$row['ipv6'];
+                }
+            }
+        }
+    }
+    if ($out['ipv4'] === [] && function_exists('gethostbynamel')) {
+        $v4 = @gethostbynamel($host);
+        if (is_array($v4)) {
+            foreach ($v4 as $ip) { if (filter_var($ip, FILTER_VALIDATE_IP)) { $out['ipv4'][] = (string)$ip; } }
+        }
+    }
+    $out['ipv4'] = array_values(array_unique($out['ipv4']));
+    $out['ipv6'] = array_values(array_unique($out['ipv6']));
+    $out['selected'] = $out['ipv4'][0] ?? ($out['ipv6'][0] ?? '');
+    if ($out['selected'] === '') {
+        $out['error'] = "DNS resolution failed: no A or AAAA address was returned for '{$host}'.";
+    }
+    return $out;
+}
+
+/**
+ * Read one (possibly multi-line) SMTP reply without authenticating or sending
+ * anything. Used only by the certificate-inspection probe.
+ *
+ * @param resource $stream
+ * @return array{code:int,lines:array<int,string>,text:string}
+ */
+function sh_mail_smtp_read_reply($stream, int $limit = 64): array
+{
+    $lines = [];
+    $code = 0;
+    // RFC 5321 limits an SMTP reply line to 1000 bytes. 2048 is generous and
+    // still avoids allocating an oversized read buffer for every line.
+    while (count($lines) < $limit && ($line = fgets($stream, 2048)) !== false) {
+        $trimmed = rtrim($line, "\r\n");
+        $lines[] = $trimmed;
+        if (preg_match('~^(\d{3})([ -])~', $trimmed, $m) === 1) {
+            if ($m[2] === ' ') { $code = (int)$m[1]; break; }
+        } else {
+            break;
+        }
+    }
+    return ['code' => $code, 'lines' => $lines, 'text' => implode("\n", $lines)];
+}
+
+/** Split a certificate SAN extension into DNS and IP identities. */
+function sh_mail_certificate_names(array $parsed): array
+{
+    $raw = (string)($parsed['extensions']['subjectAltName'] ?? '');
+    $dns = [];
+    $ips = [];
+    foreach (preg_split('~,\s*~', $raw) ?: [] as $part) {
+        $part = trim($part);
+        if ($part === '') { continue; }
+        if (preg_match('~^DNS:(.+)$~i', $part, $m) === 1) { $dns[] = strtolower(rtrim(trim($m[1]), '.')); }
+        elseif (preg_match('~^(?:IP Address|IP):(.+)$~i', $part, $m) === 1) { $ips[] = trim($m[1]); }
+    }
+    return ['dns' => array_values(array_unique($dns)), 'ip' => array_values(array_unique($ips))];
+}
+
+/**
+ * RFC 6125 name matching for the SAN list.
+ *
+ * A wildcard is accepted only as the complete left-most label and matches
+ * exactly one label. It never matches a bare parent domain and never matches
+ * a name containing a further dot.
+ *
+ * @param array<int,string> $dnsNames
+ */
+function sh_mail_tls_name_matches(string $host, array $dnsNames): bool
+{
+    $host = strtolower(rtrim(trim($host), '.'));
+    if ($host === '') { return false; }
+    foreach ($dnsNames as $name) {
+        $name = strtolower(rtrim(trim($name), '.'));
+        if ($name === '' || $name[0] === '.') { continue; }
+        if ($name === $host) { return true; }
+        if (str_starts_with($name, '*.')) {
+            $suffix = substr($name, 1); // ".example.com"
+            if (str_ends_with($host, $suffix)) {
+                $label = substr($host, 0, -strlen($suffix));
+                if ($label !== '' && !str_contains($label, '.')) { return true; }
+            }
+        }
+    }
+    return false;
+}
+
+/** Bracket an IPv6 literal for use in a stream URI. */
+function sh_mail_uri_host(string $host): string
+{
+    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        return '[' . $host . ']';
+    }
+    return $host;
+}
+
+/**
+ * Inspect the certificate a TLS endpoint presents.
+ *
+ * IMPORTANT: this is a read-only evidence probe. It opens a separate
+ * connection, completes the handshake without automatic validation so that a
+ * mismatched certificate can actually be read, then validates the chain with
+ * openssl_x509_checkpurpose() and the hostname with sh_mail_tls_name_matches().
+ * It never sends SMTP credentials, never issues AUTH/MAIL/RCPT/DATA and never
+ * reports a message as sent. Delivery connections in sh_mail_send() and
+ * sh_mail_test_connection() always use verify_peer + verify_peer_name.
+ *
+ * @param string $mode tls (STARTTLS), ssl (implicit TLS) or https
+ * @return array<string,mixed>
+ */
+function sh_mail_probe_certificate(string $host, int $port, string $mode, int $timeout = 20): array
+{
+    $mode = strtolower($mode);
+    if (!in_array($mode, ['tls', 'ssl', 'https'], true)) { $mode = 'tls'; }
+    $timeout = max(5, min(60, $timeout));
+    $out = [
+        'attempted' => true, 'ok' => false, 'inspection_only' => true,
+        'host' => $host, 'port' => $port, 'encryption' => strtoupper($mode),
+        'peer_ip' => '', 'tls_protocol' => '', 'cipher' => '',
+        'subject' => '', 'subject_cn' => '', 'issuer' => '',
+        'valid_from' => '', 'valid_to' => '',
+        'sans' => [], 'dns_sans' => [], 'ip_sans' => [],
+        'fingerprint_sha256' => '', 'serial' => '',
+        'hostname_valid' => null, 'chain_valid' => null, 'chain_error' => '',
+        'error' => '', 'openssl_errors' => [],
+    ];
+
+    if (str_contains($host, "\0") || preg_match('~^[A-Za-z0-9._:\-\[\]]+$~', $host) !== 1) {
+        $out['error'] = 'The hostname contains characters that are not valid in a TLS target.';
+        return $out;
+    }
+    if (!function_exists('openssl_x509_parse')) {
+        $out['error'] = 'The PHP OpenSSL extension is not available, so the certificate cannot be inspected.';
+        return $out;
+    }
+
+    $ssl = [
+        // Inspection only: the certificate is parsed and checked explicitly
+        // below. This context is never used to authenticate or send mail.
+        'verify_peer' => false,
+        'verify_peer_name' => false,
+        'SNI_enabled' => true,
+        'peer_name' => $host,
+        'capture_peer_cert' => true,
+        'capture_peer_cert_chain' => true,
+    ];
+    $ctx = stream_context_create(['ssl' => $ssl]);
+    $stream = null;
+    $errors = [];
+    set_error_handler(static function (int $no, string $msg) use (&$errors): bool {
+        $errors[] = $msg;
+        return true;
+    });
+    try {
+        $uriHost = sh_mail_uri_host($host);
+        if ($mode === 'tls') {
+            $stream = @stream_socket_client('tcp://' . $uriHost . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
+            if (!is_resource($stream)) {
+                $out['error'] = 'TCP connection failed: ' . ($errstr !== '' ? $errstr : 'no response') . ($errno ? " (errno {$errno})" : '') . '.';
+                return $out;
+            }
+            stream_set_timeout($stream, $timeout);
+            $greeting = sh_mail_smtp_read_reply($stream);
+            if ($greeting['code'] !== 220) {
+                $out['error'] = 'The server did not send a 220 SMTP greeting: ' . ($greeting['text'] !== '' ? $greeting['text'] : 'no reply') . '.';
+                return $out;
+            }
+            fwrite($stream, "EHLO shophaat-tls-probe\r\n");
+            $ehlo = sh_mail_smtp_read_reply($stream);
+            if ($ehlo['code'] !== 250) {
+                $out['error'] = 'EHLO was not accepted before STARTTLS: ' . ($ehlo['text'] !== '' ? $ehlo['text'] : 'no reply') . '.';
+                return $out;
+            }
+            $advertisesStartTls = false;
+            foreach ($ehlo['lines'] as $line) {
+                if (stripos($line, 'STARTTLS') !== false) { $advertisesStartTls = true; break; }
+            }
+            if (!$advertisesStartTls) {
+                $out['error'] = 'The server did not advertise STARTTLS, so no certificate can be presented.';
+                return $out;
+            }
+            fwrite($stream, "STARTTLS\r\n");
+            $start = sh_mail_smtp_read_reply($stream);
+            if ($start['code'] !== 220) {
+                $out['error'] = 'The server rejected STARTTLS: ' . ($start['text'] !== '' ? $start['text'] : 'no reply') . '.';
+                return $out;
+            }
+        } else {
+            $scheme = 'tls://';
+            $stream = @stream_socket_client($scheme . $uriHost . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
+            if (!is_resource($stream)) {
+                $out['error'] = 'TLS connection failed: ' . ($errstr !== '' ? $errstr : 'no response') . ($errno ? " (errno {$errno})" : '') . '.';
+                return $out;
+            }
+        }
+
+        if ($mode === 'tls') {
+            $crypto = STREAM_CRYPTO_METHOD_TLS_CLIENT;
+            if (defined('STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT')) { $crypto |= STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT; }
+            if (defined('STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT')) { $crypto |= STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT; }
+            $ok = stream_socket_enable_crypto($stream, true, $crypto);
+            if ($ok !== true) {
+                $out['error'] = 'The TLS handshake did not complete, so the server presented no certificate: ' . implode('; ', array_slice($errors, 0, 4));
+                return $out;
+            }
+        }
+
+        $meta = stream_get_meta_data($stream);
+        if (!empty($meta['crypto']) && is_array($meta['crypto'])) {
+            $out['tls_protocol'] = (string)($meta['crypto']['protocol'] ?? '');
+            $out['cipher'] = trim((string)($meta['crypto']['cipher_name'] ?? '') . ' ' . (string)($meta['crypto']['cipher_bits'] ?? ''));
+        }
+        $peer = stream_socket_get_name($stream, true);
+        if (is_string($peer) && $peer !== '') {
+            $pos = strrpos($peer, ':');
+            $out['peer_ip'] = $pos === false ? $peer : trim(substr($peer, 0, $pos), '[]');
+        }
+
+        $params = stream_context_get_params($stream);
+        $cert = $params['options']['ssl']['peer_certificate'] ?? null;
+        $chain = $params['options']['ssl']['peer_certificate_chain'] ?? null;
+        if (!$cert) {
+            $out['error'] = 'The TLS handshake completed but PHP did not expose a peer certificate.';
+            return $out;
+        }
+        // short names keep subject[CN] and extensions[subjectAltName] stable.
+        $parsed = openssl_x509_parse($cert, true);
+        if (!is_array($parsed)) {
+            $out['error'] = 'The peer certificate could not be parsed.';
+            return $out;
+        }
+
+        $subjectParts = [];
+        foreach (['CN', 'O', 'OU'] as $k) {
+            if (!empty($parsed['subject'][$k])) { $subjectParts[] = $k . '=' . $parsed['subject'][$k]; }
+        }
+        $issuerParts = [];
+        foreach (['CN', 'O', 'C'] as $k) {
+            if (!empty($parsed['issuer'][$k])) { $issuerParts[] = $k . '=' . $parsed['issuer'][$k]; }
+        }
+        $names = sh_mail_certificate_names($parsed);
+        $out['subject'] = implode(', ', $subjectParts);
+        $out['subject_cn'] = (string)($parsed['subject']['CN'] ?? '');
+        $out['issuer'] = implode(', ', $issuerParts);
+        $out['valid_from'] = !empty($parsed['validFrom_time_t']) ? date('Y-m-d H:i:s T', (int)$parsed['validFrom_time_t']) : '';
+        $out['valid_to'] = !empty($parsed['validTo_time_t']) ? date('Y-m-d H:i:s T', (int)$parsed['validTo_time_t']) : '';
+        $out['dns_sans'] = $names['dns'];
+        $out['ip_sans'] = $names['ip'];
+        $out['sans'] = array_merge($names['dns'], $names['ip']);
+        $out['serial'] = (string)($parsed['serialNumberHex'] ?? $parsed['serialNumber'] ?? '');
+        $fingerprint = openssl_x509_fingerprint($cert, 'sha256');
+        $out['fingerprint_sha256'] = is_string($fingerprint) ? strtoupper($fingerprint) : '';
+
+        // Hostname check: SAN is authoritative when present, CN only when the
+        // certificate carries no SAN at all (RFC 6125 section 6.4.4).
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            $out['hostname_valid'] = in_array($host, $names['ip'], true);
+        } else {
+            $candidates = $names['dns'];
+            if ($candidates === [] && $out['subject_cn'] !== '') { $candidates = [$out['subject_cn']]; }
+            $out['hostname_valid'] = sh_mail_tls_name_matches($host, $candidates);
+        }
+
+        // Chain validation. The leaf is checked against the configured trust
+        // store with the server-supplied intermediates, independently of the
+        // hostname result.
+        $ca = sh_mail_find_ca_bundle();
+        $untrusted = null;
+        if (is_array($chain) && count($chain) > 1) {
+            $pem = '';
+            foreach (array_slice($chain, 1) as $chainCert) {
+                if (is_string($chainCert) && str_contains($chainCert, 'BEGIN CERTIFICATE')) { $pem .= $chainCert; continue; }
+                $one = '';
+                if (@openssl_x509_export($chainCert, $one) && is_string($one)) { $pem .= $one; }
+            }
+            if ($pem !== '') {
+                $tmp = tempnam(sys_get_temp_dir(), 'shchain');
+                if ($tmp !== false && @file_put_contents($tmp, $pem) !== false) { $untrusted = $tmp; }
+            }
+        }
+        if (function_exists('openssl_x509_checkpurpose') && defined('X509_PURPOSE_SSL_SERVER')) {
+            while (openssl_error_string() !== false) { /* drain */ }
+            $purposeOk = @openssl_x509_checkpurpose($cert, X509_PURPOSE_SSL_SERVER, $ca !== null ? [$ca] : [], $untrusted);
+            $purposeErrors = [];
+            while (($sslMsg = openssl_error_string()) !== false) { $purposeErrors[] = $sslMsg; }
+            $out['chain_valid'] = ($purposeOk === true);
+            $out['chain_error'] = $out['chain_valid'] ? '' : implode('; ', array_slice(array_unique($purposeErrors), 0, 4));
+            if (!$out['chain_valid'] && $out['chain_error'] === '') {
+                $out['chain_error'] = 'The certificate chain did not validate against ' . ($ca !== null ? $ca : 'the system trust store') . '.';
+            }
+        }
+        if ($untrusted !== null) { @unlink($untrusted); }
+
+        $out['ok'] = true;
+        return $out;
+    } catch (Throwable $e) {
+        $out['error'] = sh_mail_redact($e->getMessage());
+        $out['openssl_errors'] = array_slice($errors, 0, 6);
+        return $out;
+    } finally {
+        restore_error_handler();
+        if (is_resource($stream)) { @fclose($stream); }
+    }
+}
+
+/**
+ * Turn a certificate probe into the exact cause/action text an operator needs.
+ * This is where a hostname mismatch stops being a generic "TLS failed".
+ *
+ * @param array<string,mixed> $cert
+ * @return array{cause:string,action:string,alternate_host:string,is_brevo:bool}
+ */
+function sh_mail_certificate_diagnosis(array $cert, string $host): array
+{
+    $host = strtolower($host);
+    $isBrevo = $host === 'smtp-relay.brevo.com' || str_ends_with($host, '.brevo.com') || str_ends_with($host, '.sendinblue.com');
+    $sans = (array)($cert['dns_sans'] ?? []);
+    $subject = trim((string)($cert['subject'] ?? ''));
+    if ($subject === '') {
+        $subject = 'CN=' . (trim((string)($cert['subject_cn'] ?? '')) !== '' ? (string)$cert['subject_cn'] : 'unknown subject');
+    }
+    $peer = trim((string)($cert['peer_ip'] ?? ''));
+    if ($peer === '') { $peer = $host; }
+    $sanText = $sans !== [] ? implode(', ', $sans) : 'none';
+    $alternate = '';
+    if ($isBrevo && in_array('smtp-relay.sendinblue.com', $sans, true) && $host !== 'smtp-relay.sendinblue.com') {
+        $alternate = 'smtp-relay.sendinblue.com';
+    }
+
+    $cause = "The endpoint at {$peer} presented a certificate for {$subject} with Subject Alternative Names [{$sanText}]. "
+        . "The configured name '{$host}' is not among them. DNS, TCP, EHLO and the TLS handshake all worked; "
+        . 'this is hostname validation rejecting a real certificate, not a local SNI bug or a generic cryptographic failure.';
+    if ($isBrevo) {
+        $cause .= ' Brevo publishes smtp-relay.brevo.com, but some of its regional relay deployments serve a Sendinblue-era certificate instead.';
+    }
+
+    $action = 'Keep certificate and hostname validation enabled. Do not disable verification. ';
+    if ($isBrevo) {
+        $action .= 'Use the Brevo HTTPS API transport (Email settings → Brevo API) with a v3 API key, or ask Brevo support to deploy a certificate that includes smtp-relay.brevo.com on the regional relay.';
+        if ($alternate !== '') {
+            $action .= " The legacy hostname {$alternate} is present in this certificate and is still accepted by Brevo's relay, but Brevo has not documented it as the current endpoint: confirm it with Brevo support before choosing it explicitly, and test it with full validation.";
+        }
+    } else {
+        $action .= "Use the hostname that appears in the certificate only after confirming it is the provider's supported endpoint, and retest with full validation.";
+    }
+
+    return ['cause' => $cause, 'action' => $action, 'alternate_host' => $alternate, 'is_brevo' => $isBrevo];
+}
+
+/** Pure classification helper for TLS errors, used by diagnostics and the log. */
+function sh_mail_tls_error_kind(string $text): string
+{
+    $r = strtolower($text);
+    foreach (['subjectaltname did not match', 'did not match expected name', 'peer certificate',
+              'hostname mismatch', 'certificate is not valid for', 'certificate subject name',
+              'does not match the expected name', 'ip address mismatch'] as $needle) {
+        if (str_contains($r, $needle)) { return 'hostname'; }
+    }
+    foreach (['unable to get local issuer', 'certificate verify failed', 'self signed', 'self-signed',
+              'unknown ca', 'certificate has expired', 'certificate is not yet valid'] as $needle) {
+        if (str_contains($r, $needle)) { return 'chain'; }
+    }
+    if (str_contains($r, 'wrong version number') || str_contains($r, 'handshake failure')
+        || str_contains($r, 'protocol version') || str_contains($r, 'tlsv1 alert')) {
+        return 'handshake';
+    }
+    return 'unknown';
+}
+
+// ---------------------------------------------------------------------------
+// Brevo HTTPS transactional API (explicit, separate from SMTP credentials)
+// ---------------------------------------------------------------------------
+
+/**
+ * Perform one HTTPS request against the Brevo v3 API.
+ *
+ * TLS verification is always enabled (peer + hostname + trust store). The API
+ * key travels only in the server-side request header; it is never put in the
+ * URL, a log line, an error string or an HTML response.
+ *
+ * @return array{ok:bool,status:int,body:mixed,error:string,certificate?:array<string,mixed>,url:string}
+ */
+function sh_brevo_api_request(string $method, string $path, ?array $payload = null, int $timeout = 20): array
+{
+    $method = strtoupper($method) === 'POST' ? 'POST' : 'GET';
+    $timeout = max(5, min(60, $timeout));
+    $url = sh_brevo_api_base() . '/' . ltrim($path, '/');
+    $out = ['ok' => false, 'status' => 0, 'body' => null, 'error' => '', 'url' => $url];
+    if (!str_starts_with(strtolower($url), 'https://')) {
+        $out['error'] = 'The Brevo API endpoint must use HTTPS.';
+        return $out;
+    }
+    $key = sh_brevo_api_key();
+    if ($key === '') {
+        $out['error'] = 'The Brevo API key is not configured.';
+        return $out;
+    }
+
+    $json = null;
+    if ($payload !== null) {
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($json === false) {
+            $out['error'] = 'The Brevo API request could not be encoded.';
+            return $out;
+        }
+    }
+    $headers = [
+        'accept: application/json',
+        'api-key: ' . $key,
+        'user-agent: ShopHaat mail transport',
+    ];
+    if ($json !== null) { $headers[] = 'content-type: application/json'; }
+
+    $ca = sh_mail_find_ca_bundle();
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        $opts = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => min(10, $timeout),
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_MAXREDIRS => 0,
+            CURLOPT_USERAGENT => 'ShopHaat mail transport',
+        ];
+        if (defined('CURLOPT_PROTOCOLS') && defined('CURLPROTO_HTTPS')) { $opts[CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS; }
+        if ($ca !== null) { $opts[CURLOPT_CAINFO] = $ca; }
+        if (defined('CURLOPT_CERTINFO')) {
+            $opts[CURLOPT_CERTINFO] = true;
+        }
+        if ($json !== null) { $opts[CURLOPT_POSTFIELDS] = $json; }
+        curl_setopt_array($ch, $opts);
+        $raw = curl_exec($ch);
+        $out['status'] = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = (string)curl_error($ch);
+        if (defined('CURLINFO_CERTINFO')) {
+            $ci = @curl_getinfo($ch, CURLINFO_CERTINFO);
+            if (is_array($ci) && isset($ci[0]) && is_array($ci[0])) {
+                $c = $ci[0];
+                // Different libcurl builds label the extension either
+                // "Subject Alternative Name" or "X509v3 Subject Alternative Name".
+                $sanRaw = '';
+                foreach ($c as $certKey => $certValue) {
+                    if (is_string($certValue) && stripos((string)$certKey, 'subject alternative name') !== false) {
+                        $sanRaw = $certValue;
+                        break;
+                    }
+                }
+                $dnsSans = [];
+                $ipSans = [];
+                foreach (preg_split('~,\s*~', $sanRaw) ?: [] as $san) {
+                    $san = trim($san);
+                    if (preg_match('~^DNS:(.+)$~i', $san, $m) === 1) { $dnsSans[] = strtolower(trim($m[1])); }
+                    elseif (preg_match('~^(?:IP Address|IP):(.+)$~i', $san, $m) === 1) { $ipSans[] = trim($m[1]); }
+                }
+                $subjectText = (string)($c['Subject'] ?? '');
+                $out['certificate'] = [
+                    'source' => 'curl',
+                    'ok' => true,
+                    'host' => (string)(parse_url($url, PHP_URL_HOST) ?: ''),
+                    'port' => (int)(parse_url($url, PHP_URL_PORT) ?: 443),
+                    'peer_ip' => '',
+                    'subject' => $subjectText,
+                    'subject_cn' => preg_match('~CN\s*=\s*([^,]+)~', $subjectText, $cn) === 1 ? trim($cn[1]) : '',
+                    'issuer' => (string)($c['Issuer'] ?? ''),
+                    'valid_from' => (string)($c['Start date'] ?? ''),
+                    'valid_to' => (string)($c['Expire date'] ?? ''),
+                    'dns_sans' => array_values(array_unique($dnsSans)),
+                    'ip_sans' => array_values(array_unique($ipSans)),
+                    'sans' => array_values(array_unique(array_merge($dnsSans, $ipSans))),
+                    // cURL completed the request with VERIFYPEER and
+                    // VERIFYHOST=2, so the chain and hostname are proven valid.
+                    'hostname_valid' => true,
+                    'chain_valid' => true,
+                ];
+            }
+        }
+        curl_close($ch);
+        if ($raw === false) {
+            $out['error'] = sh_mail_redact($err !== '' ? $err : 'The HTTPS request failed.');
+            return $out;
+        }
+    } else {
+        $hdr = implode("\r\n", $headers);
+        $http = [
+            'method' => $method,
+            'header' => $hdr,
+            'timeout' => $timeout,
+            'ignore_errors' => true,
+            'follow_location' => 0,
+            'max_redirects' => 1,
+        ];
+        if ($json !== null) { $http['content'] = $json; }
+        $ssl = ['verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true, 'peer_name' => (string)(parse_url($url, PHP_URL_HOST) ?: '')];
+        if ($ca !== null) { $ssl['cafile'] = $ca; }
+        $warnings = [];
+        set_error_handler(static function (int $no, string $msg) use (&$warnings): bool { $warnings[] = $msg; return true; });
+        try {
+            $raw = file_get_contents($url, false, stream_context_create(['http' => $http, 'ssl' => $ssl]));
+        } finally {
+            restore_error_handler();
+        }
+        if (isset($http_response_header[0]) && preg_match('~\s(\d{3})\s~', $http_response_header[0], $m)) {
+            $out['status'] = (int)$m[1];
+        }
+        if ($raw === false) {
+            $out['error'] = sh_mail_redact($warnings ? implode('; ', array_slice($warnings, 0, 3)) : 'The HTTPS request failed.');
+            return $out;
+        }
+    }
+
+    $out['body'] = json_decode((string)$raw, true);
+    if (!is_array($out['body'])) { $out['body'] = mb_substr((string)$raw, 0, 2000); }
+    $out['ok'] = $out['status'] >= 200 && $out['status'] < 300;
+    if (!$out['ok']) {
+        $message = is_array($out['body']) ? (string)($out['body']['message'] ?? ($out['body']['code'] ?? '')) : '';
+        $out['error'] = sh_mail_redact('HTTP ' . $out['status'] . ($message !== '' ? ': ' . mb_substr($message, 0, 300) : ''));
+    }
+    return $out;
+}
+
+/**
+ * Send one message through the official Brevo transactional-email API.
+ *
+ * @return array{ok:bool,error?:string,skipped?:bool,recipient:string,transport:string,category:string,message_id?:string,response?:string,transcript?:string}
+ */
+function sh_brevo_api_send(string $to, string $subject, string $textBody, ?string $htmlBody, array $t, array $opts = []): array
+{
+    $out = ['ok' => false, 'recipient' => $to, 'transport' => 'brevo_api', 'category' => 'unknown'];
+    $fromEmail = trim((string)($t['from_email'] ?? ''));
+    $fromName = trim((string)($t['from_name'] ?? 'ShopHaat'));
+    $replyTo = trim((string)($t['reply_to'] ?? ''));
+    $payload = [
+        'sender' => ['email' => $fromEmail, 'name' => $fromName !== '' ? $fromName : 'ShopHaat'],
+        'to' => [['email' => $to]],
+        'subject' => mb_substr($subject, 0, 250),
+    ];
+    if ($htmlBody !== null && $htmlBody !== '') {
+        $payload['htmlContent'] = $htmlBody;
+        $payload['textContent'] = $textBody;
+    } else {
+        $payload['textContent'] = $textBody;
+    }
+    if ($replyTo !== '' && sh_valid_email($replyTo)) {
+        $payload['replyTo'] = ['email' => $replyTo, 'name' => $fromName !== '' ? $fromName : 'ShopHaat'];
+    }
+
+    $res = sh_brevo_api_request('POST', '/smtp/email', $payload, (int)($t['timeout'] ?? 20));
+    $body = is_array($res['body']) ? $res['body'] : [];
+    $messageId = trim((string)($body['messageId'] ?? ''));
+    if ($res['ok']) {
+        $out['ok'] = true;
+        $out['category'] = 'accepted';
+        $out['message_id'] = $messageId;
+        $out['response'] = 'Accepted by the Brevo HTTPS API' . ($messageId !== '' ? ' (messageId ' . $messageId . ')' : '') . '.';
+    } else {
+        $message = trim((string)($body['message'] ?? ''));
+        $message = $message !== '' ? sh_mail_redact(mb_substr($message, 0, 300)) : $res['error'];
+        $status = (int)$res['status'];
+        if ($status === 401 || $status === 403) {
+            $out['category'] = 'auth';
+            $out['error'] = 'Brevo API authentication failed (HTTP ' . $status . '): ' . $message;
+        } elseif ($status === 429) {
+            $out['category'] = 'throttled';
+            $out['error'] = 'Brevo API rate limit reached (HTTP 429): ' . $message;
+        } elseif ($status === 400 || $status === 422) {
+            $out['category'] = 'rejected';
+            $out['error'] = 'Brevo rejected the message (HTTP ' . $status . '): ' . $message;
+        } elseif ($status >= 500) {
+            $out['category'] = 'temporary';
+            $out['error'] = 'Brevo API is temporarily unavailable (HTTP ' . $status . '): ' . $message;
+        } elseif ($status === 0) {
+            $out['category'] = sh_mail_tls_error_kind($res['error']) !== 'unknown' ? 'tls' : 'connection';
+            $out['error'] = 'Could not reach the Brevo HTTPS API: ' . $message;
+        } else {
+            $out['category'] = sh_mail_category($res['error']);
+            $out['error'] = 'Brevo API request failed (HTTP ' . $status . '): ' . $message;
+        }
+    }
+    if (!empty($opts['debug'])) {
+        $out['transcript'] = sh_mail_redact('POST ' . sh_brevo_api_base() . "/smtp/email\nHTTP " . (int)$res['status']
+            . ($messageId !== '' ? "\nmessageId: " . $messageId : ''));
+    }
+    return $out;
+}
+
+/**
+ * Verify the Brevo API key and HTTPS endpoint without sending a message.
+ * GET /v3/account is the documented account endpoint and returns 401 for a bad key.
+ *
+ * @return array<string,mixed>
+ */
+function sh_brevo_api_test_connection(array $t = []): array
+{
+    $timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
+    $host = (string)(parse_url(sh_brevo_api_base(), PHP_URL_HOST) ?: 'api.brevo.com');
+    $port = (int)(parse_url(sh_brevo_api_base(), PHP_URL_PORT) ?: 443);
+    $base = [
+        'ok' => false, 'step' => 'config', 'transport' => 'brevo_api',
+        'host' => $host, 'port' => $port, 'encryption' => 'HTTPS',
+        'certificate' => null, 'transcript' => '',
+    ];
+    if (!sh_brevo_api_key_set()) {
+        return $base + [
+            'error' => 'Brevo API key is not configured.',
+            'cause' => 'The HTTPS API transport needs a Brevo v3 API key. It is a different credential from the SMTP key.',
+            'action' => 'Create an API key in Brevo → SMTP & API → API Keys, paste it in the Brevo API settings, save, and test again.',
+        ];
+    }
+
+    $dns = sh_mail_resolve_host($host);
+    if ($dns['selected'] === '') {
+        return array_merge($base, [
+            'step' => 'dns',
+            'error' => $dns['error'],
+            'cause' => "The hosting server could not resolve '{$host}'.",
+            'action' => 'Check the server resolver or hosting firewall. The API endpoint must resolve before HTTPS can start.',
+            'resolved_ips' => $dns['ipv4'],
+        ]);
+    }
+
+    $res = sh_brevo_api_request('GET', '/account', null, $timeout);
+    $cert = $res['certificate'] ?? null;
+    if ($cert === null) {
+        $probe = sh_mail_probe_certificate($host, $port, 'https', $timeout);
+        if (!empty($probe['ok'])) { $cert = $probe; }
+    }
+    $base['certificate'] = $cert;
+    $base['resolved_ips'] = $dns['ipv4'];
+    $base['transcript'] = 'GET ' . sh_brevo_api_base() . "/account\nHTTP " . (int)$res['status'];
+
+    if ($res['ok']) {
+        $body = is_array($res['body']) ? $res['body'] : [];
+        $company = trim((string)($body['companyName'] ?? ''));
+        return array_merge($base, [
+            'ok' => true,
+            'step' => 'complete',
+            'message' => 'Brevo HTTPS API verified: TLS certificate and hostname are valid and the API key was accepted'
+                . ($company !== '' ? ' for ' . $company : '') . '. No email was sent by this test.',
+        ]);
+    }
+
+    $status = (int)$res['status'];
+    if ($status === 401 || $status === 403) {
+        return array_merge($base, [
+            'step' => 'api_auth',
+            'error' => 'Brevo API key was rejected (HTTP ' . $status . '): ' . (string)$res['error'],
+            'cause' => 'The HTTPS connection and certificate verification succeeded, but Brevo rejected the API key.',
+            'action' => 'Use a Brevo v3 API key (xkeysib-...), not an SMTP key (xsmtpsib-...). Check that the key is active and allowed to send transactional email.',
+        ]);
+    }
+    if ($status === 0) {
+        $kind = sh_mail_tls_error_kind((string)$res['error']);
+        return array_merge($base, [
+            'step' => $kind === 'hostname' ? 'tls_hostname' : ($kind === 'chain' ? 'tls_cert' : 'connect'),
+            'error' => (string)$res['error'],
+            'cause' => $kind !== 'unknown'
+                ? 'The HTTPS connection to the Brevo API failed TLS validation.'
+                : 'The server could not open an HTTPS connection to the Brevo API.',
+            'action' => 'Check outbound HTTPS (443) access and the CA bundle on the hosting server. Do not disable certificate verification.',
+        ]);
+    }
+    return array_merge($base, [
+        'step' => 'api',
+        'error' => (string)$res['error'],
+        'cause' => 'The Brevo API returned an unexpected response.',
+        'action' => 'Check the Brevo status page and the API key permissions, then retry.',
+    ]);
 }
 
 /**
@@ -346,6 +1174,29 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
         sh_email_delivery_log($result + ['subject' => $subject, 'opts' => $opts]);
         return $result;
     }
+    if (($t['driver'] ?? 'mail') === 'smtp'
+        && strtolower((string)($t['encryption'] ?? 'tls')) === 'none'
+        && trim((string)($t['username'] ?? '')) !== '') {
+        // RFC 4954 credentials must not cross a plaintext channel. An
+        // unauthenticated local relay is still allowed; credentials are not.
+        $result['skipped'] = true;
+        $result['error'] = 'Refusing to send SMTP credentials over an unencrypted connection. Use STARTTLS (port 587) or implicit TLS (port 465), or remove the username if the relay needs no authentication.';
+        $result['category'] = 'not_configured';
+        sh_email_delivery_log($result + ['subject' => $subject, 'opts' => $opts]);
+        return $result;
+    }
+    if (($t['driver'] ?? 'mail') === 'brevo_api') {
+        if (empty($t['brevo_api_enabled']) || !sh_brevo_api_key_set()) {
+            $result['skipped'] = true;
+            $result['error'] = 'The Brevo API transport is selected but is not fully configured (enable the switch and store a v3 API key).';
+            $result['category'] = 'not_configured';
+            sh_email_delivery_log($result + ['subject' => $subject, 'opts' => $opts]);
+            return $result;
+        }
+        $apiResult = sh_brevo_api_send($to, $subject, $textBody, $htmlBody, $t, $opts);
+        sh_email_delivery_log($apiResult + ['subject' => $subject, 'opts' => $opts]);
+        return $apiResult;
+    }
 
     $transcript = [];
     // The library is shipped with the application; if it is genuinely missing we
@@ -385,16 +1236,18 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
                 $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
                 $mail->SMTPAutoTLS = true;
             }
-            $allowSelfSigned = !empty($t['allow_self_signed']);
+            // Delivery always validates the chain and the hostname. The
+            // retired smtp_allow_self_signed setting is intentionally not read:
+            // there is no supported insecurity switch for outgoing mail.
             $sslOpts = [
-                'verify_peer'       => !$allowSelfSigned,
-                'verify_peer_name'  => !$allowSelfSigned,
-                'allow_self_signed' => $allowSelfSigned,
+                'verify_peer'       => true,
+                'verify_peer_name'  => true,
+                'allow_self_signed' => false,
                 'SNI_enabled'       => true,
                 'peer_name'         => $cleanHost,
             ];
             $caBundle = sh_mail_find_ca_bundle();
-            if ($caBundle !== null && !$allowSelfSigned) {
+            if ($caBundle !== null) {
                 $sslOpts['cafile'] = $caBundle;
             }
             $mail->SMTPOptions = ['ssl' => $sslOpts];
@@ -450,11 +1303,27 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
             $result['category'] = sh_mail_category($raw !== '' ? $raw : 'unknown');
         }
     } catch (Throwable $e) {
-        $raw = sh_mail_redact($e->getMessage());
+        // PHPMailer wraps a failed STARTTLS in a generic "Could not connect to
+        // SMTP host" exception. The real OpenSSL reason (for example a
+        // subjectAltName mismatch) only lives on the SMTP instance, so append it
+        // before classifying the failure. Without this a certificate mismatch
+        // is misreported as a connection error in the delivery log.
+        $raw = $e->getMessage();
+        if (isset($mail)) {
+            try {
+                $smtpErr = $mail->getSMTPInstance()->getError();
+                if (is_array($smtpErr)) {
+                    $raw .= ' ' . (string)($smtpErr['error'] ?? '') . ' ' . (string)($smtpErr['detail'] ?? '');
+                }
+            } catch (Throwable $ignore) { /* the original exception is the report */ }
+        }
+        $raw = sh_mail_redact($raw);
         $result['error'] = $raw !== '' ? $raw : 'The mail transport raised an error.';
         $result['category'] = sh_mail_category($raw);
     }
 
+    if (!empty($result['ok'])) { unset($result['action'], $result['alternate_host']); }
+    if (empty($result['ok'])) { $result = sh_mail_failure_enrich($result, $t); }
     if (!empty($opts['debug'])) {
         $result['transcript'] = sh_mail_redact(implode("\n", $transcript));
     }
@@ -582,329 +1451,450 @@ function sh_email_delivery_log(array $r): void
 function sh_mail_send_test(string $to, array $transport, array $opts = []): array
 {
     $subject = 'ShopHaat test email (' . date('d M Y H:i') . ')';
+    $viaApi = (string)($transport['driver'] ?? '') === 'brevo_api';
+    $route = $viaApi
+        ? 'Brevo HTTPS API (' . sh_brevo_api_base() . '/smtp/email)'
+        : 'SMTP ' . (string)($transport['host'] ?? '') . ':' . (string)($transport['port'] ?? '')
+            . ' (' . (string)($transport['encryption'] ?? '') . ')';
     $text = "This is a real test message from your ShopHaat installation.\n\n"
-        . "If you are reading it, SMTP authentication and submission worked for this server.\n"
+        . "If you are reading it, the selected transport accepted the message for delivery.\n"
         . "Inbox placement still depends on your SPF, DKIM and DMARC records, which a submission\n"
         . "cannot prove — check the provider's delivery report for that.\n\n"
-        . 'Host: ' . (string)($transport['host'] ?? '') . ':' . (string)($transport['port'] ?? '') . "\n"
-        . 'Encryption: ' . (string)($transport['encryption'] ?? '') . "\n";
+        . 'Transport: ' . $route . "\n";
     $html = '<p>This is a <strong>real test message</strong> from your ShopHaat installation.</p>'
-        . '<p>If you are reading it, SMTP authentication and submission worked for this server. '
+        . '<p>If you are reading it, the selected transport accepted the message for delivery. '
         . 'Inbox placement still depends on SPF, DKIM and DMARC, which a submission cannot prove — '
-        . "check your provider's delivery report for that.</p>";
+        . "check your provider's delivery report for that.</p>"
+        . '<p style="font-size:12px;color:#64748b">Transport: ' . htmlspecialchars($route, ENT_QUOTES, 'UTF-8') . '</p>';
 
     return sh_mail_send($to, $subject, $text, $html, [
         'transport'   => $transport,
         'debug'       => true,
-        'log_purpose' => 'smtp_test',
+        'log_purpose' => $viaApi ? 'brevo_api_test' : 'smtp_test',
         'log_user_id' => (int)($opts['admin_id'] ?? 0),
     ]);
 }
 
 /**
- * Test SMTP socket reachability, TLS handshake and authentication credentials
- * without sending an email.
+ * Test the selected mail transport without sending a message.
+ *
+ * SMTP path: DNS -> TCP -> greeting -> EHLO -> STARTTLS advertised ->
+ * STARTTLS -> certificate and hostname validation -> encrypted-socket check ->
+ * EHLO again -> AUTH. The Brevo API path verifies HTTPS/TLS and the API key
+ * with GET /v3/account. Nothing is authenticated before the secure channel is
+ * established, and no message is sent by this function.
  *
  * @param array<string,mixed> $t
- * @return array{ok:bool,step:string,message?:string,error?:string,cause?:string,action?:string,host?:string,port?:int,encryption?:string,transcript:string}
+ * @return array<string,mixed>
  */
 function sh_mail_test_connection(array $t): array
 {
-    $rawHost = trim((string)($t['host'] ?? ''));
-    if ($rawHost === '') {
+    $mode = (string)($t['transport'] ?? ($t['driver'] ?? 'smtp'));
+    if ($mode === 'brevo_api') {
+        return sh_brevo_api_test_connection($t);
+    }
+    return sh_mail_test_connection_smtp($t);
+}
+
+/** Pull every available error text out of PHPMailer and the PHP warning stream. */
+function sh_mail_smtp_error_detail($smtp, array $warnings = [], array $extra = []): string
+{
+    $parts = [];
+    try {
+        $err = $smtp->getError();
+        if (is_array($err)) {
+            $code = trim((string)($err['smtp_code'] ?? ''));
+            $error = trim((string)($err['error'] ?? ''));
+            $detail = trim((string)($err['detail'] ?? ''));
+            if ($code !== '') { $parts[] = 'SMTP ' . $code; }
+            if ($error !== '' && $error !== 'Connection failed.') { $parts[] = $error; }
+            if ($detail !== '') { $parts[] = $detail; }
+        }
+    } catch (Throwable $e) {
+        // Reporting must never hide the original failure.
+    }
+    foreach (array_merge($warnings, $extra) as $line) {
+        $line = trim((string)$line);
+        if ($line !== '') { $parts[] = $line; }
+    }
+    return sh_mail_redact(implode(' | ', array_values(array_unique($parts))));
+}
+
+/**
+ * Build the operator-facing cause/action for a TLS stage failure. A hostname
+ * mismatch is named as a hostname mismatch; it is never downgraded to a
+ * generic "cryptographic negotiation failed".
+ *
+ * @param array<string,mixed>|null $cert
+ * @return array{cause:string,action:string,alternate_host:string}
+ */
+function sh_mail_tls_failure_text(string $kind, ?array $cert, string $host, string $detail): array
+{
+    if ($kind === 'hostname') {
+        if (is_array($cert) && !empty($cert['ok']) && ($cert['hostname_valid'] ?? null) === false) {
+            $diag = sh_mail_certificate_diagnosis($cert, $host);
+            return ['cause' => $diag['cause'], 'action' => $diag['action'], 'alternate_host' => $diag['alternate_host']];
+        }
         return [
-            'ok'         => false,
-            'step'       => 'config',
-            'error'      => 'SMTP host is not configured.',
-            'cause'      => 'The SMTP host field is empty.',
-            'action'     => 'Enter the SMTP hostname provided by your email service (e.g. smtp.gmail.com).',
-            'transcript' => '',
+            'cause' => "TLS hostname validation failed: the certificate presented for '{$host}' does not contain that name in its Subject Alternative Names. The underlying OpenSSL/TLS error was: " . ($detail !== '' ? $detail : 'no detail was returned') . '.',
+            'action' => 'Keep hostname verification enabled. Use the certificate inspector below to read the actual subject and SANs, then configure a certificate-valid endpoint that the provider supports. Do not disable verification.',
+            'alternate_host' => '',
         ];
     }
-    if (!class_exists(\PHPMailer\PHPMailer\SMTP::class)) {
+    if ($kind === 'chain') {
         return [
-            'ok'         => false,
-            'step'       => 'library',
-            'error'      => 'PHPMailer SMTP library is not loadable.',
-            'cause'      => 'The PHPMailer files could not be located in lib/PHPMailer.',
-            'action'     => 'Ensure the application files under lib/PHPMailer are present and readable.',
-            'transcript' => '',
+            'cause' => 'TLS chain validation failed: the certificate could not be verified against the configured CA bundle. ' . ($detail !== '' ? $detail : ''),
+            'action' => 'Update the hosting server CA bundle or install the provider-issued intermediate certificate. Do not disable certificate verification.',
+            'alternate_host' => '',
         ];
+    }
+    if ($kind === 'handshake') {
+        return [
+            'cause' => 'The TLS handshake could not be completed: ' . ($detail !== '' ? $detail : 'the peer closed the connection during negotiation') . '.',
+            'action' => 'Confirm the port/encryption pair (587+STARTTLS or 465+implicit TLS) and check whether a hosting firewall is intercepting the connection.',
+            'alternate_host' => '',
+        ];
+    }
+    return [
+        'cause' => 'The server did not complete STARTTLS: ' . ($detail !== '' ? $detail : 'no SMTP or OpenSSL detail was returned') . '.',
+        'action' => 'Check the provider capabilities and the port/encryption pair, then retry. No credentials were sent.',
+        'alternate_host' => '',
+    ];
+}
+
+/**
+ * Refine a failed SMTP delivery with a read-only certificate inspection.
+ *
+ * PHPMailer closes the socket after a failed STARTTLS, which can overwrite the
+ * OpenSSL detail with a generic "could not connect" error. When that happens
+ * the delivery log would call a hostname mismatch a connection failure. This
+ * helper opens one extra inspection connection (no AUTH, no MAIL, no DATA) and
+ * reclassifies the result using the certificate that was actually presented.
+ *
+ * @param array<string,mixed> $result
+ * @param array<string,mixed> $t
+ * @return array<string,mixed>
+ */
+function sh_mail_failure_enrich(array $result, array $t): array
+{
+    if (!empty($result['ok']) || (string)($t['driver'] ?? '') !== 'smtp') { return $result; }
+    $category = (string)($result['category'] ?? 'unknown');
+    // Precise outcomes need no extra evidence. Only ambiguous transport/TLS
+    // failures are inspected.
+    if (!in_array($category, ['connection', 'tls', 'unknown'], true)) { return $result; }
+    $enc = strtolower((string)($t['encryption'] ?? 'tls'));
+    if ($enc === 'none' || !function_exists('openssl_x509_parse')) { return $result; }
+    $parsed = sh_mail_parse_host((string)($t['host'] ?? ''), (int)($t['port'] ?? 587));
+    if ($parsed['host'] === '') { return $result; }
+    $port = (int)($t['port'] ?? 587);
+    if ($port < 1 || $port > 65535) { $port = 587; }
+    $cert = sh_mail_probe_certificate($parsed['host'], $port, $enc, 5);
+    if (empty($cert['ok'])) { return $result; }
+
+    if (($cert['hostname_valid'] ?? null) === false) {
+        $diag = sh_mail_certificate_diagnosis($cert, $parsed['host']);
+        $result['category'] = 'tls_hostname';
+        $result['error'] = 'TLS hostname mismatch: the certificate presented by ' . $parsed['host']
+            . ' is not valid for that name. ' . $diag['cause'];
+        $result['action'] = $diag['action'];
+        $result['alternate_host'] = $diag['alternate_host'];
+    } elseif (($cert['chain_valid'] ?? null) === false) {
+        $result['category'] = 'tls';
+        $result['error'] = 'TLS chain validation failed: ' . ($cert['chain_error'] !== ''
+            ? (string)$cert['chain_error'] : 'the certificate is not trusted by the configured CA bundle.');
+        $result['action'] = 'Update the CA bundle or install the provider intermediate. Do not disable verification.';
+    }
+    return $result;
+}
+
+/** @param array<string,mixed> $t @return array<string,mixed> */
+function sh_mail_test_connection_smtp(array $t): array
+{
+    $base = [
+        'ok' => false, 'step' => 'config', 'transport' => 'smtp',
+        'host' => '', 'port' => 0, 'encryption' => '',
+        'resolved_ips' => [], 'certificate' => null, 'transcript' => '',
+    ];
+
+    $rawHost = trim((string)($t['host'] ?? ''));
+    if ($rawHost === '') {
+        return array_merge($base, [
+            'step' => 'config',
+            'error' => 'SMTP host is not configured.',
+            'cause' => 'The SMTP host field is empty.',
+            'action' => 'Enter the SMTP hostname provided by your email service (for example smtp-relay.brevo.com).',
+        ]);
+    }
+    if (!class_exists(\PHPMailer\PHPMailer\SMTP::class)) {
+        return array_merge($base, [
+            'step' => 'library',
+            'error' => 'PHPMailer SMTP library is not loadable.',
+            'cause' => 'The PHPMailer files could not be located in lib/PHPMailer.',
+            'action' => 'Ensure the application files under lib/PHPMailer are present and readable.',
+        ]);
     }
 
     $port = (int)($t['port'] ?? 587);
     if ($port < 1 || $port > 65535) { $port = 587; }
     $enc = strtolower((string)($t['encryption'] ?? 'tls'));
     if (!in_array($enc, ['tls', 'ssl', 'none'], true)) { $enc = 'tls'; }
-
+    if ($enc === 'none' && trim((string)($t['username'] ?? '')) !== '') {
+        return array_merge($base, [
+            'step' => 'config',
+            'error' => 'SMTP authentication cannot run without TLS.',
+            'cause' => 'A username is configured together with Encryption = None. Sending the password would expose it in plaintext, so the test was stopped before connecting.',
+            'action' => 'Choose STARTTLS (port 587) or SSL/TLS (port 465). If the relay genuinely needs no authentication, clear the SMTP username and password instead.',
+        ]);
+    }
     $parsed = sh_mail_parse_host($rawHost, $port);
     $cleanHost = $parsed['host'];
-    if (!empty($parsed['port']) && empty($t['port'])) {
-        $port = $parsed['port'];
+    if ($cleanHost === '' || str_contains($cleanHost, "\0") || preg_match('~^[A-Za-z0-9._:\-\[\]]+$~', $cleanHost) !== 1) {
+        return array_merge($base, [
+            'step' => 'config',
+            'error' => 'The configured SMTP host is not a valid hostname or IP address.',
+            'cause' => 'The host contains characters that cannot be used in a TLS connection.',
+            'action' => 'Enter a plain hostname such as smtp-relay.brevo.com, without a path or scheme.',
+        ]);
+    }
+    $base['host'] = $cleanHost;
+    $base['port'] = $port;
+    $base['encryption'] = strtoupper($enc);
+
+    if ($enc !== 'none' && !extension_loaded('openssl')) {
+        return array_merge($base, [
+            'step' => 'environment',
+            'error' => 'OpenSSL extension is missing in PHP.',
+            'cause' => 'Encrypted SMTP (' . strtoupper($enc) . ') requires the PHP OpenSSL extension, but it is not loaded on this server.',
+            'action' => 'Enable the openssl PHP extension in your hosting cPanel/php.ini or contact your hosting provider.',
+        ]);
+    }
+
+    $dns = sh_mail_resolve_host($cleanHost);
+    $base['resolved_ips'] = array_merge($dns['ipv4'], $dns['ipv6']);
+    $base['peer_ip_resolved'] = $dns['selected'];
+    if ($dns['selected'] === '') {
+        return array_merge($base, [
+            'step' => 'dns',
+            'error' => $dns['error'],
+            'cause' => "The server could not look up an IP address for '{$cleanHost}'. The hostname may be misspelled or the hosting resolver may be unreachable.",
+            'action' => 'Check the spelling of the SMTP host and the hosting DNS resolver. A TLS error cannot be diagnosed until the name resolves.',
+        ]);
     }
 
     $timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
-    $allowSelfSigned = !empty($t['allow_self_signed']);
-
-    // Check OpenSSL requirement
-    if ($enc !== 'none' && !extension_loaded('openssl')) {
-        return [
-            'ok'         => false,
-            'step'       => 'environment',
-            'error'      => 'OpenSSL extension is missing in PHP.',
-            'cause'      => 'Encrypted SMTP (' . strtoupper($enc) . ') requires the PHP OpenSSL extension, but it is not loaded on this server.',
-            'action'     => 'Enable the openssl PHP extension in your hosting cPanel/php.ini or contact your hosting provider.',
-            'host'       => $cleanHost,
-            'port'       => $port,
-            'encryption' => strtoupper($enc),
-            'transcript' => '',
-        ];
+    $cert = null;
+    if ($enc !== 'none') {
+        $cert = sh_mail_probe_certificate($cleanHost, $port, $enc, $timeout);
+        $base['certificate'] = $cert;
     }
 
-    // Stage 1: DNS Resolution
-    $dnsIp = @gethostbyname($cleanHost);
-    if ($dnsIp === $cleanHost && !filter_var($cleanHost, FILTER_VALIDATE_IP)) {
-        return [
-            'ok'         => false,
-            'step'       => 'dns',
-            'error'      => "DNS resolution failed: could not resolve host '{$cleanHost}'.",
-            'cause'      => "The server could not look up an IP address for '{$cleanHost}'. The hostname may be misspelled or your server's DNS resolver may be unreachable.",
-            'action'     => "Check the spelling of the SMTP host. Common examples: smtp.gmail.com, smtp.office365.com, smtp.mailgun.org, smtp-relay.brevo.com.",
-            'host'       => $cleanHost,
-            'port'       => $port,
-            'encryption' => strtoupper($enc),
-            'transcript' => '',
-        ];
-    }
+    $transcript = [];
+    $warnings = [];
+    $smtp = new ShMailDiagnosticSMTP();
+    $smtp->Debugoutput = static function ($str, $level) use (&$transcript): void {
+        if (count($transcript) < 120) { $transcript[] = (string)$str; }
+    };
+    $smtp->do_debug = \PHPMailer\PHPMailer\SMTP::DEBUG_SERVER;
 
-    // Build SSL Stream context options
     $sslOpts = [
-        'verify_peer'       => !$allowSelfSigned,
-        'verify_peer_name'  => !$allowSelfSigned,
-        'allow_self_signed' => $allowSelfSigned,
-        'SNI_enabled'       => true,
-        'peer_name'         => $cleanHost,
+        // Delivery-path authority: chain and name are both verified. There is
+        // no configuration switch that relaxes this.
+        'verify_peer' => true,
+        'verify_peer_name' => true,
+        'allow_self_signed' => false,
+        'SNI_enabled' => true,
+        'peer_name' => $cleanHost,
     ];
     $caBundle = sh_mail_find_ca_bundle();
-    if ($caBundle !== null && !$allowSelfSigned) {
-        $sslOpts['cafile'] = $caBundle;
-    }
+    if ($caBundle !== null) { $sslOpts['cafile'] = $caBundle; }
     $options = ['ssl' => $sslOpts];
 
-    $smtp = new \PHPMailer\PHPMailer\SMTP();
-    $transcript = [];
-    $smtp->Debugoutput = static function ($str, $level) use (&$transcript): void {
-        if (count($transcript) < 80) { $transcript[] = (string)$str; }
+    $capture = static function (callable $fn) use (&$warnings) {
+        $warnings = [];
+        set_error_handler(static function (int $no, string $msg) use (&$warnings): bool {
+            $warnings[] = $msg;
+            return true;
+        });
+        try {
+            return $fn();
+        } finally {
+            restore_error_handler();
+        }
     };
-    $smtp->do_debug = \PHPMailer\PHPMailer\SMTP::DEBUG_CONNECTION;
 
     try {
-        // Stage 2: TCP Connection
-        $connectHost = ($enc === 'ssl') ? ('ssl://' . $cleanHost) : $cleanHost;
-        $connected = @$smtp->connect($connectHost, $port, $timeout, $options);
-        if (!$connected) {
-            $errInfo = $smtp->getError();
-            $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
-            $sslErrors = [];
-            while ($sslErr = openssl_error_string()) { $sslErrors[] = $sslErr; }
-            $fullErr = trim($errText . ($sslErrors ? ' (' . implode('; ', $sslErrors) . ')' : ''));
-
-            // Check if connection failure was actually a DNS lookup failure
-            if (stripos($fullErr, 'getaddrinfo') !== false || stripos($fullErr, 'name or service not known') !== false || stripos($fullErr, 'nodename nor servname') !== false) {
-                return [
-                    'ok'         => false,
-                    'step'       => 'dns',
-                    'error'      => "DNS resolution failed: could not resolve host '{$cleanHost}'.",
-                    'cause'      => "The server could not look up an IP address for '{$cleanHost}'. The hostname may be misspelled or your server's DNS resolver is unreachable.",
-                    'action'     => "Check the spelling of the SMTP host. Common examples: smtp.gmail.com, smtp.office365.com, smtp.mailgun.org, smtp-relay.brevo.com.",
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => strtoupper($enc),
-                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
-            }
-
-            if ($enc === 'ssl' && (stripos($fullErr, 'certificate') !== false || stripos($fullErr, 'ssl') !== false || stripos($fullErr, 'handshake') !== false)) {
-                return [
-                    'ok'         => false,
-                    'step'       => 'tls_cert',
-                    'error'      => 'Implicit TLS / SSL connection failed: ' . ($fullErr !== '' ? $fullErr : 'Handshake failed.'),
-                    'cause'      => 'The server at ' . $cleanHost . ':' . $port . ' failed the SSL/TLS handshake. The host certificate could not be validated or the port does not support SMTPS.',
-                    'action'     => 'Verify that port ' . $port . ' is an SSL/TLS port (typically 465). If your provider uses port 587, switch encryption to STARTTLS.',
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => strtoupper($enc),
-                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
-            }
-
-            return [
-                'ok'         => false,
-                'step'       => 'connect',
-                'error'      => "Could not connect to SMTP server at {$cleanHost}:{$port}" . ($fullErr !== '' ? " ({$fullErr})" : "") . '.',
-                'cause'      => "Connection refused or timed out after {$timeout} seconds. Outbound network traffic to port {$port} may be blocked by your hosting provider's firewall, or the server is down.",
-                'action'     => "Check if your hosting provider restricts outbound SMTP ports (shared hosting frequently blocks port 25, 465, or 587). Contact support or try an alternative port.",
-                'host'       => $cleanHost,
-                'port'       => $port,
-                'encryption' => strtoupper($enc),
-                'transcript' => sh_mail_redact(implode("\n", $transcript)),
-            ];
-        }
-
-        // Stage 3 & 4: Greeting and EHLO Handshake
         $helloHost = gethostname() ?: 'localhost';
-        if (!$smtp->hello($helloHost)) {
-            $errInfo = $smtp->getError();
-            $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
-            $smtp->quit();
-            return [
-                'ok'         => false,
-                'step'       => 'ehlo',
-                'error'      => "SMTP server connected but did not answer EHLO handshake" . ($errText !== '' ? " ({$errText})" : "") . ".",
-                'cause'      => "The server connected but rejected the initial EHLO/HELO client greeting.",
-                'action'     => "Check if the server requires a fully qualified domain name for HELO/EHLO or has blacklisted your server IP.",
-                'host'       => $cleanHost,
-                'port'       => $port,
-                'encryption' => strtoupper($enc),
+        $uriHost = sh_mail_uri_host($cleanHost);
+        $connectHost = ($enc === 'ssl') ? ('ssl://' . $uriHost) : $uriHost;
+        while (openssl_error_string() !== false) { /* drain */ }
+        $connected = $capture(static fn() => $smtp->connect($connectHost, $port, $timeout, $options));
+        if (!$connected) {
+            $detail = sh_mail_smtp_error_detail($smtp, $warnings);
+            $kind = sh_mail_tls_error_kind($detail . ' ' . (string)($cert['error'] ?? ''));
+            $step = 'connect';
+            if (stripos($detail, 'getaddrinfo') !== false || stripos($detail, 'name or service not known') !== false
+                || stripos($detail, 'nodename nor servname') !== false) {
+                $step = 'dns';
+            } elseif ($kind === 'hostname') {
+                $step = 'tls_hostname';
+            } elseif ($kind === 'chain') {
+                $step = 'tls_cert';
+            } elseif ($kind === 'handshake' || $enc === 'ssl') {
+                $step = 'tls_handshake';
+            }
+            $tls = sh_mail_tls_failure_text($kind, $cert, $cleanHost, $detail);
+            return array_merge($base, [
+                'step' => $step,
+                'error' => 'Could not establish ' . strtoupper($enc) . " connection to {$cleanHost}:{$port}" . ($detail !== '' ? ': ' . $detail : '.'),
+                'cause' => $step === 'connect'
+                    ? "The TCP connection failed or timed out after {$timeout} seconds. Outbound port {$port} may be blocked by the hosting firewall, or the endpoint is unavailable."
+                    : $tls['cause'],
+                'action' => $step === 'connect'
+                    ? 'Check whether the hosting provider blocks outbound SMTP ports (25, 465, 587). If it does, use the Brevo HTTPS API transport, which only needs outbound HTTPS on port 443.'
+                    : $tls['action'],
+                'alternate_host' => $tls['alternate_host'],
                 'transcript' => sh_mail_redact(implode("\n", $transcript)),
-            ];
+            ]);
         }
 
-        $serverCaps = $smtp->getServerExtList() ?? [];
+        $helloOk = $capture(static fn() => $smtp->hello($helloHost));
+        if (!$helloOk) {
+            $detail = sh_mail_smtp_error_detail($smtp, $warnings);
+            $smtp->quit();
+            return array_merge($base, [
+                'step' => 'ehlo',
+                'error' => "The SMTP server connected but did not accept EHLO" . ($detail !== '' ? ": {$detail}" : '.'),
+                'cause' => 'The server connected but rejected the initial EHLO/HELO greeting.',
+                'action' => 'Check whether the server requires a fully qualified HELO name or has blocked the hosting IP.',
+                'transcript' => sh_mail_redact(implode("\n", $transcript)),
+            ]);
+        }
 
-        // Stage 5: STARTTLS Negotiation
+        $caps = $smtp->getServerExtList() ?? [];
         if ($enc === 'tls') {
-            if (!is_array($serverCaps) || !array_key_exists('STARTTLS', $serverCaps)) {
+            if (!is_array($caps) || !array_key_exists('STARTTLS', $caps)) {
                 $smtp->quit();
-                return [
-                    'ok'         => false,
-                    'step'       => 'starttls',
-                    'error'      => "STARTTLS negotiation failed: server does not advertise STARTTLS.",
-                    'cause'      => "The server at {$cleanHost}:{$port} answered EHLO, but did not list STARTTLS in its capabilities. STARTTLS cannot be negotiated.",
-                    'action'     => ($port === 465)
-                        ? "Port 465 uses SSL/TLS (Implicit TLS). Change Encryption to 'SSL/TLS (secure SMTPS, port 465)'."
-                        : "Verify your email provider's required port and encryption settings. If the server does not support TLS, switch to 'None' (unencrypted) or port 465.",
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => 'STARTTLS',
+                return array_merge($base, [
+                    'step' => 'starttls',
+                    'error' => 'The server answered EHLO but did not advertise STARTTLS.',
+                    'cause' => "STARTTLS is not in the capability list of {$cleanHost}:{$port}.",
+                    'action' => $port === 465
+                        ? "Port 465 is implicit TLS. Change Encryption to 'SSL/TLS (secure SMTPS, port 465)'."
+                        : 'Use the port/encryption pair the provider documents (587+STARTTLS or 465+implicit TLS).',
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
+                ]);
             }
 
-            if (!$smtp->startTLS()) {
-                $errInfo = $smtp->getError();
-                $errSummary = trim((string)($errInfo['error'] ?? ''));
-                $errDetail  = trim((string)($errInfo['detail'] ?? ''));
-                $smtpCode   = trim((string)($errInfo['smtp_code'] ?? ''));
-                $sslErrors  = [];
-                while ($sslMsg = openssl_error_string()) { $sslErrors[] = $sslMsg; }
-                $combined = trim($errDetail . ($sslErrors ? ' ' . implode('; ', $sslErrors) : ''));
-                $smtp->quit();
-
-                // Detailed classification of the STARTTLS failure
-                $failStep = 'starttls';
-                $cause = "TLS cryptographic negotiation failed.";
-                $action = "Check encryption setting or host certificate.";
-
-                if (stripos($combined, 'certificate verify failed') !== false || stripos($combined, 'unable to get local issuer') !== false || stripos($combined, 'certificate_unknown') !== false) {
-                    $failStep = 'tls_cert';
-                    $cause = "TLS certificate validation failed: the mail server's certificate could not be verified against the CA certificate bundle.";
-                    $action = "Ensure your server's CA certificates are up to date. If connecting to a private or test server, you can enable 'Accept self-signed certificate'.";
-                } elseif (stripos($combined, 'peer name') !== false || stripos($combined, 'does not match') !== false || stripos($combined, 'hostname mismatch') !== false) {
-                    $failStep = 'tls_cert';
-                    $cause = "TLS hostname mismatch: the server's certificate does not match the configured hostname '{$cleanHost}'.";
-                    $action = "Verify that '{$cleanHost}' is the official SMTP hostname for your provider (e.g. smtp.gmail.com rather than a custom alias without a matching certificate).";
-                } elseif (stripos($combined, 'self signed') !== false || stripos($combined, 'self-signed') !== false) {
-                    $failStep = 'tls_cert';
-                    $cause = "The mail server presented a self-signed certificate that is not trusted by public CAs.";
-                    $action = "Install a valid CA certificate on the mail server or enable 'Accept self-signed certificate' for internal testing.";
-                } elseif ($smtpCode !== '' && ($smtpCode[0] === '4' || $smtpCode[0] === '5')) {
-                    $cause = "The server rejected the STARTTLS command with code {$smtpCode}: {$errDetail}.";
-                    $action = "Check server logs or provider status. The server may be temporarily unable to establish TLS.";
-                } elseif (stripos($combined, 'handshake') !== false || stripos($combined, 'timed out') !== false) {
-                    $failStep = 'tls_handshake';
-                    $cause = "TLS handshake timed out or was terminated during negotiation.";
-                    $action = "Verify network stability and timeout settings. Some firewalls inspect and disrupt STARTTLS traffic.";
+            while (openssl_error_string() !== false) { /* drain */ }
+            $tlsOk = $capture(static fn() => $smtp->startTLS());
+            if (!$tlsOk) {
+                $detail = sh_mail_smtp_error_detail($smtp, $warnings);
+                $kind = sh_mail_tls_error_kind($detail);
+                // A correctly configured inspector is authoritative when the
+                // OpenSSL wording is ambiguous on a particular PHP build.
+                if ($kind === 'unknown' && is_array($cert) && !empty($cert['ok']) && ($cert['hostname_valid'] ?? null) === false) {
+                    $kind = 'hostname';
                 }
-
-                $errorDisplay = "STARTTLS negotiation failed" . ($combined !== '' ? " ({$combined})" : ($errSummary !== '' ? " ({$errSummary})" : "")) . ".";
-                return [
-                    'ok'         => false,
-                    'step'       => $failStep,
-                    'error'      => $errorDisplay,
-                    'cause'      => $cause,
-                    'action'     => $action,
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => 'STARTTLS',
+                $step = match ($kind) {
+                    'hostname' => 'tls_hostname',
+                    'chain' => 'tls_cert',
+                    'handshake' => 'tls_handshake',
+                    default => 'starttls',
+                };
+                $tls = sh_mail_tls_failure_text($kind, $cert, $cleanHost, $detail);
+                $smtp->quit();
+                return array_merge($base, [
+                    'step' => $step,
+                    'category' => $kind === 'hostname' ? 'tls_hostname' : 'tls',
+                    'error' => 'STARTTLS failed for ' . $cleanHost . ':' . $port . ': ' . ($detail !== '' ? $detail : 'no OpenSSL detail was returned') . '.',
+                    'cause' => $tls['cause'],
+                    'action' => $tls['action'],
+                    'alternate_host' => $tls['alternate_host'],
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
+                ]);
             }
 
-            // Re-identify following TLS handshake (RFC 3207 section 4.2)
-            $smtp->hello($helloHost);
-            $serverCaps = $smtp->getServerExtList() ?? [];
+            // Prove the socket is actually encrypted before sending credentials.
+            $meta = $smtp->socketMeta();
+            if (empty($meta['crypto']) || !is_array($meta['crypto'])) {
+                $smtp->quit();
+                return array_merge($base, [
+                    'step' => 'tls',
+                    'error' => 'STARTTLS returned success but the socket is not encrypted. Authentication was not attempted.',
+                    'cause' => 'The TLS state could not be confirmed on the live socket.',
+                    'action' => 'Retry the test. If it repeats, check the PHP/OpenSSL build on the hosting server. Do not authenticate over an unverified channel.',
+                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
+                ]);
+            }
+            $base['tls_protocol'] = (string)($meta['crypto']['protocol'] ?? '');
+            $base['cipher'] = trim((string)($meta['crypto']['cipher_name'] ?? '') . ' ' . (string)($meta['crypto']['cipher_bits'] ?? ''));
+
+            // RFC 3207: re-issue EHLO after the TLS layer starts.
+            $ehloTls = $capture(static fn() => $smtp->hello($helloHost));
+            if (!$ehloTls) {
+                $detail = sh_mail_smtp_error_detail($smtp, $warnings);
+                $smtp->quit();
+                return array_merge($base, [
+                    'step' => 'ehlo_tls',
+                    'error' => 'TLS was established but the post-STARTTLS EHLO failed' . ($detail !== '' ? ': ' . $detail : '.'),
+                    'cause' => 'The encrypted session started but the server did not complete the second EHLO.',
+                    'action' => 'Retry; if it persists, check the provider status and the hosting firewall for SMTP inspection.',
+                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
+                ]);
+            }
+            $caps = $smtp->getServerExtList() ?? [];
         }
 
-        // Stage 6: Authentication (if credentials provided)
         $user = trim((string)($t['username'] ?? ''));
         $pass = (string)($t['password'] ?? '');
         if ($user !== '') {
             if ($pass === '') {
                 $smtp->quit();
-                return [
-                    'ok'         => false,
-                    'step'       => 'auth',
-                    'error'      => "SMTP username is set, but password is empty.",
-                    'cause'      => "A username ('{$user}') was configured without a password.",
-                    'action'     => "Enter an SMTP password or application-specific password.",
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => strtoupper($enc),
+                return array_merge($base, [
+                    'step' => 'auth',
+                    'error' => 'SMTP username is set but the password is empty.',
+                    'cause' => 'A username was configured without a password.',
+                    'action' => 'Enter the SMTP password or SMTP key, save it, and retry.',
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
+                ]);
             }
-
-            if (!$smtp->authenticate($user, $pass)) {
-                $errInfo = $smtp->getError();
-                $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
+            $authOk = $capture(static fn() => $smtp->authenticate($user, $pass));
+            if (!$authOk) {
+                $detail = sh_mail_smtp_error_detail($smtp, $warnings);
                 $smtp->quit();
-                return [
-                    'ok'         => false,
-                    'step'       => 'auth',
-                    'error'      => "SMTP authentication failed (535)" . ($errText !== '' ? ": {$errText}" : "."),
-                    'cause'      => "Credentials rejected by {$cleanHost}. The username, password, or security settings (e.g. 2FA, App Password requirements) did not match.",
-                    'action'     => "Check your username and password. For services with Two-Factor Authentication (e.g. Gmail, Microsoft 365), you must generate an App Password.",
-                    'host'       => $cleanHost,
-                    'port'       => $port,
-                    'encryption' => strtoupper($enc),
+                return array_merge($base, [
+                    'step' => 'auth',
+                    'category' => 'auth',
+                    'error' => 'SMTP authentication failed' . ($detail !== '' ? ': ' . $detail : '.'),
+                    'cause' => "The encrypted channel and certificate validation succeeded, but {$cleanHost} rejected the credentials.",
+                    'action' => 'Use the SMTP login and SMTP key from Brevo → SMTP & API → SMTP (not the account password and not the v3 API key). For Gmail/Microsoft, use an app password.',
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
-                ];
+                ]);
             }
         }
 
         $smtp->quit();
-        return [
-            'ok'         => true,
-            'step'       => 'complete',
-            'message'    => "Connection test successful: reached {$cleanHost}:{$port} over " . strtoupper($enc) . ($user !== '' ? " and authenticated as {$user}" : " (open relay / no auth)") . ".",
-            'host'       => $cleanHost,
-            'port'       => $port,
-            'encryption' => strtoupper($enc),
-            'auth'       => $user !== '' ? "Authenticated as {$user}" : "No authentication required",
+        $transportText = strtoupper($enc);
+        if (($base['tls_protocol'] ?? '') !== '') {
+            $transportText .= ' / ' . $base['tls_protocol'] . ' (' . $base['cipher'] . ')';
+        }
+        return array_merge($base, [
+            'ok' => true,
+            'step' => 'complete',
+            'category' => 'ok',
+            'message' => "Connection successful: {$cleanHost}:{$port} over {$transportText}"
+                . ($user !== '' ? " and authenticated as {$user}" : ' without authentication') . '. No message was sent.',
+            'auth' => $user !== '' ? "Authenticated as {$user}" : 'No authentication configured',
+            'certificate_valid' => is_array($cert) ? (($cert['hostname_valid'] ?? null) === true && ($cert['chain_valid'] ?? null) !== false) : null,
             'transcript' => sh_mail_redact(implode("\n", $transcript)),
-        ];
+        ]);
     } catch (Throwable $e) {
-        return [
-            'ok'         => false,
-            'step'       => 'exception',
-            'error'      => sh_mail_redact($e->getMessage()),
-            'cause'      => 'Unexpected exception during SMTP connection: ' . sh_mail_redact($e->getMessage()),
-            'action'     => 'Check error logs and verify server connectivity.',
-            'host'       => $cleanHost,
-            'port'       => $port,
-            'encryption' => strtoupper($enc),
+        return array_merge($base, [
+            'step' => 'exception',
+            'error' => sh_mail_redact($e->getMessage()),
+            'cause' => 'Unexpected exception during the SMTP connection test.',
+            'action' => 'Check the application log on the hosting server and retry. The exception text above is redacted.',
             'transcript' => sh_mail_redact(implode("\n", $transcript)),
-        ];
+        ]);
     }
 }

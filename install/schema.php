@@ -908,7 +908,13 @@ function sh_email_settings_defaults(): array
         'email_otp_resend_cooldown'     => '60',
         'email_otp_email_limit'         => '3',
         'email_otp_ip_limit'            => '10',
-        // Provider feedback and signing.
+        // Delivery transport. SMTP is the default; the Brevo HTTPS API is an
+        // explicit opt-in and never selected automatically.
+        'mail_transport'                => 'smtp',
+        'brevo_api_enabled'             => '0',
+        'brevo_api_key'                 => '',
+        // Provider feedback and signing. smtp_allow_self_signed is retired and
+        // kept at 0: outgoing TLS verification is always enforced.
         'email_webhook_secret'          => '',
         'smtp_allow_self_signed'        => '0',
         'dkim_enabled'                  => '0',
@@ -1246,6 +1252,7 @@ function sh_schema_seed(PDO $pdo, array $opts): void
         'messenger_page_id'    => '',
         'messenger_token'      => '',
         'messenger_recipient'  => '',
+        'mail_transport'       => 'smtp',
         'smtp_enabled'         => '0',
         'smtp_host'            => '',
         'smtp_port'            => '587',
@@ -1254,6 +1261,8 @@ function sh_schema_seed(PDO $pdo, array $opts): void
         'smtp_password'        => '',
         'smtp_from_email'      => $email,
         'smtp_from_name'       => $siteName,
+        'brevo_api_enabled'    => '0',
+        'brevo_api_key'        => '',
         'admin_notify_email'   => $email,
     ];
     $st = $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)

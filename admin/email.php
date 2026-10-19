@@ -35,9 +35,16 @@ function sh_email_admin_int(string $key, int $default, int $min, int $max): int
 
 // Active setup method selection: 'smtp', 'firebase', or '' (none selected)
 $selectedTab = (string)($_GET['tab'] ?? '');
-if (!in_array($selectedTab, ['smtp', 'firebase', 'none'], true)) {
-    // Default to SMTP if already configured or enabled, otherwise show selector
-    $selectedTab = (sh_setting('smtp_enabled', '0') === '1' || (string)sh_setting('smtp_host', '') !== '') ? 'smtp' : '';
+if (!in_array($selectedTab, ['smtp', 'firebase', 'brevo', 'none'], true)) {
+    $selectedTab = '';
+}
+if ($selectedTab === '') {
+    // Default to the transport that is actually selected, otherwise show the selector.
+    if (sh_mail_selected_transport() === 'brevo_api') {
+        $selectedTab = 'brevo';
+    } elseif (sh_setting('smtp_enabled', '0') === '1' || (string)sh_setting('smtp_host', '') !== '') {
+        $selectedTab = 'smtp';
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -57,28 +64,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $timeout = sh_email_admin_int('smtp_timeout', 20, 5, 60);
 
         $checkTransport = [
+            'transport'         => 'smtp',
             'host'              => $host,
             'port'              => $port,
             'encryption'        => in_array($enc, ['tls', 'ssl', 'none'], true) ? $enc : 'tls',
             'username'          => $user,
             'password'          => $pass,
             'timeout'           => $timeout,
-            'allow_self_signed' => !empty($_POST['smtp_allow_self_signed']) || !empty($transport['allow_self_signed']),
         ];
         $connTestResult = sh_mail_test_connection($checkTransport);
         sh_setting_save('smtp_last_tested_at', date('Y-m-d H:i:s'));
         sh_setting_save('smtp_last_test_ok', $connTestResult['ok'] ? '1' : '0');
-        sh_log_line('admin', 'SMTP connection tested to ' . ($connTestResult['host'] ?? $host) . ':' . ($connTestResult['port'] ?? $port) . ' — ' . ($connTestResult['ok'] ? 'success' : 'failed'));
+        sh_log_line('admin', 'SMTP connection tested to ' . ($connTestResult['host'] ?? $host) . ':' . ($connTestResult['port'] ?? $port) . ' — ' . ($connTestResult['ok'] ? 'success' : 'failed') . ' — step ' . (string)($connTestResult['step'] ?? '?'));
+    } elseif ($form === 'test_brevo_api') {
+        $selectedTab = 'brevo';
+        $connTestResult = sh_mail_test_connection(['transport' => 'brevo_api', 'timeout' => sh_email_admin_int('smtp_timeout', 20, 5, 60)]);
+        sh_setting_save('brevo_api_last_tested_at', date('Y-m-d H:i:s'));
+        sh_setting_save('brevo_api_last_test_ok', !empty($connTestResult['ok']) ? '1' : '0');
+        sh_log_line('admin', 'Brevo API connection tested — ' . (!empty($connTestResult['ok']) ? 'success' : 'failed') . ' — step ' . (string)($connTestResult['step'] ?? '?'));
+    } else if ($form === 'brevo_api_settings') {
+        $selectedTab = 'brevo';
+        $apiKey = trim((string)($_POST['brevo_api_key'] ?? ''));
+        // null means "keep the stored key". Nothing is written until every
+        // field on this form has validated, so a bad sender address cannot
+        // leave a half-saved configuration behind.
+        $newApiKey = null;
+        if (!empty($_POST['clear_brevo_key'])) {
+            $newApiKey = '';
+        } elseif ($apiKey !== '' && !str_contains($apiKey, '•')) {
+            if (str_starts_with($apiKey, 'xsmtpsib-')) {
+                $errors['brevo_api_key'] = 'That is a Brevo SMTP key. The HTTPS API needs a v3 API key (it starts with xkeysib-). The two credentials stay separate.';
+            } elseif (preg_match('~^[A-Za-z0-9_.-]{20,200}$~', $apiKey) !== 1) {
+                $errors['brevo_api_key'] = 'The API key contains unexpected characters. Paste the v3 API key exactly as Brevo shows it.';
+            } else {
+                $newApiKey = sh_verify_encrypt($apiKey);
+            }
+        }
+        $apiFrom = trim((string)($_POST['smtp_from_email'] ?? ''));
+        if ($apiFrom !== '' && !sh_valid_email($apiFrom)) {
+            $errors['smtp_from_email'] = 'The sender email address is not a valid email address.';
+        }
+        $apiReply = trim((string)($_POST['smtp_reply_to'] ?? ''));
+        if ($apiReply !== '' && !sh_valid_email($apiReply)) {
+            $errors['smtp_reply_to'] = 'The reply-to address is not a valid email address.';
+        }
+        if (!$errors) {
+            if ($newApiKey !== null) {
+                sh_setting_save('brevo_api_key', $newApiKey);
+            }
+            sh_setting_save('brevo_api_enabled', !empty($_POST['brevo_api_enabled']) ? '1' : '0');
+            sh_setting_save('smtp_from_email', $apiFrom);
+            sh_setting_save('smtp_from_name', trim((string)($_POST['smtp_from_name'] ?? '')));
+            sh_setting_save('smtp_reply_to', $apiReply);
+            sh_setting_save('smtp_timeout', (string)sh_email_admin_int('smtp_timeout', 20, 5, 60));
+            sh_log_line('admin', 'Brevo API settings updated');
+            sh_flash('success', 'Brevo API settings saved. The delivery transport was not changed automatically.');
+            sh_redirect('admin/email.php?tab=brevo');
+        }
+    } elseif ($form === 'use_transport') {
+        $which = (string)($_POST['transport'] ?? '');
+        if ($which === 'brevo_api') {
+            if (sh_setting('brevo_api_enabled', '0') !== '1') {
+                sh_flash('error', 'Enable the Brevo API transport before selecting it for delivery.');
+            } elseif (!sh_brevo_api_key_set()) {
+                sh_flash('error', 'Store a Brevo v3 API key before selecting the API transport.');
+            } else {
+                sh_setting_save('mail_transport', 'brevo_api');
+                sh_setting_save('email_delivery_provider', 'smtp');
+                sh_log_line('admin', 'Outgoing mail transport switched to Brevo HTTPS API');
+                sh_flash('success', 'Brevo HTTPS API is now the delivery transport. Send a test email to confirm it before relying on it.');
+            }
+        } elseif ($which === 'smtp') {
+            if ((string)sh_setting('smtp_host', '') === '') {
+                sh_flash('error', 'Configure an SMTP host before selecting the SMTP transport.');
+            } else {
+                sh_setting_save('mail_transport', 'smtp');
+                sh_setting_save('email_delivery_provider', 'smtp');
+                sh_log_line('admin', 'Outgoing mail transport switched to SMTP');
+                sh_flash('success', 'SMTP is now the delivery transport. Run the connection test and send a test email.');
+            }
+        }
+        sh_redirect('admin/email.php?tab=' . ($which === 'brevo_api' ? 'brevo' : 'smtp'));
     } elseif ($form === 'test_mail') {
-        $selectedTab = 'smtp';
+        $selectedTab = sh_mail_selected_transport() === 'brevo_api' ? 'brevo' : 'smtp';
         // Transmit one real test message through the configured transport.
         $to = trim((string)($_POST['test_recipient'] ?? ''));
         if ($to === '' || !sh_valid_email($to)) {
             $errors['test_recipient'] = 'Enter a valid address to send the test message to.';
         } else {
             $transport = sh_mail_transport();
-            $transport['host'] = trim((string)sh_setting('smtp_host', ''));
-            $transport['driver'] = ((string)sh_setting('smtp_enabled', '0') === '1' && $transport['host'] !== '') ? 'smtp' : 'mail';
             $testResult = sh_mail_send_test($to, $transport, ['admin_id' => (int)(sh_admin()['id'] ?? 0)]);
             sh_log_line('admin', 'Test email attempted to ' . sh_email_mask($to) . ' via ' . (string)$testResult['transport']
                 . ' — ' . (!empty($testResult['ok']) ? 'accepted' : 'failed'));
@@ -219,7 +293,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sh_setting_save('smtp_timeout', (string)sh_email_admin_int('smtp_timeout', 20, 5, 60));
             sh_setting_save('admin_notify_email', $adminEmail);
             sh_setting_save('email_enabled', !empty($_POST['email_enabled']) ? '1' : '0');
-            sh_setting_save('smtp_allow_self_signed', !empty($_POST['smtp_allow_self_signed']) ? '1' : '0');
+            // Certificate verification is not optional in this application.
+            sh_setting_save('smtp_allow_self_signed', '0');
             sh_setting_save('email_delivery_provider', !empty($_POST['set_primary_provider']) ? 'smtp' : (string)sh_setting('email_delivery_provider', 'smtp'));
 
             sh_log_line('admin', 'Email/SMTP settings updated');
@@ -231,6 +306,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $smtpEnabled = sh_setting('smtp_enabled', '0') === '1';
 $emailEnabled = sh_setting('email_enabled', '0') === '1';
+$selectedTransport = sh_mail_selected_transport();
+$brevoApiEnabled = sh_setting('brevo_api_enabled', '0') === '1';
+$brevoKeySet = sh_brevo_api_key_set();
 $host = (string)sh_setting('smtp_host', '');
 $hasPass = (string)sh_setting('smtp_password', '') !== '';
 $adminEmail = (string)sh_setting('admin_notify_email', '');
@@ -255,6 +333,22 @@ $totalCustomers = $verifiedCount + $unverifiedCount;
 $totalDelivered = (int)sh_val("SELECT COUNT(*) FROM email_log WHERE status IN ('accepted', 'delivered')", [], 0);
 $lastTestedAt = (string)sh_setting('smtp_last_tested_at', '');
 $lastTestOk = (string)sh_setting('smtp_last_test_ok', '0') === '1';
+$brevoLastTestedAt = (string)sh_setting('brevo_api_last_tested_at', '');
+$brevoLastTestOk = (string)sh_setting('brevo_api_last_test_ok', '0') === '1';
+
+// Detailed Brevo API state: 'ready' (delivering), 'configured' (enabled and
+// keyed but SMTP is still the active transport), 'disabled' (key but switch
+// off), 'incomplete' (no key).
+$brevoState = 'incomplete';
+if ($brevoKeySet) {
+    if (!$brevoApiEnabled) {
+        $brevoState = 'disabled';
+    } elseif ($selectedTransport === 'brevo_api') {
+        $brevoState = 'ready';
+    } else {
+        $brevoState = 'configured';
+    }
+}
 
 // Detailed SMTP configuration state: 'ready', 'incomplete', 'disabled'
 $smtpConfigured = ($host !== '' && $hasPass);
@@ -296,75 +390,170 @@ require __DIR__ . '/_layout.php';
 <?php endif; ?>
 
 <?php if ($connTestResult !== null): ?>
-  <div class="sh-alert <?= $connTestResult['ok'] ? 'sh-alert--success' : 'sh-alert--error' ?>" style="margin-bottom:16px">
-    <?= sh_icon($connTestResult['ok'] ? 'check-circle' : 'x-circle', 18) ?>
+  <?php
+    $isApiTest = (string)($connTestResult['transport'] ?? '') === 'brevo_api';
+    $st = (string)($connTestResult['step'] ?? '');
+    $isOk = !empty($connTestResult['ok']);
+    $pending = ['config', 'library', 'environment'];
+    $dnsSt = in_array($st, $pending, true) ? 'pending' : ($st === 'dns' ? 'failed' : 'passed');
+    $tcpSt = in_array($st, array_merge($pending, ['dns']), true) ? 'pending' : ($st === 'connect' ? 'failed' : 'passed');
+    $ehloSt = $isApiTest
+        ? (in_array($st, array_merge($pending, ['dns', 'connect']), true) ? 'pending'
+            : (in_array($st, ['tls_hostname', 'tls_cert', 'tls', 'tls_handshake'], true) ? 'failed' : 'passed'))
+        : (in_array($st, array_merge($pending, ['dns', 'connect']), true) ? 'pending'
+            : (in_array($st, ['ehlo', 'ehlo_tls'], true) ? 'failed' : 'passed'));
+    $tlsSt = in_array($st, array_merge($pending, ['dns', 'connect']), true) ? 'pending'
+        : (in_array($st, ['starttls', 'tls_hostname', 'tls_cert', 'tls_handshake', 'tls'], true) ? 'failed' : 'passed');
+    $authSt = $isApiTest
+        ? (in_array($st, array_merge($pending, ['dns', 'connect', 'tls_hostname', 'tls_cert', 'tls', 'tls_handshake']), true) ? 'pending'
+            : ($st === 'api_auth' ? 'failed' : ($isOk ? 'passed' : 'skipped')))
+        : (in_array($st, array_merge($pending, ['dns', 'connect', 'ehlo', 'starttls', 'tls_hostname', 'tls_cert', 'tls_handshake', 'tls', 'ehlo_tls']), true) ? 'pending'
+            : ($st === 'auth' ? 'failed' : ($isOk ? 'passed' : 'skipped')));
+    $cert = is_array($connTestResult['certificate'] ?? null) ? $connTestResult['certificate'] : null;
+    $dot = static function (string $state): string {
+        return $state === 'passed' ? '#16a34a' : ($state === 'failed' ? '#dc2626' : '#94a3b8');
+    };
+    $label = static function (string $state, string $passed, string $failed, string $pendingText = 'Pending'): string {
+        return $state === 'passed' ? $passed : ($state === 'failed' ? $failed : ($state === 'skipped' ? 'Not reached' : $pendingText));
+    };
+  ?>
+  <div class="sh-alert <?= $isOk ? 'sh-alert--success' : 'sh-alert--error' ?>" style="margin-bottom:16px">
+    <?= sh_icon($isOk ? 'check-circle' : 'x-circle', 18) ?>
     <div style="flex:1">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <strong><?= $connTestResult['ok'] ? 'SMTP Connection Succeeded' : 'SMTP Connection Failed' ?></strong>
-        <span class="sh-chip <?= $connTestResult['ok'] ? 'sh-chip--success' : 'sh-chip--danger' ?>">
-          Stage: <?= e($connTestResult['step']) ?>
+        <strong><?= $isOk ? ($isApiTest ? 'Brevo API Connection Succeeded' : 'SMTP Connection Succeeded') : ($isApiTest ? 'Brevo API Connection Failed' : 'SMTP Connection Failed') ?></strong>
+        <span class="sh-chip <?= $isOk ? 'sh-chip--success' : 'sh-chip--danger' ?>">
+          Failed/succeeded stage: <?= e($st) ?>
         </span>
       </div>
       <div style="margin-top:4px">
-        <?= e((string)($connTestResult['ok'] ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
+        <?= e((string)($isOk ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
       </div>
       <?php if (!empty($connTestResult['cause'])): ?>
         <div style="margin-top:6px;font-size:13px;color:var(--sh-heading)">
-          <strong>Likely cause:</strong> <?= e($connTestResult['cause']) ?>
+          <strong>Confirmed cause:</strong> <?= e((string)$connTestResult['cause']) ?>
         </div>
       <?php endif; ?>
       <?php if (!empty($connTestResult['action'])): ?>
         <div style="margin-top:4px;font-size:13px;color:var(--sh-heading)">
-          <strong>Recommended action:</strong> <?= e($connTestResult['action']) ?>
+          <strong>Recommended action:</strong> <?= e((string)$connTestResult['action']) ?>
         </div>
       <?php endif; ?>
       <div style="margin-top:8px;font-size:12px;opacity:0.85;display:flex;gap:12px;flex-wrap:wrap">
         <span>Target: <code><?= e((string)($connTestResult['host'] ?? '')) ?>:<?= e((string)($connTestResult['port'] ?? '')) ?></code></span>
         <span>Mode: <code><?= e((string)($connTestResult['encryption'] ?? '')) ?></code></span>
-        <span>Password: <code>••••••••</code> (masked)</span>
+        <?php
+          $dnsIps = array_filter((array)($connTestResult['resolved_ips'] ?? []), 'is_string');
+          $peerShown = trim((string)($cert['peer_ip'] ?? ''));
+          if ($peerShown === '') { $peerShown = trim((string)($connTestResult['peer_ip_resolved'] ?? '')); }
+        ?>
+        <span>DNS: <code><?= $dnsIps !== [] ? e(implode(', ', $dnsIps)) : 'no address resolved' ?></code></span>
+        <span>Remote endpoint: <code><?= e($peerShown !== '' ? $peerShown : 'not connected') ?>:<?= (int)($connTestResult['port'] ?? 0) ?></code></span>
+        <span>Credential: <code>••••••••</code> (masked)</span>
       </div>
 
       <!-- Stage-by-stage results breakdown -->
-      <?php
-        $st = $connTestResult['step'];
-        $isOk = $connTestResult['ok'];
-        $dnsSt = ($st === 'dns') ? 'failed' : 'passed';
-        $tcpSt = ($st === 'dns') ? 'skipped' : (($st === 'connect') ? 'failed' : 'passed');
-        $ehloSt = in_array($st, ['dns', 'connect'], true) ? 'skipped' : (($st === 'ehlo') ? 'failed' : 'passed');
-        $tlsSt = in_array($st, ['dns', 'connect', 'ehlo'], true) ? 'skipped' : (in_array($st, ['starttls', 'tls_cert', 'tls_handshake'], true) ? 'failed' : 'passed');
-        $authSt = in_array($st, ['dns', 'connect', 'ehlo', 'starttls', 'tls_cert', 'tls_handshake'], true) ? 'skipped' : (($st === 'auth') ? 'failed' : ($isOk ? 'passed' : 'skipped'));
-      ?>
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,0.08)">
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dnsSt === 'passed' ? '#16a34a' : '#dc2626' ?>;margin-right:4px"></span>
-          <strong>DNS:</strong> <?= $dnsSt === 'passed' ? 'Resolved' : 'Failed' ?>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($dnsSt) ?>;margin-right:4px"></span>
+          <strong>DNS:</strong> <?= e($label($dnsSt, 'Resolved', 'Failed')) ?>
         </div>
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $tcpSt === 'passed' ? '#16a34a' : ($tcpSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
-          <strong>Socket:</strong> <?= $tcpSt === 'passed' ? 'Connected' : ($tcpSt === 'failed' ? 'Refused/Timeout' : 'Pending') ?>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($tcpSt) ?>;margin-right:4px"></span>
+          <strong>Socket:</strong> <?= e($label($tcpSt, 'Connected', 'Refused/Timeout')) ?>
         </div>
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $ehloSt === 'passed' ? '#16a34a' : ($ehloSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
-          <strong>EHLO:</strong> <?= $ehloSt === 'passed' ? 'Greeted' : ($ehloSt === 'failed' ? 'Failed' : 'Pending') ?>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($ehloSt) ?>;margin-right:4px"></span>
+          <strong><?= $isApiTest ? 'HTTPS:' : 'EHLO:' ?></strong> <?= e($label($ehloSt, $isApiTest ? 'Reached' : 'Greeted', 'Failed')) ?>
         </div>
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $tlsSt === 'passed' ? '#16a34a' : ($tlsSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
-          <strong>TLS:</strong> <?= $tlsSt === 'passed' ? 'Verified' : ($tlsSt === 'failed' ? 'Failed' : 'Pending') ?>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($tlsSt) ?>;margin-right:4px"></span>
+          <strong>TLS:</strong> <?= e($label($tlsSt, 'Verified', 'Failed')) ?>
         </div>
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $authSt === 'passed' ? '#16a34a' : ($authSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
-          <strong>Auth:</strong> <?= $authSt === 'passed' ? 'Verified' : ($authSt === 'failed' ? 'Failed' : 'Pending') ?>
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($authSt) ?>;margin-right:4px"></span>
+          <strong><?= $isApiTest ? 'API key:' : 'Auth:' ?></strong> <?= e($label($authSt, 'Verified', 'Failed')) ?>
         </div>
         <div style="font-size:11.5px">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#94a3b8;margin-right:4px"></span>
           <strong>Delivery:</strong> <em>Not tested</em>
         </div>
       </div>
+
+      <?php if ($cert !== null): ?>
+        <div style="margin-top:14px;padding:12px;border:1px solid var(--sh-line);border-radius:8px;background:var(--sh-bg-2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+            <strong style="font-size:13px"><?= sh_icon('shield', 14) ?> Presented TLS certificate</strong>
+            <span class="sh-badge sh-badge--neutral">Read-only inspection — no credentials or message sent</span>
+          </div>
+          <?php if (!empty($cert['ok'])): ?>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px">
+              <div><strong>Subject:</strong> <code><?= e((string)($cert['subject'] ?? '')) ?></code></div>
+              <div><strong>Issuer:</strong> <code><?= e((string)($cert['issuer'] ?? '')) ?></code></div>
+              <div><strong>Valid from:</strong> <?= e((string)($cert['valid_from'] ?? '')) ?></div>
+              <div><strong>Valid to:</strong> <?= e((string)($cert['valid_to'] ?? '')) ?></div>
+              <div><strong>Peer endpoint:</strong> <code><?= e(trim((string)($cert['peer_ip'] ?? '')) !== '' ? (string)$cert['peer_ip'] : ($peerShown !== '' ? $peerShown : 'not captured')) ?>:<?= (int)($cert['port'] ?? ($connTestResult['port'] ?? 0)) ?></code></div>
+              <div><strong>SNI / expected name:</strong> <code><?= e((string)($cert['host'] ?? '')) ?></code></div>
+              <div style="grid-column:1/-1"><strong>Subject Alternative Names:</strong>
+                <?php if (!empty($cert['sans'])): ?>
+                  <?php foreach ((array)$cert['sans'] as $san): ?><code style="margin-right:6px"><?= e((string)$san) ?></code><?php endforeach; ?>
+                <?php else: ?><em>none</em><?php endif; ?>
+              </div>
+              <div><strong>Hostname validation:</strong>
+                <?php if (($cert['hostname_valid'] ?? null) === true): ?><span class="sh-chip sh-chip--success">Match</span>
+                <?php elseif (($cert['hostname_valid'] ?? null) === false): ?><span class="sh-chip sh-chip--danger">Mismatch</span>
+                <?php else: ?><span class="sh-chip sh-chip--neutral">Not checked</span><?php endif; ?>
+              </div>
+              <div><strong>Chain validation:</strong>
+                <?php if (($cert['chain_valid'] ?? null) === true): ?><span class="sh-chip sh-chip--success">Trusted</span>
+                <?php elseif (($cert['chain_valid'] ?? null) === false): ?><span class="sh-chip sh-chip--danger">Not trusted</span>
+                <?php else: ?><span class="sh-chip sh-chip--neutral">Not checked</span><?php endif; ?>
+              </div>
+              <div><strong>TLS:</strong> <code><?= e((string)($cert['tls_protocol'] ?? '')) ?> <?= e((string)($cert['cipher'] ?? '')) ?></code></div>
+              <div style="grid-column:1/-1"><strong>SHA-256 fingerprint:</strong> <code style="font-size:11px"><?= e((string)($cert['fingerprint_sha256'] ?? '')) ?></code></div>
+            </div>
+            <?php if (($cert['hostname_valid'] ?? null) === false): ?>
+              <div style="margin-top:10px;padding:10px;border-radius:6px;background:#fef2f2;color:#991b1b;font-size:12.5px">
+                <strong>This is a certificate hostname mismatch, not a generic TLS or cryptographic failure.</strong>
+                The certificate is valid for the SANs above but not for <code><?= e((string)($cert['host'] ?? '')) ?></code>.
+              </div>
+              <?php if (!empty($connTestResult['alternate_host'])): ?>
+                <form method="post" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                  <?= sh_csrf_field() ?>
+                  <input type="hidden" name="form" value="test_smtp_connection">
+                  <input type="hidden" name="smtp_host" value="<?= e((string)$connTestResult['alternate_host']) ?>">
+                  <input type="hidden" name="smtp_port" value="<?= (int)($connTestResult['port'] ?? 587) ?>">
+                  <input type="hidden" name="smtp_encryption" value="<?= e(strtolower((string)($connTestResult['encryption'] ?? 'tls'))) ?>">
+                  <input type="hidden" name="smtp_username" value="<?= e((string)sh_setting('smtp_username', '')) ?>">
+                  <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">
+                    <?= sh_icon('zap', 13) ?> Test <?= e((string)$connTestResult['alternate_host']) ?> with full validation
+                  </button>
+                  <span class="sh-table__meta">Does not save or switch the hostname. Confirm this legacy hostname with Brevo support first.</span>
+                </form>
+              <?php endif; ?>
+              <div style="margin-top:8px">
+                <a class="sh-btn sh-btn--sm" href="?tab=brevo"><?= sh_icon('mail', 13) ?> Open the Brevo HTTPS API transport</a>
+                <span class="sh-table__meta">Recommended supported route; uses a v3 API key over HTTPS with a valid certificate.</span>
+              </div>
+            <?php endif; ?>
+            <?php if (($cert['chain_valid'] ?? null) === false && !empty($cert['chain_error'])): ?>
+              <div style="margin-top:8px;font-size:12px;color:#991b1b"><strong>Chain detail:</strong> <?= e((string)$cert['chain_error']) ?></div>
+            <?php endif; ?>
+          <?php else: ?>
+            <div style="font-size:12px;color:#991b1b">
+              The certificate could not be read: <?= e((string)($cert['error'] ?? 'unknown reason')) ?>
+            </div>
+            <?php if (!empty($cert['openssl_errors'])): ?>
+              <pre style="max-height:120px;overflow:auto;font-size:11px;margin-top:6px"><?= e(implode("\n", (array)$cert['openssl_errors'])) ?></pre>
+            <?php endif; ?>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
   </div>
   <?php if (!empty($connTestResult['transcript'])): ?>
     <details style="margin-bottom:16px">
-      <summary class="sh-panel__note" style="cursor:pointer;font-weight:600">View Connection Diagnostic Transcript (Redacted)</summary>
+      <summary class="sh-panel__note" style="cursor:pointer;font-weight:600">View <?= $isApiTest ? 'HTTPS API' : 'SMTP handshake' ?> transcript (redacted)</summary>
       <pre style="max-height:220px;overflow:auto;font-size:11.5px;line-height:1.5;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;margin-top:6px"><?= e($connTestResult['transcript']) ?></pre>
     </details>
   <?php endif; ?>
@@ -558,13 +747,52 @@ require __DIR__ . '/_layout.php';
           </span>
         </div>
       </a>
+
+      <!-- Option C: Brevo HTTPS API -->
+      <a href="?tab=brevo"
+         id="btn-select-brevo"
+         class="sh-setup-option <?= $selectedTab === 'brevo' ? 'sh-setup-option--active' : '' ?>"
+         role="tab"
+         aria-selected="<?= $selectedTab === 'brevo' ? 'true' : 'false' ?>"
+         aria-controls="panel-brevo"
+         tabindex="0">
+        <div class="sh-setup-option__top">
+          <span class="sh-setup-option__title">
+            <span class="sh-setup-option__radio"></span>
+            <?= sh_icon('send', 16) ?> Option C: Brevo HTTPS API
+          </span>
+          <?php if ($selectedTransport === 'brevo_api' && $brevoState === 'ready'): ?>
+            <span class="sh-badge sh-badge--success">Active</span>
+          <?php elseif ($brevoState === 'configured'): ?>
+            <span class="sh-badge sh-badge--success">Ready</span>
+          <?php elseif ($brevoState === 'disabled'): ?>
+            <span class="sh-badge sh-badge--neutral">Disabled</span>
+          <?php else: ?>
+            <span class="sh-badge sh-badge--warning">Incomplete</span>
+          <?php endif; ?>
+        </div>
+        <p class="sh-setup-option__desc">
+          Sends transactional email through Brevo's official HTTPS API. This is the supported route when a regional
+          SMTP relay presents a certificate that does not cover <code>smtp-relay.brevo.com</code>. It uses a v3 API
+          key, not the SMTP key, and never disables TLS verification.
+        </p>
+        <div class="sh-setup-option__foot">
+          <span style="color:var(--sh-muted)">
+            <?= $brevoKeySet ? 'API key set' : 'API key missing' ?>
+            <?= $selectedTransport === 'brevo_api' ? ' · delivering' : '' ?>
+          </span>
+          <span style="font-weight:700;color:var(--sh-brand)">
+            <?= $selectedTab === 'brevo' ? 'Selected &bull;' : 'Configure &rarr;' ?>
+          </span>
+        </div>
+      </a>
     </div>
 
     <!-- Empty State / Selection Prompt -->
     <div id="no-method-panel" class="sh-alert sh-alert--info" style="display:<?= $selectedTab === '' ? 'flex' : 'none' ?>;margin:0 0 16px">
       <?= sh_icon('info', 16) ?>
       <div>
-        <strong>Choose a setup method to configure its settings.</strong> Select either <strong>Custom SMTP Server</strong> or <strong>Firebase Integration</strong> above.
+        <strong>Choose a setup method to configure its settings.</strong> Select <strong>Custom SMTP Server</strong>, <strong>Firebase Integration</strong>, or the <strong>Brevo HTTPS API</strong> above.
       </div>
     </div>
 
@@ -582,17 +810,24 @@ require __DIR__ . '/_layout.php';
           </div>
         </div>
         <div class="sh-panel__body">
-          <div class="sh-alert <?= $mailStatus['ready'] ? 'sh-alert--success' : 'sh-alert--warning' ?>" style="margin-bottom:16px">
-            <?= sh_icon($mailStatus['ready'] ? 'check-circle' : 'alert', 16) ?>
+          <div class="sh-alert <?= $smtpState === 'ready' ? 'sh-alert--success' : 'sh-alert--warning' ?>" style="margin-bottom:16px">
+            <?= sh_icon($smtpState === 'ready' ? 'check-circle' : 'alert', 16) ?>
             <div>
-              <?php if ($mailStatus['ready']): ?>
-                SMTP transport is configured: <strong><?= e((string)$mailStatus['host']) ?>:<?= (int)$mailStatus['port'] ?></strong>
-                (<?= e(strtoupper((string)$mailStatus['encryption'])) ?>).
+              <?php if ($selectedTransport === 'brevo_api'): ?>
+                <strong>Brevo HTTPS API is the active delivery transport.</strong> The SMTP settings below are stored but
+                are not used for delivery until you explicitly switch back with “Use SMTP relay for delivery”.
+              <?php elseif ($smtpState === 'ready'): ?>
+                SMTP transport is configured: <strong><?= e($host) ?>:<?= (int)sh_setting('smtp_port', '587') ?></strong>
+                (<?= e(strtoupper((string)sh_setting('smtp_encryption', 'tls'))) ?>).
               <?php else: ?>
-                <strong>Configuration Required:</strong> Missing: <?= e(implode(', ', (array)$mailStatus['missing'])) ?>.
+                <strong>Configuration Required:</strong> Missing: <?= e(implode(', ', array_filter([
+                    $host === '' ? 'SMTP host' : '',
+                    $hasPass ? '' : 'SMTP password',
+                    $smtpEnabled ? '' : 'Enable Custom SMTP Delivery',
+                ]))) ?>.
                 The store will clearly display when email is not configured instead of pretending codes were delivered.
               <?php endif; ?>
-              <br><span class="sh-table__meta">Library: <?= e((string)$mailStatus['library']) ?> · <?= $mailStatus['password_set'] ? 'password stored' : 'no password stored' ?></span>
+              <br><span class="sh-table__meta">Library: <?= e((string)$mailStatus['library']) ?> · <?= $hasPass ? 'password stored' : 'no password stored' ?> · TLS validation: always on</span>
             </div>
           </div>
 
@@ -690,14 +925,22 @@ require __DIR__ . '/_layout.php';
               <span class="sh-field__hint">Receives new order notifications and critical administrative alerts.</span>
             </div>
 
-            <label class="sh-toggle" style="margin-bottom:16px">
-              <input type="checkbox" name="smtp_allow_self_signed" value="1" <?= sh_setting('smtp_allow_self_signed', '0') === '1' ? 'checked' : '' ?>>
-              <span class="sh-toggle__track"></span>
-              <span>Accept self-signed certificate (internal testing only)</span>
-            </label>
+            <div class="sh-alert sh-alert--info" style="margin-bottom:16px">
+              <?= sh_icon('shield', 16) ?>
+              <div>
+                <strong>TLS verification is always enforced.</strong>
+                ShopHaat validates the certificate chain, the hostname and SNI for every SMTP delivery, and refuses to
+                authenticate before the encrypted channel is confirmed. The old “accept self-signed certificate”
+                option has been retired. If a provider presents the wrong hostname, fix the endpoint or use the
+                Brevo HTTPS API transport — do not disable verification.
+              </div>
+            </div>
 
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
               <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save SMTP Settings</button>
+              <?php if ($selectedTransport === 'smtp'): ?>
+                <span class="sh-chip sh-chip--success">SMTP is the active delivery transport</span>
+              <?php endif; ?>
             </div>
           </form>
 
@@ -719,7 +962,6 @@ require __DIR__ . '/_layout.php';
                 <input type="hidden" name="smtp_port" value="<?= e((string)sh_setting('smtp_port', '587')) ?>">
                 <input type="hidden" name="smtp_encryption" value="<?= e((string)sh_setting('smtp_encryption', 'tls')) ?>">
                 <input type="hidden" name="smtp_username" value="<?= e((string)sh_setting('smtp_username', '')) ?>">
-                <input type="hidden" name="smtp_allow_self_signed" value="<?= sh_setting('smtp_allow_self_signed', '0') === '1' ? '1' : '0' ?>">
                 <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" <?= $host === '' ? 'disabled' : '' ?>>
                   <?= sh_icon('zap', 14) ?> Run SMTP Connection Test
                 </button>
@@ -738,11 +980,186 @@ require __DIR__ . '/_layout.php';
                 <div style="display:flex;gap:8px">
                   <input class="sh-input" type="email" name="test_recipient" placeholder="test@yourinbox.com"
                          value="<?= e((string)($_POST['test_recipient'] ?? $adminEmail)) ?>" required style="height:36px;font-size:13px">
-                  <button class="sh-btn sh-btn--sm" type="submit" <?= $mailStatus['ready'] ? '' : 'disabled' ?> style="flex:none">
+                  <button class="sh-btn sh-btn--sm" type="submit" <?= ($mailStatus['ready'] && $selectedTransport === 'brevo_api') ? '' : 'disabled' ?> style="flex:none">
                     <?= sh_icon('send', 13) ?> Send Test Email
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+
+          <form method="post" id="use-smtp-transport" style="margin-top:14px">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="use_transport">
+            <input type="hidden" name="transport" value="smtp">
+            <p class="sh-panel__note" style="margin:0 0 8px">
+              Selecting a transport is an explicit change. Saving SMTP settings alone never switches an active Brevo API transport.
+            </p>
+            <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" <?= $host === '' ? 'disabled' : '' ?>>
+              <?= sh_icon('check-circle', 14) ?> Use SMTP relay for delivery
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         PANEL C: BREVO HTTPS TRANSACTIONAL API
+         ==================================================================== -->
+    <div id="panel-brevo" role="tabpanel" aria-labelledby="btn-select-brevo" style="display:<?= $selectedTab === 'brevo' ? 'block' : 'none' ?>">
+      <div class="sh-panel" style="border:1px solid var(--sh-line);box-shadow:none;margin-bottom:0">
+        <div class="sh-panel__head" style="background:var(--sh-bg-2)">
+          <h3 class="sh-panel__title"><?= sh_icon('mail', 16) ?> Brevo HTTPS API Transport</h3>
+          <div class="sh-panel__actions">
+            <a href="<?= e(sh_url('admin/guides/smtp')) ?>#brevo-api" class="sh-btn sh-btn--sm" style="background:#0f766e;color:#fff;border-color:#0f766e">
+              <?= sh_icon('book-open', 14) ?> Brevo setup guide &rarr;
+            </a>
+          </div>
+        </div>
+        <div class="sh-panel__body">
+          <div class="sh-alert sh-alert--info" style="margin-bottom:16px">
+            <?= sh_icon('info', 16) ?>
+            <div>
+              <strong>A supported route around the Brevo SMTP certificate mismatch.</strong>
+              Brevo documents <code>smtp-relay.brevo.com</code>, but some of its regional relays present a
+              Sendinblue-era certificate whose Subject Alternative Names do not include that hostname. The official
+              transactional API at <code>https://api.brevo.com/v3/smtp/email</code> uses a valid
+              <code>*.brevo.com</code> certificate and a separate v3 API key. Choosing it here is explicit: SMTP
+              settings and credentials are left untouched, and no automatic fallback is performed.
+            </div>
+          </div>
+
+          <div class="sh-alert <?= ($selectedTransport === 'brevo_api' && $brevoState === 'ready') ? 'sh-alert--success' : 'sh-alert--warning' ?>" style="margin-bottom:16px">
+            <?= sh_icon(($selectedTransport === 'brevo_api' && $brevoState === 'ready') ? 'check-circle' : 'alert', 16) ?>
+            <div>
+              <strong>Current delivery transport:</strong> <?= $selectedTransport === 'brevo_api' ? 'Brevo HTTPS API' : 'SMTP relay' ?>.
+              API key: <?= $brevoKeySet ? 'stored (masked)' : 'not set' ?>;
+              API transport switch: <?= $brevoApiEnabled ? 'enabled' : 'disabled' ?>.
+              <?php if ($brevoLastTestedAt !== ''): ?>
+                <br><span class="sh-table__meta">Last API test: <?= e($brevoLastTestedAt) ?> — <?= $brevoLastTestOk ? 'verified' : 'failed' ?>.</span>
+              <?php endif; ?>
+              <?php if ($brevoState === 'incomplete'): ?>
+                <br><span class="sh-table__meta">Add a v3 API key to finish the configuration.</span>
+              <?php elseif ($brevoState === 'configured'): ?>
+                <br><span class="sh-table__meta">Enabled and keyed. Use “Use Brevo HTTPS API for delivery” below to make it the active transport.</span>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <form method="post" novalidate>
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="brevo_api_settings">
+
+            <label class="sh-toggle" style="margin-bottom:14px">
+              <input type="checkbox" name="brevo_api_enabled" value="1" <?= $brevoApiEnabled ? 'checked' : '' ?>>
+              <span class="sh-toggle__track"></span>
+              <span style="font-weight:700">Enable the Brevo HTTPS API transport</span>
+            </label>
+
+            <div class="sh-field">
+              <label class="sh-field__label" for="brevo-key">Brevo v3 API Key</label>
+              <input class="sh-input" id="brevo-key" type="password" name="brevo_api_key" autocomplete="new-password" spellcheck="false"
+                     placeholder="<?= $brevoKeySet ? 'A key is saved — leave blank to keep it' : 'xkeysib-…' ?>">
+              <span class="sh-field__hint">
+                Brevo → SMTP &amp; API → API Keys. This is <strong>not</strong> the SMTP key and <strong>not</strong> the account password.
+                Stored encrypted server-side; never rendered, logged or sent to browser JavaScript.
+              </span>
+              <?php if ($brevoKeySet): ?>
+                <label class="sh-check" style="margin-top:6px">
+                  <input type="checkbox" name="clear_brevo_key" value="1">
+                  <span>Remove the stored Brevo API key</span>
+                </label>
+              <?php endif; ?>
+            </div>
+
+            <div class="sh-grid2">
+              <div class="sh-field">
+                <label class="sh-field__label" for="brevo-from-name">Sender Name</label>
+                <input class="sh-input" id="brevo-from-name" name="smtp_from_name" value="<?= e((string)sh_setting('smtp_from_name', 'ShopHaat')) ?>">
+                <span class="sh-field__hint">Shared sender identity with the SMTP transport.</span>
+              </div>
+              <div class="sh-field">
+                <label class="sh-field__label" for="brevo-from-mail">Sender Email Address</label>
+                <input class="sh-input" id="brevo-from-mail" type="email" name="smtp_from_email" value="<?= e((string)sh_setting('smtp_from_email', '')) ?>" placeholder="noreply@yourdomain.com">
+                <span class="sh-field__hint">Must be a verified sender or on an authenticated domain in Brevo.</span>
+              </div>
+            </div>
+
+            <div class="sh-grid2">
+              <div class="sh-field">
+                <label class="sh-field__label" for="brevo-reply">Reply-To (optional)</label>
+                <input class="sh-input" id="brevo-reply" type="email" name="smtp_reply_to" value="<?= e((string)sh_setting('smtp_reply_to', '')) ?>" placeholder="support@yourdomain.com">
+              </div>
+              <div class="sh-field">
+                <label class="sh-field__label" for="brevo-timeout">HTTPS Timeout (seconds)</label>
+                <input class="sh-input" id="brevo-timeout" type="number" min="5" max="60" name="smtp_timeout" value="<?= (int)sh_setting('smtp_timeout', '20') ?>">
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
+              <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save Brevo API Settings</button>
+              <span class="sh-table__meta">Saving does not change the active transport.</span>
+            </div>
+          </form>
+
+          <form method="post" style="margin-bottom:18px">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="use_transport">
+            <input type="hidden" name="transport" value="brevo_api">
+            <button class="sh-btn sh-btn--sm" type="submit" <?= ($brevoKeySet && $brevoApiEnabled) ? '' : 'disabled' ?>>
+              <?= sh_icon('check-circle', 14) ?> Use Brevo HTTPS API for delivery
+            </button>
+            <?php if (!$brevoKeySet || !$brevoApiEnabled): ?>
+              <span class="sh-table__meta">Save a v3 API key and enable the switch first.</span>
+            <?php elseif ($selectedTransport === 'brevo_api'): ?>
+              <span class="sh-chip sh-chip--success">Active delivery transport</span>
+            <?php endif; ?>
+          </form>
+
+          <hr style="border:0;border-top:1px solid var(--sh-line);margin:20px 0">
+
+          <h4 style="margin:0 0 12px;font-size:14px;color:var(--sh-heading)"><?= sh_icon('zap', 15) ?> Brevo API Diagnostics</h4>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="background:var(--sh-bg-2);border:1px solid var(--sh-line);border-radius:8px;padding:14px">
+              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">Action: Verify HTTPS and API key</h5>
+              <p style="font-size:12px;color:var(--sh-muted);margin:0 0 10px">
+                Resolves api.brevo.com, validates its certificate and calls <code>GET /v3/account</code>. No email is sent.
+              </p>
+              <form method="post" novalidate>
+                <?= sh_csrf_field() ?>
+                <input type="hidden" name="form" value="test_brevo_api">
+                <input type="hidden" name="smtp_timeout" value="<?= (int)sh_setting('smtp_timeout', '20') ?>">
+                <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" <?= $brevoKeySet ? '' : 'disabled' ?>>
+                  <?= sh_icon('zap', 14) ?> Test Brevo API Connection
+                </button>
+              </form>
+            </div>
+
+            <div style="background:var(--sh-bg-2);border:1px solid var(--sh-line);border-radius:8px;padding:14px">
+              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">Action: Send a real test email</h5>
+              <p style="font-size:12px;color:var(--sh-muted);margin:0 0 10px">
+                Uses the selected transport and shows the exact API response. A message is sent only when you click.
+              </p>
+              <form method="post" novalidate>
+                <?= sh_csrf_field() ?>
+                <input type="hidden" name="form" value="test_mail">
+                <div style="display:flex;gap:8px">
+                  <input class="sh-input" type="email" name="test_recipient" placeholder="test@yourinbox.com"
+                         value="<?= e((string)($_POST['test_recipient'] ?? $adminEmail)) ?>" required style="height:36px;font-size:13px">
+                  <button class="sh-btn sh-btn--sm" type="submit" <?= ($mailStatus['ready'] && $selectedTransport === 'smtp') ? '' : 'disabled' ?> style="flex:none">
+                    <?= sh_icon('send', 13) ?> Send Test Email
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="sh-alert sh-alert--info" style="margin-top:16px">
+            <?= sh_icon('shield', 16) ?>
+            <div>
+              HTTPS requests always verify the certificate chain and the <code>api.brevo.com</code> hostname. API
+              credentials and SMTP credentials are stored separately; the API key is never exposed to the browser.
+              If the API test fails, the exact failed stage (DNS, connect, TLS, API auth) is reported above.
             </div>
           </div>
         </div>
@@ -1028,71 +1445,44 @@ require __DIR__ . '/_layout.php';
 <!-- Client-side Tab Switcher Enhancer (Seamless Switching & Keyboard Access) -->
 <script<?= sh_csp_nonce_attr() ?>>
 (function() {
-  var btnSmtp = document.getElementById('btn-select-smtp');
-  var btnFb = document.getElementById('btn-select-firebase');
-  var panelSmtp = document.getElementById('panel-smtp');
-  var panelFb = document.getElementById('panel-firebase');
+  var tabs = {
+    smtp: { btn: document.getElementById('btn-select-smtp'), panel: document.getElementById('panel-smtp') },
+    firebase: { btn: document.getElementById('btn-select-firebase'), panel: document.getElementById('panel-firebase') },
+    brevo: { btn: document.getElementById('btn-select-brevo'), panel: document.getElementById('panel-brevo') }
+  };
   var panelNone = document.getElementById('no-method-panel');
 
-  function activateTab(tab, updateUrl) {
-    if (tab === 'smtp') {
-      if (btnSmtp) {
-        btnSmtp.classList.add('sh-setup-option--active');
-        btnSmtp.setAttribute('aria-selected', 'true');
+  function activateTab(name, updateUrl) {
+    Object.keys(tabs).forEach(function(key) {
+      var t = tabs[key];
+      if (!t) { return; }
+      var active = key === name;
+      if (t.btn) {
+        t.btn.classList.toggle('sh-setup-option--active', active);
+        t.btn.setAttribute('aria-selected', active ? 'true' : 'false');
       }
-      if (btnFb) {
-        btnFb.classList.remove('sh-setup-option--active');
-        btnFb.setAttribute('aria-selected', 'false');
-      }
-      if (panelSmtp) panelSmtp.style.display = 'block';
-      if (panelFb) panelFb.style.display = 'none';
-      if (panelNone) panelNone.style.display = 'none';
-      if (updateUrl && window.history && history.replaceState) {
-        history.replaceState(null, '', '?tab=smtp');
-      }
-    } else if (tab === 'firebase') {
-      if (btnFb) {
-        btnFb.classList.add('sh-setup-option--active');
-        btnFb.setAttribute('aria-selected', 'true');
-      }
-      if (btnSmtp) {
-        btnSmtp.classList.remove('sh-setup-option--active');
-        btnSmtp.setAttribute('aria-selected', 'false');
-      }
-      if (panelFb) panelFb.style.display = 'block';
-      if (panelSmtp) panelSmtp.style.display = 'none';
-      if (panelNone) panelNone.style.display = 'none';
-      if (updateUrl && window.history && history.replaceState) {
-        history.replaceState(null, '', '?tab=firebase');
-      }
+      if (t.panel) { t.panel.style.display = active ? 'block' : 'none'; }
+    });
+    if (panelNone) { panelNone.style.display = 'none'; }
+    if (updateUrl && window.history && history.replaceState) {
+      history.replaceState(null, '', '?tab=' + encodeURIComponent(name));
     }
   }
 
-  if (btnSmtp) {
-    btnSmtp.addEventListener('click', function(e) {
+  Object.keys(tabs).forEach(function(name) {
+    var btn = tabs[name] && tabs[name].btn;
+    if (!btn) { return; }
+    btn.addEventListener('click', function(e) {
       e.preventDefault();
-      activateTab('smtp', true);
+      activateTab(name, true);
     });
-    btnSmtp.addEventListener('keydown', function(e) {
+    btn.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        activateTab('smtp', true);
+        activateTab(name, true);
       }
     });
-  }
-
-  if (btnFb) {
-    btnFb.addEventListener('click', function(e) {
-      e.preventDefault();
-      activateTab('firebase', true);
-    });
-    btnFb.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        activateTab('firebase', true);
-      }
-    });
-  }
+  });
 })();
 </script>
 

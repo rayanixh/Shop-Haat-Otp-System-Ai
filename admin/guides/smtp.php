@@ -251,6 +251,76 @@ if ($fromEmail === '') {
     </div>
   </section>
 
+  <!-- Brevo certificate mismatch and the supported API route -->
+  <section class="sh-guide-card" id="brevo-api">
+    <div class="sh-guide-card__header">
+      <span class="sh-guide-card__num">5B</span>
+      <h2 class="sh-guide-card__title">Brevo: Certificate Hostname Mismatch and the HTTPS API Route</h2>
+    </div>
+    <div class="sh-guide-card__body">
+      <p>
+        Brevo documents <code>smtp-relay.brevo.com</code> for SMTP, but that name is served by regional relay
+        deployments. In some regions the endpoint presents a Sendinblue-era certificate whose Subject Alternative
+        Names are only the regional relay name and <code>smtp-relay.sendinblue.com</code> — not
+        <code>smtp-relay.brevo.com</code>. A client that validates the hostname (correctly) rejects the handshake with:
+      </p>
+      <div class="sh-guide-codeblock">
+        <pre>stream_socket_enable_crypto(): Peer certificate subjectAltName did not match expected name "smtp-relay.brevo.com"</pre>
+      </div>
+      <p>
+        This is a provider-side certificate deployment mismatch, not a local SNI bug: DNS resolves, the TCP socket
+        connects, EHLO succeeds, and the TLS handshake starts. The certificate chain itself can be valid and issued by
+        a public CA. ShopHaat's connection test now shows the actual subject, SANs, issuer, validity dates, chain
+        result, hostname result and peer endpoint, so the mismatch is identified as a hostname failure rather than a
+        generic cryptographic error.
+      </p>
+      <div class="sh-guide-callout sh-guide-callout--warn">
+        <?= sh_icon('alert', 16) ?>
+        <div>
+          <strong>Do not disable certificate or hostname verification.</strong>
+          The old “accept self-signed” option has been retired, <code>verify_peer</code> and
+          <code>verify_peer_name</code> are always enabled for delivery, and ShopHaat refuses to authenticate until the
+          encrypted socket is confirmed. An unexpected certificate must be rejected.
+        </div>
+      </div>
+
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">Recommended supported route: Brevo HTTPS API</h3>
+      <p>
+        Go to <strong>Email &amp; Verification Settings → Option C: Brevo HTTPS API</strong>. Create a v3 API key in
+        Brevo (SMTP &amp; API → API Keys), save it, enable the transport, click <em>Use Brevo HTTPS API for delivery</em>,
+        then run <em>Test Brevo API Connection</em> and send a real test email. The API uses
+        <code>https://api.brevo.com/v3/smtp/email</code> with a <code>*.brevo.com</code> certificate and standard CA
+        validation. The API key is stored encrypted server-side and is never rendered or sent to browser JavaScript;
+        it is a separate credential from the SMTP key.
+      </p>
+
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">If you must use SMTP</h3>
+      <p>
+        Some affected endpoints present a certificate that does include the legacy hostname
+        <code>smtp-relay.sendinblue.com</code>. That name still reaches the same relay infrastructure and accepts the
+        same SMTP credentials, but Brevo has not documented it as the current endpoint. Do not switch to it blindly:
+        confirm it with Brevo support for your account, then enter it explicitly in the SMTP host field and run the
+        connection test with full validation. Never use the regional hostname from the certificate's CN as a
+        workaround, and never disable verification.
+      </p>
+
+      <h3 style="margin:16px 0 6px;font-size:14.5px;color:var(--sh-heading)">Read the certificate on the hosting server</h3>
+      <p>
+        If ShopHaat's certificate card is not enough, run this from the hosting account's terminal (or ask the host):
+      </p>
+      <div class="sh-guide-codeblock">
+        <pre>openssl s_client -starttls smtp -connect smtp-relay.brevo.com:587 \
+  -servername smtp-relay.brevo.com -showcerts &lt;/dev/null \
+  | openssl x509 -noout -subject -issuer -dates -ext subjectAltName</pre>
+      </div>
+      <p>
+        Compare the printed SANs with <code>smtp-relay.brevo.com</code>. Also check whether the hosting resolver selects
+        a different regional IP than the provider's documented endpoint; a transparent SMTP proxy would present its own
+        certificate, which the same output will reveal.
+      </p>
+    </div>
+  </section>
+
   <!-- Step 6: Verifying Signup OTP Delivery -->
   <section class="sh-guide-card">
     <div class="sh-guide-card__header">
@@ -335,9 +405,9 @@ if ($fromEmail === '') {
               <td>For Gmail, generate an App Password. For Brevo/SendGrid, confirm you are using an active SMTP API Key.</td>
             </tr>
             <tr>
-              <td><strong>Certificate name mismatch</strong></td>
-              <td>Host name does not match the SSL certificate on the mail server.</td>
-              <td>Use the server's official mail hostname (e.g. <code>mail.yourhost.com</code>) rather than a custom CNAME.</td>
+              <td><strong>Certificate name mismatch</strong><br><code>Peer certificate subjectAltName did not match expected name</code></td>
+              <td>The certificate's SANs do not include the configured hostname. On Brevo this happens on some regional relays that still present a Sendinblue certificate. It is hostname validation doing its job, not a generic TLS failure.</td>
+              <td>Read the SANs in the connection test. Use the Brevo HTTPS API transport (Option C), or a certificate-valid endpoint that the provider confirms. Do not disable <code>verify_peer</code> or <code>verify_peer_name</code>.</td>
             </tr>
             <tr>
               <td><strong>Emails landing in spam</strong></td>
