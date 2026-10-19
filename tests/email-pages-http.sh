@@ -173,7 +173,9 @@ try {
 
     if ($cmd === 'set-api-key') {
         // Stored exactly the way the admin form stores it, so the test can
-        // prove the form preserves it when the field is left blank.
+        // prove the form preserves it when the field is left blank. The
+        // encryption helper is not part of the base bootstrap.
+        require_once getcwd() . '/includes/verification.php';
         sh_setting_save('brevo_api_key', sh_verify_encrypt((string)($argv[2] ?? '')));
         echo "saved\n";
         exit;
