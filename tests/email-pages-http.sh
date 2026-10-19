@@ -223,7 +223,11 @@ try {
 FIXTURES
 
 fixtures() {
-  php "$TMP_DIR/fixtures.php" "$@" 2>/dev/null || fail "fixture command '${1}' failed"
+  local prepend=()
+  if [[ -f "$TMP_DIR/ca-bootstrap.php" ]]; then
+    prepend=(-d "auto_prepend_file=$TMP_DIR/ca-bootstrap.php")
+  fi
+  php "${prepend[@]}" "$TMP_DIR/fixtures.php" "$@" 2>/dev/null || fail "fixture command '${1}' failed"
 }
 
 # The pages under test require the email + password authentication mode; the
@@ -235,7 +239,25 @@ set_store_setting authentication_mode email_password
 set_store_setting email_forgot_enabled 1
 set_store_setting email_verify_enabled 1
 
-php -S "127.0.0.1:${PORT}" router.php >"$SERVER_LOG" 2>&1 &
+# The recovery flow must authenticate over a verified TLS channel, exactly like
+# production. Generate a throwaway CA and server certificate for the capture
+# SMTP server, and make the web server trust only that CA.
+SMTP_CA="$TMP_DIR/smtp-ca.pem"
+SMTP_CERT="$TMP_DIR/smtp-server.pem"
+SMTP_KEY="$TMP_DIR/smtp-server.key"
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 -keyout "$TMP_DIR/smtp-ca.key" -out "$SMTP_CA" \
+  -subj "/CN=ShopHaat HTTP Test CA" -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1 \
+  || fail 'could not generate the test CA'
+openssl req -newkey rsa:2048 -sha256 -nodes -keyout "$SMTP_KEY" -out "$TMP_DIR/smtp.csr" \
+  -subj "/CN=127.0.0.1" >/dev/null 2>&1 || fail 'could not generate the test server key'
+printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >"$TMP_DIR/smtp.ext"
+openssl x509 -req -in "$TMP_DIR/smtp.csr" -CA "$SMTP_CA" -CAkey "$TMP_DIR/smtp-ca.key" \
+  -CAcreateserial -out "$SMTP_CERT" -days 2 -sha256 -extfile "$TMP_DIR/smtp.ext" >/dev/null 2>&1 \
+  || fail 'could not sign the test server certificate'
+printf '<?php define("SH_MAIL_CA_BUNDLE", %s);\n' "$(php -r 'echo var_export($argv[1], true);' "$SMTP_CA")" >"$TMP_DIR/ca-bootstrap.php"
+
+php -d "auto_prepend_file=$TMP_DIR/ca-bootstrap.php" -S "127.0.0.1:${PORT}" router.php >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 40); do
   if curl -sS "${BASE}/login.php" >/dev/null 2>&1; then break; fi
@@ -273,7 +295,7 @@ assert_contains "$forgot_guest" 'name="email"' 'the recovery entry page has no e
 # ---------------------------------------------------------------------------
 echo 'Recovery over real SMTP'
 mkdir -p "$SMTP_DIR"
-php tests/smtp-capture-server.php "$SMTP_PORT" normal "$SMTP_DIR" >"$TMP_DIR/smtp.log" 2>&1 &
+php tests/smtp-tls-server.php "$SMTP_PORT" "$SMTP_CERT" "$SMTP_KEY" normal "$SMTP_DIR" >"$TMP_DIR/smtp.log" 2>&1 &
 SMTP_PID=$!
 for _ in $(seq 1 40); do
   [[ -f "$SMTP_DIR/ready" ]] && break
@@ -284,7 +306,7 @@ done
 set_store_setting smtp_enabled 1
 set_store_setting smtp_host 127.0.0.1
 set_store_setting smtp_port "$SMTP_PORT"
-set_store_setting smtp_encryption none
+set_store_setting smtp_encryption tls
 set_store_setting smtp_username 'apiuser'
 set_store_setting smtp_password "$SMTP_PASSWORD"
 set_store_setting smtp_from_email 'noreply@shophaat.test'
@@ -306,9 +328,18 @@ if ! grep -Eqi '^Location: .*/?reset-password\.php' "$forgot_headers"; then
   dump_app_log 'forgot-password'
   fail 'forgot-password.php did not hand off to the reset page after a real submission'
 fi
-# The code must have gone out over an authenticated SMTP session.
-assert_contains "$(cat "$SMTP_DIR/message.txt" 2>/dev/null)" 'AUTH LOGIN' \
-  'the recovery code was not submitted over authenticated SMTP'
+# The code must have gone out over an authenticated SMTP session that started
+# only after the TLS handshake completed.
+smtp_conversation=''
+for _ in $(seq 1 30); do
+  smtp_conversation="$(cat "$SMTP_DIR"/conversation-*.txt 2>/dev/null || true)"
+  if [[ "$smtp_conversation" == *'[tls] C: AUTH LOGIN'* ]]; then break; fi
+  sleep 0.1
+done
+assert_contains "$smtp_conversation" '[tls] C: AUTH LOGIN' \
+  'the recovery code was not submitted over authenticated, encrypted SMTP'
+assert_absent "$smtp_conversation" 'AUTH before TLS' \
+  'authentication was attempted before the TLS handshake'
 
 # The code only exists in the delivered message: read it from the captured SMTP
 # submission and prove the database itself never holds it in the clear.

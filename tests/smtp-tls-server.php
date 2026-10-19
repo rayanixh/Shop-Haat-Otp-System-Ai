@@ -41,12 +41,13 @@ $say = static function ($conn, string $line) use (&$log): void {
     fwrite($conn, $line . "\r\n");
 };
 
-$deadline = time() + 90;
+$deadline = time() + 180;
 $handled = 0;
-while (time() < $deadline && $handled < 4) {
+while (time() < $deadline && $handled < 20) {
     $conn = @stream_socket_accept($server, 5);
     if ($conn === false) { continue; }
     $handled++;
+    $log = '';
     $stage = 'pre-tls';
     $inData = false;
     $message = '';
@@ -59,7 +60,10 @@ while (time() < $deadline && $handled < 4) {
         if ($inData) {
             if ($trimmed === '.') {
                 $inData = false;
-                @file_put_contents($dir . '/message.txt', $message);
+                // Keep the transcript in front of the message, like the older
+                // capture server, so tests can assert on the SMTP conversation
+                // and decode the message from the same file.
+                @file_put_contents($dir . '/message.txt', $log . "\n--- message ---\n" . $message);
                 $say($conn, '250 2.0.0 Ok: queued as TLS-TEST');
                 continue;
             }
