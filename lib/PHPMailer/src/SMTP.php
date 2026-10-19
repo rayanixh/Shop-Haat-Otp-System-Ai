@@ -500,6 +500,9 @@ class SMTP
             // phpcs:ignore PHPCompatibility.Constants.NewConstants.stream_crypto_method_tlsv1_1_clientFound
             $crypto_method |= STREAM_CRYPTO_METHOD_TLSv1_1_CLIENT;
         }
+        if (defined('STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT')) {
+            $crypto_method |= STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT;
+        }
 
         //Begin encrypted connection
             set_error_handler(function () {

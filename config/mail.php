@@ -50,31 +50,140 @@ function sh_phpmailer_source(): string
  *
  * @return array<string,mixed>
  */
+/**
+ * Safely parse and sanitize an SMTP host string.
+ * Strips leading schemes like ssl://, tls://, tcp://, and trailing ports like :587,
+ * returning the normalized hostname, any scheme specified, and the extracted port.
+ *
+ * @return array{host:string,scheme:string,port:int}
+ */
+function sh_mail_parse_host(string $rawHost, int $defaultPort = 587): array
+{
+    $host = trim($rawHost);
+    $scheme = '';
+    $port = $defaultPort;
+
+    // Check for explicit transport prefix
+    if (preg_match('~^([a-z0-9+]+)://(.*)$~i', $host, $m)) {
+        $scheme = strtolower($m[1]);
+        $host = $m[2];
+    }
+
+    // Strip wrapping brackets from IPv6 or host, e.g. [smtp.example.com]
+    if (preg_match('~^\[([a-f0-9:]+)\](?::([0-9]+))?$~i', $host, $m)) {
+        $host = $m[1];
+        if (!empty($m[2])) {
+            $port = (int)$m[2];
+        }
+    } elseif (preg_match('~^([^:/]+):([0-9]+)$~', $host, $m)) {
+        // host:port pattern
+        $host = $m[1];
+        $port = (int)$m[2];
+    }
+
+    $host = trim($host, " \t\n\r\0\x0B/");
+    return [
+        'host'   => $host,
+        'scheme' => $scheme,
+        'port'   => ($port > 0 && $port <= 65535) ? $port : $defaultPort,
+    ];
+}
+
+/**
+ * Locate the system's trusted CA certificate bundle.
+ *
+ * Essential on shared hosting environments where openssl.cafile in php.ini
+ * is not configured or points to an obsolete compile-time path.
+ */
+function sh_mail_find_ca_bundle(): ?string
+{
+    // 1. Configured php.ini settings
+    $iniCa = ini_get('openssl.cafile');
+    if (is_string($iniCa) && $iniCa !== '' && is_file($iniCa) && is_readable($iniCa)) {
+        return $iniCa;
+    }
+    $iniCurl = ini_get('curl.cainfo');
+    if (is_string($iniCurl) && $iniCurl !== '' && is_file($iniCurl) && is_readable($iniCurl)) {
+        return $iniCurl;
+    }
+
+    // 2. OpenSSL extension locations
+    if (function_exists('openssl_get_cert_locations')) {
+        $loc = openssl_get_cert_locations();
+        if (!empty($loc['default_cert_file']) && is_file($loc['default_cert_file']) && is_readable($loc['default_cert_file'])) {
+            return $loc['default_cert_file'];
+        }
+        if (!empty($loc['ini_cafile']) && is_file($loc['ini_cafile']) && is_readable($loc['ini_cafile'])) {
+            return $loc['ini_cafile'];
+        }
+    }
+
+    // 3. Known system locations on Linux distributions and shared hosting
+    $paths = [
+        '/etc/ssl/certs/ca-certificates.crt', // Debian, Ubuntu, Gentoo
+        '/etc/pki/tls/certs/ca-bundle.crt',   // RHEL, CentOS, Rocky, AlmaLinux, CloudLinux, cPanel
+        '/etc/ssl/ca-bundle.pem',             // OpenSUSE, SUSE
+        '/etc/pki/tls/cacert.pem',            // OpenELEC
+        '/etc/ssl/cert.pem',                  // Alpine, FreeBSD, macOS
+        '/usr/local/share/certs/ca-root-nss.crt', // FreeBSD
+        '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem', // Modern RHEL/CentOS
+        '/etc/ssl/certs/ca-bundle.crt',
+    ];
+    foreach ($paths as $path) {
+        if (is_file($path) && is_readable($path)) {
+            return $path;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Read the current transport configuration from settings.
+ *
+ * Falls back to sensible shared-hosting defaults: mail() enabled if SMTP
+ * is not switched on, standard port 587 with STARTTLS, sender address
+ * matching the store contact email.
+ *
+ * @return array<string,mixed>
+ */
 function sh_mail_transport(): array
 {
     $fromEmail = trim((string)sh_setting('smtp_from_email', (string)sh_setting('contact_email', '')));
     $fromName  = trim((string)sh_setting('smtp_from_name', (string)sh_setting('site_name', 'ShopHaat')));
     $replyTo   = trim((string)sh_setting('smtp_reply_to', ''));
     $enabled   = (string)sh_setting('smtp_enabled', '0') === '1';
-    $host      = trim((string)sh_setting('smtp_host', ''));
-    $port      = (int)sh_setting('smtp_port', '587');
+    $rawHost   = trim((string)sh_setting('smtp_host', ''));
+    $rawPort   = (int)sh_setting('smtp_port', '587');
     $enc       = strtolower((string)sh_setting('smtp_encryption', 'tls'));
-    $timeout   = (int)sh_setting('smtp_timeout', '20');
+    if (!in_array($enc, ['tls', 'ssl', 'none'], true)) { $enc = 'tls'; }
+
+    $defaultPort = ($enc === 'ssl') ? 465 : 587;
+    $parsed = sh_mail_parse_host($rawHost, $rawPort > 0 ? $rawPort : $defaultPort);
+    $host = $parsed['host'];
+    $port = ($parsed['port'] > 0 && $parsed['port'] <= 65535) ? $parsed['port'] : $defaultPort;
+
+    if ($parsed['scheme'] === 'ssl' && $enc !== 'ssl') {
+        $enc = 'ssl';
+    }
+
+    $timeout = (int)sh_setting('smtp_timeout', '20');
     if ($timeout < 5 || $timeout > 60) { $timeout = 20; }
 
     return [
-        'driver'      => ($enabled && $host !== '') ? 'smtp' : 'mail',
-        'host'        => $host,
-        'port'        => ($port > 0 && $port <= 65535) ? $port : (($enc === 'ssl') ? 465 : 587),
-        'encryption'  => in_array($enc, ['tls', 'ssl', 'none'], true) ? $enc : 'tls',
-        'username'    => trim((string)sh_setting('smtp_username', '')),
-        'password'    => (string)sh_setting('smtp_password', ''),
-        'from_email'  => $fromEmail,
-        'from_name'   => $fromName !== '' ? $fromName : 'ShopHaat',
-        'reply_to'    => $replyTo,
+        'driver'            => ($enabled && $host !== '') ? 'smtp' : 'mail',
+        'host'              => $host,
+        'raw_host'          => $rawHost,
+        'port'              => $port,
+        'encryption'        => $enc,
+        'username'          => trim((string)sh_setting('smtp_username', '')),
+        'password'          => (string)sh_setting('smtp_password', ''),
+        'from_email'        => $fromEmail,
+        'from_name'         => $fromName !== '' ? $fromName : 'ShopHaat',
+        'reply_to'          => $replyTo,
         'allow_self_signed' => (string)sh_setting('smtp_allow_self_signed', '0') === '1',
-        'dkim_enabled' => (string)sh_setting('dkim_enabled', '0') === '1',
-        'timeout'     => $timeout,
+        'dkim_enabled'      => (string)sh_setting('dkim_enabled', '0') === '1',
+        'timeout'           => $timeout,
     ];
 }
 
@@ -113,6 +222,8 @@ function sh_mail_service_status(): array
         'timeout'       => (int)($t['timeout'] ?? 20),
         'dkim'          => sh_mail_dkim_status(),
         'missing'       => $missing,
+        'ca_bundle'     => sh_mail_find_ca_bundle(),
+        'openssl_ok'    => extension_loaded('openssl'),
     ];
 }
 
@@ -254,8 +365,11 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
 
         if (($t['driver'] ?? 'mail') === 'smtp') {
             $mail->isSMTP();
-            $mail->Host = (string)$t['host'];
+            $parsedHost = sh_mail_parse_host((string)$t['host'], (int)($t['port'] ?? 587));
+            $cleanHost = $parsedHost['host'];
+            $mail->Host = $cleanHost;
             $mail->Port = (int)($t['port'] ?? 587);
+            $mail->Timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
             $username = (string)($t['username'] ?? '');
             $mail->SMTPAuth = $username !== '';
             $mail->Username = $username;
@@ -272,12 +386,18 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
                 $mail->SMTPAutoTLS = true;
             }
             $allowSelfSigned = !empty($t['allow_self_signed']);
-            $mail->SMTPOptions = ['ssl' => [
+            $sslOpts = [
                 'verify_peer'       => !$allowSelfSigned,
                 'verify_peer_name'  => !$allowSelfSigned,
                 'allow_self_signed' => $allowSelfSigned,
                 'SNI_enabled'       => true,
-            ]];
+                'peer_name'         => $cleanHost,
+            ];
+            $caBundle = sh_mail_find_ca_bundle();
+            if ($caBundle !== null && !$allowSelfSigned) {
+                $sslOpts['cafile'] = $caBundle;
+            }
+            $mail->SMTPOptions = ['ssl' => $sslOpts];
             $mail->SMTPDebug = !empty($opts['debug']) ? \PHPMailer\PHPMailer\SMTP::DEBUG_SERVER : \PHPMailer\PHPMailer\SMTP::DEBUG_OFF;
             $mail->Debugoutput = function ($str, $level) use (&$transcript): void {
                 if (count($transcript) < 120) { $transcript[] = (string)$str; }
@@ -319,8 +439,13 @@ function sh_mail_send(string $to, string $subject, string $textBody, ?string $ht
         } else {
             $raw = trim((string)$mail->ErrorInfo);
             $smtpErr = '';
-            try { $smtpErr = trim((string)$mail->getSMTPInstance()->getError()); } catch (Throwable $e) { $smtpErr = ''; }
-            $raw = sh_mail_redact($raw . ' ' . $smtpErr);
+            try {
+                $errObj = $mail->getSMTPInstance()->getError();
+                if (is_array($errObj)) {
+                    $smtpErr = trim((string)($errObj['detail'] ?? ($errObj['error'] ?? '')));
+                }
+            } catch (Throwable $e) { $smtpErr = ''; }
+            $raw = sh_mail_redact($raw . ($smtpErr !== '' ? ' (' . $smtpErr . ')' : ''));
             $result['error'] = $raw !== '' ? $raw : 'The mail transport rejected the message.';
             $result['category'] = sh_mail_category($raw !== '' ? $raw : 'unknown');
         }
@@ -481,75 +606,247 @@ function sh_mail_send_test(string $to, array $transport, array $opts = []): arra
  * without sending an email.
  *
  * @param array<string,mixed> $t
- * @return array{ok:bool,step:string,message?:string,error?:string,transcript:string}
+ * @return array{ok:bool,step:string,message?:string,error?:string,cause?:string,action?:string,host?:string,port?:int,encryption?:string,transcript:string}
  */
 function sh_mail_test_connection(array $t): array
 {
-    $host = trim((string)($t['host'] ?? ''));
-    if ($host === '') {
-        return ['ok' => false, 'step' => 'config', 'error' => 'SMTP host is not configured.', 'transcript' => ''];
+    $rawHost = trim((string)($t['host'] ?? ''));
+    if ($rawHost === '') {
+        return [
+            'ok'         => false,
+            'step'       => 'config',
+            'error'      => 'SMTP host is not configured.',
+            'cause'      => 'The SMTP host field is empty.',
+            'action'     => 'Enter the SMTP hostname provided by your email service (e.g. smtp.gmail.com).',
+            'transcript' => '',
+        ];
     }
     if (!class_exists(\PHPMailer\PHPMailer\SMTP::class)) {
-        return ['ok' => false, 'step' => 'library', 'error' => 'PHPMailer SMTP library is not loadable.', 'transcript' => ''];
+        return [
+            'ok'         => false,
+            'step'       => 'library',
+            'error'      => 'PHPMailer SMTP library is not loadable.',
+            'cause'      => 'The PHPMailer files could not be located in lib/PHPMailer.',
+            'action'     => 'Ensure the application files under lib/PHPMailer are present and readable.',
+            'transcript' => '',
+        ];
     }
-
-    $smtp = new \PHPMailer\PHPMailer\SMTP();
-    $transcript = [];
-    $smtp->Debugoutput = static function ($str, $level) use (&$transcript): void {
-        if (count($transcript) < 60) { $transcript[] = (string)$str; }
-    };
-    $smtp->do_debug = \PHPMailer\PHPMailer\SMTP::DEBUG_CONNECTION;
 
     $port = (int)($t['port'] ?? 587);
     if ($port < 1 || $port > 65535) { $port = 587; }
-    $timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
     $enc = strtolower((string)($t['encryption'] ?? 'tls'));
+    if (!in_array($enc, ['tls', 'ssl', 'none'], true)) { $enc = 'tls'; }
+
+    $parsed = sh_mail_parse_host($rawHost, $port);
+    $cleanHost = $parsed['host'];
+    if (!empty($parsed['port']) && empty($t['port'])) {
+        $port = $parsed['port'];
+    }
+
+    $timeout = max(5, min(60, (int)($t['timeout'] ?? 20)));
     $allowSelfSigned = !empty($t['allow_self_signed']);
-    $options = ['ssl' => [
+
+    // Check OpenSSL requirement
+    if ($enc !== 'none' && !extension_loaded('openssl')) {
+        return [
+            'ok'         => false,
+            'step'       => 'environment',
+            'error'      => 'OpenSSL extension is missing in PHP.',
+            'cause'      => 'Encrypted SMTP (' . strtoupper($enc) . ') requires the PHP OpenSSL extension, but it is not loaded on this server.',
+            'action'     => 'Enable the openssl PHP extension in your hosting cPanel/php.ini or contact your hosting provider.',
+            'host'       => $cleanHost,
+            'port'       => $port,
+            'encryption' => strtoupper($enc),
+            'transcript' => '',
+        ];
+    }
+
+    // Stage 1: DNS Resolution
+    $dnsIp = @gethostbyname($cleanHost);
+    if ($dnsIp === $cleanHost && !filter_var($cleanHost, FILTER_VALIDATE_IP)) {
+        return [
+            'ok'         => false,
+            'step'       => 'dns',
+            'error'      => "DNS resolution failed: could not resolve host '{$cleanHost}'.",
+            'cause'      => "The server could not look up an IP address for '{$cleanHost}'. The hostname may be misspelled or your server's DNS resolver may be unreachable.",
+            'action'     => "Check the spelling of the SMTP host. Common examples: smtp.gmail.com, smtp.office365.com, smtp.mailgun.org, smtp-relay.brevo.com.",
+            'host'       => $cleanHost,
+            'port'       => $port,
+            'encryption' => strtoupper($enc),
+            'transcript' => '',
+        ];
+    }
+
+    // Build SSL Stream context options
+    $sslOpts = [
         'verify_peer'       => !$allowSelfSigned,
         'verify_peer_name'  => !$allowSelfSigned,
         'allow_self_signed' => $allowSelfSigned,
         'SNI_enabled'       => true,
-    ]];
+        'peer_name'         => $cleanHost,
+    ];
+    $caBundle = sh_mail_find_ca_bundle();
+    if ($caBundle !== null && !$allowSelfSigned) {
+        $sslOpts['cafile'] = $caBundle;
+    }
+    $options = ['ssl' => $sslOpts];
+
+    $smtp = new \PHPMailer\PHPMailer\SMTP();
+    $transcript = [];
+    $smtp->Debugoutput = static function ($str, $level) use (&$transcript): void {
+        if (count($transcript) < 80) { $transcript[] = (string)$str; }
+    };
+    $smtp->do_debug = \PHPMailer\PHPMailer\SMTP::DEBUG_CONNECTION;
 
     try {
-        $connectHost = ($enc === 'ssl') ? ('ssl://' . $host) : $host;
-        if (!$smtp->connect($connectHost, $port, $timeout, $options)) {
-            $err = trim((string)($smtp->getError()['error'] ?? ''));
+        // Stage 2: TCP Connection
+        $connectHost = ($enc === 'ssl') ? ('ssl://' . $cleanHost) : $cleanHost;
+        $connected = @$smtp->connect($connectHost, $port, $timeout, $options);
+        if (!$connected) {
+            $errInfo = $smtp->getError();
+            $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
+            $sslErrors = [];
+            while ($sslErr = openssl_error_string()) { $sslErrors[] = $sslErr; }
+            $fullErr = trim($errText . ($sslErrors ? ' (' . implode('; ', $sslErrors) . ')' : ''));
+
+            // Check if connection failure was actually a DNS lookup failure
+            if (stripos($fullErr, 'getaddrinfo') !== false || stripos($fullErr, 'name or service not known') !== false || stripos($fullErr, 'nodename nor servname') !== false) {
+                return [
+                    'ok'         => false,
+                    'step'       => 'dns',
+                    'error'      => "DNS resolution failed: could not resolve host '{$cleanHost}'.",
+                    'cause'      => "The server could not look up an IP address for '{$cleanHost}'. The hostname may be misspelled or your server's DNS resolver is unreachable.",
+                    'action'     => "Check the spelling of the SMTP host. Common examples: smtp.gmail.com, smtp.office365.com, smtp.mailgun.org, smtp-relay.brevo.com.",
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => strtoupper($enc),
+                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
+                ];
+            }
+
+            if ($enc === 'ssl' && (stripos($fullErr, 'certificate') !== false || stripos($fullErr, 'ssl') !== false || stripos($fullErr, 'handshake') !== false)) {
+                return [
+                    'ok'         => false,
+                    'step'       => 'tls_cert',
+                    'error'      => 'Implicit TLS / SSL connection failed: ' . ($fullErr !== '' ? $fullErr : 'Handshake failed.'),
+                    'cause'      => 'The server at ' . $cleanHost . ':' . $port . ' failed the SSL/TLS handshake. The host certificate could not be validated or the port does not support SMTPS.',
+                    'action'     => 'Verify that port ' . $port . ' is an SSL/TLS port (typically 465). If your provider uses port 587, switch encryption to STARTTLS.',
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => strtoupper($enc),
+                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
+                ];
+            }
+
             return [
                 'ok'         => false,
                 'step'       => 'connect',
-                'error'      => 'Could not connect to SMTP server at ' . $host . ':' . $port . ($err !== '' ? ' (' . $err . ')' : '') . '. Verify host, port, firewall or network connectivity.',
+                'error'      => "Could not connect to SMTP server at {$cleanHost}:{$port}" . ($fullErr !== '' ? " ({$fullErr})" : "") . '.',
+                'cause'      => "Connection refused or timed out after {$timeout} seconds. Outbound network traffic to port {$port} may be blocked by your hosting provider's firewall, or the server is down.",
+                'action'     => "Check if your hosting provider restricts outbound SMTP ports (shared hosting frequently blocks port 25, 465, or 587). Contact support or try an alternative port.",
+                'host'       => $cleanHost,
+                'port'       => $port,
+                'encryption' => strtoupper($enc),
                 'transcript' => sh_mail_redact(implode("\n", $transcript)),
             ];
         }
 
-        if (!$smtp->hello(gethostname() ?: 'localhost')) {
-            $err = trim((string)($smtp->getError()['error'] ?? ''));
+        // Stage 3 & 4: Greeting and EHLO Handshake
+        $helloHost = gethostname() ?: 'localhost';
+        if (!$smtp->hello($helloHost)) {
+            $errInfo = $smtp->getError();
+            $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
             $smtp->quit();
             return [
                 'ok'         => false,
                 'step'       => 'ehlo',
-                'error'      => 'SMTP server connected but did not answer EHLO handshake' . ($err !== '' ? ' (' . $err . ')' : '') . '.',
+                'error'      => "SMTP server connected but did not answer EHLO handshake" . ($errText !== '' ? " ({$errText})" : "") . ".",
+                'cause'      => "The server connected but rejected the initial EHLO/HELO client greeting.",
+                'action'     => "Check if the server requires a fully qualified domain name for HELO/EHLO or has blacklisted your server IP.",
+                'host'       => $cleanHost,
+                'port'       => $port,
+                'encryption' => strtoupper($enc),
                 'transcript' => sh_mail_redact(implode("\n", $transcript)),
             ];
         }
 
+        $serverCaps = $smtp->getServerExtList() ?? [];
+
+        // Stage 5: STARTTLS Negotiation
         if ($enc === 'tls') {
-            if (!$smtp->startTLS()) {
-                $err = trim((string)($smtp->getError()['error'] ?? ''));
+            if (!is_array($serverCaps) || !array_key_exists('STARTTLS', $serverCaps)) {
                 $smtp->quit();
                 return [
                     'ok'         => false,
                     'step'       => 'starttls',
-                    'error'      => 'STARTTLS negotiation failed' . ($err !== '' ? ' (' . $err . ')' : '') . '. Check encryption setting or host certificate.',
+                    'error'      => "STARTTLS negotiation failed: server does not advertise STARTTLS.",
+                    'cause'      => "The server at {$cleanHost}:{$port} answered EHLO, but did not list STARTTLS in its capabilities. STARTTLS cannot be negotiated.",
+                    'action'     => ($port === 465)
+                        ? "Port 465 uses SSL/TLS (Implicit TLS). Change Encryption to 'SSL/TLS (secure SMTPS, port 465)'."
+                        : "Verify your email provider's required port and encryption settings. If the server does not support TLS, switch to 'None' (unencrypted) or port 465.",
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => 'STARTTLS',
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
                 ];
             }
-            // Re-identify following TLS handshake
-            $smtp->hello(gethostname() ?: 'localhost');
+
+            if (!$smtp->startTLS()) {
+                $errInfo = $smtp->getError();
+                $errSummary = trim((string)($errInfo['error'] ?? ''));
+                $errDetail  = trim((string)($errInfo['detail'] ?? ''));
+                $smtpCode   = trim((string)($errInfo['smtp_code'] ?? ''));
+                $sslErrors  = [];
+                while ($sslMsg = openssl_error_string()) { $sslErrors[] = $sslMsg; }
+                $combined = trim($errDetail . ($sslErrors ? ' ' . implode('; ', $sslErrors) : ''));
+                $smtp->quit();
+
+                // Detailed classification of the STARTTLS failure
+                $failStep = 'starttls';
+                $cause = "TLS cryptographic negotiation failed.";
+                $action = "Check encryption setting or host certificate.";
+
+                if (stripos($combined, 'certificate verify failed') !== false || stripos($combined, 'unable to get local issuer') !== false || stripos($combined, 'certificate_unknown') !== false) {
+                    $failStep = 'tls_cert';
+                    $cause = "TLS certificate validation failed: the mail server's certificate could not be verified against the CA certificate bundle.";
+                    $action = "Ensure your server's CA certificates are up to date. If connecting to a private or test server, you can enable 'Accept self-signed certificate'.";
+                } elseif (stripos($combined, 'peer name') !== false || stripos($combined, 'does not match') !== false || stripos($combined, 'hostname mismatch') !== false) {
+                    $failStep = 'tls_cert';
+                    $cause = "TLS hostname mismatch: the server's certificate does not match the configured hostname '{$cleanHost}'.";
+                    $action = "Verify that '{$cleanHost}' is the official SMTP hostname for your provider (e.g. smtp.gmail.com rather than a custom alias without a matching certificate).";
+                } elseif (stripos($combined, 'self signed') !== false || stripos($combined, 'self-signed') !== false) {
+                    $failStep = 'tls_cert';
+                    $cause = "The mail server presented a self-signed certificate that is not trusted by public CAs.";
+                    $action = "Install a valid CA certificate on the mail server or enable 'Accept self-signed certificate' for internal testing.";
+                } elseif ($smtpCode !== '' && ($smtpCode[0] === '4' || $smtpCode[0] === '5')) {
+                    $cause = "The server rejected the STARTTLS command with code {$smtpCode}: {$errDetail}.";
+                    $action = "Check server logs or provider status. The server may be temporarily unable to establish TLS.";
+                } elseif (stripos($combined, 'handshake') !== false || stripos($combined, 'timed out') !== false) {
+                    $failStep = 'tls_handshake';
+                    $cause = "TLS handshake timed out or was terminated during negotiation.";
+                    $action = "Verify network stability and timeout settings. Some firewalls inspect and disrupt STARTTLS traffic.";
+                }
+
+                $errorDisplay = "STARTTLS negotiation failed" . ($combined !== '' ? " ({$combined})" : ($errSummary !== '' ? " ({$errSummary})" : "")) . ".";
+                return [
+                    'ok'         => false,
+                    'step'       => $failStep,
+                    'error'      => $errorDisplay,
+                    'cause'      => $cause,
+                    'action'     => $action,
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => 'STARTTLS',
+                    'transcript' => sh_mail_redact(implode("\n", $transcript)),
+                ];
+            }
+
+            // Re-identify following TLS handshake (RFC 3207 section 4.2)
+            $smtp->hello($helloHost);
+            $serverCaps = $smtp->getServerExtList() ?? [];
         }
 
+        // Stage 6: Authentication (if credentials provided)
         $user = trim((string)($t['username'] ?? ''));
         $pass = (string)($t['password'] ?? '');
         if ($user !== '') {
@@ -558,17 +855,29 @@ function sh_mail_test_connection(array $t): array
                 return [
                     'ok'         => false,
                     'step'       => 'auth',
-                    'error'      => 'SMTP username is set but password is empty. Enter an SMTP password or app password.',
+                    'error'      => "SMTP username is set, but password is empty.",
+                    'cause'      => "A username ('{$user}') was configured without a password.",
+                    'action'     => "Enter an SMTP password or application-specific password.",
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => strtoupper($enc),
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
                 ];
             }
+
             if (!$smtp->authenticate($user, $pass)) {
-                $err = trim((string)($smtp->getError()['error'] ?? ''));
+                $errInfo = $smtp->getError();
+                $errText = trim((string)($errInfo['detail'] ?? ($errInfo['error'] ?? '')));
                 $smtp->quit();
                 return [
                     'ok'         => false,
                     'step'       => 'auth',
-                    'error'      => 'SMTP authentication failed (535)' . ($err !== '' ? ': ' . $err : '. Check your username and password.'),
+                    'error'      => "SMTP authentication failed (535)" . ($errText !== '' ? ": {$errText}" : "."),
+                    'cause'      => "Credentials rejected by {$cleanHost}. The username, password, or security settings (e.g. 2FA, App Password requirements) did not match.",
+                    'action'     => "Check your username and password. For services with Two-Factor Authentication (e.g. Gmail, Microsoft 365), you must generate an App Password.",
+                    'host'       => $cleanHost,
+                    'port'       => $port,
+                    'encryption' => strtoupper($enc),
                     'transcript' => sh_mail_redact(implode("\n", $transcript)),
                 ];
             }
@@ -578,7 +887,11 @@ function sh_mail_test_connection(array $t): array
         return [
             'ok'         => true,
             'step'       => 'complete',
-            'message'    => 'Connection test successful: reached ' . $host . ':' . $port . ($enc !== 'none' ? ' over ' . strtoupper($enc) : '') . ($user !== '' ? ' and authenticated as ' . $user : ' (open/relay mode)') . '.',
+            'message'    => "Connection test successful: reached {$cleanHost}:{$port} over " . strtoupper($enc) . ($user !== '' ? " and authenticated as {$user}" : " (open relay / no auth)") . ".",
+            'host'       => $cleanHost,
+            'port'       => $port,
+            'encryption' => strtoupper($enc),
+            'auth'       => $user !== '' ? "Authenticated as {$user}" : "No authentication required",
             'transcript' => sh_mail_redact(implode("\n", $transcript)),
         ];
     } catch (Throwable $e) {
@@ -586,6 +899,11 @@ function sh_mail_test_connection(array $t): array
             'ok'         => false,
             'step'       => 'exception',
             'error'      => sh_mail_redact($e->getMessage()),
+            'cause'      => 'Unexpected exception during SMTP connection: ' . sh_mail_redact($e->getMessage()),
+            'action'     => 'Check error logs and verify server connectivity.',
+            'host'       => $cleanHost,
+            'port'       => $port,
+            'encryption' => strtoupper($enc),
             'transcript' => sh_mail_redact(implode("\n", $transcript)),
         ];
     }

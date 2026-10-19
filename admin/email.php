@@ -63,12 +63,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'username'          => $user,
             'password'          => $pass,
             'timeout'           => $timeout,
-            'allow_self_signed' => !empty($_POST['smtp_allow_self_signed']),
+            'allow_self_signed' => !empty($_POST['smtp_allow_self_signed']) || !empty($transport['allow_self_signed']),
         ];
         $connTestResult = sh_mail_test_connection($checkTransport);
         sh_setting_save('smtp_last_tested_at', date('Y-m-d H:i:s'));
         sh_setting_save('smtp_last_test_ok', $connTestResult['ok'] ? '1' : '0');
-        sh_log_line('admin', 'SMTP connection tested to ' . $host . ':' . $port . ' — ' . ($connTestResult['ok'] ? 'success' : 'failed'));
+        sh_log_line('admin', 'SMTP connection tested to ' . ($connTestResult['host'] ?? $host) . ':' . ($connTestResult['port'] ?? $port) . ' — ' . ($connTestResult['ok'] ? 'success' : 'failed'));
     } elseif ($form === 'test_mail') {
         $selectedTab = 'smtp';
         // Transmit one real test message through the configured transport.
@@ -187,16 +187,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $enc = (string)($_POST['smtp_encryption'] ?? 'tls');
         if (!in_array($enc, ['tls', 'ssl', 'none'], true)) { $enc = 'tls'; }
 
+        $rawHost = trim((string)($_POST['smtp_host'] ?? ''));
+        $parsedHost = sh_mail_parse_host($rawHost, $port);
+        $cleanHost = $parsedHost['host'];
+        if ($rawHost !== '' && $cleanHost === '') {
+            $errors['smtp_host'] = 'The SMTP host is invalid.';
+        }
+        if (!empty($parsedHost['port']) && empty($_POST['smtp_port'])) {
+            $port = $parsedHost['port'];
+        }
+
         // Port & Encryption compatibility check
-        if ($port === 465 && $enc !== 'ssl') {
-            $noticePort = 'Port 465 traditionally uses SSL/TLS. If connections fail, switch encryption to SSL/TLS.';
+        $noticePort = '';
+        if ($enc === 'none') {
+            $noticePort = 'Plain SMTP sends passwords and email contents unencrypted across the network. Use STARTTLS or SSL/TLS in production.';
+        } elseif ($port === 465 && $enc !== 'ssl') {
+            $noticePort = 'Port 465 is designed for SSL/TLS (Implicit TLS). Using STARTTLS on port 465 will usually fail.';
         } elseif ($port === 587 && $enc === 'ssl') {
-            $noticePort = 'Port 587 typically uses STARTTLS rather than SSL/TLS.';
+            $noticePort = 'Port 587 is designed for STARTTLS. Using Implicit SSL/TLS on port 587 will usually fail.';
         }
 
         if (!$errors) {
             sh_setting_save('smtp_enabled', !empty($_POST['smtp_enabled']) ? '1' : '0');
-            sh_setting_save('smtp_host', trim((string)($_POST['smtp_host'] ?? '')));
+            sh_setting_save('smtp_host', $cleanHost);
             sh_setting_save('smtp_port', (string)$port);
             sh_setting_save('smtp_encryption', $enc);
             sh_setting_save('smtp_username', trim((string)($_POST['smtp_username'] ?? '')));
@@ -285,10 +298,68 @@ require __DIR__ . '/_layout.php';
 <?php if ($connTestResult !== null): ?>
   <div class="sh-alert <?= $connTestResult['ok'] ? 'sh-alert--success' : 'sh-alert--error' ?>" style="margin-bottom:16px">
     <?= sh_icon($connTestResult['ok'] ? 'check-circle' : 'x-circle', 18) ?>
-    <div>
-      <strong><?= $connTestResult['ok'] ? 'SMTP Connection Succeeded' : 'SMTP Connection Failed' ?></strong>
-      (Step: <?= e($connTestResult['step']) ?>)<br>
-      <?= e((string)($connTestResult['ok'] ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
+    <div style="flex:1">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <strong><?= $connTestResult['ok'] ? 'SMTP Connection Succeeded' : 'SMTP Connection Failed' ?></strong>
+        <span class="sh-chip <?= $connTestResult['ok'] ? 'sh-chip--success' : 'sh-chip--danger' ?>">
+          Stage: <?= e($connTestResult['step']) ?>
+        </span>
+      </div>
+      <div style="margin-top:4px">
+        <?= e((string)($connTestResult['ok'] ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
+      </div>
+      <?php if (!empty($connTestResult['cause'])): ?>
+        <div style="margin-top:6px;font-size:13px;color:var(--sh-heading)">
+          <strong>Likely cause:</strong> <?= e($connTestResult['cause']) ?>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($connTestResult['action'])): ?>
+        <div style="margin-top:4px;font-size:13px;color:var(--sh-heading)">
+          <strong>Recommended action:</strong> <?= e($connTestResult['action']) ?>
+        </div>
+      <?php endif; ?>
+      <div style="margin-top:8px;font-size:12px;opacity:0.85;display:flex;gap:12px;flex-wrap:wrap">
+        <span>Target: <code><?= e((string)($connTestResult['host'] ?? '')) ?>:<?= e((string)($connTestResult['port'] ?? '')) ?></code></span>
+        <span>Mode: <code><?= e((string)($connTestResult['encryption'] ?? '')) ?></code></span>
+        <span>Password: <code>••••••••</code> (masked)</span>
+      </div>
+
+      <!-- Stage-by-stage results breakdown -->
+      <?php
+        $st = $connTestResult['step'];
+        $isOk = $connTestResult['ok'];
+        $dnsSt = ($st === 'dns') ? 'failed' : 'passed';
+        $tcpSt = ($st === 'dns') ? 'skipped' : (($st === 'connect') ? 'failed' : 'passed');
+        $ehloSt = in_array($st, ['dns', 'connect'], true) ? 'skipped' : (($st === 'ehlo') ? 'failed' : 'passed');
+        $tlsSt = in_array($st, ['dns', 'connect', 'ehlo'], true) ? 'skipped' : (in_array($st, ['starttls', 'tls_cert', 'tls_handshake'], true) ? 'failed' : 'passed');
+        $authSt = in_array($st, ['dns', 'connect', 'ehlo', 'starttls', 'tls_cert', 'tls_handshake'], true) ? 'skipped' : (($st === 'auth') ? 'failed' : ($isOk ? 'passed' : 'skipped'));
+      ?>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,0.08)">
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dnsSt === 'passed' ? '#16a34a' : '#dc2626' ?>;margin-right:4px"></span>
+          <strong>DNS:</strong> <?= $dnsSt === 'passed' ? 'Resolved' : 'Failed' ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $tcpSt === 'passed' ? '#16a34a' : ($tcpSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
+          <strong>Socket:</strong> <?= $tcpSt === 'passed' ? 'Connected' : ($tcpSt === 'failed' ? 'Refused/Timeout' : 'Pending') ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $ehloSt === 'passed' ? '#16a34a' : ($ehloSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
+          <strong>EHLO:</strong> <?= $ehloSt === 'passed' ? 'Greeted' : ($ehloSt === 'failed' ? 'Failed' : 'Pending') ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $tlsSt === 'passed' ? '#16a34a' : ($tlsSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
+          <strong>TLS:</strong> <?= $tlsSt === 'passed' ? 'Verified' : ($tlsSt === 'failed' ? 'Failed' : 'Pending') ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $authSt === 'passed' ? '#16a34a' : ($authSt === 'failed' ? '#dc2626' : '#94a3b8') ?>;margin-right:4px"></span>
+          <strong>Auth:</strong> <?= $authSt === 'passed' ? 'Verified' : ($authSt === 'failed' ? 'Failed' : 'Pending') ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#94a3b8;margin-right:4px"></span>
+          <strong>Delivery:</strong> <em>Not tested</em>
+        </div>
+      </div>
     </div>
   </div>
   <?php if (!empty($connTestResult['transcript'])): ?>
@@ -302,11 +373,17 @@ require __DIR__ . '/_layout.php';
 <?php if ($testResult !== null): ?>
   <div class="sh-alert <?= !empty($testResult['ok']) ? 'sh-alert--success' : 'sh-alert--error' ?>" style="margin-bottom:16px">
     <?= sh_icon(!empty($testResult['ok']) ? 'check-circle' : 'x-circle', 18) ?>
-    <div>
-      <strong><?= !empty($testResult['ok']) ? 'Test Message Accepted by Mail Server' : 'Test Email Delivery Failed' ?></strong>
-      (Transport: <?= e((string)($testResult['transport'] ?? 'unknown')) ?><?= !empty($testResult['category']) ? ', Category: ' . e((string)$testResult['category']) : '' ?>)<br>
-      <?= e((string)($testResult['ok'] ? ($testResult['response'] ?? 'Accepted.') : ($testResult['error'] ?? ''))) ?>
-      <?php if (!empty($testResult['message_id'])): ?><br><span class="sh-table__meta">Message-ID: <?= e((string)$testResult['message_id']) ?></span><?php endif; ?>
+    <div style="flex:1">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <strong><?= !empty($testResult['ok']) ? 'Test Message Accepted by Mail Server' : 'Test Email Delivery Failed' ?></strong>
+        <span class="sh-chip <?= !empty($testResult['ok']) ? 'sh-chip--success' : 'sh-chip--danger' ?>">
+          Transport: <?= e((string)($testResult['transport'] ?? 'unknown')) ?><?= !empty($testResult['category']) ? ', Category: ' . e((string)$testResult['category']) : '' ?>
+        </span>
+      </div>
+      <div style="margin-top:4px">
+        <?= e((string)($testResult['ok'] ? ($testResult['response'] ?? 'Accepted.') : ($testResult['error'] ?? ''))) ?>
+      </div>
+      <?php if (!empty($testResult['message_id'])): ?><div style="margin-top:4px" class="sh-table__meta">Message-ID: <?= e((string)$testResult['message_id']) ?></div><?php endif; ?>
     </div>
   </div>
   <?php if (!empty($testResult['transcript'])): ?>
@@ -629,9 +706,9 @@ require __DIR__ . '/_layout.php';
           <!-- SMTP Diagnostics & Actions -->
           <h4 style="margin:0 0 12px;font-size:14px;color:var(--sh-heading)"><?= sh_icon('zap', 15) ?> SMTP Diagnostics &amp; Testing Actions</h4>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <!-- Action 1: Test Connection -->
+            <!-- Action 1: Run SMTP Connection Test -->
             <div style="background:var(--sh-bg-2);border:1px solid var(--sh-line);border-radius:8px;padding:14px">
-              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">Action: Test SMTP Connection</h5>
+              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">Action: Run SMTP Connection Test</h5>
               <p style="font-size:12px;color:var(--sh-muted);margin:0 0 10px">
                 Tests network reachability, TLS handshake, and authentication credentials without sending a message.
               </p>
@@ -642,8 +719,9 @@ require __DIR__ . '/_layout.php';
                 <input type="hidden" name="smtp_port" value="<?= e((string)sh_setting('smtp_port', '587')) ?>">
                 <input type="hidden" name="smtp_encryption" value="<?= e((string)sh_setting('smtp_encryption', 'tls')) ?>">
                 <input type="hidden" name="smtp_username" value="<?= e((string)sh_setting('smtp_username', '')) ?>">
+                <input type="hidden" name="smtp_allow_self_signed" value="<?= sh_setting('smtp_allow_self_signed', '0') === '1' ? '1' : '0' ?>">
                 <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" <?= $host === '' ? 'disabled' : '' ?>>
-                  <?= sh_icon('zap', 14) ?> Test SMTP Connection
+                  <?= sh_icon('zap', 14) ?> Run SMTP Connection Test
                 </button>
               </form>
             </div>
@@ -661,7 +739,7 @@ require __DIR__ . '/_layout.php';
                   <input class="sh-input" type="email" name="test_recipient" placeholder="test@yourinbox.com"
                          value="<?= e((string)($_POST['test_recipient'] ?? $adminEmail)) ?>" required style="height:36px;font-size:13px">
                   <button class="sh-btn sh-btn--sm" type="submit" <?= $mailStatus['ready'] ? '' : 'disabled' ?> style="flex:none">
-                    <?= sh_icon('send', 13) ?> Send Test
+                    <?= sh_icon('send', 13) ?> Send Test Email
                   </button>
                 </div>
               </form>
