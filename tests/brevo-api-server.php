@@ -12,8 +12,14 @@
  *   account-denied-key  the reported condition: account 403 permission_denied
  *                       while the transactional endpoints keep working
  *   send-denied-key     authenticated but not permitted for anything: 403
- *   rate-limited-key    account 403, list 429 with Retry-After: 7
+ *   rate-limited-key    account 429 with Retry-After: 7
  *   payment-required-key account 402 not_enough_credits
+ *   invalid-sender-key  account 200, send 400 invalid_parameter (sender)
+ *   missing-field-key   account 200, send 400 missing_parameter
+ *
+ * GET /v3/smtp/emails mirrors Brevo: it is a log query that requires an
+ * email, messageId or templateId filter, so an unfiltered call answers 400
+ * missing_parameter. The application must not use it as a permission probe.
  *
  * It records method/path and a payload summary, never the api-key value.
  */
@@ -86,7 +92,8 @@ while (time() < $deadline && $handled < 40) {
     $path = '/';
     if (preg_match('~^([A-Z]+)\s+(\S+)~', $requestLine, $m)) { $method = $m[1]; $path = $m[2]; }
     $apiKey = (string)($headers['api-key'] ?? '');
-    $known = ['test-api-key', 'account-denied-key', 'send-denied-key', 'rate-limited-key', 'payment-required-key'];
+    $known = ['test-api-key', 'account-denied-key', 'send-denied-key', 'rate-limited-key', 'payment-required-key',
+        'invalid-sender-key', 'missing-field-key'];
     // "authorized" means the stub recognised the key, not that every resource
     // was permitted: account-denied-key authenticates but is refused for
     // /v3/account, exactly like the reported Brevo condition.
@@ -94,9 +101,14 @@ while (time() < $deadline && $handled < 40) {
     $payload = json_decode($body, true);
     if (is_array($payload)) {
         $entry['recipient'] = (string)($payload['to'][0]['email'] ?? '');
+        $entry['sender'] = (string)($payload['sender']['email'] ?? '');
+        $entry['sender_name'] = (string)($payload['sender']['name'] ?? '');
         $entry['subject'] = (string)($payload['subject'] ?? '');
         $entry['has_text'] = !empty($payload['textContent']);
+        $entry['has_html'] = !empty($payload['htmlContent']);
     }
+    $entry['accept'] = (string)($headers['accept'] ?? '');
+    $entry['content_type'] = (string)($headers['content-type'] ?? '');
     @file_put_contents($dir . '/request-' . $handled . '.json', json_encode($entry, JSON_PRETTY_PRINT));
 
     $route = (string)parse_url($path, PHP_URL_PATH);
@@ -116,15 +128,23 @@ while (time() < $deadline && $handled < 40) {
             $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "account"']));
         }
     } elseif ($method === 'GET' && $route === '/v3/smtp/emails') {
-        if (in_array($apiKey, ['test-api-key', 'account-denied-key'], true)) {
+        // Brevo requires one of these filters; without one it answers 400.
+        $query = [];
+        parse_str((string)parse_url($path, PHP_URL_QUERY), $query);
+        $filtered = isset($query['email']) || isset($query['messageId']) || isset($query['templateId']);
+        if (!$filtered) {
+            $respond($conn, 400, '{"code":"missing_parameter","message":"At least one of the following parameters is required: email, messageId, templateId"}');
+        } elseif (in_array($apiKey, ['test-api-key', 'account-denied-key'], true)) {
             $respond($conn, 200, '{"count":0,"transactionalEmails":[]}');
-        } elseif ($apiKey === 'rate-limited-key') {
-            $respond($conn, 429, '{"code":"too_many_requests","message":"Rate limit reached"}', ['Retry-After: 7']);
         } else {
             $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "smtp"']));
         }
     } elseif ($method === 'POST' && $route === '/v3/smtp/email') {
-        if (in_array($apiKey, ['test-api-key', 'account-denied-key'], true)) {
+        if ($apiKey === 'invalid-sender-key') {
+            $respond($conn, 400, '{"code":"invalid_parameter","message":"Invalid `sender` parameter: the sender email is not verified in this account"}');
+        } elseif ($apiKey === 'missing-field-key') {
+            $respond($conn, 400, '{"code":"missing_parameter","message":"`sender.email` is missing"}');
+        } elseif (in_array($apiKey, ['test-api-key', 'account-denied-key', 'rate-limited-key'], true)) {
             $respond($conn, 201, '{"messageId":"<test-message@brevo>"}');
         } else {
             $respond($conn, 403, json_encode(['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "smtp"']));

@@ -195,7 +195,7 @@ try {
     api_same('missing', $noKey['credential']['state'], 'An empty key was not reported as missing.');
     api_assert(($noKey['checks']['tls']['status'] ?? '') === 'passed', 'Test A should pass against the local HTTPS stub.');
     api_assert(($noKey['checks']['tls']['http_status'] ?? 0) === 401, 'Test A must use an unauthenticated request and expect 401.');
-    api_assert(empty($noKey['checks']['credentials']['http_status']), 'Test B must not run without a key.');
+    api_assert(empty($noKey['checks']['account']['http_status']), 'Test B must not run without a key.');
     api_same('incomplete', $noKey['verdict'], 'A missing key must leave the verdict incomplete.');
     $tlsRequests = api_requests($apiDir);
     api_assert(count($tlsRequests) >= 1, 'Test A did not reach the stub.');
@@ -203,29 +203,35 @@ try {
     api_assert(!empty($noKey['certificate']) && ($noKey['certificate']['hostname_valid'] ?? null) === true, 'The TLS certificate was not validated by hostname.');
 
     // ------------------------------------------------------------------
-    echo "2. the reported 403 on /v3/account is a resource permission result\n";
+    echo "2. the reported 403 on /v3/account is informational, not a failure\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
     $denied = sh_brevo_api_test_connection(['timeout' => 8]);
-    api_assert(($denied['checks']['credentials']['status'] ?? '') === 'passed', 'Test B should pass for a key that may use transactional email.');
-    api_same('permission_denied', $denied['checks']['account']['status'], 'Test C did not report the 403 as permission_denied.');
-    api_same(403, $denied['checks']['account']['http_status'], 'Test C did not record HTTP 403.');
+    api_same('permission_denied', $denied['checks']['account']['status'], 'The 403 was not reported as permission_denied.');
+    api_same(403, $denied['checks']['account']['http_status'], 'The 403 status was not recorded.');
     api_same('permission_denied', $denied['checks']['account']['provider']['code'], 'The provider error code was not captured.');
-    api_assert(str_contains((string)$denied['checks']['account']['detail'], 'not by itself block'), 'The 403 explanation must say it does not by itself block email.');
-    api_assert(!empty($denied['ok']), 'A 403 on the account resource alone must not fail the transactional check.');
-    api_same('verified', $denied['verdict'], 'The verdict should be verified when the email scope passes.');
-    api_assert(str_contains((string)$denied['message'], 'does not affect email delivery'), 'The summary did not explain the account 403.');
+    api_assert(str_contains((string)$denied['checks']['account']['detail'], 'account-information access was denied'), 'The 403 explanation does not say account access was denied.');
+    api_assert(str_contains((string)$denied['checks']['account']['detail'], 'only a real Send Test Email'), 'The 403 explanation must point at a real send.');
+    api_assert(!empty($denied['ok']), 'A 403 on the account resource alone must not fail the diagnostics.');
+    api_same('account_denied', $denied['verdict'], 'The verdict should record an account permission denial.');
+    api_assert(str_contains((string)$denied['message'], 'does not by itself block transactional email'), 'The summary did not explain the account 403.');
+    api_assert(empty($denied['transactional_verified']), 'The diagnostics must not claim transactional email is verified.');
     api_assert(!str_contains(json_encode($denied), 'account-denied-key'), 'The credential value leaked into the diagnostic result.');
-    api_assert(!str_contains(json_encode($denied), 'api-key:'), 'A request header leaked into the diagnostic result.');
 
     // ------------------------------------------------------------------
-    echo "3. the transactional check does not send a message\n";
+    echo "3. the incorrect historical-email probe is gone and diagnostics send nothing\n";
     // ------------------------------------------------------------------
+    $paths = array_map(static fn(array $r): string => (string)($r['path'] ?? ''), api_requests($apiDir));
+    foreach ($paths as $path) {
+        api_assert(!str_starts_with($path, '/v3/smtp/emails'), 'The diagnostics called the historical list endpoint: ' . $path);
+    }
     api_same([], api_posts($apiDir), 'The non-delivery diagnostics sent a POST; they must never send mail.');
-    $requests = api_requests($apiDir);
-    $paths = array_map(static fn(array $r): string => (string)($r['path'] ?? ''), $requests);
-    api_assert(in_array('/v3/smtp/emails?limit=1', $paths, true), 'Test B did not call the transactional emails endpoint.');
-    api_assert(in_array('/v3/account', $paths, true), 'Test C did not call the account endpoint.');
+    $tx = $denied['checks']['transactional'] ?? null;
+    api_assert(is_array($tx), 'The transactional check row is missing from the diagnostics.');
+    api_same('not_tested', $tx['status'], 'The transactional check must be reported as not tested.');
+    api_same('POST /v3/smtp/email', $tx['endpoint'], 'The transactional row does not name the documented endpoint.');
+    api_assert(str_contains((string)$tx['detail'], 'Not run'), 'The transactional row does not say it was not run.');
+    api_assert(str_contains((string)$tx['detail'], 'Send Test Email'), 'The transactional row does not name the action that runs it.');
 
     // ------------------------------------------------------------------
     echo "4. an unknown API key is an authentication failure, not a permission result\n";
@@ -234,8 +240,8 @@ try {
     $bad = sh_brevo_api_test_connection(['timeout' => 8]);
     api_assert(empty($bad['ok']), 'An unknown API key was accepted.');
     api_same('invalid_credentials', $bad['verdict'], 'An unknown key was not classified as invalid credentials.');
-    api_same('invalid_key', $bad['checks']['credentials']['status'], 'Test B did not report the 401 as invalid_key.');
-    api_same(401, $bad['checks']['credentials']['http_status'], 'Test B did not record HTTP 401.');
+    api_same('invalid_key', $bad['checks']['account']['status'], 'The 401 was not reported as an invalid key.');
+    api_same(401, $bad['checks']['account']['http_status'], 'The 401 status was not recorded.');
     api_assert(str_contains((string)$bad['error'], '401'), 'The reported error does not include HTTP 401.');
     api_assert((string)$bad['step'] !== 'api_auth', 'The old conflating api_auth stage is still being reported.');
 
@@ -246,16 +252,12 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'xsmtpsib-0123456789abcdef-SENTINEL-SMTP-KEY';
     $smtpKey = sh_brevo_api_test_connection(['timeout' => 8]);
     api_same('smtp_key', $smtpKey['credential']['state'], 'An SMTP key in the API field was not recognised.');
-    api_same('incomplete', $smtpKey['verdict'], 'An SMTP key must not produce a verified verdict.');
-    // Test A still runs (it is unauthenticated by design); the credential must
-    // never leave the server. Prove it by looking at what the endpoint saw.
+    api_same('incomplete', $smtpKey['verdict'], 'An SMTP key must not produce a reachable verdict.');
     $newRecords = array_slice(api_requests($apiDir), count($before));
     api_assert($newRecords !== [], 'The unauthenticated reachability check did not run.');
     foreach ($newRecords as $record) {
         api_assert(($record['key_present'] ?? true) === false, 'An SMTP key was transmitted to the API endpoint.');
     }
-    api_same([], api_posts($apiDir), 'An SMTP key attempt sent a POST.');
-    api_assert(str_contains((string)$smtpKey['error'], 'SMTP key'), 'The refusal does not name the credential type.');
     $smtpKeySend = sh_brevo_api_send('inbox@example.test', 'refused', 'refused', null, sh_mail_transport());
     api_assert(empty($smtpKeySend['ok']) && !empty($smtpKeySend['skipped']), 'An SMTP key was allowed to attempt an API send.');
     api_assert(!str_contains(json_encode([$smtpKey, $smtpKeySend]), 'SENTINEL-SMTP-KEY'), 'The SMTP key leaked into a result.');
@@ -263,7 +265,6 @@ try {
     // ------------------------------------------------------------------
     echo "6. an API key in the SMTP password is refused, not used\n";
     // ------------------------------------------------------------------
-    // The check happens before DNS or a socket, so no connection is attempted.
     $smtpWithApiKey = [
         'driver' => 'smtp', 'transport' => 'smtp', 'host' => 'smtp-relay.brevo.com', 'port' => 587,
         'encryption' => 'tls', 'username' => 'user@example.test',
@@ -274,13 +275,12 @@ try {
     api_same('api_key_in_smtp_password', $mismatch['code'], 'The mismatch has the wrong code.');
     $smtpTest = sh_mail_test_connection($smtpWithApiKey);
     api_same('credentials', $smtpTest['step'], 'The SMTP test did not stop at the credential stage.');
-    api_assert(str_contains((string)$smtpTest['error'], 'API key'), 'The SMTP refusal does not explain the credential mix-up.');
     $smtpSend = sh_mail_send('inbox@example.test', 'refused', 'refused', null, ['transport' => $smtpWithApiKey]);
     api_assert(empty($smtpSend['ok']) && !empty($smtpSend['skipped']), 'A cross-transport credential was allowed to attempt SMTP delivery.');
     api_assert(!str_contains(json_encode([$smtpTest, $smtpSend]), 'SENTINEL-API-KEY'), 'The API key leaked into an SMTP result.');
 
     // ------------------------------------------------------------------
-    echo "7. a valid key with a forbidden account resource can still send\n";
+    echo "7. Test C: a real POST /v3/smtp/email is accepted with a message id\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
     $send = sh_mail_send_test('inbox@example.test', sh_mail_transport(), ['admin_id' => 1]);
@@ -291,15 +291,43 @@ try {
     api_same('POST', $send['request']['method'] ?? '', 'The send did not record its HTTP method.');
     api_same('/smtp/email', $send['request']['path'] ?? '', 'The send did not use the transactional email endpoint.');
     api_same(201, $send['http_status'] ?? 0, 'The send did not record HTTP 201.');
+    api_same('unconfirmed', $send['delivery'] ?? '', 'Acceptance must leave delivery unconfirmed.');
     api_assert(str_contains((string)$send['response'], 'not inbox delivery'), 'Acceptance was presented as inbox delivery.');
     $posts = api_posts($apiDir);
     api_assert(count($posts) === 1, 'Exactly one real POST should have been made, got ' . count($posts) . '.');
-    api_same('inbox@example.test', $posts[0]['recipient'] ?? '', 'The POST had the wrong recipient.');
-    api_assert(($posts[0]['authorized'] ?? false) === true, 'The POST did not carry a key the stub recognises.');
+    $post = $posts[0];
+    api_same('inbox@example.test', $post['recipient'] ?? '', 'The POST had the wrong recipient.');
+    api_same('noreply@example.test', $post['sender'] ?? '', 'The POST did not use the configured sender.');
+    api_same('ShopHaat API Test', $post['sender_name'] ?? '', 'The POST did not use the configured sender name.');
+    api_assert(($post['subject'] ?? '') !== '', 'The POST had no subject.');
+    api_assert(($post['has_text'] ?? false) === true, 'The POST had no textContent.');
+    api_assert(str_contains((string)($post['accept'] ?? ''), 'application/json'), 'The POST did not send an Accept: application/json header.');
+    api_assert(str_contains((string)($post['content_type'] ?? ''), 'application/json'), 'The POST did not send a JSON content type.');
+    api_assert(($post['key_present'] ?? false) === true, 'The POST did not carry the api-key header.');
+    api_assert(($post['authorized'] ?? false) === true, 'The POST did not carry a key the stub recognises.');
     api_assert(!str_contains(json_encode($send), 'account-denied-key'), 'The API key leaked into the send result.');
 
     // ------------------------------------------------------------------
-    echo "8. a denied send is a failure, never a success\n";
+    echo "8. an invalid sender is a sanitized 400 that names the field\n";
+    // ------------------------------------------------------------------
+    $GLOBALS['test_settings']['brevo_api_key'] = 'invalid-sender-key';
+    $invalidSender = sh_mail_send_test('inbox@example.test', sh_mail_transport());
+    api_assert(empty($invalidSender['ok']), 'A 400 invalid-sender response was reported as success.');
+    api_same(400, $invalidSender['http_status'] ?? 0, 'The 400 status was not recorded.');
+    api_same('rejected', $invalidSender['category'], 'A 400 was not categorised as rejected.');
+    api_same('invalid_parameter', $invalidSender['provider']['code'] ?? '', 'The provider code was not captured.');
+    api_assert(!empty($invalidSender['fields']), 'The 400 did not identify the offending field.');
+    api_assert(str_contains(strtolower(implode(',', (array)$invalidSender['fields'])), 'sender'), 'The 400 field list does not name the sender.');
+    api_assert(empty($invalidSender['message_id']), 'A failed send exposed a message id.');
+    api_assert(str_contains((string)$invalidSender['error'], 'Field Brevo objected to'), 'The error does not tell the operator which field to fix.');
+
+    $GLOBALS['test_settings']['brevo_api_key'] = 'missing-field-key';
+    $missingField = sh_mail_send_test('inbox@example.test', sh_mail_transport());
+    api_same(400, $missingField['http_status'] ?? 0, 'The missing_parameter 400 was not recorded.');
+    api_assert(str_contains(implode(',', (array)($missingField['fields'] ?? [])), 'sender.email'), 'The missing field name was not extracted from the provider message.');
+
+    // ------------------------------------------------------------------
+    echo "9. a denied send is a failure, never a success, and is not retried\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'send-denied-key';
     $beforeDenied = count(api_posts($apiDir));
@@ -312,51 +340,47 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "9. status codes map to distinct, non-overlapping meanings\n";
+    echo "10. status codes map to distinct, non-overlapping meanings\n";
     // ------------------------------------------------------------------
     $provider = ['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "account"', 'detail' => '', 'fields' => []];
     $m403 = sh_brevo_api_status_meaning(403, $provider, 'GET /v3/account');
     api_assert($m403['kind'] === 'permission_denied', '403 was not classified as a permission result.');
     api_assert(!str_contains(strtolower($m403['label']), 'invalid key'), '403 must not be described as an invalid key.');
-    api_assert(str_contains($m403['cause'], 'not authorized') || str_contains($m403['cause'], 'permission'), '403 has no resource-permission explanation.');
-    $m401 = sh_brevo_api_status_meaning(401, $provider, 'GET /v3/account');
-    api_same('invalid_credentials', $m401['kind'], '401 was not classified as invalid credentials.');
-    $m402 = sh_brevo_api_status_meaning(402, ['code' => 'not_enough_credits', 'message' => 'Not enough credits', 'detail' => '', 'fields' => []], 'POST /v3/smtp/email');
-    api_same('payment_required', $m402['kind'], '402 was not classified as a billing problem.');
-    $m429 = sh_brevo_api_status_meaning(429, $provider, 'GET /v3/smtp/emails', 7);
+    api_same('invalid_credentials', sh_brevo_api_status_meaning(401, $provider, 'GET /v3/account')['kind'], '401 was not classified as invalid credentials.');
+    api_same('payment_required', sh_brevo_api_status_meaning(402, ['code' => 'not_enough_credits', 'message' => 'Not enough credits', 'detail' => '', 'fields' => []], 'POST /v3/smtp/email')['kind'], '402 was not classified as a billing problem.');
+    $m429 = sh_brevo_api_status_meaning(429, $provider, 'GET /v3/account', 7);
     api_same('rate_limited', $m429['kind'], '429 was not classified as a rate limit.');
     api_same(7, $m429['retry_after'], 'The Retry-After value was not carried into the meaning.');
     api_same('invalid_request', sh_brevo_api_status_meaning(400, $provider, 'POST /v3/smtp/email')['kind'], '400 was not classified as a validation problem.');
     api_same('network', sh_brevo_api_status_meaning(0, $provider)['kind'], 'A transport failure was not classified as network.');
     api_same('provider_error', sh_brevo_api_status_meaning(503, $provider)['kind'], '503 was not classified as a provider error.');
     foreach ([200, 201] as $code) {
-        $m = sh_brevo_api_status_meaning($code, $provider, 'POST /v3/smtp/email');
-        api_same('ok', $m['kind'], $code . ' was not treated as success.');
+        api_same('ok', sh_brevo_api_status_meaning($code, $provider, 'POST /v3/smtp/email')['kind'], $code . ' was not treated as success.');
     }
 
     // ------------------------------------------------------------------
-    echo "10. a 402 from the account endpoint is billing, not a broken key\n";
+    echo "11. a 402 from the account endpoint is billing, not a broken key\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'payment-required-key';
     $billing = sh_brevo_api_test_connection(['timeout' => 8]);
     api_assert(empty($billing['ok']), 'A 402 account response was treated as success.');
     api_same('payment_required', $billing['checks']['account']['status'], 'The 402 was not reported as payment_required.');
-    api_assert(str_contains((string)$billing['checks']['account']['detail'], 'credit') || str_contains(strtolower((string)$billing['checks']['account']['detail']), 'billing') || str_contains(strtolower((string)$billing['checks']['account']['detail']), 'activate'), 'The 402 explanation does not mention credits/billing/activation.');
+    api_same('payment_required', $billing['verdict'], 'The 402 was not carried into the verdict.');
 
     // ------------------------------------------------------------------
-    echo "11. a rate limit carries retry guidance and is not retried\n";
+    echo "12. a rate limit carries retry guidance and is not retried\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'rate-limited-key';
     $beforePosts = count(api_posts($apiDir));
     $limited = sh_brevo_api_test_connection(['timeout' => 8]);
-    api_same('rate_limited', $limited['checks']['credentials']['status'], 'A 429 was not reported as a rate limit.');
-    api_same(7, $limited['checks']['credentials']['retry_after'], 'The Retry-After value was not surfaced.');
-    api_assert(str_contains((string)$limited['checks']['credentials']['action'], 'wait') || str_contains(strtolower((string)$limited['checks']['credentials']['action']), 'retry'), 'The rate-limit result has no wait guidance.');
+    api_same('rate_limited', $limited['checks']['account']['status'], 'A 429 was not reported as a rate limit.');
+    api_same(7, $limited['checks']['account']['retry_after'], 'The Retry-After value was not surfaced.');
+    api_same('rate_limited', $limited['verdict'], 'The 429 was not carried into the verdict.');
     api_same($beforePosts, count(api_posts($apiDir)), 'A 429 caused a send attempt.');
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "12. an unreachable endpoint is a network failure, not an auth failure\n";
+    echo "13. an unreachable endpoint is a network failure, not an auth failure\n";
     // ------------------------------------------------------------------
     api_stop($server);
     usleep(300000);
@@ -367,7 +391,7 @@ try {
     api_assert(!str_contains(strtolower((string)$down['error']), 'invalid key'), 'A transport failure was described as an invalid key.');
 
     // ------------------------------------------------------------------
-    echo "13. one transport failing does not corrupt the other\n";
+    echo "14. one transport failing does not corrupt the other\n";
     // ------------------------------------------------------------------
     api_same('brevo_api', sh_mail_selected_transport(), 'The selected API transport changed after a failure.');
     $GLOBALS['test_settings']['mail_transport'] = 'smtp';

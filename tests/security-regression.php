@@ -2521,10 +2521,15 @@ sh_t('a 403 from the Brevo account resource is reported as a permission, not an 
     if ($at === false || $end === false) { return 'sh_brevo_api_test_connection() could not be read'; }
     $fn = substr($mail, $at, $end - $at);
 
-    // The three checks must stay separate and the account check must be
-    // described as informational, so a 403 there can never read as "the API is
-    // broken" or "the key is invalid".
-    if (!str_contains($fn, "GET /v3/smtp/emails")) { return 'the credential is not tested in the transactional-email scope'; }
+    // The checks must stay separate and the account check must be described as
+    // informational, so a 403 there can never read as "the API is broken" or
+    // "the key is invalid". The historical list endpoint is a log query that
+    // needs an email/messageId/templateId filter; it must not be used as a
+    // permission probe, and transaction email must not be claimed before a
+    // real POST has succeeded.
+    if (str_contains($fn, "'/smtp/emails'")) { return 'the diagnostics still query the historical transactional-email log'; }
+    if (!str_contains($fn, 'POST /v3/smtp/email')) { return 'the transactional check does not name the documented send endpoint'; }
+    if (!str_contains($fn, "'not_tested'")) { return 'transactional email is not reported as not tested until a real send'; }
     if (!str_contains($fn, 'informational')) { return 'the account check is not labelled informational'; }
     if (!str_contains($fn, "=== 403")) { return '403 is not handled separately in the API diagnostics'; }
     if (!str_contains($fn, "'permission_denied'")) { return 'the diagnostics never report a resource permission result'; }

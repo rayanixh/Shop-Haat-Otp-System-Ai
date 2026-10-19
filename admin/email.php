@@ -161,6 +161,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($viaApi) {
                 sh_setting_save('brevo_api_last_test_ok', !empty($testResult['ok']) ? '1' : '0');
                 sh_setting_save('brevo_api_last_tested_at', date('Y-m-d H:i:s'));
+                // Persist only non-secret outcome data so the Transactional
+                // Email row still shows the real result after a page refresh.
+                sh_setting_save('brevo_api_last_send_at', date('Y-m-d H:i:s'));
+                sh_setting_save('brevo_api_last_send_status', (string)(int)($testResult['http_status'] ?? 0));
+                sh_setting_save('brevo_api_last_send_message_id', (string)($testResult['message_id'] ?? ''));
+                sh_setting_save('brevo_api_last_send_error', empty($testResult['ok'])
+                    ? mb_substr((string)($testResult['error'] ?? ''), 0, 300)
+                    : '');
+                sh_setting_save('brevo_api_last_send_fields', implode(', ', array_slice((array)($testResult['fields'] ?? []), 0, 3)));
                 if (!empty($testResult['ok'])) {
                     // Only an accepted real send sets this; a connection test or
                     // a read-only diagnostic can never claim delivery works.
@@ -170,6 +179,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         sh_setting_save('brevo_api_verified_note', 'messageId ' . (string)$testResult['message_id']);
                     }
+                } elseif (in_array((string)($testResult['category'] ?? ''), ['auth', 'permission', 'credential', 'billing', 'not_configured'], true)) {
+                    // A refusal invalidates the earlier proof; a temporary
+                    // network or rate-limit failure does not.
+                    sh_setting_save('brevo_api_verified_at', '');
+                    sh_setting_save('brevo_api_verified_note', '');
                 }
             } else {
                 sh_setting_save('smtp_last_tested_at', date('Y-m-d H:i:s'));
@@ -420,13 +434,41 @@ require __DIR__ . '/_layout.php';
     $isOk = !empty($connTestResult['ok']);
     $apiChecks = is_array($connTestResult['checks'] ?? null) ? (array)$connTestResult['checks'] : [];
     $apiVerdict = (string)($connTestResult['verdict'] ?? '');
-    // A key that authenticates but lacks a resource permission is neither a
-    // success nor an authentication failure. It gets its own amber state so
-    // the screen never reports 403 as "connection failed".
-    $apiPartial = $isApiTest && $apiVerdict === 'permission_limited';
-    $apiCredCheck = is_array($apiChecks['credentials'] ?? null) ? $apiChecks['credentials'] : null;
     $apiAcctCheck = is_array($apiChecks['account'] ?? null) ? $apiChecks['account'] : null;
     $apiTlsCheck = is_array($apiChecks['tls'] ?? null) ? $apiChecks['tls'] : null;
+
+    // A 403 on the account resource is neither a success nor an authentication
+    // failure: the key authenticated but that resource is out of scope. It is
+    // shown as an informational amber result, never as "the API is broken".
+    $apiAcctDenied = $isApiTest && $apiVerdict === 'account_denied';
+    $apiOk = $isApiTest && ($apiVerdict === 'reachable' || $apiVerdict === 'account_denied');
+
+    // Test C is the real POST /v3/smtp/email, which is only run by the
+    // administrator's Send Test Email action. Its persisted outcome is shown
+    // here so the row survives a refresh without ever sending on page load.
+    $lastSendAt = (string)sh_setting('brevo_api_last_send_at', '');
+    $lastSendStatus = (int)sh_setting('brevo_api_last_send_status', 0);
+    $lastSendMessageId = (string)sh_setting('brevo_api_last_send_message_id', '');
+    $lastSendError = (string)sh_setting('brevo_api_last_send_error', '');
+    $lastSendFields = (string)sh_setting('brevo_api_last_send_fields', '');
+    $lastSendOk = $lastSendAt !== '' && $lastSendStatus >= 200 && $lastSendStatus < 300;
+    $txCheck = [
+        'key' => 'transactional',
+        'label' => 'Test C — Transactional email (real POST /v3/smtp/email)',
+        'status' => $lastSendAt === '' ? 'not_tested' : ($lastSendOk ? 'passed' : 'failed'),
+        'http_status' => $lastSendStatus > 0 ? $lastSendStatus : 0,
+        'endpoint' => 'POST /v3/smtp/email',
+        'detail' => $lastSendAt === ''
+            ? 'Not run. This check sends a real message, so it only runs when you press Send Test Email.'
+            : 'Last attempt ' . $lastSendAt . '. ' . ($lastSendOk
+                ? 'Brevo accepted the request (HTTP ' . $lastSendStatus . '). Acceptance is not inbox delivery — confirm it in the recipient mailbox or Brevo → Transactional → Logs / Events.'
+                : 'Brevo refused or the request failed: ' . ($lastSendError !== '' ? $lastSendError : 'no detail was recorded.')),
+        'message_id' => $lastSendMessageId,
+        'fields' => $lastSendFields,
+        'action' => $lastSendAt === ''
+            ? 'Use Send Test Email below with a mailbox you control. Brevo must answer 201 with a messageId.'
+            : '',
+    ];
 
     $pending = ['config', 'library', 'environment'];
     $stateOf = static function (?array $check): string {
@@ -444,7 +486,8 @@ require __DIR__ . '/_layout.php';
         $tcpSt = $apiTlsCheck === null ? 'pending' : $stateOf($apiTlsCheck);
         $ehloSt = $apiTlsCheck === null ? 'pending' : $stateOf($apiTlsCheck);
         $tlsSt = $apiTlsCheck === null ? 'pending' : $stateOf($apiTlsCheck);
-        $authSt = $apiCredCheck === null ? 'pending' : $stateOf($apiCredCheck);
+        $authSt = $apiAcctCheck === null ? 'pending' : $stateOf($apiAcctCheck);
+        $sendSt = $lastSendAt === '' ? 'pending' : ($lastSendOk ? 'passed' : 'failed');
     } else {
         $dnsSt = in_array($st, $pending, true) ? 'pending' : ($st === 'dns' ? 'failed' : 'passed');
         $tcpSt = in_array($st, array_merge($pending, ['dns']), true) ? 'pending' : ($st === 'connect' ? 'failed' : 'passed');
@@ -473,29 +516,31 @@ require __DIR__ . '/_layout.php';
             default => $pendingText,
         };
     };
-    $apiVerifiedAt = (string)sh_setting('brevo_api_verified_at', '');
   ?>
-  <div class="sh-alert <?= $isOk ? 'sh-alert--success' : ($apiPartial ? 'sh-alert--warning' : 'sh-alert--error') ?>" style="margin-bottom:16px">
-    <?= sh_icon($isOk ? 'check-circle' : ($apiPartial ? 'alert' : 'x-circle'), 18) ?>
+  <div class="sh-alert <?= $isApiTest ? ($apiOk ? ($apiVerdict === 'account_denied' ? 'sh-alert--warning' : 'sh-alert--success') : 'sh-alert--error') : ($isOk ? 'sh-alert--success' : 'sh-alert--error') ?>" style="margin-bottom:16px">
+    <?= sh_icon($isApiTest ? ($apiOk ? ($apiVerdict === 'account_denied' ? 'alert' : 'check-circle') : 'x-circle') : ($isOk ? 'check-circle' : 'x-circle'), 18) ?>
     <div style="flex:1">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <strong><?php
           if ($isApiTest) {
-              if ($isOk) { echo 'Brevo HTTPS API verified for transactional email'; }
-              elseif ($apiPartial) { echo 'Brevo API key authenticated — resource permission limited'; }
-              else { echo 'Brevo API test failed'; }
+              if ($apiVerdict === 'reachable') { echo 'Brevo HTTPS API reachable — credential accepted for account access'; }
+              elseif ($apiVerdict === 'account_denied') { echo 'Brevo HTTPS API reachable — account access denied (informational)'; }
+              elseif ($apiVerdict === 'invalid_credentials') { echo 'Brevo API key was not accepted'; }
+              elseif ($apiVerdict === 'unreachable') { echo 'Brevo HTTPS API is not reachable'; }
+              elseif ($apiVerdict === 'incomplete') { echo 'Brevo API credential is not usable'; }
+              else { echo 'Brevo API diagnostic reported a provider or platform problem'; }
           } else {
               echo $isOk ? 'SMTP Connection Succeeded' : 'SMTP Connection Failed';
           }
         ?></strong>
-        <span class="sh-chip <?= $isOk ? 'sh-chip--success' : ($apiPartial ? 'sh-chip--warning' : 'sh-chip--danger') ?>">
+        <span class="sh-chip <?= $isApiTest ? ($apiOk ? ($apiVerdict === 'account_denied' ? 'sh-chip--warning' : 'sh-chip--success') : 'sh-chip--danger') : ($isOk ? 'sh-chip--success' : 'sh-chip--danger') ?>">
           <?= $isApiTest ? 'Verdict: ' . e($apiVerdict !== '' ? $apiVerdict : $st) : 'Failed/succeeded stage: ' . e($st) ?>
         </span>
       </div>
       <div style="margin-top:4px">
-        <?= e((string)($isOk || $apiPartial ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
+        <?= e((string)(($isApiTest ? $apiOk : $isOk) ? ($connTestResult['message'] ?? '') : ($connTestResult['error'] ?? ''))) ?>
       </div>
-      <?php if ($isApiTest && $apiPartial && !empty($connTestResult['error'])): ?>
+      <?php if ($isApiTest && !$apiOk && !empty($connTestResult['error'])): ?>
         <div style="margin-top:4px;font-size:13px"><?= e((string)$connTestResult['error']) ?></div>
       <?php endif; ?>
       <?php if (!empty($connTestResult['cause'])): ?>
@@ -541,26 +586,35 @@ require __DIR__ . '/_layout.php';
         </div>
         <div style="font-size:11.5px">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $dot($authSt) ?>;margin-right:4px"></span>
-          <strong><?= $isApiTest ? 'API key:' : 'Auth:' ?></strong> <?= e($label($authSt, 'Verified', 'Failed', 'Pending', $apiCredCheck !== null && ($apiCredCheck['status'] ?? '') === 'not_configured' ? 'Not configured' : 'Not permitted')) ?>
+          <strong><?= $isApiTest ? 'Account API:' : 'Auth:' ?></strong> <?= e($isApiTest ? $label($authSt, 'Accessible', 'Rejected', 'Pending', (string)($apiAcctCheck['status'] ?? '') === 'permission_denied' ? 'Denied (informational)' : 'Limited') : $label($authSt, 'Verified', 'Failed')) ?>
         </div>
         <div style="font-size:11.5px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $isApiTest && $apiVerifiedAt !== '' ? '#16a34a' : '#94a3b8' ?>;margin-right:4px"></span>
-          <strong>Delivery:</strong>
-          <?php if ($isApiTest && $apiVerifiedAt !== ''): ?>
-            Verified by accepted test send (<?= e($apiVerifiedAt) ?>)
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:<?= $isApiTest ? $dot($sendSt) : '#94a3b8' ?>;margin-right:4px"></span>
+          <strong>Transactional email:</strong>
+          <?php if (!$isApiTest): ?>
+            <em>Use Send Test Email</em>
+          <?php elseif ($lastSendAt === ''): ?>
+            <em>Not tested</em>
+          <?php elseif ($lastSendOk): ?>
+            Accepted (HTTP <?= (int)$lastSendStatus ?>)
           <?php else: ?>
-            <em>Not tested — use Send Test Email</em>
+            Failed (HTTP <?= (int)$lastSendStatus ?>)
           <?php endif; ?>
+        </div>
+        <div style="font-size:11.5px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#94a3b8;margin-right:4px"></span>
+          <strong>Delivery:</strong>
+          <em><?= $lastSendOk ? 'Unconfirmed — confirm in the inbox or Brevo logs' : 'No accepted send yet' ?></em>
         </div>
       </div>
 
       <?php if ($isApiTest): ?>
         <div style="margin-top:12px;display:grid;gap:8px">
-          <?php foreach ([['A', $apiTlsCheck], ['B', $apiAcctCheck], ['C', $apiCredCheck]] as $row): ?>
+          <?php foreach ([['A', $apiTlsCheck], ['B', $apiAcctCheck], ['C', $txCheck]] as $row): ?>
             <?php
               $check = $row[1];
               if (!is_array($check)) { continue; }
-              $cSt = $stateOf($check);
+              $cSt = ($check['status'] ?? '') === 'not_tested' ? 'pending' : $stateOf($check);
               $http = (int)($check['http_status'] ?? 0);
               $prov = is_array($check['provider'] ?? null) ? $check['provider'] : null;
             ?>
@@ -574,6 +628,12 @@ require __DIR__ . '/_layout.php';
                 </span>
               </div>
               <?php if (!empty($check['detail'])): ?><div style="margin-top:4px"><?= e((string)$check['detail']) ?></div><?php endif; ?>
+              <?php if (!empty($check['message_id'])): ?>
+                <div style="margin-top:4px"><strong>Message ID:</strong> <code><?= e((string)$check['message_id']) ?></code></div>
+              <?php endif; ?>
+              <?php if (!empty($check['fields'])): ?>
+                <div style="margin-top:4px"><strong>Field Brevo objected to:</strong> <code><?= e((string)$check['fields']) ?></code></div>
+              <?php endif; ?>
               <?php if ($prov !== null && !empty($prov['detail'])): ?>
                 <div style="margin-top:4px;font-size:11.5px;color:var(--sh-muted)">Brevo said: <code><?= e((string)$prov['detail']) ?></code></div>
               <?php endif; ?>
@@ -583,9 +643,11 @@ require __DIR__ . '/_layout.php';
             </div>
           <?php endforeach; ?>
           <div style="font-size:11.5px;color:var(--sh-muted)">
-            Only a real accepted send marks delivery verified; the checks above never send mail.
-            Brevo documents 401 as an unknown or missing key and 403 as a key that authenticated but is not
-            permitted for that resource — the two are reported separately here.
+            Test A and Test B never send mail. Test C is the documented transactional endpoint and only runs from
+            the explicit <em>Send Test Email</em> action below. Brevo documents 401 as an unknown or missing key and
+            403 as a key that authenticated but is not permitted for that resource — the two are reported separately,
+            and a 403 on the account resource is not treated as a broken integration. Acceptance (201) is not inbox
+            delivery; confirm that in the recipient's mailbox or Brevo's transaction log.
             <a href="https://developers.brevo.com/docs/api-key-authentication" target="_blank" rel="noopener">API key authentication</a> ·
             <a href="https://developers.brevo.com/reference/sendtransacemail" target="_blank" rel="noopener">Send a transactional email</a> ·
             <a href="https://help.brevo.com/hc/en-us/articles/209467485-Create-and-manage-your-API-keys" target="_blank" rel="noopener">Create and manage API keys</a>
@@ -677,15 +739,28 @@ require __DIR__ . '/_layout.php';
     <?= sh_icon(!empty($testResult['ok']) ? 'check-circle' : 'x-circle', 18) ?>
     <div style="flex:1">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <strong><?= !empty($testResult['ok']) ? 'Test Message Accepted by Mail Server' : 'Test Email Delivery Failed' ?></strong>
+        <strong><?= !empty($testResult['ok'])
+          ? ((string)($testResult['transport'] ?? '') === 'brevo_api'
+              ? 'Brevo accepted the test email (HTTP ' . (int)($testResult['http_status'] ?? 0) . ', messageId ' . (!empty($testResult['message_id']) ? 'returned' : 'not returned') . ')'
+              : 'Test message accepted by the mail server')
+          : 'Test email was not accepted' ?></strong>
         <span class="sh-chip <?= !empty($testResult['ok']) ? 'sh-chip--success' : 'sh-chip--danger' ?>">
-          Transport: <?= e((string)($testResult['transport'] ?? 'unknown')) ?><?= !empty($testResult['category']) ? ', Category: ' . e((string)$testResult['category']) : '' ?>
+          Transport: <?= e((string)($testResult['transport'] ?? 'unknown')) ?><?= !empty($testResult['http_status']) ? ', HTTP ' . (int)$testResult['http_status'] : '' ?><?= !empty($testResult['category']) ? ', Category: ' . e((string)$testResult['category']) : '' ?>
         </span>
       </div>
       <div style="margin-top:4px">
         <?= e((string)($testResult['ok'] ? ($testResult['response'] ?? 'Accepted.') : ($testResult['error'] ?? ''))) ?>
       </div>
-      <?php if (!empty($testResult['message_id'])): ?><div style="margin-top:4px" class="sh-table__meta">Message-ID: <?= e((string)$testResult['message_id']) ?></div><?php endif; ?>
+      <?php if (!empty($testResult['message_id'])): ?><div style="margin-top:4px" class="sh-table__meta">Message ID: <code><?= e((string)$testResult['message_id']) ?></code></div><?php endif; ?>
+      <?php if ((string)($testResult['transport'] ?? '') === 'brevo_api' && !empty($testResult['ok'])): ?>
+        <div style="margin-top:4px" class="sh-table__meta">
+          <strong>Delivery:</strong> pending / unconfirmed — acceptance is not inbox delivery. Confirm it in the
+          recipient mailbox or in Brevo → Transactional → Logs / Events.
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($testResult['fields'])): ?>
+        <div style="margin-top:4px" class="sh-table__meta"><strong>Field Brevo objected to:</strong> <code><?= e(implode(', ', array_slice((array)$testResult['fields'], 0, 3))) ?></code></div>
+      <?php endif; ?>
       <?php if (!empty($testResult['cause'])): ?>
         <div style="margin-top:6px;font-size:13px;color:var(--sh-heading)"><strong>Confirmed cause:</strong> <?= e((string)$testResult['cause']) ?></div>
       <?php endif; ?>
@@ -1167,7 +1242,7 @@ require __DIR__ . '/_layout.php';
               API key: <?= $brevoKeySet ? 'stored (masked)' : 'not set' ?>;
               API transport switch: <?= $brevoApiEnabled ? 'enabled' : 'disabled' ?>.
               <?php if ($brevoLastTestedAt !== ''): ?>
-                <br><span class="sh-table__meta">Last diagnostics run: <?= e($brevoLastTestedAt) ?> — <?= $brevoLastTestOk ? 'email scope reachable' : 'not verified' ?>.</span>
+                <br><span class="sh-table__meta">Last diagnostics run: <?= e($brevoLastTestedAt) ?> — <?= $brevoLastTestOk ? 'HTTPS and account access OK (email not yet proven)' : 'not verified' ?>.</span>
               <?php endif; ?>
               <br><span class="sh-table__meta">
                 Last accepted test send: <?= $brevoVerified ? e($brevoVerifiedAt) : 'none yet' ?>.
@@ -1263,14 +1338,15 @@ require __DIR__ . '/_layout.php';
           <h4 style="margin:0 0 12px;font-size:14px;color:var(--sh-heading)"><?= sh_icon('zap', 15) ?> Brevo API Diagnostics</h4>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
             <div style="background:var(--sh-bg-2);border:1px solid var(--sh-line);border-radius:8px;padding:14px">
-              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">1. Connection and permission tests (no email sent)</h5>
+              <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">1. Connection and account tests (no email sent)</h5>
               <p style="font-size:12px;color:var(--sh-muted);margin:0 0 8px">
-                Runs three separate checks and reports each result:
+                Two checks run here. Transactional email is proven separately by a real send, because that is the
+                only documented operation that can accept a message:
               </p>
               <ol style="font-size:12px;color:var(--sh-muted);margin:0 0 10px;padding-left:18px;line-height:1.5">
                 <li><strong>A — HTTPS/TLS</strong> to <code>api.brevo.com</code> (no credential sent).</li>
                 <li><strong>B — account access</strong>: <code>GET /v3/account</code>, informational only. A 403 here means this key may not read account details; it does not by itself block email.</li>
-                <li><strong>C — transactional-email access</strong>: <code>GET /v3/smtp/emails</code>. This is the scope the transport uses, and it sends no message.</li>
+                <li><strong>C — transactional email</strong>: a real <code>POST /v3/smtp/email</code>, run only by <em>Send Test Email</em> below. It is never sent by this button.</li>
               </ol>
               <form method="post" novalidate>
                 <?= sh_csrf_field() ?>
@@ -1288,9 +1364,10 @@ require __DIR__ . '/_layout.php';
             <div style="background:var(--sh-bg-2);border:1px solid var(--sh-line);border-radius:8px;padding:14px">
               <h5 style="margin:0 0 6px;font-size:13px;color:var(--sh-heading)">2. Send a real test email</h5>
               <p style="font-size:12px;color:var(--sh-muted);margin:0 0 10px">
-                Sends one message through <strong><?= $selectedTransport === 'brevo_api' ? 'the Brevo HTTPS API' : 'SMTP' ?></strong>
-                (the saved transport, not the tab you are on) and shows Brevo's exact response.
-                Only an accepted send marks the API verified.
+                Sends one real message through <strong><?= $selectedTransport === 'brevo_api' ? 'the Brevo HTTPS API (POST /v3/smtp/email)' : 'SMTP' ?></strong>
+                — the saved transport, not the tab you are on. The sender must be a registered, verified address in the
+                Brevo account, and the recipient must be a mailbox you control.
+                Only a 201 answer with a messageId is treated as accepted; delivery is still unconfirmed until you see it.
               </p>
               <form method="post" novalidate>
                 <?= sh_csrf_field() ?>

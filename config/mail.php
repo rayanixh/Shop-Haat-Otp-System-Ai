@@ -920,6 +920,27 @@ function sh_brevo_api_provider($body): array
         }
     }
     if ($out['message'] === '' && $out['fields'] !== []) { $out['message'] = $out['fields'][0]; }
+
+    // Brevo's 400 codes name the problem but not always the field
+    // (missing_parameter, invalid_parameter, invalid_email...). Pull the field
+    // name out of the message when it is quoted, so the operator is told what
+    // to correct instead of only that something was wrong.
+    if ($out['message'] !== '') {
+        $patterns = [
+            '~[`"\']([A-Za-z0-9_.\[\]-]+)[`"\']\s+(?:is|are)\s+(?:missing|required|invalid)~i',
+            '~(?:missing|invalid|required)[:\s]+[`"\']?([A-Za-z0-9_.\[\]-]+)[`"\']?~i',
+            '~attribute\s+[`"\']?([A-Za-z0-9_.\[\]-]+)[`"\']?~i',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $out['message'], $m) === 1) {
+                $field = mb_substr(trim($m[1]), 0, 80);
+                if ($field !== '' && !in_array($field, $out['fields'], true)) {
+                    array_unshift($out['fields'], $field);
+                }
+                break;
+            }
+        }
+    }
     $out['detail'] = trim(implode('; ', array_filter([$out['code'], $out['message']])));
     return $out;
 }
@@ -1243,6 +1264,22 @@ function sh_brevo_api_send(string $to, string $subject, string $textBody, ?strin
     $fromEmail = trim((string)($t['from_email'] ?? ''));
     $fromName = trim((string)($t['from_name'] ?? 'ShopHaat'));
     $replyTo = trim((string)($t['reply_to'] ?? ''));
+    if ($fromEmail === '' || !sh_valid_email($fromEmail)) {
+        // Brevo requires a sender registered and verified on the account. Do
+        // not send a request with an empty or malformed sender and then blame
+        // the API key for the 400 that follows.
+        $out['category'] = 'not_configured';
+        $out['skipped'] = true;
+        $out['error'] = 'No valid sender email address is configured. Set the Sender Email in the Brevo API settings '
+            . 'to an address registered and verified in the Brevo account before sending. Nothing was sent.';
+        return $out;
+    }
+    if (!sh_valid_email($to)) {
+        $out['category'] = 'invalid_recipient';
+        $out['skipped'] = true;
+        $out['error'] = 'The test recipient is not a valid email address. Nothing was sent.';
+        return $out;
+    }
     $payload = [
         'sender' => ['email' => $fromEmail, 'name' => $fromName !== '' ? $fromName : 'ShopHaat'],
         'to' => [['email' => $to]],
@@ -1269,13 +1306,20 @@ function sh_brevo_api_send(string $to, string $subject, string $textBody, ?strin
     $out['request'] = $res['request'] ?? ['method' => 'POST', 'path' => '/smtp/email'];
     $out['http_status'] = $status;
     $out['provider'] = $provider;
+    // A 2xx means Brevo accepted the request; it does not mean the mail reached
+    // an inbox. Delivery stays unconfirmed until the recipient or the Brevo
+    // event log says otherwise.
+    $out['delivery'] = 'unconfirmed';
     if ($res['ok']) {
         $out['ok'] = true;
         $out['category'] = 'accepted';
-        $out['message_id'] = $messageId;
-        $out['response'] = 'Brevo accepted the message for processing'
-            . ($messageId !== '' ? ' (messageId ' . $messageId . ')' : '') . '.'
-            . ' Acceptance is not inbox delivery; check the Brevo transactional log for the final status.';
+        if ($messageId !== '') {
+            $out['message_id'] = $messageId;
+        }
+        $out['response'] = 'Brevo accepted the message for processing (HTTP ' . $status . ')'
+            . ($messageId !== '' ? ' — messageId ' . $messageId : ' — no messageId was returned') . '.'
+            . ' This is acceptance, not inbox delivery: confirm delivery in the recipient mailbox or in '
+            . 'Brevo → Transactional → Logs / Events.';
         $out['acceptance_ok'] = true;
     } else {
         $kind = (string)($meaning['kind'] ?? 'unexpected');
@@ -1293,32 +1337,37 @@ function sh_brevo_api_send(string $to, string $subject, string $textBody, ?strin
         $out['cause'] = $meaning['cause'];
         $out['action'] = $meaning['action'];
         $out['retry_after'] = (int)($meaning['retry_after'] ?? 0);
+        if (!empty($provider['fields'])) {
+            $out['fields'] = $provider['fields'];
+            $out['error'] .= ' Field Brevo objected to: ' . implode(', ', array_slice((array)$provider['fields'], 0, 3)) . '.';
+        }
         if ($out['error'] === '.') { $out['error'] = (string)$res['error']; }
     }
     if (!empty($opts['debug'])) {
         $out['transcript'] = sh_mail_redact('POST ' . sh_brevo_api_base() . "/smtp/email\nHTTP " . $status
             . ($messageId !== '' ? "\nmessageId: " . $messageId : '')
-            . (($provider['detail'] ?? '') !== '' ? "\nprovider: " . $provider['detail'] : ''));
+            . (($provider['detail'] ?? '') !== '' ? "\nprovider: " . $provider['detail'] : '')
+            . (!empty($provider['fields']) ? "\nfields: " . implode(', ', array_slice((array)$provider['fields'], 0, 3)) : ''));
     }
     return $out;
 }
 
 /**
- * Run the Brevo HTTPS API diagnostics as three separate, honest checks.
+ * Run the Brevo HTTPS API diagnostics without sending any mail.
  *
  * A. HTTPS and TLS — an unauthenticated request proves DNS, TCP, TLS and HTTP
  *    work. No credential is sent, so this can never be confused with an
  *    authentication result.
- * B. Account access — GET /v3/account, informational only. A 403 here means
- *    the key cannot read account settings. It is not a delivery blocker.
- * C. Credential in the transactional scope — GET /v3/smtp/emails. Brevo
- *    answers 401 for a key it does not know and 403 for a key that is valid
- *    but not permitted for the resource; those are reported differently. This
- *    check never sends a message.
+ * B. Account API access — GET /v3/account. Informational. Brevo answers 401 for
+ *    a key it does not know and 403 for a key that authenticated but may not
+ *    read that resource. A 403 here does not by itself say anything about
+ *    transactional email.
  *
- * Sending is never attempted here. Only a POST /v3/smtp/email that Brevo
- * accepts can mark transactional email as verified, and that happens from the
- * explicit Send Test Email action.
+ * Transactional email is deliberately NOT tested here. The documented way to
+ * prove the transport can send is POST /v3/smtp/email, which delivers a real
+ * message, so it runs only from the explicit Send Test Email action. The
+ * historical list endpoint (GET /v3/smtp/emails) is a log query that requires
+ * an email, messageId or templateId; it is never used as a permission probe.
  *
  * @return array<string,mixed>
  */
@@ -1340,11 +1389,13 @@ function sh_brevo_api_test_connection(array $t = []): array
         'credential' => ['state' => $cred['state'], 'prefix' => $cred['prefix'], 'field' => 'brevo_api_key'],
         'verdict' => 'incomplete',
         'step' => 'config',
+        'transactional_verified' => false,
+        'delivery' => 'unconfirmed',
         'transcript' => '',
     ];
 
     // ---- A. HTTPS and TLS -------------------------------------------------
-    $tlsCheck = ['key' => 'tls', 'label' => 'Test A — HTTPS and TLS reachability', 'status' => 'pending', 'http_status' => 0];
+    $tlsCheck = ['key' => 'tls', 'label' => 'Test A — HTTPS and TLS', 'status' => 'pending', 'http_status' => 0];
     $dns = sh_mail_resolve_host($host);
     $base['resolved_ips'] = $dns['ipv4'];
     if ($dns['selected'] === '') {
@@ -1397,12 +1448,21 @@ function sh_brevo_api_test_connection(array $t = []): array
     $base['checks']['tls'] = $tlsCheck;
     $base['step'] = 'tls';
 
+    // Transactional email is only proven by a real send. Say so up front.
+    $base['checks']['transactional'] = [
+        'key' => 'transactional',
+        'label' => 'Test C — Transactional email (real send)',
+        'status' => 'not_tested',
+        'http_status' => 0,
+        'endpoint' => 'POST /v3/smtp/email',
+        'detail' => 'Not run: this check sends a real message, so it runs only when you click “Send Test Email”.',
+        'cause' => '',
+        'action' => 'Use “Send Test Email” with a mailbox you control. Brevo must answer 201 with a messageId.',
+        'retry_after' => 0,
+    ];
+
     // ---- Credential shape -------------------------------------------------
     if (!in_array($cred['state'], ['ok', 'unverified'], true)) {
-        $base['checks']['credentials'] = [
-            'key' => 'credentials', 'label' => 'Test C — Transactional-email API access', 'status' => 'not_configured',
-            'http_status' => 0, 'endpoint' => 'GET /v3/smtp/emails', 'detail' => $cred['message'],
-        ];
         $base['checks']['account'] = [
             'key' => 'account', 'label' => 'Test B — Account API access (informational)', 'status' => 'skipped',
             'http_status' => 0, 'endpoint' => 'GET /v3/account', 'detail' => 'No usable API key is stored.',
@@ -1418,43 +1478,6 @@ function sh_brevo_api_test_connection(array $t = []): array
             'message' => 'Test A passed. Test B was not run: ' . $cred['message'],
         ]);
     }
-
-    // ---- C. Credential, checked inside the transactional-email scope ------
-    $credRes = sh_brevo_api_request('GET', '/smtp/emails?limit=1', null, $timeout, true);
-    $credProvider = is_array($credRes['provider'] ?? null) ? $credRes['provider'] : sh_brevo_api_provider($credRes['body']);
-    $credMeaning = is_array($credRes['meaning'] ?? null)
-        ? $credRes['meaning']
-        : sh_brevo_api_status_meaning((int)$credRes['status'], $credProvider, 'GET /v3/smtp/emails');
-    $credStatus = 'failed';
-    if ((int)$credRes['status'] >= 200 && (int)$credRes['status'] < 300) {
-        $credStatus = 'passed';
-    } elseif ((int)$credRes['status'] === 401) {
-        $credStatus = 'invalid_key';
-    } elseif ((int)$credRes['status'] === 403) {
-        $credStatus = 'permission_denied';
-    } elseif ((int)$credRes['status'] === 402) {
-        $credStatus = 'payment_required';
-    } elseif ((int)$credRes['status'] === 429) {
-        $credStatus = 'rate_limited';
-    } elseif ((int)$credRes['status'] === 0) {
-        $credStatus = 'unreachable';
-    }
-    $base['checks']['credentials'] = [
-        'key' => 'credentials',
-        'label' => 'Test C — Transactional-email API access',
-        'status' => $credStatus,
-        'http_status' => (int)$credRes['status'],
-        'endpoint' => 'GET /v3/smtp/emails?limit=1',
-        'request' => $credRes['request'] ?? null,
-        'provider' => $credProvider,
-        'detail' => trim((string)($credMeaning['label'] ?? '') . (($credMeaning['cause'] ?? '') !== '' ? ': ' . $credMeaning['cause'] : '')),
-        'cause' => (string)($credMeaning['cause'] ?? ''),
-        'action' => (string)($credMeaning['action'] ?? ''),
-        'retry_after' => (int)($credMeaning['retry_after'] ?? 0),
-    ];
-    $base['request'] = $credRes['request'] ?? null;
-    $base['provider'] = $credProvider;
-    $base['http_status'] = (int)$credRes['status'];
 
     // ---- B. Account access, informational only ---------------------------
     $acctRes = sh_brevo_api_request('GET', '/account', null, $timeout, true);
@@ -1473,10 +1496,12 @@ function sh_brevo_api_test_connection(array $t = []): array
         $acctStatus = 'payment_required';
     } elseif ((int)$acctRes['status'] === 429) {
         $acctStatus = 'rate_limited';
+    } elseif ((int)$acctRes['status'] >= 500) {
+        $acctStatus = 'provider_error';
     } elseif ((int)$acctRes['status'] === 0) {
         $acctStatus = 'unreachable';
     }
-    $account = [
+    $base['checks']['account'] = [
         'key' => 'account',
         'label' => 'Test B — Account API access (informational)',
         'status' => $acctStatus,
@@ -1489,16 +1514,21 @@ function sh_brevo_api_test_connection(array $t = []): array
         'action' => (string)($acctMeaning['action'] ?? ''),
         'retry_after' => (int)($acctMeaning['retry_after'] ?? 0),
     ];
+    $base['request'] = $acctRes['request'] ?? null;
+    $base['provider'] = $acctProvider;
+    $base['http_status'] = (int)$acctRes['status'];
+
     if ($acctStatus === 'permission_denied') {
-        // The exact condition behind the reported failure. Say plainly that
-        // the key is authentic and that this resource is simply out of scope.
-        $account['cause'] = 'Brevo accepted the key but this key is not authorized for the account resource.'
+        // The exact condition that was misreported before. The key is
+        // authentic; this resource is simply out of scope, and email may
+        // still work.
+        $base['checks']['account']['cause'] = 'Brevo accepted the key but this key is not authorized for the account resource.'
             . (($acctProvider['message'] ?? '') !== '' ? ' Brevo said: ' . $acctProvider['message'] : '');
-        $account['detail'] = 'HTTP 403 — the key is valid, but account information is not in its permissions. '
-            . 'This does not by itself block transactional email; Test B and the Send Test Email result decide that.';
-        $account['action'] = 'No action is required for email delivery if Test B passes. If you want account details here, use a key created by the account owner with account access.';
+        $base['checks']['account']['detail'] = 'HTTP 403 — account-information access was denied. The key itself was recognised. '
+            . 'This says nothing about transactional email; only a real Send Test Email can prove that.';
+        $base['checks']['account']['action'] = 'No action is needed for email delivery unless Send Test Email also fails. '
+            . 'If you want account details here, use a key created by the account owner with account access.';
     }
-    $base['checks']['account'] = $account;
 
     // ---- Verdict ----------------------------------------------------------
     $serverInfo = is_array($acctRes['body']) ? trim((string)($acctRes['body']['companyName'] ?? '')) : '';
@@ -1511,53 +1541,42 @@ function sh_brevo_api_test_connection(array $t = []): array
     }
 
     $base['transcript'] = 'A: GET ' . sh_brevo_api_base() . "/account (no key) -> HTTP " . (int)$probe['status'] . "\n"
-        . 'B: GET ' . sh_brevo_api_base() . "/smtp/emails?limit=1 -> HTTP " . (int)$credRes['status'] . "\n"
-        . 'C: GET ' . sh_brevo_api_base() . "/account -> HTTP " . (int)$acctRes['status'];
+        . 'B: GET ' . sh_brevo_api_base() . "/account -> HTTP " . (int)$acctRes['status'] . "\n"
+        . 'C: POST ' . sh_brevo_api_base() . '/smtp/email -> not run (sends a real message; use Send Test Email)';
 
-    if ($credStatus === 'passed') {
+    if ($acctStatus === 'passed' || $acctStatus === 'permission_denied') {
         $base['ok'] = true;
-        $base['verdict'] = 'verified';
+        $base['verdict'] = $acctStatus === 'passed' ? 'reachable' : 'account_denied';
         $base['step'] = 'complete';
-        $base['message'] = 'Test A passed (HTTPS/TLS) and Test B passed: the API key can use the transactional-email API. '
-            . 'No message was sent by these tests — send a test email to prove delivery acceptance.';
-        if ($acctStatus === 'permission_denied') {
-            $base['message'] .= ' Test C returned 403: the key is valid but not authorized for account details. That does not affect email delivery.';
-        }
+        $base['message'] = $acctStatus === 'passed'
+            ? 'Test A passed (HTTPS/TLS) and Test B passed: the API key can read account information. '
+                . 'Transactional email has not been tested — use Send Test Email to prove the API accepts a message.'
+            : 'Test A passed (HTTPS/TLS) and the API key was recognised, but Brevo denied account-information access (HTTP 403). '
+                . 'That does not by itself block transactional email — use Send Test Email to find out.';
         return $base;
     }
 
-    // No 200 from the email scope. Decide how honest we can be.
-    $anyUnauthorized = ($credStatus === 'invalid_key' || $acctStatus === 'invalid_key');
-    $allPermission = in_array($credStatus, ['permission_denied', 'payment_required'], true)
-        && in_array($acctStatus, ['permission_denied', 'payment_required', 'skipped'], true);
-    if ($allPermission && !$anyUnauthorized) {
-        $base['verdict'] = 'permission_limited';
-        $base['step'] = 'permission';
-        $base['message'] = 'Test A passed. The API key authenticated, but Brevo did not permit the resources checked here. '
-            . 'That is a permission result, not necessarily a delivery blocker: run Send Test Email to find out whether '
-            . 'this key may submit transactional email.';
-        $base['error'] = 'API key authenticated but has no access to the checked resources (HTTP '
-            . (int)$credRes['status'] . ').';
-        $base['cause'] = (string)$credMeaning['cause'];
-        $base['action'] = 'Send a test email to a controlled mailbox to determine whether this key can submit transactional email. '
-            . 'If that is also refused, create a key for a user with transactional-email permission.';
-        return $base;
-    }
-    if ($anyUnauthorized) {
-        $meaning = $credStatus === 'invalid_key' ? $credMeaning : $acctMeaning;
+    if ($acctStatus === 'invalid_key') {
         $base['verdict'] = 'invalid_credentials';
         $base['step'] = 'credentials';
-        $base['error'] = 'Brevo did not accept the API key (HTTP ' . (int)$credRes['status'] . '): '
-            . (string)($credProvider['detail'] ?? '');
-        $base['cause'] = (string)($meaning['cause'] ?? 'The API key was not recognised.');
-        $base['action'] = (string)($meaning['action'] ?? 'Create a new v3 API key in Brevo and save it in the API key field.');
+        $base['error'] = 'Brevo did not accept the API key (HTTP 401): ' . (string)($acctProvider['detail'] ?? '');
+        $base['cause'] = (string)$acctMeaning['cause'];
+        $base['action'] = (string)$acctMeaning['action'];
         return $base;
     }
-    $base['verdict'] = 'incomplete';
-    $base['step'] = 'credentials';
-    $base['error'] = 'Test B did not succeed (HTTP ' . (int)$credRes['status'] . ').';
-    $base['cause'] = (string)($credMeaning['cause'] ?? 'The transactional-email API did not accept the request.');
-    $base['action'] = (string)($credMeaning['action'] ?? 'Check the key, the account status and the endpoint.');
+    if (in_array($acctStatus, ['payment_required', 'rate_limited', 'provider_error'], true)) {
+        $base['verdict'] = $acctStatus;
+        $base['step'] = 'account';
+        $base['error'] = trim((string)$acctMeaning['label'] . '. ' . (string)$acctMeaning['cause']);
+        $base['cause'] = (string)$acctMeaning['cause'];
+        $base['action'] = (string)$acctMeaning['action'];
+        return $base;
+    }
+    $base['verdict'] = $acctStatus === 'unreachable' ? 'unreachable' : 'unexpected';
+    $base['step'] = 'account';
+    $base['error'] = 'Account API access test could not complete (HTTP ' . (int)$acctRes['status'] . ').';
+    $base['cause'] = (string)($acctMeaning['cause'] ?? 'The account endpoint did not answer as expected.');
+    $base['action'] = (string)($acctMeaning['action'] ?? 'Retry the diagnostics; if it persists, check the endpoint and Brevo status.');
     return $base;
 }
 
@@ -1979,11 +1998,11 @@ function sh_mail_send_test(string $to, array $transport, array $opts = []): arra
  *
  * SMTP path: DNS -> TCP -> greeting -> EHLO -> STARTTLS advertised ->
  * STARTTLS -> certificate and hostname validation -> encrypted-socket check ->
- * EHLO again -> AUTH. The Brevo API path runs three separate checks: HTTPS/TLS
- * (unauthenticated), the credential in the transactional-email scope
- * (GET /v3/smtp/emails), and account access (GET /v3/account, informational).
- * A 403 on the account resource is reported as a resource permission, never as
- * a failed connection. No message is sent by this function.
+ * EHLO again -> AUTH. The Brevo API path checks HTTPS/TLS (unauthenticated)
+ * and account access (GET /v3/account, informational). A 403 on the account
+ * resource is reported as a resource permission, never as a failed connection.
+ * No message is sent by this function, and it never claims transactional-email
+ * access: that requires the explicit Send Test Email action.
  *
  * @param array<string,mixed> $t
  * @return array<string,mixed>

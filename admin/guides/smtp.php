@@ -296,8 +296,12 @@ if ($fromEmail === '') {
       <p>
         <strong>If the diagnostics report <code>HTTP 403 — api key is not authorized for resource “account”</code>:</strong>
         that answer comes from <code>GET /v3/account</code>. It means Brevo recognised the key but the key is not
-        permitted to read account details — it is <em>not</em> proof that the key cannot send email. Test B
-        (<code>GET /v3/smtp/emails</code>) and a real <em>Send Test Email</em> decide that. If the send is also refused,
+        permitted to read account details — it is <em>not</em> proof that the key cannot send email. Only a real
+        <em>Send Test Email</em> (<code>POST /v3/smtp/email</code>) decides that: it must answer 201 with a
+        <code>messageId</code>, and even then delivery is unconfirmed until the mail arrives or Brevo's event log
+        shows it. The historical <code>GET /v3/smtp/emails</code> endpoint is a log query that requires an
+        <code>email</code>, <code>messageId</code> or <code>templateId</code> filter, so it is deliberately not used
+        as a connection or permission test. If the send is refused,
         create a key owned by a user who may send transactional email; check Brevo → Security → Authorized IPs if the
         hosting server's address is restricted, and check the plan's sending credits. Nothing here needs the key to be
         pasted into a chat or a log.
