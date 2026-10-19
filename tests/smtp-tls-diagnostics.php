@@ -25,7 +25,6 @@ $tmp = sys_get_temp_dir() . '/shophaat-smtp-tls-' . bin2hex(random_bytes(4));
 @mkdir($tmp, 0777, true);
 
 $GLOBALS['test_settings'] = [];
-$GLOBALS['delivery_log'] = [];
 $GLOBALS['test_servers'] = [];
 
 function tls_assert(bool $condition, string $message): void
@@ -106,7 +105,6 @@ function sh_valid_email(string $email): bool
 }
 function sh_verify_decrypt(?string $stored): string { return (string)$stored; }
 function sh_verify_encrypt(string $plain): string { return $plain; }
-function sh_email_delivery_log(array $result): void { $GLOBALS['delivery_log'][] = $result; }
 function sh_log_line(string $channel, string $message): void {}
 function sh_log_exception(Throwable $e, string $context): void {}
 
@@ -239,13 +237,15 @@ try {
     // transcript. Check every one: no AUTH or MAIL may appear before the
     // encrypted channel is established.
     $wrongTranscripts = [];
-    $wrongDeadline = microtime(true) + 4;
+    $wrongDeadline = microtime(true) + 5;
     do {
         $wrongTranscripts = glob($wrongDir . '/conversation-*.txt') ?: [];
-        if ($wrongTranscripts !== []) { break; }
+        // The read-only probe and the delivery attempt each open a connection;
+        // wait for at least both so the delivery transcript is really checked.
+        if (count($wrongTranscripts) >= 2) { break; }
         usleep(100000);
     } while (microtime(true) < $wrongDeadline);
-    tls_assert($wrongTranscripts !== [], 'The rejected TLS connection was not recorded by the test server.');
+    tls_assert(count($wrongTranscripts) >= 2, 'The rejected TLS connections were not recorded by the test server.');
     $wrongConversation = '';
     foreach ($wrongTranscripts as $wrongTranscript) {
         $wrongConversation .= (string)@file_get_contents($wrongTranscript);
