@@ -380,7 +380,23 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "13. an unreachable endpoint is a network failure, not an auth failure\n";
+    echo "13. a readable account is reachable, but email still unproven\n";
+    // ------------------------------------------------------------------
+    $GLOBALS['test_settings']['brevo_api_key'] = 'test-api-key';
+    $beforeReadable = count(api_posts($apiDir));
+    $readable = sh_brevo_api_test_connection(['timeout' => 8]);
+    api_assert(!empty($readable['ok']), 'A fully readable account was not reported as reachable.');
+    api_same('reachable', $readable['verdict'], 'A readable account did not produce the reachable verdict.');
+    api_same('complete', $readable['step'], 'The diagnostics did not finish for a readable account.');
+    api_same('passed', $readable['checks']['account']['status'], 'Test B did not pass for a readable account.');
+    api_same('ShopHaat TLS Test', $readable['company'] ?? '', 'The account company name was not captured.');
+    api_same('not_tested', $readable['checks']['transactional']['status'], 'Test C must stay not_tested until a real send.');
+    api_same($beforeReadable, count(api_posts($apiDir)), 'A readable account caused an automatic test email.');
+    api_assert(str_contains((string)$readable['message'], 'has not been tested'), 'The summary did not say transactional email is still unproven.');
+    $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
+
+    // ------------------------------------------------------------------
+    echo "14. an unreachable endpoint is a network failure, not an auth failure\n";
     // ------------------------------------------------------------------
     api_stop($server);
     usleep(300000);
@@ -391,7 +407,7 @@ try {
     api_assert(!str_contains(strtolower((string)$down['error']), 'invalid key'), 'A transport failure was described as an invalid key.');
 
     // ------------------------------------------------------------------
-    echo "14. one transport failing does not corrupt the other\n";
+    echo "15. one transport failing does not corrupt the other\n";
     // ------------------------------------------------------------------
     api_same('brevo_api', sh_mail_selected_transport(), 'The selected API transport changed after a failure.');
     $GLOBALS['test_settings']['mail_transport'] = 'smtp';

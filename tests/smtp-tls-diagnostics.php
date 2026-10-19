@@ -277,8 +277,18 @@ try {
     tls_assert(!empty($api['ok']), 'The Brevo API connection test failed: ' . ($api['error'] ?? ''));
     tls_same('complete', $api['step'], 'The Brevo API test did not reach complete.');
     tls_same('passed', $api['checks']['tls']['status'], 'Test A (HTTPS/TLS) did not pass.');
-    tls_same('passed', $api['checks']['credentials']['status'], 'Test B (credential) did not pass.');
-    tls_same('passed', $api['checks']['account']['status'], 'Test C (account) did not pass.');
+    tls_same('passed', $api['checks']['account']['status'], 'Test B (account) did not pass.');
+    tls_same('reachable', $api['verdict'], 'A readable account did not produce the reachable verdict.');
+    // Transactional email is only proven by the documented POST. The
+    // non-delivery diagnostics must say so instead of probing a log endpoint.
+    tls_same('not_tested', $api['checks']['transactional']['status'], 'Test C must stay not_tested until a real send.');
+    tls_same('POST /v3/smtp/email', $api['checks']['transactional']['endpoint'], 'Test C does not name the documented endpoint.');
+    $apiDiagnosticPosts = 0;
+    foreach (glob($apiDir . '/request-*.json') ?: [] as $file) {
+        $row = json_decode((string)@file_get_contents($file), true);
+        if (is_array($row) && ($row['method'] ?? '') === 'POST') { $apiDiagnosticPosts++; }
+    }
+    tls_same(0, $apiDiagnosticPosts, 'The diagnostics sent an email without an explicit Send Test Email action.');
 
     $apiSent = sh_mail_send_test('inbox@example.test', sh_mail_transport(), ['admin_id' => 1]);
     tls_assert(!empty($apiSent['ok']), 'The Brevo API test message failed: ' . ($apiSent['error'] ?? ''));
@@ -298,7 +308,7 @@ try {
     tls_assert(empty($badApi['ok']), 'A wrong Brevo API key was accepted.');
     tls_same('credentials', $badApi['step'], 'The wrong API key was not reported at the credential stage.');
     tls_same('invalid_credentials', $badApi['verdict'], 'The wrong API key was not classified as invalid credentials.');
-    tls_same('invalid_key', $badApi['checks']['credentials']['status'], 'The 401 was not reported as an invalid key.');
+    tls_same('invalid_key', $badApi['checks']['account']['status'], 'The 401 was not reported as an invalid key.');
     tls_assert(str_contains((string)($badApi['error'] ?? ''), '401'), 'The wrong-key error did not include HTTP 401.');
 
     echo "6. an incomplete API configuration never falls back to SMTP or mail()\n";
