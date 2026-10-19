@@ -14,13 +14,28 @@ $fCats = $shCategories ?? sh_categories();
           <span class="sh-brand__mark">SH</span>
           <span class="sh-brand__text"><?= e(sh_setting('site_name', 'ShopHaat')) ?></span>
         </div>
-        <p class="sh-footer__about"><?= e(sh_setting('footer_about', '')) ?></p>
+        <?php
+        // Only real, configured details are printed: a fresh store must not show
+        // an empty phone/email/address list or placeholder marketing copy.
+        $fAbout = trim((string)sh_setting('footer_about', ''));
+        $fContact = array_filter([
+            'phone'   => trim((string)sh_setting('contact_phone', '')),
+            'mail'    => trim((string)sh_setting('contact_email', '')),
+            'map-pin' => trim((string)sh_setting('contact_address', '')),
+        ], static fn(string $v): bool => $v !== '');
+        ?>
+        <?php if ($fAbout !== ''): ?>
+        <p class="sh-footer__about"><?= e($fAbout) ?></p>
+        <?php endif; ?>
+        <?php if ($fContact): ?>
         <ul class="sh-footer__contact">
-          <li><?= sh_icon('phone', 15) ?><span><?= e(sh_setting('contact_phone', '')) ?></span></li>
-          <li><?= sh_icon('mail', 15) ?><span><?= e(sh_setting('contact_email', '')) ?></span></li>
-          <li><?= sh_icon('map-pin', 15) ?><span><?= e(sh_setting('contact_address', '')) ?></span></li>
+          <?php foreach ($fContact as $icon => $value): ?>
+          <li><?= sh_icon($icon, 15) ?><span><?= e($value) ?></span></li>
+          <?php endforeach; ?>
         </ul>
+        <?php endif; ?>
       </div>
+      <?php if ($fCats): ?>
       <div class="sh-footer__col">
         <h3 class="sh-footer__title">Shop</h3>
         <ul class="sh-footer__links">
@@ -29,6 +44,7 @@ $fCats = $shCategories ?? sh_categories();
           <?php endforeach; ?>
         </ul>
       </div>
+      <?php endif; ?>
       <div class="sh-footer__col">
         <h3 class="sh-footer__title">Customer Service</h3>
         <ul class="sh-footer__links">

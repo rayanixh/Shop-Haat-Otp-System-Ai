@@ -200,12 +200,12 @@ require __DIR__ . '/_layout.php';
   <div class="sh-panel__body">
     <p class="sh-panel__note" style="margin-bottom:12px">
       With the webhook registered, every new order and payment arrives in Telegram as a card with real buttons —
-      verify or reject a payment, move to processing, deliver digital codes, complete or cancel. Each button performs the
+      verify or reject a payment, move to processing, complete or cancel. Each button performs the
       same database action as the admin panel, including duplicate protection.
     </p>
     <div class="sh-field">
       <label class="sh-field__label" for="tg-url">Webhook URL</label>
-      <input class="sh-input" id="tg-url" value="<?= e(sh_tg_webhook_url()) ?>" readonly onclick="this.select()">
+      <input class="sh-input" id="tg-url" value="<?= e(sh_tg_webhook_url()) ?>" readonly data-select-on-click>
     </div>
     <?php if ($tgHookInfo !== null): ?>
       <div class="sh-grid2">

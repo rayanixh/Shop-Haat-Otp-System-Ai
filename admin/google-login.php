@@ -124,7 +124,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-field">
           <label class="sh-field__label" for="gl-cb">Authorized Redirect URI</label>
           <div class="sh-copyrow">
-            <input class="sh-input sh-input--mono" id="gl-cb" value="<?= e($gCallback) ?>" readonly onclick="this.select()">
+            <input class="sh-input sh-input--mono" id="gl-cb" value="<?= e($gCallback) ?>" readonly data-select-on-click>
             <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-copy="<?= e($gCallback) ?>"><?= sh_icon('copy', 14) ?> Copy</button>
           </div>
           <span class="sh-field__hint">Detected from this site's address. Add it exactly as shown in Google Cloud Console.</span>
@@ -132,7 +132,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-field">
           <label class="sh-field__label" for="gl-or">Authorized JavaScript origin</label>
           <div class="sh-copyrow">
-            <input class="sh-input sh-input--mono" id="gl-or" value="<?= e($gOrigin) ?>" readonly onclick="this.select()">
+            <input class="sh-input sh-input--mono" id="gl-or" value="<?= e($gOrigin) ?>" readonly data-select-on-click>
             <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-copy="<?= e($gOrigin) ?>"><?= sh_icon('copy', 14) ?> Copy</button>
           </div>
         </div>

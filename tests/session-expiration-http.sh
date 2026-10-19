@@ -17,15 +17,122 @@ DESKTOP_UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safa
 
 cleanup() {
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  # The category section writes this script and then creates a probe category;
+  # running it here too means a failed assertion cannot leave the probe row or
+  # its upload behind. The script deletes nothing when the probe is not there.
+  if [[ -f "$TMP_DIR/probe-cleanup.php" ]]; then
+    php "$TMP_DIR/probe-cleanup.php" >/dev/null 2>&1 || true
+  fi
+  rm -f "$ROOT/tests/tmp-probe.php"
+  # The admin section creates the account it signs in with.
+  if [[ -f "$TMP_DIR/admin-cleanup.php" ]]; then
+    php "$TMP_DIR/admin-cleanup.php" >/dev/null 2>&1 || true
+  fi
+  # The slider section creates its own two slides; a failed assertion mid-section
+  # must not leave them behind either.
+  if [[ -f "$TMP_DIR/slider.php" ]]; then
+    php "$TMP_DIR/slider.php" cleanup >/dev/null 2>&1 || true
+  fi
   rm -f "$COOKIE_JAR" "$SERVER_LOG"
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
-fail() { echo "Session HTTP integration failed: $*" >&2; exit 1; }
+fail() {
+  # ::error:: is picked up by the runner and exposed through the annotations
+  # API, so a failure is diagnosable without downloading the full step log.
+  echo "::error title=Integration failure::Session HTTP integration failed: $*" >&2
+  echo "Session HTTP integration failed: $*" >&2
+  exit 1
+}
+
+# Surface the application log through an annotation: the raw exception is what
+# makes a 500 diagnosable, and the log is already scrubbed of credentials by the
+# application itself. Newlines are folded so the workflow command stays on one
+# line, and % is escaped because the runner treats it as an escape character.
+dump_app_log() {
+  local label="$1" file=""
+  file="$(ls -1t logs/app-*.log 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$file" && -f "$file" ]]; then
+    echo "::error title=App log tail (${label})::$(tail -c 2000 "$file" | tr '\n' '|' | sed 's/%/%25/g')"
+  else
+    echo "::warning title=App log (${label})::no application log was found under logs/"
+  fi
+}
+
+# Parse an XML file. SimpleXML is what CI installs; if a host lacks it, the
+# check falls back to a structural assertion and says so, rather than passing
+# silently on an unchecked file.
+assert_valid_xml() {
+  local file="$1" label="$2"
+  if ! php -r 'exit(function_exists("simplexml_load_file") ? 0 : 1);'; then
+    echo "NOTE: SimpleXML is unavailable, using a structural check for ${label}"
+    grep -Eq '</urlset>|</sitemapindex>' "$file" || fail "${label} is not a closed sitemap document"
+    return 0
+  fi
+  php -r 'exit(@simplexml_load_file($argv[1]) === false ? 1 : 0);' "$file" || fail "${label} is not well-formed XML"
+}
 assert_contains() {
   local haystack="$1" needle="$2" message="$3"
   [[ "$haystack" == *"$needle"* ]] || fail "$message"
+}
+
+# Flip a store setting through the application's own writer, so this test
+# exercises exactly what the admin settings page writes (settings cache included).
+set_store_setting() {
+  local key="$1" value="$2"
+  SH_TEST_SET_KEY="$key" SH_TEST_SET_VALUE="$value" php -r '
+    $_SERVER["SCRIPT_NAME"] = "/tests/setting.php";
+    $_SERVER["HTTP_HOST"] = "localhost";
+    $_SERVER["REMOTE_ADDR"] = "127.0.0.1";
+    $_SERVER["REQUEST_METHOD"] = "GET";
+    require getcwd() . "/config/config.php";
+    sh_setting_save((string)getenv("SH_TEST_SET_KEY"), (string)getenv("SH_TEST_SET_VALUE"));
+  ' >/dev/null || fail "could not write the setting ${key}"
+}
+
+# Count occurrences of a fixed string in a body. Written so a missing match
+# cannot abort the script: with `set -o pipefail` a `grep` that finds nothing
+# makes the whole command substitution fail, which would hide the assertion that
+# was about to explain the problem.
+count_of() {
+  local n
+  n="$(printf '%s' "$2" | grep -o -- "$1" | wc -l)" || n=0
+  printf '%s' "${n// /}"
+}
+
+fetch_page() {
+  local path="$1" ua="${2:-$DESKTOP_UA}"
+  # -L: some routes legitimately redirect (checkout with an empty cart), and the
+  # page the visitor actually lands on is the one that must carry the overlay.
+  curl -sS -L --max-redirs 3 -A "$ua" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}${path}" || fail "GET ${path} failed"
+}
+
+# The markup a real browser needs for the transition, in the order it must
+# arrive in: the hold script in the head, then the overlay, then the content.
+assert_transition_markup() {
+  local path="$1" body="$2" label="$3"
+  local overlay_count head_at body_at overlay_at main_at duration
+  overlay_count="$(count_of 'id="sh-pt"' "$body")"
+  [[ "$overlay_count" == "1" ]] || fail "${label} rendered ${overlay_count} transition overlays, expected exactly 1"
+  assert_contains "$body" 'data-transition="1"' "${label} does not announce the transition on the body"
+  assert_contains "$body" '__shPtFallback' "${label} has no first-paint hold script"
+  assert_contains "$body" 'html.sh-pt-hold .sh-pt' "${label} has no first-paint style for the overlay"
+  assert_contains "$body" 'assets/js/app.js' "${label} does not load the script that releases the overlay"
+  head_at="$(printf '%s' "$body" | grep -bo '__shPtFallback' | head -n 1 | cut -d: -f1)"
+  body_at="$(printf '%s' "$body" | grep -bo '<body' | head -n 1 | cut -d: -f1)"
+  [[ -n "$head_at" && -n "$body_at" && "$head_at" -lt "$body_at" ]] || fail "${label} emits the hold after <body>, which is too late for the first paint"
+  overlay_at="$(printf '%s' "$body" | grep -bo 'id="sh-pt"' | head -n 1 | cut -d: -f1)"
+  # Public pages use <main id="sh-main">; the admin layout uses
+  # <div class="sh-admin-main"> and the admin sign-in page its own box.
+  # Whichever the page has, the overlay must come first. The anchors are element
+  # markup on purpose: a stylesheet selector (".sh-adminlogin__box {") sits in
+  # the head of that page and would otherwise match before the overlay.
+  main_at="$(printf '%s' "$body" | grep -bo 'id="sh-main"\|class="sh-admin-main"\|class="sh-adminlogin__box"' | head -n 1 | cut -d: -f1)"
+  [[ -n "$overlay_at" && -n "$main_at" && "$overlay_at" -lt "$main_at" ]] || fail "${label} renders the overlay after the page content"
+  duration="$(printf '%s' "$body" | sed -n 's/.*--sh-pt-ms:\([0-9]*\)ms.*/\1/p' | head -n 1)"
+  [[ -n "$duration" ]] || fail "${label} does not carry the configured transition duration"
+  printf '%s' "$duration"
 }
 
 php -S "127.0.0.1:${PORT}" router.php >"$SERVER_LOG" 2>&1 &
@@ -187,5 +294,720 @@ grep -Eqi '^Location: .*/?login\.php\?redirect=' "$stale_headers" || { cat "$sta
 ! grep -qi '419' "$stale_body" || fail 'Stale Account POST exposed Error 419'
 stale_location="$(awk 'BEGIN { IGNORECASE=1 } /^Location:/ { sub(/\r$/, ""); print $2; exit }' "$stale_headers")"
 open_login_notice "$stale_location"
+
+# ---------------------------------------------------------------------------
+# 7. Public SEO routes, fetched exactly as a crawler would.
+#    /sitemap.xml and /robots.txt are generated from the database the reporting
+#    test just seeded, so this also proves the endpoints answer over real HTTP
+#    with the real schema in place.
+# ---------------------------------------------------------------------------
+robots_headers="$TMP_DIR/robots-headers"
+robots_body="$TMP_DIR/robots.txt"
+robots_ct=''
+robots_code="$(curl -sS -A "$DESKTOP_UA" -D "$robots_headers" -o "$robots_body" -w '%{http_code}' "${BASE}/robots.txt")"
+robots_ct="$(tr -d '\r' < "$robots_headers" | awk 'BEGIN { IGNORECASE=1 } /^content-type:/ { print $2; exit }')"
+
+sitemap_headers="$TMP_DIR/sitemap-headers"
+sitemap_body="$TMP_DIR/sitemap.xml"
+sitemap_code="$(curl -sS -A "$DESKTOP_UA" -D "$sitemap_headers" -o "$sitemap_body" -w '%{http_code}' "${BASE}/sitemap.xml")"
+sitemap_ct="$(tr -d '\r' < "$sitemap_headers" | awk 'BEGIN { IGNORECASE=1 } /^content-type:/ { print $2; exit }')"
+sitemap_root=''
+grep -q '<sitemapindex' "$sitemap_body" 2>/dev/null && sitemap_root='sitemapindex'
+grep -q '<urlset' "$sitemap_body" 2>/dev/null && sitemap_root="${sitemap_root:-urlset}"
+sitemap_locs="$(grep -c '<loc>' "$sitemap_body" 2>/dev/null || true)"
+
+chunk_code="$(curl -sS -A "$DESKTOP_UA" -o "$TMP_DIR/sitemap-1.xml" -w '%{http_code}' "${BASE}/sitemap-1.xml")"
+missing_code="$(curl -sS -A "$DESKTOP_UA" -o "$TMP_DIR/sitemap-999.xml" -w '%{http_code}' "${BASE}/sitemap-999.xml")"
+
+# The canonical domain the store is configured with, if any.
+canonical_base="$(php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $v = $pdo->query("SELECT setting_value FROM settings WHERE setting_key = \"seo_canonical_base\" LIMIT 1")->fetchColumn();
+    echo is_string($v) ? trim($v) : "";
+} catch (Throwable $e) { echo ""; }')"
+
+slug="$(php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $v = $pdo->query("SELECT slug FROM products WHERE status = 1 ORDER BY id ASC LIMIT 1")->fetchColumn();
+    echo is_string($v) ? $v : "";
+} catch (Throwable $e) { echo ""; }')"
+
+product_code='(no published product)'
+title_count='-'
+canonical_count='-'
+description_count='-'
+og_count='-'
+ld_count='-'
+if [[ -n "$slug" ]]; then
+  product_body="$TMP_DIR/product.html"
+  product_code="$(curl -sS -A "$DESKTOP_UA" -o "$product_body" -w '%{http_code}' --get --data-urlencode "slug=${slug}" "${BASE}/product.php")"
+  if [[ -s "$product_body" ]]; then
+    title_count="$(grep -c '<title>' "$product_body" || true)"
+    canonical_count="$(grep -c 'rel="canonical"' "$product_body" || true)"
+    description_count="$(grep -c 'name="description"' "$product_body" || true)"
+    og_count="$(grep -c 'property="og:title"' "$product_body" || true)"
+    ld_count="$(grep -c 'application/ld+json' "$product_body" || true)"
+  fi
+fi
+
+# Observed values, reported before the assertions so a failure is diagnosable
+# from the annotations alone.
+echo "::notice title=SEO routes observed::robots ${robots_code} ${robots_ct} | sitemap ${sitemap_code} ${sitemap_ct} root=${sitemap_root} locs=${sitemap_locs} | chunk ${chunk_code} | out-of-range ${missing_code} | product ${product_code} slug=${slug} titles=${title_count} canonicals=${canonical_count} descriptions=${description_count} og=${og_count} jsonld=${ld_count} | canonical_base=${canonical_base}"
+
+[[ "$robots_code" == '200' ]] || { cat "$robots_body" >&2; fail "GET /robots.txt returned HTTP ${robots_code}, expected 200"; }
+case "$robots_ct" in text/plain*) ;; *) cat "$robots_headers" >&2; fail "robots.txt Content-Type is '${robots_ct}', expected text/plain";; esac
+grep -q '^User-agent: \*' "$robots_body" || { cat "$robots_body" >&2; fail 'robots.txt has no user-agent group'; }
+grep -q '^Allow: /' "$robots_body" || { cat "$robots_body" >&2; fail 'robots.txt does not allow crawling'; }
+grep -Eq '^Sitemap: .*/?sitemap\.xml[[:space:]]*$' "$robots_body" || { cat "$robots_body" >&2; fail 'robots.txt does not advertise the sitemap URL'; }
+if grep -Eq '^Disallow: /[[:space:]]*$' "$robots_body"; then cat "$robots_body" >&2; fail 'robots.txt disallows the whole site'; fi
+if grep -q 'Disallow: /assets/' "$robots_body"; then cat "$robots_body" >&2; fail 'robots.txt blocks the assets a crawler needs to render pages'; fi
+
+[[ "$sitemap_code" == '200' ]] || { cat "$sitemap_body" >&2; fail "GET /sitemap.xml returned HTTP ${sitemap_code}, expected 200 from an installed store"; }
+case "$sitemap_ct" in application/xml*) ;; *) cat "$sitemap_headers" >&2; fail "sitemap.xml Content-Type is '${sitemap_ct}', expected application/xml";; esac
+if grep -qi '<!doctype html' "$sitemap_body"; then cat "$sitemap_body" >&2; fail 'sitemap.xml returned an HTML page instead of XML'; fi
+assert_valid_xml "$sitemap_body" 'sitemap.xml'
+[[ "$sitemap_root" == 'urlset' || "$sitemap_root" == 'sitemapindex' ]] || { cat "$sitemap_body" >&2; fail 'sitemap.xml has neither <urlset> nor <sitemapindex>'; }
+grep -q '<loc>' "$sitemap_body" || { cat "$sitemap_body" >&2; fail 'the sitemap publishes no <loc> entry at all'; }
+if grep -q '<loc>http' "$sitemap_body"; then
+  while IFS= read -r loc; do
+    case "$loc" in
+      *"<loc>http://"*|*"<loc>https://"*) ;;
+      *) cat "$sitemap_body" >&2; fail "the sitemap mixes absolute and relative URLs: ${loc}";;
+    esac
+  done < <(grep -o '<loc>[^<]*</loc>' "$sitemap_body")
+fi
+if [[ -n "$canonical_base" ]]; then
+  while IFS= read -r loc; do
+    case "$loc" in
+      *"<loc>${canonical_base}/"*) ;;
+      *) cat "$sitemap_body" >&2; fail "a sitemap URL ignores the configured canonical domain ${canonical_base}: ${loc}";;
+    esac
+  done < <(grep -o '<loc>[^<]*</loc>' "$sitemap_body")
+fi
+for forbidden in '/cart.php' '/checkout.php' '/payment.php' '/account.php' '/order-success.php' '/admin/' '/install/' '/logs/' '?q='; do
+  if grep -qF "$forbidden" "$sitemap_body"; then cat "$sitemap_body" >&2; fail "the sitemap publishes a private route: ${forbidden}"; fi
+done
+if grep -q 'changefreq\|priority' "$sitemap_body"; then cat "$sitemap_body" >&2; fail 'the sitemap carries an invented changefreq or priority value'; fi
+
+[[ "$chunk_code" == '200' ]] || fail "GET /sitemap-1.xml returned HTTP ${chunk_code}, expected 200"
+assert_valid_xml "$TMP_DIR/sitemap-1.xml" 'sitemap-1.xml'
+[[ "$missing_code" == '404' ]] || fail "GET /sitemap-999.xml returned HTTP ${missing_code}, expected 404 for a file that was never published"
+assert_valid_xml "$TMP_DIR/sitemap-999.xml" 'the out-of-range sitemap chunk'
+
+# A product page must carry exactly one of each metadata tag.
+if [[ -n "$slug" ]]; then
+  if [[ "$product_code" != '200' ]]; then
+    dump_app_log "product page HTTP ${product_code}"
+    echo "::notice title=Product page body::$(head -c 400 "$TMP_DIR/product.html" | tr '\n' ' ' | sed 's/%/%25/g')"
+    fail "GET /product.php?slug=${slug} returned HTTP ${product_code}"
+  fi
+  [[ "$title_count" == '1' ]] || fail "the product page has ${title_count} <title> tags, expected 1"
+  [[ "$canonical_count" == '1' ]] || fail "the product page has ${canonical_count} canonical links, expected 1"
+  [[ "$description_count" == '1' ]] || fail "the product page has ${description_count} meta descriptions, expected 1"
+  [[ "$og_count" == '1' ]] || fail "the product page has ${og_count} og:title tags, expected 1"
+  [[ "$ld_count" == '1' ]] || fail "the product page has ${ld_count} JSON-LD blocks, expected 1"
+  grep -q "product.php?slug=${slug}" "$TMP_DIR/product.html" || fail 'the product page does not reference its own canonical slug URL'
+  echo "SEO product page metadata passed (slug: ${slug})"
+else
+  echo '::notice title=SEO routes observed::no published product in the test database, product page metadata not checked'
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 11 — the Digital Codes feature is removed.
+#
+# A row that still carries product_type = 'digital' is deliberately left in
+# place for the owner to decide about, but the store must not sell it (there is
+# no fulfilment path any more) and the page must say so honestly instead of
+# offering a buy button or promising a code. A disposable probe row is created,
+# rendered, asserted and removed.
+# ---------------------------------------------------------------------------
+digital_slug='legacy-digital-removal-probe'
+digital_id="$(php -r '
+$cfg = require "config/database.php";
+$slug = "legacy-digital-removal-probe";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM products WHERE slug = ?")->execute([$slug]);
+    $pdo->prepare("INSERT INTO products (name, slug, sku, price, stock, product_type, image, status, rating, review_count, sold_count, view_count, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,0,0,0,0,NOW())")
+        ->execute(["Legacy Digital Removal Probe", $slug, "PROBE-DIGITAL", 300, 25, "digital", null, 1]);
+    echo (string)(int)$pdo->lastInsertId();
+} catch (Throwable $e) { echo ""; }')"
+
+digital_code='(probe row not created)'
+if [[ -n "$digital_id" ]]; then
+  digital_body="$TMP_DIR/legacy-digital.html"
+  digital_code="$(curl -sS -A "$DESKTOP_UA" -o "$digital_body" -w '%{http_code}' --get --data-urlencode "slug=${digital_slug}" "${BASE}/product.php")"
+  digital_orderable='unknown'
+  grep -q "data-add-cart=\"${digital_id}\"" "$digital_body" 2>/dev/null && digital_orderable='button present'
+  grep -q "data-add-cart=\"${digital_id}\" data-qty-source=\"sh-pdp-qty\" disabled" "$digital_body" 2>/dev/null && digital_orderable='disabled'
+  echo "::notice title=Phase 11 probe::legacy digital product page ${digital_code} id=${digital_id} buy_state=${digital_orderable}"
+
+  [[ "$digital_code" == '200' ]] || {
+    head -c 400 "$digital_body" >&2
+    fail "GET /product.php?slug=${digital_slug} returned HTTP ${digital_code}"
+  }
+  grep -q 'can no longer be ordered online' "$digital_body" || fail 'a legacy digital product page does not explain that it can no longer be ordered'
+  grep -q 'Not orderable online' "$digital_body" || fail 'a legacy digital product page does not show its availability honestly'
+  [[ "$digital_orderable" == 'disabled' ]] || fail "a legacy digital product page offers a live buy button (state: ${digital_orderable})"
+  if grep -qE 'Digital Delivery|Your Digital Codes|digital codes will appear' "$digital_body"; then
+    fail 'a legacy digital product page still advertises code delivery'
+  fi
+
+  php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM products WHERE slug = ?")->execute(["legacy-digital-removal-probe"]);
+} catch (Throwable $e) {}'
+  echo 'Legacy digital product probe passed'
+else
+  echo '::notice title=Phase 11 probe::probe row could not be created, legacy digital product page not checked'
+fi
+
+echo 'SEO route integration passed'
+
+# ---------------------------------------------------------------------------
+# 8. Page transition: every supported page load, website and admin panel.
+#    The overlay must be in the first paint (before the content), on a fresh
+#    load, a refresh and a direct URL, on the public site and in the admin; the
+#    one global setting must drive both; and switching it off must render no
+#    overlay at all rather than a hidden one.
+# ---------------------------------------------------------------------------
+echo 'Page transition HTTP integration'
+
+home_body="$(fetch_page '/')"
+home_duration="$(assert_transition_markup '/' "$home_body" 'GET / (fresh load)')"
+# A refresh and a direct URL are the same request; the assertion is that the
+# hold is emitted by the HTML itself rather than from a leftover session marker.
+assert_transition_markup '/login.php' "$(fetch_page '/login.php')" 'GET /login.php (direct URL)' >/dev/null
+assert_transition_markup '/products.php' "$(fetch_page '/products.php')" 'GET /products.php (direct URL)' >/dev/null
+
+login_customer
+assert_transition_markup '/account.php' "$(fetch_page '/account.php' "$MOBILE_UA")" 'GET /account.php (signed in)' >/dev/null
+assert_transition_markup '/orders.php' "$(fetch_page '/orders.php')" 'GET /orders.php (signed in)' >/dev/null
+assert_transition_markup '/checkout.php' "$(fetch_page '/checkout.php')" 'GET /checkout.php (signed in)' >/dev/null
+
+order_probe_id="$(php -r '
+$cfg = require "config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $id = $pdo->query("SELECT o.id FROM orders o JOIN users u ON u.id = o.user_id WHERE u.email = \"reporting-customer@example.test\" ORDER BY o.id ASC LIMIT 1")->fetchColumn();
+    echo $id === false ? "" : (string)$id;
+} catch (Throwable $e) { echo ""; }')"
+if [[ -n "$order_probe_id" ]]; then
+  assert_transition_markup "/order-details.php?id=${order_probe_id}" "$(fetch_page "/order-details.php?id=${order_probe_id}" "$MOBILE_UA")" "GET /order-details.php?id=${order_probe_id} (direct URL)" >/dev/null
+  echo "::notice title=Page transition order page::checked /order-details.php?id=${order_probe_id}"
+else
+  echo '::notice title=Page transition order page::no order for the reporting customer, /order-details.php not checked'
+fi
+
+# The admin sign-in page is the one admin screen a signed-out visitor sees, and
+# it must use the very same global duration as the storefront.
+admin_duration="$(assert_transition_markup '/admin/login.php' "$(fetch_page '/admin/login.php')" 'GET /admin/login.php (admin panel)')"
+[[ "$admin_duration" == "$home_duration" ]] || fail "the admin panel uses a different transition duration (${admin_duration}ms) than the website (${home_duration}ms)"
+
+# A refresh of a page fetched after a click marker exists must not double-hold:
+# the marker is single-use, and a later load without it is a normal cold load.
+marker_page="$(fetch_page '/cart.php')"
+assert_transition_markup '/cart.php' "$marker_page" 'GET /cart.php (refresh)' >/dev/null
+
+# Change the shared duration: both panels must follow it, with no second setting.
+read_setting() {
+  SH_TEST_GET_KEY="$1" php -r '
+    $_SERVER["SCRIPT_NAME"] = "/tests/setting.php";
+    $_SERVER["HTTP_HOST"] = "localhost";
+    $_SERVER["REMOTE_ADDR"] = "127.0.0.1";
+    require getcwd() . "/config/config.php";
+    echo (string)sh_setting((string)getenv("SH_TEST_GET_KEY"), "");
+  ' 2>/dev/null
+}
+original_duration="$(read_setting transition_duration)"
+[[ -n "$original_duration" ]] || original_duration=450
+original_enabled="$(read_setting transition_enabled)"
+[[ -n "$original_enabled" ]] || original_enabled=1
+
+set_store_setting transition_duration 750
+home_new="$(fetch_page '/')"
+admin_new="$(fetch_page '/admin/login.php')"
+assert_contains "$home_new" '--sh-pt-ms:750ms' 'the website did not pick up the changed transition duration'
+assert_contains "$admin_new" '--sh-pt-ms:750ms' 'the admin panel did not pick up the changed transition duration'
+set_store_setting transition_duration "$original_duration"
+
+# Disabled: no overlay, no hold script — and the page content still renders.
+set_store_setting transition_enabled 0
+disabled_home="$(fetch_page '/')"
+disabled_admin="$(fetch_page '/admin/login.php')"
+disabled_account="$(fetch_page '/account.php')"
+for pair in "GET /:${disabled_home}" "GET /admin/login.php:${disabled_admin}" "GET /account.php:${disabled_account}"; do
+  label="${pair%%:*}"; body="${pair#*:}"
+  if printf '%s' "$body" | grep -q 'id="sh-pt"'; then fail "${label} rendered the transition overlay while the setting is off"; fi
+  if printf '%s' "$body" | grep -q '__shPtFallback'; then fail "${label} emitted the first-paint hold while the setting is off"; fi
+done
+assert_contains "$disabled_home" 'id="sh-main"' 'the homepage lost its content while the transition is disabled'
+assert_contains "$disabled_admin" 'sh-adminlogin__box' 'the admin sign-in form disappeared while the transition is disabled'
+set_store_setting transition_enabled "$original_enabled"
+assert_transition_markup '/' "$(fetch_page '/')" 'GET / after re-enabling the transition' >/dev/null
+echo "::notice title=Page transition observed::home=${home_duration}ms admin=${admin_duration}ms disabled=no-overlay duration-change=750ms both panels"
+
+# ---------------------------------------------------------------------------
+# 9. Product category cards: the category's own uploaded image on top, the name
+#    beneath it, a neutral fallback when nothing is uploaded, and no item count
+#    anywhere on a card. The CI database ships no categories, so this section
+#    creates its own probe parent (with a real GIF in uploads/categories) and a
+#    child without an upload — the child is what proves the fallback on a real
+#    category page. Both rows and the file are removed again, from the EXIT trap
+#    as well, so a failure cannot leave them behind.
+# ---------------------------------------------------------------------------
+echo 'Category card HTTP integration'
+
+# The neutral fallback must be served, so a category without a photo is not broken.
+fallback_code="$(curl -sS -o "$TMP_DIR/fallback.svg" -w '%{http_code}' -D "$TMP_DIR/fallback-headers" "${BASE}/assets/images/category-fallback.svg")"
+[[ "$fallback_code" == '200' ]] || fail "the category fallback image returned HTTP ${fallback_code}"
+grep -Eqi '^content-type: image/svg\+xml' "$TMP_DIR/fallback-headers" || fail 'the category fallback is not served as SVG'
+grep -q '<svg' "$TMP_DIR/fallback.svg" || fail 'the category fallback is not an SVG document'
+
+probe_label='Cards Probe'
+probe_child_label='Cards Probe Child'
+
+cat > "$TMP_DIR/probe-cleanup.php" <<'PROBE_CLEANUP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass']);
+    $st = $pdo->prepare('SELECT image FROM categories WHERE slug = ? LIMIT 1');
+    $st->execute(['category-card-probe']);
+    $image = (string)$st->fetchColumn();
+    $pdo->prepare('DELETE FROM categories WHERE slug IN (?, ?)')->execute(['category-card-probe-child', 'category-card-probe']);
+    if ($image !== '' && strpos($image, '/') === false) {
+        @unlink(getcwd() . '/uploads/categories/' . basename($image));
+    }
+} catch (Throwable $e) {
+}
+PROBE_CLEANUP
+
+# The probe row, its upload and its child. getcwd() is the repository root, the
+# same directory the PHP test server serves, so the path written here is the one
+# the storefront reads. display_errors goes to stderr so a warning cannot corrupt
+# the file name this command substitution captures.
+probe_file="$(php -d display_errors=stderr -r '
+$_SERVER["SCRIPT_NAME"] = "/tests/probe.php";
+$_SERVER["HTTP_HOST"] = "localhost";
+$cfg = require getcwd() . "/config/database.php";
+$src = base64_decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+$name = "probe-" . bin2hex(random_bytes(4)) . ".gif";
+$dir = getcwd() . "/uploads/categories";
+if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) { exit; }
+if (@file_put_contents($dir . "/" . $name, $src) === false) { exit; }
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM categories WHERE slug IN (?, ?)")->execute(["category-card-probe-child", "category-card-probe"]);
+    $insert = $pdo->prepare("INSERT INTO categories (name, slug, icon, image, description, sort_order, status, parent_id) VALUES (?,?,?,?,?,?,?,?)");
+    $insert->execute(["Cards Probe", "category-card-probe", "grid", $name, "category card probe", -99, 1, null]);
+    $parentId = (int)$pdo->lastInsertId();
+    $insert->execute(["Cards Probe Child", "category-card-probe-child", "grid", null, "category card probe child", -98, 1, $parentId]);
+    echo $name;
+} catch (Throwable $e) {
+    @unlink($dir . "/" . $name);
+}' 2>/dev/null || true)"
+if [[ -z "$probe_file" ]]; then
+  echo '::error title=Category cards::the probe category could not be created, so the category cards could not be exercised'
+  fail 'the category-card probe category could not be created'
+fi
+
+# A one-off probe page served by the same PHP process and the same working
+# directory as the storefront, so it answers from the application's own point of
+# view: what the row holds, whether the upload directory really contains the
+# file, which URL the helper resolves, and the categories the homepage will draw.
+# It is deleted again below (and in the EXIT trap).
+cat > tests/tmp-probe.php <<'PROBE_PAGE'
+<?php
+declare(strict_types=1);
+require dirname(__DIR__) . '/config/config.php';
+require_once SH_ROOT . '/includes/catalog.php';
+header('Content-Type: text/plain; charset=utf-8');
+// Report the decisive facts first: the annotation is truncated on purpose.
+$out = [];
+try {
+    $row = sh_one('SELECT id, name, slug, image, sort_order, status FROM categories WHERE slug = ?', ['category-card-probe']);
+    $img = (string)($row['image'] ?? '');
+    $path = SH_UPLOAD_DIR . '/categories/' . basename($img);
+    $out[] = 'resolved=' . sh_category_image($img);
+    $out[] = 'card=' . ($row !== null ? sh_category_card($row, 0) : '(no row)');
+    $slice = [];
+    foreach (array_slice(sh_categories(), 0, 10) as $c) {
+        $slice[] = $c['name'] . '[' . (string)($c['image'] ?? '') . ']->' . sh_category_thumb($c['image'] ?? null);
+    }
+    $out[] = 'cats=' . implode('; ', $slice);
+    $out[] = 'cwd=' . getcwd() . ' sh_root=' . SH_ROOT . ' upload_dir=' . SH_UPLOAD_DIR
+        . ' dir_exists=' . (is_dir(SH_UPLOAD_DIR . '/categories') ? 'yes' : 'no');
+    $out[] = 'script=' . (string)($_SERVER['SCRIPT_NAME'] ?? '?') . ' base=' . sh_base_url();
+    $out[] = 'row=' . json_encode($row);
+    $out[] = 'path=' . $path . ' is_file=' . (is_file($path) ? 'yes' : 'no') . ' is_readable=' . (is_readable($path) ? 'yes' : 'no')
+        . ' realpath=' . (string)(realpath($path) ?: '(none)');
+    $out[] = 'dir_listing=' . implode(',', array_slice((array)@scandir(SH_UPLOAD_DIR . '/categories'), 0, 15));
+} catch (Throwable $e) {
+    $out[] = 'threw=' . get_class($e) . ': ' . $e->getMessage();
+}
+echo implode("\n", $out), "\n";
+PROBE_PAGE
+probe_state="$(curl -sS -A "$DESKTOP_UA" "${BASE}/tests/tmp-probe.php" | tr '\n' '|' | head -c 3000 || true)"
+echo "::notice title=Category probe::probe=${probe_file} | ${probe_state}"
+rm -f tests/tmp-probe.php
+
+home_cards="$(fetch_page '/')"
+card_count="$(count_of 'class="sh-category-card"' "$home_cards")"
+if [[ "$card_count" -lt 1 ]]; then
+  echo '::error title=Category cards::the homepage rendered no category cards'
+  fail 'the homepage rendered no product category cards'
+fi
+assert_contains "$home_cards" "$probe_label" 'the homepage did not draw the probe category as a card'
+
+# Only the cards are inspected for a count: a cart or order summary legitimately
+# prints "2 items" elsewhere on the site.
+card_blocks="$(printf '%s' "$home_cards" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+[[ -n "$card_blocks" ]] || fail 'the category cards could not be isolated from the homepage markup'
+if printf '%s' "$card_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
+  fail 'a category card still prints an item count'
+fi
+if printf '%s' "$card_blocks" | grep -q 'sh-category-card__icon\|sh-category-card__count'; then
+  fail 'a category card still uses the placeholder-icon / count markup'
+fi
+
+# Each card is one link carrying exactly one image and one name.
+card_img="$(count_of 'class="sh-category-card__img' "$home_cards")"
+card_name="$(count_of 'class="sh-category-card__name"' "$home_cards")"
+[[ "$card_img" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_img} images"
+[[ "$card_name" == "$card_count" ]] || fail "the homepage drew ${card_count} category cards but ${card_name} names"
+
+# A real upload must be used by the card, and must not be marked as the placeholder.
+direct_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/uploads/categories/${probe_file}")"
+# Only the card blocks are inspected from here on: the navigation rows also show
+# a category's own image, so a page-wide search would answer for the wrong <img>.
+if ! printf '%s' "$card_blocks" | grep -q "uploads/categories/${probe_file}"; then
+  echo "::error title=Category card::probe=${probe_file} | direct_http=${direct_code} | ${probe_state}"
+  printf '%s' "$card_blocks" | head -c 900 | tr '\n' ' ' | sed 's/%/%25/g' | while read -r line; do
+    echo "::error title=Category card markup::${line}"
+  done
+  fail "the homepage did not use the uploaded category image (${probe_file})"
+fi
+probe_img="$(printf '%s' "$card_blocks" | grep -o "<img class=\"[^\"]*\" src=\"[^\"]*${probe_file}[^\"]*\"" | head -n 1 || true)"
+[[ -n "$probe_img" ]] || fail "the uploaded category image is not rendered by an <img> tag (${probe_file})"
+case "$probe_img" in
+  *sh-category-card__img--fallback*) fail 'an uploaded category image was rendered as the placeholder' ;;
+  *sh-category-card__img*) ;;
+  *) fail 'the uploaded category image is not rendered as a category card image' ;;
+esac
+echo "::notice title=Category card image::homepage card used uploads/categories/${probe_file}"
+
+# The upload is a public URL that the web server really serves.
+img_url="$(printf '%s' "$card_blocks" | grep -o "/uploads/categories/${probe_file}[^\"]*" | head -n 1 || true)"
+if [[ -n "$img_url" ]]; then
+  img_code="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}${img_url}")"
+  [[ "$img_code" == '200' ]] || fail "the uploaded category image returned HTTP ${img_code} (${img_url})"
+fi
+
+# The category page must use the same cards, and a child without an upload must
+# fall back to the neutral artwork instead of breaking.
+cat_page="$(fetch_page "/category.php?slug=category-card-probe")"
+assert_contains "$cat_page" "$probe_child_label" 'the category page did not draw its child category as a card'
+cat_cards="$(count_of 'class="sh-category-card"' "$cat_page")"
+[[ "$cat_cards" -ge 1 ]] || fail 'the category page drew no child category cards'
+cat_blocks="$(printf '%s' "$cat_page" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+if printf '%s' "$cat_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
+  fail 'a category page card still prints an item count'
+fi
+child_img="$(printf '%s' "$cat_page" | grep -o '<img class="[^"]*" src="[^"]*category-fallback\.svg[^"]*"' | head -n 1 || true)"
+[[ -n "$child_img" ]] || fail 'a category without an upload did not use the neutral fallback on the category page'
+case "$child_img" in
+  *sh-category-card__img--fallback*) ;;
+  *) fail 'the fallback image on the category page is not marked as the placeholder' ;;
+esac
+
+# Clean up now and prove it worked, so a probe row cannot skew a later run.
+php "$TMP_DIR/probe-cleanup.php"
+probe_gone="$(curl -sS -o /dev/null -w '%{http_code}' "${BASE}/category.php?slug=category-card-probe")"
+[[ "$probe_gone" == '404' ]] || fail "the probe category was not removed (category page returned HTTP ${probe_gone})"
+
+# ---------------------------------------------------------------------------
+# 10. The admin panel over real HTTP. An authenticated operator must reach the
+#     list pages, every Add action must sit above the records, every create/edit
+#     form must live on its own screen, and a real save must round-trip through
+#     the existing handler. The CI database seeds no admin, so this section
+#     creates one and removes it again (the EXIT trap removes it too).
+# ---------------------------------------------------------------------------
+echo 'Admin panel HTTP integration'
+
+cat > "$TMP_DIR/admin-cleanup.php" <<'ADMIN_CLEANUP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass']);
+    $pdo->prepare('DELETE FROM admins WHERE email = ?')->execute(['http-test-admin@example.test']);
+} catch (Throwable $e) {
+}
+ADMIN_CLEANUP
+
+admin_password='Http-Test-Admin-Pass-1!'
+admin_created="$(SH_TEST_ADMIN_PASSWORD="$admin_password" php -d display_errors=stderr -r '
+$cfg = require getcwd() . "/config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $pdo->prepare("DELETE FROM admins WHERE email = ?")->execute(["http-test-admin@example.test"]);
+    $st = $pdo->prepare("INSERT INTO admins (name, email, password_hash, role, status) VALUES (?,?,?,?,?)");
+    $st->execute(["HTTP Test Admin", "http-test-admin@example.test", password_hash(getenv("SH_TEST_ADMIN_PASSWORD"), PASSWORD_DEFAULT), "superadmin", "active"]);
+    echo "ok";
+} catch (Throwable $e) { echo ""; }' 2>/dev/null || true)"
+if [[ "$admin_created" != 'ok' ]]; then
+  echo '::error title=Admin panel::the admin account for this section could not be created'
+  fail 'the admin HTTP section could not create its admin account'
+fi
+
+# Sign in through the real form, with a real CSRF token.
+admin_login_page="$(curl -sS -A "$DESKTOP_UA" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/admin/login.php")"
+admin_token="$(printf '%s' "$admin_login_page" | csrf_from_html)"
+[[ -n "$admin_token" ]] || fail 'the admin sign-in page did not provide a CSRF token'
+admin_login_headers="$TMP_DIR/admin-login-headers"
+curl -sS -A "$DESKTOP_UA" -D "$admin_login_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${admin_token}" \
+  --data-urlencode 'email=http-test-admin@example.test' \
+  --data-urlencode "password=${admin_password}" \
+  --data-urlencode 'redirect=' \
+  "${BASE}/admin/login.php"
+grep -Eqi '^Location: .*/?admin/dashboard\.php' "$admin_login_headers" \
+  || { cat "$admin_login_headers" >&2; fail 'the admin sign-in did not redirect to the dashboard'; }
+
+admin_home="$(fetch_page '/admin/dashboard.php')"
+if printf '%s' "$admin_home" | grep -q 'sh-adminlogin__box'; then
+  fail 'the admin dashboard still rendered the sign-in form for an authenticated operator'
+fi
+assert_contains "$admin_home" 'sh-admin-sidebar' 'the admin dashboard did not render the panel navigation'
+
+# Each section: Add above the records, no save form in the listing, and a
+# dedicated create screen that renders with a CSRF token and a form footer.
+# Each row: listing|editor|create label|marker that appears with the records. The
+# marker keeps the ordering check meaningful on pages whose records are cards
+# rather than a table (and while the table is still empty on a fresh install).
+admin_sections='admin/categories.php|admin/category-edit.php?new=1|Add category|sh-tablewrap
+admin/products.php|admin/product-edit.php?new=1|Add product|sh-tablewrap
+admin/homepage.php|admin/homepage-edit.php?new=slider|Add slide|sh-panel__body
+admin/payment-methods.php|admin/payment-method-edit.php?new=1|Add payment method|sh-payment-method-list
+admin/couriers.php|admin/courier-edit.php?new=1|Add a courier|sh-tablewrap
+admin/coupons.php|admin/coupon-edit.php?new=1|Add coupon|sh-tablewrap
+admin/admins.php|admin/admin-edit.php?new=1|Add admin|sh-tablewrap
+admin/roles.php|admin/role-edit.php?new=1|Add role|sh-tablewrap
+admin/verification.php|admin/verification-provider-edit.php?new=1|Add provider|sh-verify-providers
+admin/payment-gateways.php|admin/payment-gateway-edit.php?new=1|Register gateway|sh-tablewrap'
+while IFS='|' read -r list_path editor_path add_label record_marker; do
+  [[ -n "$list_path" ]] || continue
+  list_body="$(fetch_page "/${list_path}")"
+  assert_contains "$list_body" "$add_label" "the ${list_path} header lost its create action"
+  if printf '%s' "$list_body" | grep -q 'name="form" value="save"'; then
+    fail "${list_path} still renders a create/edit form inside the listing"
+  fi
+  add_at="$(printf '%s' "$list_body" | grep -bo -- "$add_label" | head -n 1 | cut -d: -f1 || true)"
+  table_at="$(printf '%s' "$list_body" | grep -bo -- "$record_marker" | head -n 1 | cut -d: -f1 || true)"
+  [[ -n "$add_at" && -n "$table_at" ]] || fail "${list_path} does not render both a create action and a record list (${record_marker})"
+  [[ "$add_at" -lt "$table_at" ]] || fail "${list_path} renders its records above the create action"
+
+  editor_body="$(fetch_page "/${editor_path}")"
+  assert_contains "$editor_body" 'name="csrf_token"' "the ${editor_path} form has no CSRF field"
+  assert_contains "$editor_body" 'sh-formcard' "the ${editor_path} form is not rendered in a form card"
+  assert_contains "$editor_body" 'sh-formcard__foot' "the ${editor_path} form has no action footer"
+  assert_contains "$editor_body" 'sh-crumbs' "the ${editor_path} page has no breadcrumb"
+
+  # A bookmark to the old inline editor still lands on the dedicated screen.
+  admin_edit_headers="$TMP_DIR/admin-edit-headers"
+  admin_edit_code="$(curl -sS -A "$DESKTOP_UA" -D "$admin_edit_headers" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -w '%{http_code}' "${BASE}/${list_path}?edit=1")"
+  [[ "$admin_edit_code" == '302' ]] || fail "${list_path}?edit=1 answered HTTP ${admin_edit_code} instead of forwarding to the editor"
+  grep -Eqi "^Location: .*/?$(basename "${editor_path%%\?*}")" "$admin_edit_headers" \
+    || { cat "$admin_edit_headers" >&2; fail "${list_path}?edit=1 did not forward to $(basename "${editor_path%%\?*}")"; }
+  echo "::notice title=Admin section::${list_path} → ${editor_path} (${add_label}) OK"
+done <<< "$admin_sections"
+
+# A real create → list → delete round trip through the coupon screens.
+coupon_probe="HTTPPROBE$$"
+coupon_editor="$(fetch_page '/admin/coupon-edit.php?new=1')"
+coupon_token="$(printf '%s' "$coupon_editor" | csrf_from_html)"
+[[ -n "$coupon_token" ]] || fail 'the coupon editor did not provide a CSRF token'
+coupon_create_headers="$TMP_DIR/coupon-create-headers"
+coupon_create_body="$TMP_DIR/coupon-create-body"
+coupon_create_code="$(curl -sS -A "$DESKTOP_UA" -D "$coupon_create_headers" -o "$coupon_create_body" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -w '%{http_code}' \
+  -X POST --data-urlencode "csrf_token=${coupon_token}" \
+  --data-urlencode 'form=save' --data-urlencode 'id=0' \
+  --data-urlencode "code=${coupon_probe}" \
+  --data-urlencode 'type=percent' --data-urlencode 'value=10' \
+  --data-urlencode 'min_order=0' --data-urlencode 'status=1' \
+  "${BASE}/admin/coupon-edit.php?new=1")"
+if ! grep -Eqi '^Location: .*/?admin/coupons\.php' "$coupon_create_headers"; then
+  # Say exactly what came back: a rejected token, a validation re-render and a
+  # server error all look the same from the outside otherwise.
+  echo "::error title=Coupon round trip::code=${coupon_create_code} location=$(grep -i '^location:' "$coupon_create_headers" | tr -d '\r' | head -n 1) token_len=${#coupon_token} editor_has_form=$(count_of 'name="form" value="save"' "$coupon_editor") editor_is_login=$(count_of 'sh-adminlogin__box' "$coupon_editor")"
+  echo "::error title=Coupon round trip body::$(head -c 240 "$coupon_create_body" | tr -d '\r\n' | sed 's/%/%25/g')"
+  fail 'a coupon saved on its own screen did not return to the coupon list'
+fi
+coupon_list="$(fetch_page '/admin/coupons.php')"
+assert_contains "$coupon_list" "$coupon_probe" 'the saved coupon did not appear in the listing'
+assert_contains "$coupon_list" 'Coupon created.' 'the listing did not report the successful save'
+
+# Deleting it again must work through the listing's own action.
+coupon_id="$(SH_TEST_COUPON_CODE="$coupon_probe" php -r '
+$cfg = require getcwd() . "/config/database.php";
+try {
+    $pdo = new PDO("mysql:host=" . $cfg["host"] . ";port=" . $cfg["port"] . ";dbname=" . $cfg["name"] . ";charset=utf8mb4", $cfg["user"], $cfg["pass"]);
+    $st = $pdo->prepare("SELECT id FROM coupons WHERE code = ? LIMIT 1");
+    $st->execute([getenv("SH_TEST_COUPON_CODE")]);
+    echo (string)$st->fetchColumn();
+} catch (Throwable $e) { echo ""; }' 2>/dev/null || true)"
+[[ -n "$coupon_id" ]] || fail 'the saved coupon could not be found to delete again'
+coupon_delete_token="$(printf '%s' "$coupon_list" | csrf_from_html)"
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST --data-urlencode "csrf_token=${coupon_delete_token}" \
+  --data-urlencode 'form=delete' --data-urlencode "id=${coupon_id}" \
+  "${BASE}/admin/coupons.php"
+coupon_after="$(fetch_page '/admin/coupons.php')"
+if printf '%s' "$coupon_after" | grep -q "$coupon_probe"; then
+  fail 'the coupon delete action left the coupon in the listing'
+fi
+echo "::notice title=Admin CRUD round trip::coupon ${coupon_probe} created, listed and deleted through the panel"
+
+# ---------------------------------------------------------------------------
+# 11. Homepage slider over real HTTP. The CI database seeds no promo content, so
+#     this section creates two slides of its own, drives the real homepage and
+#     removes them again. It asserts what the markup must guarantee: no slide
+#     button, no arrow controls, the configured timing, exactly one slide in the
+#     initial state with the rest stacked behind it, a disabled slide that does
+#     not reach the page at all, a single slide that renders no pagination, and a
+#     missing image that degrades to its plate instead of a broken frame.
+# ---------------------------------------------------------------------------
+cat > "$TMP_DIR/slider.php" <<'PHP'
+<?php
+$cfg = require getcwd() . '/config/database.php';
+try {
+    $pdo = new PDO('mysql:host=' . $cfg['host'] . ';port=' . $cfg['port'] . ';dbname=' . $cfg['name'] . ';charset=utf8mb4', $cfg['user'], $cfg['pass'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (Throwable $e) { fwrite(STDERR, 'slider probe: ' . $e->getMessage() . "\n"); exit(1); }
+$cmd = $argv[1] ?? '';
+$arg = $argv[2] ?? '';
+try {
+    if ($cmd === 'seed') {
+        $pdo->prepare("DELETE FROM promo_slides WHERE title LIKE 'Slider Probe %'")->execute();
+        $ins = $pdo->prepare("INSERT INTO promo_slides (placement, slot, tag, title, subtitle, button_text, button_url, image, overlay, sort_order, status)
+                              VALUES ('slider', NULL, ?, ?, ?, NULL, NULL, ?, 70, ?, 1)");
+        $ins->execute(['Probe Badge', 'Slider Probe One', 'First probe slide text.', 'promo/slide-flash.jpg', 1]);
+        $a = (int)$pdo->lastInsertId();
+        $ins->execute(['Probe Badge Two', 'Slider Probe Two', 'Second probe slide text.', 'promo/slide-grocery.jpg', 2]);
+        $b = (int)$pdo->lastInsertId();
+        echo $a . ' ' . $b;
+    } elseif ($cmd === 'status') {
+        // php slider.php status <0|1> <id>
+        $st = $pdo->prepare('UPDATE promo_slides SET status = ? WHERE id = ?');
+        $st->execute([(int)$arg, (int)($argv[3] ?? 0)]);
+        echo 'ok';
+    } elseif ($cmd === 'missing') {
+        // php slider.php missing <id>
+        $pdo->prepare("UPDATE promo_slides SET image = 'promo/slider-probe-missing.jpg' WHERE id = ?")->execute([(int)$arg]);
+        echo 'ok';
+    } elseif ($cmd === 'cleanup') {
+        $pdo->exec("DELETE FROM promo_slides WHERE title LIKE 'Slider Probe %'");
+        echo 'ok';
+    } else {
+        echo 'unknown';
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, 'slider probe: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+PHP
+
+slider_ids="$(php "$TMP_DIR/slider.php" seed)" || fail 'the slider probe slides could not be created'
+slide_one="${slider_ids%% *}"
+slide_two="${slider_ids##* }"
+[[ -n "$slide_one" && -n "$slide_two" && "$slide_one" != "$slide_two" ]] || fail 'the slider probe did not get two slide ids'
+
+home_slider="$(fetch_page '/index.php')"
+
+# 1. No slide-level call to action and no arrow controls anywhere on the page.
+[[ "$(count_of 'sh-slide__btn' "$home_slider")" == '0' ]] || fail 'the homepage still renders a slide CTA button'
+for gone in sh-carousel__arrow data-carousel-prev data-carousel-next; do
+  [[ "$(count_of "$gone" "$home_slider")" == '0' ]] || fail "the homepage still renders the removed slider control: ${gone}"
+done
+
+# 2. The content is still there, and the slides are stacked rather than swapped.
+assert_contains "$home_slider" 'Slider Probe One' 'the homepage slider lost its first slide heading'
+assert_contains "$home_slider" 'First probe slide text.' 'the homepage slider lost its slide description'
+assert_contains "$home_slider" 'data-carousel' 'the homepage no longer initialises the slider'
+
+slide_count="$(count_of 'data-slide="' "$home_slider")"
+dot_count="$(count_of 'data-slide-to="' "$home_slider")"
+img_count="$(count_of 'class="sh-slide__img"' "$home_slider")"
+[[ "$slide_count" == '2' ]] || fail "the homepage rendered ${slide_count} slides instead of the 2 active ones"
+[[ "$dot_count" == '2' ]] || fail "the homepage rendered ${dot_count} pagination buttons for 2 slides"
+[[ "$img_count" == '2' ]] || fail "the homepage rendered ${img_count} slide images for 2 slides"
+[[ "$(count_of 'sh-slide--on' "$home_slider")" == '1' ]] || fail 'more than one slide starts as the visible slide'
+[[ "$(count_of 'sh-slide--in' "$home_slider")" == '0' ]] || fail 'the served markup already contains a transition state'
+
+# 3. The timing is the configured, clamped band: 4-6 s per slide, 600-1000 ms fade.
+interval="$(printf '%s' "$home_slider" | grep -o 'data-carousel-interval="[0-9]*"' | head -n 1 | grep -o '[0-9]*' || true)"
+fade="$(printf '%s' "$home_slider" | grep -o 'data-carousel-fade="[0-9]*"' | head -n 1 | grep -o '[0-9]*' || true)"
+[[ "$interval" =~ ^[0-9]+$ && "$interval" -ge 4000 && "$interval" -le 6000 ]] || fail "the slide interval is outside 4000-6000 ms (${interval:-none})"
+[[ "$fade" =~ ^[0-9]+$ && "$fade" -ge 600 && "$fade" -le 1000 ]] || fail "the crossfade is outside 600-1000 ms (${fade:-none})"
+
+# 4. A disabled slide is not rendered at all — not hidden, absent.
+php "$TMP_DIR/slider.php" status 0 "$slide_two" >/dev/null
+home_one="$(fetch_page '/index.php')"
+if [[ "$home_one" == *'Slider Probe Two'* ]]; then
+  fail 'a slide switched off in the admin panel still reached the homepage'
+fi
+[[ "$(count_of 'data-slide="' "$home_one")" == '1' ]] || fail 'the homepage did not fall back to the single active slide'
+[[ "$(count_of 'data-slide-to="' "$home_one")" == '0' ]] || fail 'the homepage rendered pagination for a single slide'
+assert_contains "$home_one" 'Slider Probe One' 'the remaining slide disappeared with the disabled one'
+
+# 5. A missing image degrades to the plate and keeps the text.
+php "$TMP_DIR/slider.php" status 1 "$slide_two" >/dev/null
+php "$TMP_DIR/slider.php" missing "$slide_two" >/dev/null
+home_missing="$(fetch_page '/index.php')"
+assert_contains "$home_missing" 'sh-slide--noimg' 'a slide whose image file is gone is not marked for the fallback plate'
+assert_contains "$home_missing" 'Slider Probe Two' 'a slide with a missing image lost its heading'
+[[ "$(count_of 'class="sh-slide__img"' "$home_missing")" == '1' ]] || fail 'the missing image was still rendered as a slide image'
+if [[ "$home_missing" == *'slider-probe-missing.jpg'* ]]; then
+  fail 'the homepage still points at a slide image that does not exist'
+fi
+
+php "$TMP_DIR/slider.php" cleanup >/dev/null
+echo "::notice title=Homepage slider::slides=${slide_count} dots=${dot_count} interval=${interval}ms fade=${fade}ms disabled=absent noimg=plate"
+
+# ---------------------------------------------------------------------------
+# 10b. The sample-content review screen is gone: no page, no menu entry, and
+#      nothing behind the old route that could still touch records.
+# ---------------------------------------------------------------------------
+assert_not_contains() {
+  local haystack="$1" needle="$2" message="$3"
+  [[ "$haystack" != *"$needle"* ]] || fail "$message"
+}
+
+admin_nav="$(fetch_page '/admin/dashboard.php')"
+assert_not_contains "$admin_nav" 'Demo Data Review' 'the admin navigation still offers the removed demo-data review'
+assert_not_contains "$admin_nav" 'admin/demo-data.php' 'the admin navigation still links to the removed demo-data page'
+
+# The router may answer a deleted route with the storefront rather than a 404, so
+# the assertion is about content: nothing of the removed review screen is served.
+demo_status="$(curl -sS -o "$TMP_DIR/demo-page.html" -w '%{http_code}' \
+  -A "$DESKTOP_UA" -c "$COOKIE_JAR" -b "$COOKIE_JAR" "${BASE}/admin/demo-data.php" || true)"
+demo_body="$(cat "$TMP_DIR/demo-page.html" 2>/dev/null || true)"
+assert_not_contains "$demo_body" 'Demo data review' 'the removed demo-data review screen is still being served'
+assert_not_contains "$demo_body" 'confirm_phrase' 'a removed demo-data form is still being served'
+assert_not_contains "$demo_body" 'Delete the sample content' 'the removed cleanup action is still reachable'
+rm -f "$TMP_DIR/demo-page.html"
+echo "::notice title=Demo data review removed::route=${demo_status} nav=clean"
+
+php "$TMP_DIR/admin-cleanup.php"
+echo 'Admin panel HTTP integration passed'
 
 echo 'Session expiration HTTP integration passed'

@@ -22,7 +22,6 @@ const SH_EVENTS = [
     'order_processing'  => 'Order Processing',
     'order_completed'   => 'Order Completed',
     'order_cancelled'   => 'Order Cancelled',
-    'code_delivered'    => 'Digital Code Delivered',
     'low_stock'         => 'Low Stock',
 ];
 

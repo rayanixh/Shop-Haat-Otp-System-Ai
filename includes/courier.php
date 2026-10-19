@@ -25,8 +25,18 @@ function sh_courier_schema_ensure(): void
     try {
         $pdo = sh_db();
         foreach (sh_courier_schema_sql() as $ddl) { $pdo->exec($ddl); }
-        if ((int)sh_val('SELECT COUNT(*) FROM couriers', [], 0) === 0) {
-            sh_courier_seed($pdo);
+        // Courier accounts are sample content, so they are only ever created by
+        // an install that chose Demo Data = ON (see sh_install_seed_all()).
+        // A store installed before this marker existed gets the built-in list
+        // once during its upgrade, so an existing admin screen does not suddenly
+        // show an empty registry. After that the marker stops this from running
+        // again, and a demo-OFF store is never filled by a page view.
+        $marked = (int)sh_val("SELECT COUNT(*) FROM settings WHERE setting_key = 'courier_registry_state'", [], 0);
+        if ($marked === 0) {
+            if ((int)sh_val('SELECT COUNT(*) FROM couriers', [], 0) === 0) {
+                sh_courier_seed($pdo);
+            }
+            sh_courier_state_save($pdo, (int)sh_val('SELECT COUNT(*) FROM couriers', [], 0) > 0 ? 'installed' : 'none');
         }
     } catch (Throwable $e) {
         sh_log_exception($e, 'courier-schema');

@@ -16,9 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = sh_post('email');
     $password = (string)($_POST['password'] ?? '');
 
-    if (sh_login_throttled('admin_login', 5, 900)) {
+    // Two independent limits: the session counter (fast) and the audit table
+    // (survives a discarded cookie, which is how brute force is normally done).
+    if (sh_login_throttled('admin_login', 5, 900)
+        || sh_auth_throttle_blocked('admin_login_failed', $email, 15, 5, 900)) {
         $error = 'Too many failed sign-in attempts. Please wait 15 minutes before trying again.';
-        sh_log_line('security', 'Admin login throttled for ' . $email);
+        sh_log_line('security', 'Admin login throttled for ' . mb_substr($email, 0, 3) . '***');
     } elseif ($email === '' || $password === '') {
         $error = 'Enter your email address and password.';
     } else {
@@ -32,8 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $r = sh_post('redirect', sh_get('redirect'));
                 sh_redirect($r !== '' && strpos($r, '//') === false ? ltrim($r, '/') : 'admin/dashboard.php');
             }
-            sh_login_fail('admin_login');
-            sh_log_line('security', 'Failed admin login for ' . $email);
+            sh_auth_failure_record('admin_login', 'admin_login_failed', $email);
+            sh_log_line('security', 'Failed admin login for ' . mb_substr($email, 0, 3) . '***');
             $error = 'Invalid email address or password.';
         } catch (Throwable $e) {
             sh_log_exception($e, 'admin-login');
@@ -42,6 +45,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 $token = sh_csrf_token();
+// The same single global Page Transition setting the storefront and the rest of
+// the admin panel use — this page was the one admin screen without it.
+require_once SH_ROOT . '/includes/transition.php';
+$shTransition = sh_transition_config();
 ?>
 <!doctype html>
 <html lang="en">
@@ -57,8 +64,10 @@ $token = sh_csrf_token();
 .sh-adminlogin__brand { display: flex; align-items: center; gap: 10px; justify-content: center; font-weight: 800; font-size: 19px; margin-bottom: 5px; }
 .sh-adminlogin__sub { text-align: center; font-size: 13px; color: var(--sh-muted); margin-bottom: 20px; }
 </style>
+<?= sh_transition_head($shTransition) ?>
 </head>
-<body>
+<body<?= sh_transition_body_attrs($shTransition) ?>>
+<?= sh_transition_overlay($shTransition) ?>
 <div class="sh-adminlogin">
   <div class="sh-adminlogin__box">
     <div class="sh-adminlogin__brand"><span class="sh-brand__mark">SH</span> Admin Panel</div>
@@ -89,5 +98,6 @@ $token = sh_csrf_token();
     </p>
   </div>
 </div>
+<script src="<?= e(sh_asset('assets/js/app.js')) ?>" defer></script>
 </body>
 </html>

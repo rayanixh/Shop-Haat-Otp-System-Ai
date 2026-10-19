@@ -1,0 +1,8 @@
+# ShopHaat — automated tests are developer tooling and are not part of the site.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

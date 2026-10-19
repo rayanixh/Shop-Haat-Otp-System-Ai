@@ -115,6 +115,9 @@ function sh_render_error_page(int $status, string $title, string $message, strin
         $safeActionUrl = htmlspecialchars($actionUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    // Deliberately outside the Page Transition: a fatal error or a 404 must be
+    // readable the instant it is served, so this page ships no overlay and no
+    // dependency on JavaScript or on the settings database.
     echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         . '<meta name="viewport" content="width=device-width, initial-scale=1">'
         . '<meta name="robots" content="noindex,nofollow">'

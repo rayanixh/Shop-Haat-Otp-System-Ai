@@ -178,7 +178,7 @@ require dirname(__DIR__) . '/_layout.php';
         <div class="sh-grid2">
           <div class="sh-field">
             <label class="sh-field__label" for="pv-driver">Provider type</label>
-            <select class="sh-select" id="pv-driver" name="driver" <?= $editing ? 'disabled' : '' ?> onchange="location.href='<?= e(sh_url('admin/ai/providers.php?new=')) ?>'+this.value+'#edit'">
+            <select class="sh-select" id="pv-driver" name="driver" <?= $editing ? 'disabled' : '' ?> data-navigate-prefix="<?= e(sh_url('admin/ai/providers.php?new=')) ?>" data-navigate-suffix="#edit">
               <?php foreach ($drivers as $key => $c): ?>
                 <option value="<?= e($key) ?>" <?= $formDriver === $key ? 'selected' : '' ?>><?= e($c::defaultLabel()) ?></option>
               <?php endforeach; ?>

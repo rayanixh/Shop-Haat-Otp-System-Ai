@@ -1,0 +1,55 @@
+# =============================================================================
+# ShopHaat — files that must never enter version control
+#
+# These carry live secrets, customer data or host-specific state. The installer
+# writes them on the server, so a fresh checkout is expected to be missing them.
+# =============================================================================
+
+# Database credentials written by the installer (config/database.example.php is
+# the tracked template).
+/config/database.php
+
+# Installation marker written by the installer. Shipping one in a code package
+# would make a brand-new upload look like an already-installed store.
+/config/installed.lock
+
+# Installer unlock token — proves filesystem control for re-installation.
+/config/install-unlock.key
+/shophaat-install-unlock.key
+/config/reinstall.key
+
+# Application, PHP and limiter logs. These contain security events, customer IP
+# addresses and admin activity.
+/logs/*.log
+/logs/limits/
+/logs/csp/
+# Nothing else in logs/ belongs in version control either: the directory holds
+# request logs, security events and the SEO cache. Only the directory guard is
+# source code. (The SEO sitemap cache is written under logs/seo/.)
+/logs/*
+!/logs/.htaccess
+
+# Uploaded content (product images, payment proof screenshots, logos) is store
+# data, not source code. The directory guard itself stays tracked.
+/uploads/*
+!/uploads/.htaccess
+
+# Database backups.
+/backups/
+
+# Editor and OS leftovers that could be served as text over HTTP.
+*.bak
+*.orig
+*.old
+*.save
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Build/dependency artifacts (this project needs neither).
+node_modules/
+vendor/

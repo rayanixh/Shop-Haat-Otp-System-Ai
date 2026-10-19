@@ -36,14 +36,14 @@ require dirname(__DIR__) . '/_layout.php';
         <div class="sh-grid2">
           <div class="sh-field">
             <label class="sh-field__label" for="seo-type">Type</label>
-            <select class="sh-select" id="seo-type" onchange="location.href=<?= json_encode(sh_url('admin/ai/seo.php?type=')) ?>+this.value">
+            <select class="sh-select" id="seo-type" data-navigate-prefix="<?= e(sh_url('admin/ai/seo.php?type=')) ?>">
               <option value="product" <?= $type === 'product' ? 'selected' : '' ?>>Product</option>
               <option value="category" <?= $type === 'category' ? 'selected' : '' ?>>Category</option>
             </select>
           </div>
           <div class="sh-field">
             <label class="sh-field__label" for="seo-item">Item</label>
-            <select class="sh-select" id="seo-item" onchange="if(this.value)location.href=this.value">
+            <select class="sh-select" id="seo-item" data-navigate-on-change>
               <option value="">Select…</option>
               <?php foreach ($list as $r): ?>
                 <option value="<?= e(sh_url('admin/ai/seo.php?type=' . $type . '&id=' . (int)$r['id'])) ?>"

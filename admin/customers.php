@@ -225,7 +225,7 @@ $adminTitle = 'Customers';
 require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
-  <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('users', 17) ?> Customers (<?= number_format($total) ?>)</h2></div>
+  <div class="sh-panel__head"><span class="sh-formcard__note"><?= number_format($total) ?> customer<?= $total === 1 ? '' : 's' ?> match the filters</span></div>
   <div class="sh-panel__body" style="padding-bottom:0">
     <form class="sh-filterbar" method="get">
       <div class="sh-field"><label class="sh-field__label" for="f-q">Search</label>

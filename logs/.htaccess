@@ -1,0 +1,11 @@
+# ShopHaat — application logs contain security events and are never public.
+#
+# The application log records administrator sign-ins, blocked orders, rate
+# limits and error diagnostics. It must only be readable by the hosting account.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

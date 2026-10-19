@@ -119,7 +119,7 @@ function sh_customer_return_target(string $raw, string $fallback = 'account.php'
     }
     $blocked = [
         'login.php', 'register.php', 'logout.php', 'otp.php', 'forgot-password.php',
-        'reset-password.php', 'auth/google/login.php', 'auth/google/callback.php',
+        'reset-password.php', 'verify-email.php', 'auth/google/login.php', 'auth/google/callback.php',
     ];
     return in_array($path, $blocked, true) ? $fallback : $target;
 }
@@ -145,7 +145,45 @@ function sh_customer_auth_required_payload(string $returnTo = '', ?bool $expired
     ];
 }
 
-function sh_require_login(string $redirectTo = ''): array
+/**
+ * Does this customer account require email verification before accessing protected areas?
+ *
+ * True only when email verification is enabled by the administrator, the account
+ * uses a real (non-synthetic) email address, and email_verified is not 1.
+ */
+function sh_user_needs_email_verification(?array $user = null): bool
+{
+    if ($user === null) {
+        $user = sh_user();
+    }
+    if ($user === null) {
+        return false;
+    }
+    if (sh_auth_mode() !== 'email_password') {
+        return false;
+    }
+
+    if (!function_exists('sh_email_verify_enabled')) {
+        require_once SH_ROOT . '/includes/mail.php';
+    }
+    if (!sh_email_verify_enabled()) {
+        return false;
+    }
+
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email === '' || (function_exists('sh_is_synthetic_email') && sh_is_synthetic_email($email))) {
+        return false;
+    }
+    if (function_exists('sh_valid_email')) {
+        if (!sh_valid_email($email)) { return false; }
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    return empty($user['email_verified']);
+}
+
+function sh_require_login(string $redirectTo = '', bool $requireVerified = true): array
 {
     $u = sh_user();
     if ($u === null) {
@@ -158,6 +196,25 @@ function sh_require_login(string $redirectTo = ''): array
         if ($expired) { sh_consume_customer_session_expired_notice(); }
         sh_redirect(sh_login_url($target));
     }
+
+    if ($requireVerified && sh_user_needs_email_verification($u)) {
+        $target = $redirectTo !== '' ? $redirectTo : (string)($_SERVER['REQUEST_URI'] ?? '');
+        $target = sh_customer_return_target($target, 'account.php');
+        if (function_exists('sh_email_verify_pending_set')) {
+            sh_email_verify_pending_set($u, $target, 'protected');
+        }
+        if (sh_wants_json()) {
+            sh_json([
+                'success'          => false,
+                'error'            => 'Please verify your email address to continue.',
+                'email_unverified' => true,
+                'verify_url'       => sh_url('verify-email.php'),
+            ], 403);
+        }
+        sh_flash('warning', 'Please verify your email address before continuing.');
+        sh_redirect('verify-email.php');
+    }
+
     return $u;
 }
 
@@ -320,4 +377,102 @@ function sh_login_reset(string $bucket): void
 {
     sh_session_start();
     unset($_SESSION['throttle_' . $bucket]);
+}
+
+/* ---------- Database-backed authentication throttling ----------------
+ * The counters above live in the PHP session, and a session is discarded the
+ * moment the attacker drops the cookie — so on its own it does not slow a
+ * credential-stuffing run down at all.
+ *
+ * These helpers additionally count recent failures in the `security_logs`
+ * audit table, which an unauthenticated attacker cannot clear or edit. Both
+ * checks run together: the session counter stays as the fast first line, the
+ * table provides the limit that actually holds.
+ *
+ * Failure to read the audit table fails OPEN on purpose: a store must never
+ * become impossible to sign in to because a logging table is unavailable.
+ * ------------------------------------------------------------------ */
+
+/** Pseudonymous, non-reversible handle for an account identifier used in logs. */
+function sh_auth_identity_hash(string $identity): string
+{
+    return substr(hash('sha256', 'sh-auth|' . mb_strtolower(trim($identity))), 0, 32);
+}
+
+/**
+ * Count recent authentication failures from the audit table.
+ *
+ * @param string      $event        audit event name to count
+ * @param string      $ip           client IP
+ * @param string|null $identityHash account handle, or null to count by IP only
+ * @param int         $window       look-back window in seconds
+ */
+function sh_auth_failure_count(string $event, string $ip, ?string $identityHash, int $window): int
+{
+    try {
+        if (!sh_table_exists('security_logs')) { return 0; }
+        if ($identityHash === null) {
+            return (int)sh_val(
+                'SELECT COUNT(*) FROM security_logs
+                  WHERE event = ? AND ip_address = ? AND created_at > (NOW() - INTERVAL ? SECOND)',
+                [$event, $ip, $window],
+                0
+            );
+        }
+        // metadata holds a JSON document; the identity is a hex hash, so the
+        // LIKE pattern cannot contain wildcards from user input.
+        return (int)sh_val(
+            'SELECT COUNT(*) FROM security_logs
+              WHERE event = ? AND ip_address = ?
+                AND metadata LIKE ?
+                AND created_at > (NOW() - INTERVAL ? SECOND)',
+            [$event, $ip, '%"email_sha":"' . $identityHash . '"%', $window],
+            0
+        );
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'auth-throttle');
+        return 0;
+    }
+}
+
+/**
+ * Is this sign-in attempt blocked? Checks the caller's IP and, when an account
+ * identifier was supplied, that identifier as well.
+ *
+ * @param string $event  audit event used for failures ('login_failed' or 'admin_login_failed')
+ * @param string $identity submitted email address (may be empty)
+ */
+function sh_auth_throttle_blocked(string $event, string $identity, int $ipMax = 25, int $idMax = 8, int $window = 900): bool
+{
+    $ip = function_exists('sh_client_ip') ? sh_client_ip() : (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    if (sh_auth_failure_count($event, $ip, null, $window) >= $ipMax) { return true; }
+    if ($identity !== '') {
+        $hash = sh_auth_identity_hash($identity);
+        if (sh_auth_failure_count($event, $ip, $hash, $window) >= $idMax) { return true; }
+    }
+    return false;
+}
+
+/**
+ * Record one failed authentication attempt in both the session counter and the
+ * audit table. Stores only a masked identifier plus a pseudonymous hash — never
+ * the submitted password, and never the full address.
+ */
+function sh_auth_failure_record(string $bucket, string $event, string $identity, ?int $userId = null, array $meta = []): void
+{
+    sh_login_fail($bucket);
+    if (function_exists('sh_security_log')) {
+        $meta['email_sha'] = $identity !== '' ? sh_auth_identity_hash($identity) : '';
+        if ($identity !== '') {
+            $meta['email'] = mb_substr($identity, 0, 3) . '***';
+        }
+        sh_security_log($event, $userId, $meta);
+    }
+}
+
+/** Count an abuse-prone action recorded elsewhere in security_logs. */
+function sh_auth_action_count(string $event, int $window): int
+{
+    $ip = function_exists('sh_client_ip') ? sh_client_ip() : (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    return sh_auth_failure_count($event, $ip, null, $window);
 }

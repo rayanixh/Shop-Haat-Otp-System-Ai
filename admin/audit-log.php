@@ -58,7 +58,7 @@ require __DIR__ . '/_layout.php';
 ?>
 <div class="sh-panel">
   <div class="sh-panel__head sh-panel__head--wrap">
-    <h2 class="sh-panel__title"><?= sh_icon('file-text', 17) ?> Audit Log (<?= number_format($total) ?>)</h2>
+    <span class="sh-formcard__note"><?= number_format($total) ?> entries match the filters</span>
     <?php if (sh_admin_is_superadmin()): ?>
       <form method="post" class="sh-inline-form" data-confirm="Delete audit entries older than the selected period? This cannot be undone."><?= sh_csrf_field() ?><input type="hidden" name="form" value="prune">
         <select class="sh-select sh-select--sm" name="days"><option value="90">older than 90 days</option><option value="180" selected>older than 180 days</option><option value="365">older than 1 year</option></select>

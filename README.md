@@ -24,10 +24,20 @@ Writable directories: `config/`, `logs/`, `uploads/`.
 2. **Create a MySQL database** and a user in cPanel, and grant that user all privileges on the database.
 3. **Open your site in a browser.** With no configuration present you are sent to the installer automatically.
 4. **Fill in the single install form**: database credentials, your store name, and the administrator
-   account you want to create. Tick "install demo data" if you want sample categories and products.
+   account you want to create. Set **Demo Data** to ON only if you want the sample catalogue.
 5. **Delete the `install/` folder** when the installer tells you setup is complete.
 
 The installer writes `config/database.php` itself — no file needs to be edited by hand.
+
+**Demo Data** defaults to OFF. OFF creates the tables, the payment routes and the settings the site
+needs to run, and nothing else: no products, categories, customers, orders, reviews, coupons, slides,
+promotions or courier accounts, so the storefront is genuinely empty until you add your own content.
+ON adds the bundled sample catalogue once. Neither choice ever deletes existing records.
+
+The administrator password is whatever you choose: **at least 12 characters**, any characters,
+no prefix, suffix or example to copy. It is stored only as a `password_hash()` hash and verified with
+`password_verify()`. The minimum can be raised by defining `SH_ADMIN_PASSWORD_MIN_LENGTH` (customer
+accounts use `SH_PASSWORD_MIN_LENGTH`, default 8 with at least one letter and one number).
 
 If the database credentials are wrong you get a plain explanation of the problem, never a blank page
 or a stack trace.
@@ -83,7 +93,6 @@ Sign in at `/admin/` with the administrator account you created.
 | Dashboard | Revenue, orders, payments awaiting review, low stock, 14-day chart |
 | Homepage Images | Slider slides and the three feature cards: upload images, edit text, links, order and visibility |
 | Products / Categories / Brands | Full catalogue management with image upload |
-| Digital Codes | Bulk-load codes for digital products; delivered codes are locked |
 | Coupons | Percentage or fixed discounts, minimums, caps, usage limits, date windows |
 | Orders | Full order detail, status control, notification history |
 | Parcels | Create parcels for physical orders, assign couriers, tracking numbers and a full status timeline |
@@ -107,10 +116,10 @@ Sign in at `/admin/` with the administrator account you created.
 The customer sends money to your merchant number, then submits the transaction ID and the number they
 sent from. The order is marked *payment submitted* and waits. **Nothing is auto-verified.** You compare
 the transaction ID with your merchant statement in *Admin → Payments* and approve or reject it.
-Approving moves the order to processing and, for digital products, releases the codes.
+Approving moves the order to processing, where it waits for packing and dispatch.
 
 **Cash on delivery**
-Available for physical products only; hidden automatically for digital-only carts.
+Available for physical products only; hidden automatically for carts with nothing to ship.
 
 **Automatic gateways**
 Gateways are modular. Credentials are stored server-side and are never sent to the browser.
@@ -141,9 +150,10 @@ the recipient taken from the order, linked to a courier, and tracked through a s
   moves it to *Cancelled*; any other movement into pickup/transit sets the order to *Processing*.
   Order `payment_status` is never changed by parcel activity — COD collection is still approved under
   Admin → Payments.
-- **Courier registry:** ships pre-seeded with common Bangladesh couriers (Steadfast, Pathao, RedX,
-  eCourier, Paperfly, Sundarban, SA Paribahan), all **disabled by default**. Enable and edit them under
-  Admin → Couriers. A tracking URL template can include a `{tracking}` placeholder.
+- **Courier registry:** a Demo Data = ON install pre-registers the common Bangladesh couriers
+  (Steadfast, Pathao, RedX, eCourier, Paperfly, Sundarban, SA Paribahan), all **disabled by default**;
+  a Demo Data = OFF install starts with an empty registry and you add the services you actually use.
+  A tracking URL template can include a `{tracking}` placeholder.
 - **API drivers:** credentials are stored server-side and never sent to the browser. Only **Steadfast**
   currently ships with a real API client (book a parcel and fetch its status). The other drivers are
   registered so you can store their credentials, but they deliberately refuse to send requests until
@@ -151,7 +161,8 @@ the recipient taken from the order, linked to a courier, and tracked through a s
   also works fully manually: type the consignment number and update the status by hand.
 
 Existing installs pick up the new tables automatically the first time the Couriers or Parcels page is
-opened; fresh installs create them during setup.
+opened (a store that predates the courier registry also receives the pre-registered provider list once);
+fresh installs create the tables during setup.
 
 ## Phone verification & anti-fake orders
 
@@ -183,13 +194,6 @@ fake or duplicated orders. It is governed by a **master switch** and per-rule to
 Existing installs create the new columns/tables automatically on the first request (stamped in
 `settings`), so no manual migration is needed. Fresh installs create them during setup.
 
-## Digital product delivery
-
-Codes are stored in `product_codes` and issued inside a locked database transaction
-(`SELECT … FOR UPDATE`). A code moves from `available` to `used` exactly once and is bound to one
-order item, so the same code can never reach two customers. Delivery only happens after a payment has
-been verified. Delivered codes cannot be deleted from the admin panel.
-
 ---
 
 ## Notifications
@@ -216,7 +220,7 @@ Key guarantees:
 - Passwords are hashed with `password_hash()` and re-hashed on sign-in when the algorithm improves.
 - OTP codes are likewise only ever stored as hashes, with server-side attempt/resend/rate limits.
 - Sign-in throttling on both the customer and admin login forms.
-- Orders, addresses and digital codes are ownership-checked on every read (IDOR protection).
+- Orders and addresses are ownership-checked on every read (IDOR protection).
 - Phone verification settings, SMS credentials, logs and manual verification are restricted to the
   superadmin role.
 - Errors are logged server-side; visitors only ever see a friendly message. No `@` suppression is
@@ -230,10 +234,10 @@ Key guarantees:
 index.php products.php product.php category.php cart.php checkout.php
 payment.php order-success.php login.php register.php logout.php
 account.php orders.php order-details.php addresses.php wishlist.php
-digital.php password.php track.php support.php help.php page.php
+password.php track.php support.php help.php page.php
 otp.php     phone-verification entry page (register/login/account/checkout)
 
-admin/      dashboard, products, categories, brands, digital-codes, coupons,
+admin/      dashboard, products, categories, brands, coupons,
             orders, payments, payment-methods, payment-gateways, customers,
             telegram, whatsapp, messenger, email, notifications, settings, logs,
             security (phone verification), otp-logs, security-logs
@@ -252,7 +256,7 @@ install/    the web installer
 
 The suites under `/home/user/tests` (not part of the deployable site) cover syntax, include
 dependencies, every storefront page, every admin page, and a full purchase → manual payment →
-admin approval → digital-code delivery cycle including IDOR and CSRF checks.
+admin approval → courier handover cycle including IDOR and CSRF checks.
 
 ```
 bash tests/run-all.sh

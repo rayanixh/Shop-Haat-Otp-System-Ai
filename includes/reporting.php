@@ -305,7 +305,7 @@ function sh_reporting_top_products(array $range, int $limit = 10): array
          WHERE $where AND $paid
          GROUP BY oi.product_id, oi.product_name, COALESCE(oi.product_variant, '')
          ORDER BY quantity_sold DESC, gross_item_sales DESC, oi.product_name ASC
-         LIMIT $limit",
+         LIMIT $limit", // @security-scan-ignore sql_interpolation_unproven — $limit is an int-typed parameter clamped by max(1, min(100, $limit))
         sh_reporting_date_params($range)
     );
 }

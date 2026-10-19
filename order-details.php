@@ -11,10 +11,15 @@ $orderId = sh_int($_GET['id'] ?? 0);
 $order = $orderId > 0 ? sh_order_get($orderId) : null;
 
 // A customer-owned order opened after automatic logout should resume through
-// Login, not look like an unknown order. Deliberately logged-out/guessed IDs
-// still take the ordinary IDOR-safe 404 path below.
-if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
-    sh_require_login('order-details.php?id=' . $orderId);
+// Login, not look like an unknown order. Logged-in customers must satisfy
+// the server-side email verification requirement before viewing order details.
+// Deliberately logged-out/guessed IDs still take the ordinary IDOR-safe 404 path below.
+if ($order !== null && (int)($order['user_id'] ?? 0) > 0) {
+    if (sh_user() === null && sh_customer_session_expired()) {
+        sh_require_login('order-details.php?id=' . $orderId);
+    } elseif (sh_user() !== null) {
+        sh_require_login('order-details.php?id=' . $orderId);
+    }
 }
 
 // IDOR protection: only the owner (or the guest session that created it) may view.
@@ -33,7 +38,6 @@ if ($order === null || !sh_order_can_view($order)) {
 
 $items = sh_order_items($orderId);
 $payment = sh_order_latest_payment($orderId);
-$codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
 $timeline = sh_order_timeline($order, $payment, $items);
 
 $accountPage = 'orders';
@@ -60,21 +64,6 @@ require_once SH_ROOT . '/includes/header.php';
     <?php endif; ?>
     <div style="margin-top:14px"><?= sh_order_timeline_render($timeline) ?></div>
   </div>
-
-  <?php if ($codes): ?>
-    <div class="sh-section">
-      <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('key', 18) ?> Digital Codes</h2></div>
-      <div class="sh-codebox">
-        <?php foreach ($codes as $c): ?>
-          <div class="sh-codebox__row">
-            <span class="sh-codebox__label"><?= e($c['product_name']) ?></span>
-            <span class="sh-codebox__code"><?= e($c['code']) ?></span>
-            <button class="sh-btn sh-btn--sm" type="button" data-copy="<?= e($c['code']) ?>"><?= sh_icon('copy', 13) ?> <span data-copy-label>Copy</span></button>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  <?php endif; ?>
 
   <div class="sh-cartlayout">
     <div>

@@ -6,6 +6,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/catalog.php';
+// The SEO helpers are used while this page builds its metadata, before
+// includes/header.php is loaded, so the engine must be required here.
+require_once SH_ROOT . '/includes/seo.php';
 
 $slug = sh_get('slug');
 $category = $slug !== '' ? sh_category_by_slug($slug) : null;
@@ -31,6 +34,11 @@ $rating   = sh_get('rating');
 $inStock  = sh_get('in_stock') === '1';
 $brandIds = array_map('intval', (array)($_GET['brand'] ?? []));
 
+// Child categories, if this category has any. Rendered as cards under the
+// heading so a shopper can drill down; the section is skipped entirely when
+// there are none, so no empty grid can appear.
+$childCats = sh_category_children((int)$category['id']);
+
 $result = sh_product_search([
     'category_id' => (int)$category['id'],
     'sort' => $sort, 'page' => $page,
@@ -38,9 +46,32 @@ $result = sh_product_search([
     'rating' => $rating, 'in_stock' => $inStock, 'brand_ids' => $brandIds,
 ]);
 
-$pageTitle = $category['name'];
-$pageDescription = $category['description'] ?: ('Shop ' . $category['name'] . ' online with fast delivery and secure payment.');
-$pageCanonical = rtrim(sh_site_url(), '/') . '/category.php?slug=' . urlencode($category['slug']);
+/*
+ * SEO. Categories gained the same editable columns as products, so the row is
+ * handed to the SEO engine; the generated description below is only a fallback
+ * for a category the owner has not written one for yet.
+ *
+ * Sorted and filtered views of this page are the same content, so the canonical
+ * always points at the plain slug URL with the browsing parameters stripped.
+ */
+$pageSeoKey      = 'category';
+$pageSeoEntity   = $category;
+$pageTitle       = (string)$category['name'];
+$pageDescription = sh_seo_plain((string)$category['description']);
+if ($pageDescription === '') {
+    // Built from the real category name and the store's own delivery promises
+    // rather than a generic sentence repeated on every category.
+    $pageDescription = 'Shop ' . $category['name'] . ' at ' . sh_setting('site_name', 'ShopHaat')
+        . '. ' . (int)($category['product_count'] ?? 0) . ' products with delivery across Bangladesh and secure payment.';
+}
+$pageCanonical   = 'category.php?slug=' . rawurlencode((string)$category['slug']);
+$pageKeywords    = trim((string)($category['seo_focus_keyword'] ?? '') . ',' . (string)($category['meta_keywords'] ?? ''), ',');
+// Prefer an image the owner set for sharing, then the category's own image.
+$pageImage = sh_seo_category_image($category);
+$pageBreadcrumbs = [
+    ['name' => 'Home', 'url' => 'index.php'],
+    ['name' => (string)$category['name'], 'url' => ''],
+];
 $shWishlist = sh_wishlist_ids();
 $brands = sh_brands();
 
@@ -143,6 +174,17 @@ require_once SH_ROOT . '/includes/header.php';
 
       <?php if ($category['description']): ?>
         <p style="font-size:13.5px;color:var(--sh-muted);margin-bottom:12px"><?= e($category['description']) ?></p>
+      <?php endif; ?>
+
+      <?php if ($childCats): ?>
+        <section class="sh-section" aria-labelledby="sh-subcats-h">
+          <div class="sh-section__head">
+            <h2 class="sh-section__title" id="sh-subcats-h"><?= sh_icon('grid', 18) ?> Shop <?= e($category['name']) ?> by category</h2>
+          </div>
+          <div class="sh-catgrid">
+            <?= sh_category_cards($childCats) ?>
+          </div>
+        </section>
       <?php endif; ?>
 
       <?php if (!$result['items']): ?>

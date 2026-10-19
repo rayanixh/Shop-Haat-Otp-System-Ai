@@ -31,6 +31,12 @@ ini_set('error_log', SH_LOG_DIR . '/php-error.log');
 require_once SH_ROOT . '/includes/errors.php';
 sh_register_error_handlers();
 
+// Security response headers (CSP, nosniff, clickjacking, Referrer-Policy, HSTS).
+// Applied before any page logic runs so no route can forget them; the module
+// degrades to safe defaults when the database is unavailable.
+require_once SH_ROOT . '/includes/security.php';
+sh_security_headers_apply();
+
 // ---------------------------------------------------------------------------
 // Base URL detection (works in subfolders on shared hosting)
 // ---------------------------------------------------------------------------
@@ -43,8 +49,8 @@ function sh_base_url(): string
     $dir = str_replace('\\', '/', dirname($script));
     // Pages inside /admin, /api or /install resolve up to the project root.
     // Trailing segments are stripped repeatedly so nested folders such as
-    // /admin/ai also resolve correctly rather than becoming the base URL.
-    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google'];
+    // /admin/ai or /admin/guides also resolve correctly rather than becoming the base URL.
+    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google', 'guides'];
     $parts = array_values(array_filter(explode('/', $dir), static fn($p) => $p !== ''));
     while ($parts !== [] && in_array(end($parts), $known, true)) {
         array_pop($parts);

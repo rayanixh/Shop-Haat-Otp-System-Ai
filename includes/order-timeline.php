@@ -91,9 +91,8 @@ function sh_order_timeline_step(string $key, string $label, string $state, ?stri
  *
  * @param array<string,mixed> $order
  * @param ?array<string,mixed> $payment Latest saved payment snapshot, if already loaded.
- * @param ?list<array<string,mixed>> $items Order items when available; used to
- *        distinguish a digital-only order from a mixed physical/digital order.
- * @return array{is_cod:bool,is_digital_only:bool,order_status:string,payment_status:string,steps:list<array{key:string,label:string,state:string,at:?string,note:string}>,problem:?array{label:string,detail:string,severity:string,at:?string}}
+ * @param ?list<array<string,mixed>> $items Order items when available, used for the line-item view.
+ * @return array{is_cod:bool,order_status:string,payment_status:string,steps:list<array{key:string,label:string,state:string,at:?string,note:string}>,problem:?array{label:string,detail:string,severity:string,at:?string}}
  */
 function sh_order_timeline(array $order, ?array $payment = null, ?array $items = null): array
 {
@@ -112,15 +111,6 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
             $items = [];
         }
     }
-    $hasDigital = (int)($order['has_digital'] ?? 0) === 1;
-    $hasPhysical = false;
-    foreach ($items ?? [] as $item) {
-        if ((string)($item['product_type'] ?? '') === 'physical') { $hasPhysical = true; break; }
-    }
-    // On a legacy order without item snapshots, preserve the established
-    // has_digital behaviour rather than presenting a made-up physical delivery.
-    $isDigitalOnly = $hasDigital && (!$hasPhysical || empty($items));
-
     $placedAt = sh_order_timeline_timestamp($order['created_at'] ?? null);
     $submittedAt = sh_order_timeline_timestamp($payment['submitted_at'] ?? null);
     $verifiedAt = sh_order_timeline_timestamp($payment['verified_at'] ?? null);
@@ -150,7 +140,6 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
 
     $processingReached = in_array($orderStatus, ['processing', 'shipped', 'delivered', 'completed'], true);
     $deliveryReached = in_array($orderStatus, ['delivered', 'completed'], true);
-    $codesDelivered = $isDigitalOnly && (int)($order['codes_delivered'] ?? 0) === 1;
     $cancelled = $orderStatus === 'cancelled';
     $returned = $orderStatus === 'returned';
     $refunded = $paymentStatus === 'refunded';
@@ -197,21 +186,7 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
     $terminalProblem = $cancelled || $returned || $paymentFailed;
     $active = null;
     if (!$terminalProblem) {
-        if ($isDigitalOnly) {
-            if ($orderStatus === 'completed') {
-                $active = null;
-            } elseif ($codesDelivered) {
-                $active = 'code_delivered';
-            } elseif ($paymentVerified) {
-                $active = 'payment_verified';
-            } elseif ($paymentSubmitted) {
-                $active = 'payment_verified';
-            } elseif (!$isCod) {
-                $active = 'payment_submitted';
-            } else {
-                $active = 'order_placed';
-            }
-        } elseif ($deliveryReached) {
+        if ($deliveryReached) {
             $active = null;
         } elseif ($processingReached) {
             $active = 'processing';
@@ -241,14 +216,9 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
         $steps[] = sh_order_timeline_step('payment_verified', $verifiedLabel, $verifiedState, $paymentVerified ? $verifiedAt : ($paymentFailed ? $failedAt : null));
     }
 
-    if ($isDigitalOnly) {
-        $steps[] = sh_order_timeline_step('code_delivered', 'Code Delivered', $state('code_delivered', $codesDelivered), null);
-        $steps[] = sh_order_timeline_step('delivery', 'Completed', $state('delivery', $orderStatus === 'completed'), sh_order_timeline_status_at($orderId, 'completed'));
-    } else {
-        $steps[] = sh_order_timeline_step('processing', 'Processing', $state('processing', $processingReached), sh_order_timeline_status_at($orderId, 'processing'));
-        $steps[] = sh_order_timeline_step('delivery', 'Delivery', $state('delivery', $deliveryReached),
-            $deliveryReached ? sh_order_timeline_status_at($orderId, $orderStatus) : null);
-    }
+    $steps[] = sh_order_timeline_step('processing', 'Processing', $state('processing', $processingReached), sh_order_timeline_status_at($orderId, 'processing'));
+    $steps[] = sh_order_timeline_step('delivery', 'Delivery', $state('delivery', $deliveryReached),
+        $deliveryReached ? sh_order_timeline_status_at($orderId, $orderStatus) : null);
 
     if ($cancelled || $returned) {
         $steps[] = sh_order_timeline_step($cancelled ? 'cancelled' : 'returned', $cancelled ? 'Cancelled' : 'Returned', 'bad', $problem['at']);
@@ -258,7 +228,6 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
 
     return [
         'is_cod' => $isCod,
-        'is_digital_only' => $isDigitalOnly,
         'order_status' => $orderStatus,
         'payment_status' => $paymentStatus,
         'steps' => $steps,

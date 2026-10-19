@@ -182,12 +182,26 @@ function sh_fb_apply_oob_code(string $code): array
     if (!$r['ok']) { return ['ok' => false, 'error' => sh_fb_error_text((string)$r['error'])]; }
     $email = (string)($r['data']['email'] ?? '');
     if ($email === '' || empty($r['data']['emailVerified'])) { return ['ok' => false, 'error' => 'Firebase did not confirm the verification.']; }
-    $u = sh_one('SELECT id, email FROM users WHERE email = ? LIMIT 1', [$email]);
-    if ($u) {
-        sh_update('users', ['email_verified' => 1, 'email_verified_at' => date('Y-m-d H:i:s'), 'email_verify_checked_at' => date('Y-m-d H:i:s')], 'id = ?', [(int)$u['id']]);
-        sh_security_log('email_verified', (int)$u['id'], ['via' => 'firebase-link']);
+    $u = sh_one('SELECT id, email, firebase_uid FROM users WHERE email = ? LIMIT 1', [$email]);
+    $uid = (int)($u['id'] ?? 0);
+    if ($uid > 0) {
+        $upd = [
+            'email_verified'          => 1,
+            'email_verified_at'       => date('Y-m-d H:i:s'),
+            'email_verify_checked_at' => date('Y-m-d H:i:s'),
+        ];
+        if (!empty($r['data']['localId']) && empty($u['firebase_uid'])) {
+            $upd['firebase_uid'] = (string)$r['data']['localId'];
+        }
+        sh_update('users', $upd, 'id = ?', [$uid]);
+        sh_security_log('email_verified', $uid, ['via' => 'firebase-link']);
+        try {
+            if (function_exists('sh_email_challenge_revoke')) {
+                sh_email_challenge_revoke($email, SH_EMAIL_PURPOSE_SIGNUP);
+            }
+        } catch (Throwable $e) {}
     }
-    return ['ok' => true, 'email' => $email, 'user_id' => (int)($u['id'] ?? 0)];
+    return ['ok' => true, 'email' => $email, 'user_id' => $uid];
 }
 
 /** Mark verified without Firebase (e.g. Google sign-in already asserted the email). */
@@ -211,6 +225,11 @@ function sh_fb_reset_for_email_change(): array
 /** Should this signed-in user be blocked from checkout until verified? */
 function sh_fb_checkout_blocked(?array $user): bool
 {
+    // The unified gate handles both verifiers (the store's own emailed code and
+    // Firebase), so this wrapper keeps working for any older caller.
+    if (function_exists('sh_email_gate_blocked')) {
+        return sh_email_gate_blocked($user, 'checkout') !== null;
+    }
     if ($user === null || !sh_fb_enabled() || sh_setting('email_verification_required', '0') !== '1') { return false; }
     if (sh_auth_mode() !== 'email_password') { return false; }
     sh_fb_schema_ensure();

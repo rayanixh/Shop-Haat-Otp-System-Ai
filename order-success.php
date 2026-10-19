@@ -1,6 +1,6 @@
 <?php
 /**
- * Order confirmation + live tracking + digital code delivery view.
+ * Order confirmation and live progress view.
  */
 declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
@@ -15,7 +15,7 @@ $order = $orderId > 0 ? sh_order_get($orderId) : null;
 // Keep a timed-out customer in the normal login/recovery flow. Guest-order
 // protection remains unchanged for URLs that were never authenticated.
 if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
-    sh_require_login('order-success.php?id=' . $orderId);
+    sh_require_login('order-success.php?id=' . $orderId, false);
 }
 
 if ($order === null || !sh_order_can_view($order)) {
@@ -32,7 +32,6 @@ if ($order === null || !sh_order_can_view($order)) {
 }
 
 $items = sh_order_items($orderId);
-$codes = (int)$order['has_digital'] === 1 ? sh_order_codes($orderId) : [];
 // Preserve the saved payment route and map progress from persisted order and
 // payment states. This is shared with Order Details and public tracking.
 $payment = sh_order_latest_payment($orderId);
@@ -101,33 +100,6 @@ require_once SH_ROOT . '/includes/header.php';
     <?= sh_order_timeline_problem_render($timeline) ?>
     <div style="margin-top:<?= !empty($timeline['problem']) ? '14px' : '0' ?>"><?= sh_order_timeline_render($timeline) ?></div>
   </div>
-
-  <?php if ($codes): ?>
-  <div class="sh-section">
-    <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('key', 18) ?> Your Digital Codes</h2></div>
-    <p style="font-size:13px;color:var(--sh-muted);margin-bottom:8px">
-      These codes are unique to your order. Keep them private — each code can only be used once.
-    </p>
-    <div class="sh-codebox">
-      <?php foreach ($codes as $c): ?>
-        <div class="sh-codebox__row">
-          <span class="sh-codebox__label"><?= e($c['product_name']) ?></span>
-          <span class="sh-codebox__code"><?= e($c['code']) ?></span>
-          <button class="sh-btn sh-btn--sm" type="button" data-copy="<?= e($c['code']) ?>">
-            <?= sh_icon('copy', 13) ?> <span data-copy-label>Copy</span>
-          </button>
-        </div>
-      <?php endforeach; ?>
-    </div>
-  </div>
-  <?php elseif ((int)$order['has_digital'] === 1): ?>
-  <div class="sh-section">
-    <div class="sh-alert sh-alert--info" style="margin:0">
-      <?= sh_icon('clock', 16) ?>
-      <span>Your digital codes will appear here automatically as soon as the payment is verified.</span>
-    </div>
-  </div>
-  <?php endif; ?>
 
   <div class="sh-cartlayout">
     <div class="sh-section">

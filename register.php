@@ -27,43 +27,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $redirect = sh_customer_return_target(sh_post('redirect', $redirect), '');
 
+    // Signup abuse limit. Counted from the audit table by client IP, so it
+    // cannot be bypassed by clearing cookies. Five accounts per hour is far
+    // above any genuine customer's pattern.
+    $signupBlocked = sh_auth_action_count('account_created', 3600) >= 5;
+
     if ($mode === 'email_password') {
         $v = new ShValidator($_POST);
         $v->required('name', 'Full name')->minLen('name', 2, 'Full name')->maxLen('name', 110, 'Full name')
           ->required('email', 'Email address')->email('email', 'Email address')
           ->required('password', 'Password')->password('password')
-          ->matches('password2', 'password', 'Password confirmation');
+          ->matchesRaw('password2', 'password', 'Password confirmation');
         if (empty($_POST['terms'])) { $v->custom('terms', false, 'You must accept the terms and conditions.'); }
         $errors = $v->errors();
+        if ($signupBlocked) { $errors['general'] = 'Too many accounts have been created from this connection. Please try again later.'; }
 
         if (!$errors) {
             try {
-                $exists = sh_one('SELECT id FROM users WHERE email = ? LIMIT 1', [$form['email']]);
+                $exists = sh_one('SELECT id, email, email_verified FROM users WHERE email = ? LIMIT 1', [$form['email']]);
                 if ($exists) {
-                    $errors['email'] = 'An account with this email address already exists.';
+                    if (empty($exists['email_verified']) && sh_email_verify_enabled()) {
+                        $target = sh_customer_return_target($redirect, 'account.php');
+                        $existUid = (int)$exists['id'];
+                        sh_email_verify_pending_set(['id' => $existUid, 'email' => $form['email']], $target, 'signup');
+                        $verifier = sh_email_verifier();
+                        if ($verifier === 'firebase') {
+                            require_once SH_ROOT . '/includes/firebase.php';
+                            $sent = sh_fb_send_verification(['id' => $existUid, 'email' => $form['email'], 'email_verified' => 0]);
+                            $msg = !empty($sent['ok'])
+                                ? 'An account with this email address is pending verification. We sent a verification link to ' . $form['email'] . ' — please check your inbox.'
+                                : 'An account with this email address is pending verification. You can request a fresh link on the verification page.';
+                        } else {
+                            $send = sh_email_send_verification_code($form['email'], $existUid);
+                            $msg = !empty($send['ok'])
+                                ? 'An account with this email address is pending verification. We sent a verification code to ' . $form['email'] . '.'
+                                : 'An account with this email address is pending verification. You can request a fresh code on the verification page.';
+                        }
+                        sh_flash('info', $msg);
+                        sh_redirect('verify-email.php');
+                    } else {
+                        $errors['email'] = 'An account with this email address already exists. Please log in instead.';
+                    }
                 } else {
                     $target = sh_customer_return_target($redirect, 'account.php');
                     $uid = sh_insert('users', [
-                        'name'          => $form['name'],
-                        'email'         => $form['email'],
-                        'password_hash' => password_hash((string)$_POST['password'], PASSWORD_DEFAULT),
-                        'status'        => 'active',
+                        'name'           => $form['name'],
+                        'email'          => $form['email'],
+                        'password_hash'  => password_hash((string)$_POST['password'], PASSWORD_DEFAULT),
+                        'status'         => 'active',
+                        'email_verified' => 0,
                     ]);
                     sh_login_user($uid);
                     sh_security_log('account_created', $uid, ['email' => mb_substr($form['email'], 0, 3) . '***']);
                     try { require_once SH_ROOT . '/includes/admin-tools.php'; sh_admin_notify('new_customer', 'New customer registered', (string)$form['name'], 'admin/customers.php?id=' . $uid); } catch (Throwable $e) {}
                     $welcome = 'Your account has been created. Welcome to ' . sh_setting('site_name', 'ShopHaat') . '.';
+                    $needsVerification = false;
                     try {
-                        require_once SH_ROOT . '/includes/firebase.php';
-                        if (sh_fb_enabled()) {
-                            $sent = sh_fb_send_verification(['id' => $uid, 'email' => $form['email'], 'email_verified' => 0]);
-                            $welcome .= !empty($sent['ok'])
-                                ? ' We sent a verification link to ' . $form['email'] . ' — please check your inbox.'
-                                : ' You can verify your email address from your profile.';
+                        require_once SH_ROOT . '/includes/mail.php';
+                        sh_email_schema_ensure();
+                        if (sh_email_verify_enabled()) {
+                            $verifier = sh_email_verifier();
+                            $needsVerification = true;
+                            sh_email_verify_pending_set(['id' => $uid, 'email' => $form['email']], $target, 'signup');
+
+                            if ($verifier === 'firebase') {
+                                require_once SH_ROOT . '/includes/firebase.php';
+                                $sent = sh_fb_send_verification(['id' => $uid, 'email' => $form['email'], 'email_verified' => 0]);
+                                $welcome .= !empty($sent['ok'])
+                                    ? ' We sent a verification link to ' . $form['email'] . ' — please check your inbox.'
+                                    : ' A verification email could not be sent (' . (string)($sent['error'] ?? 'the service was unavailable')
+                                      . '). You can request a new link on the verification page.';
+                            } else {
+                                $send = sh_email_send_verification_code($form['email'], $uid);
+                                $welcome .= !empty($send['ok'])
+                                    ? ' We emailed a verification code to ' . $form['email'] . '.'
+                                    : ' Your verification code could not be emailed (' . (string)($send['error'] ?? 'the mail server refused the message')
+                                      . '). Open the verification page to try again — nothing was verified for you.';
+                            }
                         }
                     } catch (Throwable $e) { sh_log_exception($e, 'register-verify'); }
                     sh_flash('success', $welcome);
-                    sh_redirect($target);
+                    sh_redirect($needsVerification ? 'verify-email.php' : $target);
                 }
             } catch (Throwable $e) {
                 sh_log_exception($e, 'register');
@@ -77,6 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           ->required('phone', 'Phone number')->phone('phone', 'Phone number');
         if (empty($_POST['terms'])) { $v->custom('terms', false, 'You must accept the terms and conditions.'); }
         $errors = $v->errors();
+        if ($signupBlocked) { $errors['general'] = 'Too many accounts have been created from this connection. Please try again later.'; }
 
         if (!$errors) {
             $phone = sh_phone_normalize($form['phone']);

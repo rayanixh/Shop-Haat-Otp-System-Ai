@@ -120,6 +120,100 @@ function sh_promo_image(?string $file): string
 }
 
 /**
+ * The homepage hero slider markup.
+ *
+ * Lives here rather than inline in index.php so the behaviour harness can drive
+ * exactly the markup the storefront ships, instead of a copy of it that could
+ * drift.
+ *
+ * Design rules this markup follows (all enforced by the test suite):
+ *   - no slide-level button: the slide carries the image, badge, heading and
+ *     description, and nothing the visitor can tap by accident;
+ *   - every slide is rendered and stacked, never hidden with display:none, so
+ *     the incoming image is already decoded when it fades in;
+ *   - a slide whose image file is missing is marked sh-slide--noimg and falls
+ *     back to the gradient plate while keeping its text;
+ *   - pagination is rendered only when there is more than one slide, and carries
+ *     the slide name for screen readers.
+ */
+function sh_slider_markup(array $slides): string
+{
+    if (!$slides) { return ''; }
+
+    $interval = sh_slider_interval_ms();
+    $fade     = sh_slider_fade_ms();
+    $total    = count($slides);
+
+    $html = '<div class="sh-carousel' . ($total > 1 ? ' sh-carousel--multi' : '') . '"'
+        . ' data-carousel data-carousel-interval="' . (int)$interval . '"'
+        . ' data-carousel-fade="' . (int)$fade . '"'
+        . ' style="--sh-slide-fade:' . (int)$fade . 'ms"'
+        . ' aria-roledescription="carousel" aria-label="Featured offers">';
+
+    foreach (array_values($slides) as $i => $sl) {
+        $img = sh_promo_image($sl['image'] ?? '');
+        $html .= '<div class="sh-slide' . ($i === 0 ? ' sh-slide--on' : '')
+            . ($img === '' ? ' sh-slide--noimg' : '') . '" data-slide="' . (int)$i . '"'
+            . ($i === 0 ? '' : ' aria-hidden="true"') . '>';
+        if ($img !== '') {
+            $html .= '<img class="sh-slide__img" src="' . e($img) . '" alt="' . e($sl['title'])
+                . '" width="1696" height="624" '
+                . ($i === 0 ? 'fetchpriority="high"' : 'loading="lazy"')
+                . ' decoding="async" draggable="false">';
+        }
+        $html .= '<span class="sh-slide__scrim" aria-hidden="true" style="opacity:'
+            . e(number_format(max(0, min(100, (int)($sl['overlay'] ?? 70))) / 100, 2)) . '"></span>'
+            . '<div class="sh-slide__inner">';
+        if (trim((string)($sl['tag'] ?? '')) !== '') {
+            $html .= '<span class="sh-slide__tag">' . e($sl['tag']) . '</span>';
+        }
+        $html .= '<h2 class="sh-slide__title">' . e($sl['title']) . '</h2>';
+        if (trim((string)($sl['subtitle'] ?? '')) !== '') {
+            $html .= '<p class="sh-slide__text">' . e($sl['subtitle']) . '</p>';
+        }
+        $html .= '</div></div>';
+    }
+
+    if ($total > 1) {
+        $html .= '<div class="sh-carousel__dots" role="group" aria-label="Choose a slide">';
+        foreach (array_values($slides) as $i => $sl) {
+            $html .= '<button class="sh-carousel__dot' . ($i === 0 ? ' sh-carousel__dot--on' : '') . '"'
+                . ' type="button" data-slide-to="' . (int)$i . '"'
+                . ' aria-label="Slide ' . (int)($i + 1) . ' of ' . (int)$total . ': ' . e($sl['title']) . '"'
+                . ($i === 0 ? ' aria-current="true"' : '') . '></button>';
+        }
+        $html .= '</div>';
+    }
+
+    return $html . '</div>';
+}
+
+/**
+ * How long each homepage slide stays on screen, in milliseconds.
+ *
+ * Clamped on read, not only on write: a value typed into the admin panel, edited
+ * in the database, or left over from an older install can never push the slider
+ * outside the 4-6 second band the storefront is designed for.
+ */
+function sh_slider_interval_ms(): int
+{
+    $ms = (int)sh_setting('slider_interval_ms', '5200');
+    return ($ms >= 4000 && $ms <= 6000) ? $ms : 5200;
+}
+
+/**
+ * The homepage slide crossfade duration, in milliseconds (600-1000 ms).
+ *
+ * The same clamp applies: a shorter fade flickers, a longer one feels stalled,
+ * so both ends of the range are enforced here rather than trusted from storage.
+ */
+function sh_slider_fade_ms(): int
+{
+    $ms = (int)sh_setting('slider_fade_ms', '700');
+    return ($ms >= 600 && $ms <= 1000) ? $ms : 700;
+}
+
+/**
  * Homepage promo content, loaded from the database.
  * $placement is 'slider' or 'card'. Only active rows are returned, in admin order.
  */
@@ -198,11 +292,100 @@ function sh_unique_slug(string $table, string $base, int $ignoreId = 0): string
     $try = $slug;
     $i = 2;
     while (true) {
-        $row = sh_one("SELECT id FROM `$table` WHERE slug = ? AND id <> ? LIMIT 1", [$try, $ignoreId]);
+        $row = sh_one("SELECT id FROM `$table` WHERE slug = ? AND id <> ? LIMIT 1", [$try, $ignoreId]); // @security-scan-ignore sql_interpolation — $table is an internal identifier, never request data
         if ($row === null) { return $try; }
         $try = $slug . '-' . $i++;
         if ($i > 200) { return $slug . '-' . bin2hex(random_bytes(3)); }
     }
+}
+
+/**
+ * Allowlist HTML sanitizer for the few places where markup is intentional
+ * (AI-generated article drafts).
+ *
+ * A regex approach was used before and could be bypassed: strip_tags() keeps
+ * attributes, and "<p/onmouseover=…>" is not matched by a pattern that expects
+ * whitespace after the tag name, while HTML parsers do treat "/" as an
+ * attribute separator. This walks the document instead, removing every element
+ * that is not on the list and every attribute on the ones that are, so the
+ * result can be rendered with innerHTML without creating a script sink.
+ *
+ * @param array<int,string> $allowed element names, lower case
+ */
+function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'h2', 'h3', 'h4']): string
+{
+    $html = trim($html);
+    if ($html === '') { return ''; }
+    if (!class_exists('DOMDocument')) {
+        // Conservative fallback: text only, no markup at all.
+        return trim(strip_tags($html));
+    }
+
+    $allow = array_flip(array_map('strtolower', $allowed));
+    $doc = new DOMDocument('1.0', 'UTF-8');
+    $prev = libxml_use_internal_errors(true);
+    $fatal = false;
+    try {
+        // The XML encoding hint keeps UTF-8 intact without mbstring entities.
+        $loaded = $doc->loadHTML('<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        // loadHTML() can report success and still return a truncated tree: past
+        // its nesting limit (256 levels) it drops everything deeper and merely
+        // logs "Excessive depth in document", so the words at the end of a
+        // deeply nested description would vanish silently. Any error-level
+        // parse message means the tree cannot be trusted, and the text-only
+        // fallback below keeps the content instead of discarding it.
+        foreach (libxml_get_errors() as $error) {
+            if ($error->level >= LIBXML_ERR_ERROR) { $fatal = true; break; }
+        }
+    } catch (Throwable $e) {
+        $loaded = false;
+    } finally {
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+    }
+    if (!$loaded || $fatal || $doc->documentElement === null) {
+        return trim(strip_tags($html));
+    }
+
+    // Collect first, then modify: mutating a live DOMNodeList skips siblings.
+    $nodes = [];
+    foreach ($doc->getElementsByTagName('*') as $node) { $nodes[] = $node; }
+    foreach ($nodes as $node) {
+        if (!($node instanceof DOMElement)) { continue; }
+        $name = strtolower($node->tagName);
+        if (!isset($allow[$name])) {
+            // Keep the words the writer produced, drop the element entirely.
+            // Removing the node (rather than unwrapping it) also discards any
+            // script/style content it may have carried.
+            if (in_array($name, ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math'], true)) {
+                if ($node->parentNode) { $node->parentNode->removeChild($node); }
+            } else {
+                $text = $doc->createTextNode($node->textContent ?? '');
+                if ($node->parentNode) { $node->parentNode->replaceChild($text, $node); }
+            }
+            continue;
+        }
+        while ($node->attributes !== null && $node->attributes->length > 0) {
+            $node->removeAttribute($node->attributes->item(0)->nodeName);
+        }
+    }
+
+    // Drop the encoding hint that was prepended to make loadHTML() read UTF-8,
+    // so it never becomes part of the stored content.
+    foreach ($doc->childNodes as $child) {
+        if ($child->nodeType === XML_PI_NODE) { $doc->removeChild($child); }
+    }
+
+    $out = '';
+    foreach ($doc->childNodes as $child) { $out .= $doc->saveHTML($child); }
+    $out = preg_replace('/<\?xml[^>]*\?>/i', '', $out) ?? $out;
+    $out = trim($out);
+    if ($out === '') {
+        // The DOM pass produced nothing. Rather than return empty and lose the
+        // writer's words, fall back to plain text while dropping all markup.
+        return trim(strip_tags($html));
+    }
+    return $out;
 }
 
 function sh_excerpt(?string $text, int $len = 120): string
@@ -554,6 +737,8 @@ function sh_icon(string $name, int $size = 20, string $class = ''): string
             'help'          => '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
             'refresh'       => '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',
             'lock'          => '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+            'link'          => '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+            'arrow-right'   => '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
             'file-text'     => '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
             'database'      => '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
             'bar-chart'     => '<line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/>',
@@ -823,7 +1008,7 @@ function sh_user_field(int $userId, string $field): ?string
 {
     $allow = ['name', 'email', 'phone'];
     if (!in_array($field, $allow, true)) { return null; }
-    return (string)sh_val("SELECT `$field` FROM users WHERE id = ? LIMIT 1", [$userId], '');
+    return (string)sh_val("SELECT `$field` FROM users WHERE id = ? LIMIT 1", [$userId], ''); // @security-scan-ignore sql_interpolation — $field is allowlisted on the line above
 }
 
 /**
