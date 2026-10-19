@@ -242,12 +242,19 @@ try {
     // ------------------------------------------------------------------
     echo "5. an SMTP key is refused in the API field and never transmitted\n";
     // ------------------------------------------------------------------
-    $before = count(api_requests($apiDir));
+    $before = api_requests($apiDir);
     $GLOBALS['test_settings']['brevo_api_key'] = 'xsmtpsib-0123456789abcdef-SENTINEL-SMTP-KEY';
     $smtpKey = sh_brevo_api_test_connection(['timeout' => 8]);
     api_same('smtp_key', $smtpKey['credential']['state'], 'An SMTP key in the API field was not recognised.');
     api_same('incomplete', $smtpKey['verdict'], 'An SMTP key must not produce a verified verdict.');
-    api_same($before, count(api_requests($apiDir)), 'An SMTP key caused a request to the API endpoint.');
+    // Test A still runs (it is unauthenticated by design); the credential must
+    // never leave the server. Prove it by looking at what the endpoint saw.
+    $newRecords = array_slice(api_requests($apiDir), count($before));
+    api_assert($newRecords !== [], 'The unauthenticated reachability check did not run.');
+    foreach ($newRecords as $record) {
+        api_assert(($record['key_present'] ?? true) === false, 'An SMTP key was transmitted to the API endpoint.');
+    }
+    api_same([], api_posts($apiDir), 'An SMTP key attempt sent a POST.');
     api_assert(str_contains((string)$smtpKey['error'], 'SMTP key'), 'The refusal does not name the credential type.');
     $smtpKeySend = sh_brevo_api_send('inbox@example.test', 'refused', 'refused', null, sh_mail_transport());
     api_assert(empty($smtpKeySend['ok']) && !empty($smtpKeySend['skipped']), 'An SMTP key was allowed to attempt an API send.');
@@ -256,8 +263,9 @@ try {
     // ------------------------------------------------------------------
     echo "6. an API key in the SMTP password is refused, not used\n";
     // ------------------------------------------------------------------
+    // The check happens before DNS or a socket, so no connection is attempted.
     $smtpWithApiKey = [
-        'driver' => 'smtp', 'transport' => 'smtp', 'host' => '127.0.0.1', 'port' => 1,
+        'driver' => 'smtp', 'transport' => 'smtp', 'host' => 'smtp-relay.brevo.com', 'port' => 587,
         'encryption' => 'tls', 'username' => 'user@example.test',
         'password' => 'xkeysib-0123456789abcdef-SENTINEL-API-KEY', 'timeout' => 5,
     ];
@@ -363,6 +371,7 @@ try {
     // ------------------------------------------------------------------
     api_same('brevo_api', sh_mail_selected_transport(), 'The selected API transport changed after a failure.');
     $GLOBALS['test_settings']['mail_transport'] = 'smtp';
+    $GLOBALS['test_settings']['smtp_enabled'] = '1';
     $GLOBALS['test_settings']['smtp_host'] = 'smtp-relay.brevo.com';
     $GLOBALS['test_settings']['smtp_username'] = 'user@example.test';
     $GLOBALS['test_settings']['smtp_password'] = 'xsmtpsib-smtp-only-key';

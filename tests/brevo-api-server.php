@@ -55,7 +55,7 @@ $respond = static function ($conn, int $status, string $body, array $extraHeader
 
 $deadline = time() + 120;
 $handled = 0;
-while (time() < $deadline && $handled < 12) {
+while (time() < $deadline && $handled < 40) {
     $conn = @stream_socket_accept($server, 5);
     if ($conn === false) { continue; }
     $handled++;
@@ -86,7 +86,11 @@ while (time() < $deadline && $handled < 12) {
     $path = '/';
     if (preg_match('~^([A-Z]+)\s+(\S+)~', $requestLine, $m)) { $method = $m[1]; $path = $m[2]; }
     $apiKey = (string)($headers['api-key'] ?? '');
-    $entry = ['method' => $method, 'path' => $path, 'key_present' => $apiKey !== '', 'authorized' => $apiKey === 'test-api-key'];
+    $known = ['test-api-key', 'account-denied-key', 'send-denied-key', 'rate-limited-key', 'payment-required-key'];
+    // "authorized" means the stub recognised the key, not that every resource
+    // was permitted: account-denied-key authenticates but is refused for
+    // /v3/account, exactly like the reported Brevo condition.
+    $entry = ['method' => $method, 'path' => $path, 'key_present' => $apiKey !== '', 'authorized' => in_array($apiKey, $known, true)];
     $payload = json_decode($body, true);
     if (is_array($payload)) {
         $entry['recipient'] = (string)($payload['to'][0]['email'] ?? '');
@@ -96,7 +100,6 @@ while (time() < $deadline && $handled < 12) {
     @file_put_contents($dir . '/request-' . $handled . '.json', json_encode($entry, JSON_PRETTY_PRINT));
 
     $route = (string)parse_url($path, PHP_URL_PATH);
-    $known = ['test-api-key', 'account-denied-key', 'send-denied-key', 'rate-limited-key', 'payment-required-key'];
     if ($apiKey === '' ) {
         // Brevo's answer when no api-key header is present at all.
         $respond($conn, 401, '{"message":"authentication not found in headers","code":"unauthorized"}');
