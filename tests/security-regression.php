@@ -2474,6 +2474,46 @@ sh_t('the SMTP password is never rendered, logged or returned', function () {
     return true;
 });
 
+sh_t('the Brevo API key is server-side only and delivery TLS verification is never disabled', function () {
+    $admin = sh_email_src('admin/email.php');
+    if (preg_match('~value="<\?=\s*e\(\(string\)sh_setting\(\'brevo_api_key~', $admin) === 1) {
+        return 'admin/email.php renders the stored Brevo API key';
+    }
+    if (!str_contains($admin, 'name="brevo_api_key"') || !str_contains($admin, 'type="password"')) {
+        return 'the Brevo API key field is not a masked password input';
+    }
+    if (!str_contains($admin, 'sh_verify_encrypt($apiKey)')) {
+        return 'the Brevo API key is not encrypted before storage';
+    }
+
+    $mail = sh_email_src('config/mail.php');
+    $sendAt = strpos($mail, 'function sh_mail_send(');
+    $sendEnd = $sendAt === false ? false : strpos($mail, 'function sh_mail_send_legacy(', $sendAt);
+    if ($sendAt === false || $sendEnd === false) { return 'sh_mail_send() could not be read'; }
+    $send = substr($mail, $sendAt, $sendEnd - $sendAt);
+    foreach (["'verify_peer'       => true", "'verify_peer_name'  => true", "'allow_self_signed' => false", "'peer_name'         => \$cleanHost"] as $needle) {
+        if (!str_contains($send, $needle)) { return 'the delivery path does not enforce TLS validation: ' . $needle; }
+    }
+    if (preg_match('~sh_setting\(\s*[\'\"]smtp_allow_self_signed~', $send) === 1) {
+        return 'the delivery path still reads the retired self-signed setting';
+    }
+    if (str_contains($send, 'CURLOPT_SSL_VERIFYPEER => false') || str_contains($send, 'CURLOPT_SSL_VERIFYHOST => 0')) {
+        return 'the delivery path disables HTTPS verification';
+    }
+
+    $apiAt = strpos($mail, 'function sh_brevo_api_request(');
+    $apiEnd = $apiAt === false ? false : strpos($mail, 'function sh_brevo_api_send(', $apiAt);
+    if ($apiAt === false || $apiEnd === false) { return 'sh_brevo_api_request() could not be read'; }
+    $api = substr($mail, $apiAt, $apiEnd - $apiAt);
+    foreach (['CURLOPT_SSL_VERIFYPEER => true', 'CURLOPT_SSL_VERIFYHOST => 2', "'verify_peer' => true", "'verify_peer_name' => true"] as $needle) {
+        if (!str_contains($api, $needle)) { return 'the Brevo API path does not enforce TLS validation: ' . $needle; }
+    }
+    if (!str_contains($mail, "'inspection_only' => true")) {
+        return 'the read-only certificate inspector is not labelled as inspection-only';
+    }
+    return true;
+});
+
 sh_t('email templates escape interpolated values and ship a text alternative', function () {
     $src = sh_email_src('includes/mail.php');
     if (!str_contains($src, 'function sh_email_e(')) { return 'the email escaper is missing'; }

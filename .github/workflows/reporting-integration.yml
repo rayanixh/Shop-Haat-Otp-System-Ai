@@ -29,6 +29,12 @@ jobs:
         run: php tools/security-scan.php --fail-on=high
       - name: Security regression suite
         run: php tests/security-regression.php
+      # Drives the real transport against local TLS servers: a matching cert
+      # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
+      # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
+      # at auth), and a local HTTPS Brevo API stub (valid vs wrong key).
+      - name: SMTP and Brevo TLS diagnostics
+        run: php tests/smtp-tls-diagnostics.php
       # Both harnesses drive the REAL rendered markup (tests/page-transition-
       # fixtures.php and tests/slider-fixtures.php, which call the shipped
       # helpers), the real stylesheet and the real script inside jsdom:
