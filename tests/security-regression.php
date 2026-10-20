@@ -3015,6 +3015,298 @@ sh_t('existing accounts are grandfathered once instead of being locked out', fun
     return true;
 });
 
+sh_section('AI provider connection tests');
+
+sh_t('every bundled AI driver has its own connection test', function () {
+    $files = [
+        'AbstractAIProvider.php'       => 'the shared fallback',
+        'OpenAICompatibleProvider.php' => 'OpenAI-compatible endpoints',
+        'OpenAIProvider.php'           => 'OpenAI',
+        'OpenRouterProvider.php'       => 'OpenRouter',
+        'GeminiProvider.php'           => 'Google Gemini',
+        'AnthropicProvider.php'        => 'Anthropic Claude',
+    ];
+    foreach ($files as $file => $label) {
+        $src = (string)file_get_contents(SH_ROOT . '/ai/providers/' . $file);
+        if (!str_contains($src, 'public function testConnection(): array')) {
+            return $label . ' has no testConnection() override';
+        }
+        if (!str_contains($src, 'testResult(')) { return $label . ' does not build a structured test result'; }
+    }
+    return true;
+});
+
+sh_t('the Gemini probe cannot mistake a token limit for a bad key', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/ai/providers/GeminiProvider.php');
+    if (!str_contains($src, '/models?pageSize=200')) { return 'the key is not checked with a read-only /models call'; }
+    if (!str_contains($src, ':generateContent')) { return 'the text probe does not use generateContent'; }
+    if (!str_contains($src, "'maxOutputTokens' => 256")) { return 'the probe budget is not large enough for thinking models'; }
+    if (!str_contains($src, "if (\$finish === 'MAX_TOKENS')")) { return 'MAX_TOKENS is not classified explicitly'; }
+    if (!str_contains($src, "testResult(true, 'token_limit'")) { return 'a token limit is not reported as a valid connection'; }
+    return true;
+});
+
+sh_t('no provider probe uses an eight-token budget', function () {
+    $dir = SH_ROOT . '/ai/providers';
+    foreach (glob($dir . '/*.php') ?: [] as $file) {
+        $src = (string)file_get_contents($file);
+        if (preg_match("/max_(?:completion_)?tokens'?\s*=>\s*8\b/", $src)) {
+            return basename($file) . ' still asks for only 8 output tokens';
+        }
+    }
+    return true;
+});
+
+sh_t('OpenRouter validates the key before spending tokens', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/ai/providers/OpenRouterProvider.php');
+    if (!str_contains($src, "'/auth/key'")) { return 'the /auth/key check is missing'; }
+    if (!str_contains($src, "'max_tokens' => 64")) { return 'the chat probe budget changed unexpectedly'; }
+    if (str_contains($src, "'max_tokens' => 8")) { return 'the old eight-token probe is still present'; }
+    return true;
+});
+
+sh_t('a provider test stores the code, HTTP status and next action', function () {
+    $pm = (string)file_get_contents(SH_ROOT . '/ai/ProviderManager.php');
+    foreach (["'last_test_code'", "'last_test_status'", "'last_test_next'", 'sh_ai_test_columns_ensure()'] as $needle) {
+        if (!str_contains($pm, $needle)) { return 'ProviderManager is missing ' . $needle; }
+    }
+    $schema = (string)file_get_contents(SH_ROOT . '/ai/schema.php');
+    foreach (['last_test_code VARCHAR(40)', 'last_test_status SMALLINT UNSIGNED', 'last_test_next VARCHAR(255)'] as $needle) {
+        if (!str_contains($schema, $needle)) { return 'ai_providers is missing ' . $needle; }
+    }
+    if (!str_contains($schema, 'function sh_ai_test_columns_ensure()')) { return 'existing installs have no additive migration'; }
+    return true;
+});
+
+sh_t('the test endpoint returns the real outcome instead of a bare failure', function () {
+    $api = (string)file_get_contents(SH_ROOT . '/api/ai.php');
+    $start = strpos($api, "case 'test_connection':");
+    if ($start === false) { return 'test_connection is missing'; }
+    $end = strpos($api, "case 'sync_models':", $start);
+    $fn = $end === false ? substr($api, $start) : substr($api, $start, $end - $start);
+    foreach (["'ok'         =>", "'code'       =>", "'state'      =>", "'next'       =>", "'tested_at'  =>"] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the response omits ' . trim($needle); }
+    }
+    if (str_contains($fn, 'api_key')) { return 'the test response mentions the API key'; }
+    return true;
+});
+
+sh_t('the Providers screen never renders a stored key', function () {
+    $page = (string)file_get_contents(SH_ROOT . '/admin/ai/providers.php');
+    if (!str_contains($page, 'sh_ai_provider_masked_key($editing)')) { return 'the edit form does not show the masked key'; }
+    if (preg_match('/value="<\?=\s*e\(\$[^)]*\[.api_key.\]/', $page)) { return 'a stored key is printed into an input value'; }
+    if (!str_contains($page, 'type="password"')) { return 'the key field is not a password input'; }
+    if (!str_contains($page, 'data-modal-open="sh-aiprov-add"')) { return 'there is no Add provider action'; }
+    if (!str_contains($page, 'sh_admin_modal(')) { return 'the Add provider chooser is missing'; }
+    if (!str_contains($page, 'data-ai-card=')) { return 'the cards have no test-state scope'; }
+    if (str_contains($page, 'style="display:inline"')) { return 'actions still use inline forms that break alignment'; }
+    return true;
+});
+
+sh_t('the browser test handler always restores its button', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    foreach (['AbortController', '45000', "removeAttribute('data-testing')", 'busy(btn, false)', 'function showTestResult', 'data-ai-test-autorun'] as $needle) {
+        if (!str_contains($js, $needle)) { return 'app.js is missing ' . $needle; }
+    }
+    $start = strpos($js, 'function runProviderTest(btn)');
+    $end = strpos($js, 'window.shAiTestProvider', $start);
+    if ($start === false || $end === false) { return 'runProviderTest() could not be read'; }
+    $fn = substr($js, $start, $end - $start);
+    if (substr_count($fn, 'busy(btn, false)') !== 1) { return 'the busy state is not reset in exactly one finally path'; }
+    if (!str_contains($fn, '.finally(')) { return 'the reset is not in a finally block'; }
+    return true;
+});
+
+sh_t('the redesigned provider cards have a responsive grid and no fixed heights', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    foreach (['.sh-aiprov-grid', '.sh-aiprov__meta', '.sh-aiprov-stats', '.sh-aiprov__actions', '.sh-aiprov-pick'] as $needle) {
+        if (!str_contains($css, $needle)) { return 'the stylesheet is missing ' . $needle; }
+    }
+    $start = strpos($css, '/* Providers screen: compact cards');
+    $block = $start === false ? '' : substr($css, $start, 9000);
+    if ($block === '') { return 'the provider stylesheet block could not be read'; }
+    if (preg_match('/\.sh-aiprov(?:::?[a-z_-]+)?\s*\{[^}]*height:\s*\d/', $block)) { return 'a provider card has a fixed height'; }
+    if (preg_match('/\.sh-aiprov__meta\s*\{[^}]*height:\s*\d/', $block)) { return 'the metadata grid has a fixed height'; }
+    if (preg_match('/gradient\(/i', $block)) { return 'the provider styles use a gradient'; }
+    return true;
+});
+
+sh_section('Courier connection tests');
+
+require_once SH_ROOT . '/includes/courier.php';
+
+sh_t('the test vocabulary covers every state the admin can see', function () {
+    $states = sh_courier_test_states();
+    foreach (['connected', 'authentication_failed', 'configuration_incomplete', 'permission_denied',
+              'network_error', 'unsupported', 'failed'] as $key) {
+        if (!isset($states[$key])) { return 'missing state ' . $key; }
+        if (trim((string)$states[$key]['label']) === '') { return $key . ' has no label'; }
+    }
+    if (sh_courier_test_state_label('unsupported') !== 'Unsupported automated test') {
+        return 'the unsupported state is not worded honestly';
+    }
+    return true;
+});
+
+sh_t('HTTP statuses map to authentication, permission and network states', function () {
+    $map = [
+        0   => 'network_error',
+        401 => 'authentication_failed',
+        403 => 'permission_denied',
+        408 => 'network_error',
+        500 => 'failed',
+    ];
+    foreach ($map as $status => $expected) {
+        if (sh_courier_test_state_from_http($status) !== $expected) {
+            return 'HTTP ' . $status . ' maps to ' . sh_courier_test_state_from_http($status) . ', expected ' . $expected;
+        }
+    }
+    return true;
+});
+
+sh_t('a test message cannot leak a stored credential', function () {
+    $msg = 'Invalid key sk-live-SECRET123 for merchant';
+    $clean = sh_courier_test_scrub($msg, ['sk-live-SECRET123']);
+    if (str_contains($clean, 'sk-live-SECRET123')) { return 'the credential survived sanitising'; }
+    if (!str_contains($clean, '••••')) { return 'the credential was not replaced'; }
+    if (str_contains($clean, "\n")) { return 'control characters were not stripped'; }
+    $long = sh_courier_test_scrub(str_repeat('x', 500));
+    if (mb_strlen($long) > 220) { return 'messages are not capped'; }
+    return true;
+});
+
+sh_t('every required courier has a provider-specific probe', function () {
+    foreach (['steadfast', 'pathao', 'ecourier', 'paperfly', 'sundarban', 'saparibahan'] as $name) {
+        if (!function_exists('sh_courier_probe_' . $name)) { return 'sh_courier_probe_' . $name . '() is missing'; }
+    }
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach ([
+        "sh_courier_probe_steadfast" => "sh_steadfast_base_url(\$creds) . '/get_balance'",
+        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/external/login'",
+        "sh_courier_probe_ecourier"  => "'/city-list'",
+    ] as $fn => $needle) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, $needle)) { return $fn . ' does not call its documented endpoint'; }
+    }
+    return true;
+});
+
+sh_t('a Pathao test uses client credentials and verifies the stored store', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_probe_pathao(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the Pathao probe could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['client_id', 'client_secret', 'access_token', '/aladdin/api/v1/stores', 'store_id'] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the Pathao probe is missing ' . $needle; }
+    }
+    if (str_contains($fn, 'username') || str_contains($fn, 'password')) {
+        return 'the probe asks for username/password, which the official client_credentials flow does not need';
+    }
+    if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
+        return 'a missing or unknown store is not reported as configuration incomplete';
+    }
+    return true;
+});
+
+sh_t('an ambiguous provider is never reported as connected', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['sh_courier_probe_paperfly', 'sh_courier_probe_sundarban', 'sh_courier_probe_saparibahan'] as $fn) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, "'unsupported'")) { return $fn . ' does not return the unsupported state'; }
+        if (str_contains($body, 'sh_courier_http(')) { return $fn . ' sends a request even though no API is documented'; }
+    }
+    return true;
+});
+
+sh_t('connection tests never book, pick up or charge', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_test(array $courier');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'sh_courier_test() could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['sh_courier_book', 'sh_shipment_create', 'create_order', 'create_pickup', 'new_order', 'sh_shipment_set_status'] as $needle) {
+        if (str_contains($fn, $needle)) { return 'the test path references ' . $needle; }
+    }
+    // And the probes themselves must not call a booking endpoint.
+    $probeStart = strpos($src, 'function sh_courier_probe_steadfast(');
+    $probeEnd = strpos($src, '// Test results: persistence + display', $probeStart);
+    $probes = $probeStart === false || $probeEnd === false ? '' : substr($src, $probeStart, $probeEnd - $probeStart);
+    foreach (['/create_order', '/orders', 'create_pickup', 'new_order', '/order-place'] as $needle) {
+        if (str_contains($probes, $needle)) { return 'a probe contains the booking path ' . $needle; }
+    }
+    return true;
+});
+
+sh_t('test results get their own additive table and never touch shipments', function () {
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (!str_contains($schema, 'function sh_courier_test_results_sql()')) { return 'the shared DDL function is missing'; }
+    if (!str_contains($schema, 'CREATE TABLE IF NOT EXISTS courier_test_results')) { return 'the table is not created idempotently'; }
+    if (!str_contains($schema, 'sh_courier_test_results_sql(),')) { return 'the installer does not create the table'; }
+    foreach (['result_code VARCHAR(40)', 'state VARCHAR(40)', 'http_status SMALLINT UNSIGNED', 'tested_by INT UNSIGNED', 'tested_at DATETIME'] as $needle) {
+        if (!str_contains($schema, $needle)) { return 'courier_test_results is missing ' . $needle; }
+    }
+    if (str_contains($schema, 'DROP TABLE')) { return 'the migration drops a table'; }
+    foreach (['shipments', 'shipment_events', 'couriers'] as $table) {
+        if (preg_match('/ALTER TABLE\s+' . $table . '/i', $schema)) { return 'the migration alters ' . $table; }
+    }
+    $courier = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (!str_contains($courier, 'function sh_courier_test_record(')) { return 'results are not persisted'; }
+    if (!str_contains($courier, 'function sh_courier_last_test(')) { return 'the last result cannot be read back'; }
+    if (!str_contains($courier, 'function sh_courier_test_summary(')) { return 'there is no shared result display'; }
+    return true;
+});
+
+sh_t('the test action exists on the card and on the courier details page', function () {
+    $list = (string)file_get_contents(SH_ROOT . '/admin/couriers.php');
+    if (!str_contains($list, 'name="courier_action" value="test"')) { return 'the card has no test action'; }
+    if (!str_contains($list, 'sh_courier_test_summary($c)')) { return 'the card does not show the last result'; }
+    if (str_contains($list, "if (\$apiReady): ?>\n          <button")) { return 'the test is still hidden for non-booking drivers'; }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/courier-edit.php');
+    if (!str_contains($edit, 'name="courier_action" value="test"')) { return 'the details page has no test action'; }
+    if (!str_contains($edit, 'sh_courier_test($saved')) { return 'the details page does not run the test after saving'; }
+    if (!str_contains($edit, 'sh_courier_test_summary($editing)')) { return 'the details page does not show the last result'; }
+    return true;
+});
+
+sh_t('courier credentials are encrypted at rest with a legacy fallback', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['function sh_courier_credentials_store(', 'function sh_courier_secret_key(', "str_starts_with(\$raw, 'cou:')"] as $needle) {
+        if (!str_contains($src, $needle)) { return 'the courier credential encryption is missing ' . $needle; }
+    }
+    if (!str_contains($src, 'openssl_encrypt(')) { return 'credentials are not encrypted'; }
+    if (!str_contains($src, '$d = json_decode($raw, true);')) { return 'plain legacy JSON is no longer readable'; }
+    foreach (['admin/couriers.php', 'admin/courier-edit.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (str_contains($body, "'credentials'  => \$creds ? json_encode(\$creds")) {
+            return $page . ' still writes plaintext credentials';
+        }
+        if (!str_contains($body, 'sh_courier_credentials_store($creds)')) {
+            return $page . ' does not encrypt the credentials it saves';
+        }
+    }
+    return true;
+});
+
+sh_t('the Steadfast default points at the official host', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (str_contains($src, 'portal.pacakge.net')) { return 'the misspelled portal host is still the default'; }
+    if (!str_contains($src, 'https://portal.packzy.com/api/v1')) { return 'the official packzy host is not the default'; }
+    return true;
+});
+
+sh_t('paperfly asks for the key its API requires', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (!str_contains($src, "'paperfly_key' => 'Paperfly Key'")) { return 'the paperflykey credential field is missing'; }
+    return true;
+});
+
 // ===========================================================================
 echo "\n" . str_repeat('=', 72) . "\n";
 printf("passed %d   failed %d   skipped %d\n", $passed, $failed, $skipped);

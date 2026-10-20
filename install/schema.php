@@ -13,7 +13,7 @@ function sh_schema_tables(): array
         'addresses', 'settings', 'notifications', 'notification_logs', 'app_logs',
         'promo_slides', 'whatsapp_messages', 'whatsapp_message_statuses',
         'telegram_admin_log', 'telegram_updates',
-        'couriers', 'shipments', 'shipment_events',
+        'couriers', 'shipments', 'shipment_events', 'courier_test_results',
         'otp_verifications', 'security_logs', 'password_resets',
         'email_challenges', 'email_log',
     ];
@@ -604,7 +604,39 @@ function sh_courier_schema_sql(): array
             CONSTRAINT fk_shipment_events_shipment FOREIGN KEY (shipment_id) REFERENCES shipments (id) ON DELETE CASCADE,
             CONSTRAINT fk_shipment_events_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
         ) $E",
+
+        sh_courier_test_results_sql(),
     ];
+}
+
+/**
+ * One row per courier connection test: the real outcome, the HTTP status the
+ * provider returned and the next action shown to the admin.
+ *
+ * Additive only. It is created by CREATE TABLE IF NOT EXISTS from both the
+ * installer and the lazy schema ensure, so an existing store gets it without
+ * touching couriers, credentials, shipments or orders.
+ */
+function sh_courier_test_results_sql(): string
+{
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return "CREATE TABLE IF NOT EXISTS courier_test_results (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        courier_id INT UNSIGNED DEFAULT NULL,
+        driver VARCHAR(50) NOT NULL DEFAULT '',
+        result_code VARCHAR(40) NOT NULL DEFAULT 'failed',
+        state VARCHAR(40) NOT NULL DEFAULT 'failed',
+        http_status SMALLINT UNSIGNED DEFAULT NULL,
+        note VARCHAR(255) DEFAULT NULL,
+        next_action VARCHAR(255) DEFAULT NULL,
+        tested_by INT UNSIGNED DEFAULT NULL,
+        tested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_ctr_courier (courier_id, tested_at),
+        KEY idx_ctr_state (state),
+        CONSTRAINT fk_ctr_courier FOREIGN KEY (courier_id) REFERENCES couriers (id) ON DELETE CASCADE,
+        CONSTRAINT fk_ctr_admin FOREIGN KEY (tested_by) REFERENCES admins (id) ON DELETE SET NULL
+    ) $E";
 }
 
 /**

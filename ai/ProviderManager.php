@@ -520,20 +520,89 @@ function sh_ai_image(string $task, string $prompt, array $meta = []): array
     return sh_ai_dispatch('image', $task, ['prompt' => $prompt], $meta);
 }
 
-/** Test one configured provider and remember the outcome. */
+/** Human labels for the machine codes a provider test can return. */
+function sh_ai_test_state_labels(): array
+{
+    return [
+        'connected'           => 'Connected',
+        'token_limit'         => 'Connected — token limit',
+        'config_incomplete'   => 'Configuration incomplete',
+        'auth_failed'         => 'Authentication failed',
+        'permission_denied'   => 'Permission denied',
+        'model_not_found'     => 'Model not available',
+        'rate_limited'        => 'Rate limited',
+        'billing'             => 'Billing problem',
+        'timeout'             => 'Timed out',
+        'network_error'       => 'Network error',
+        'provider_error'      => 'Provider error',
+        'failed'              => 'Test failed',
+    ];
+}
+
+function sh_ai_test_state_label(string $code): string
+{
+    return sh_ai_test_state_labels()[$code] ?? 'Test failed';
+}
+
+/**
+ * Badge tone for a test code: ok / warn / bad. A token limit and a missing
+ * configuration are warnings, never evidence of a bad key.
+ */
+function sh_ai_test_state_tone(string $code): string
+{
+    if ($code === 'connected') { return 'ok'; }
+    if (in_array($code, ['token_limit', 'config_incomplete', 'model_not_found', 'rate_limited', 'timeout', 'network_error'], true)) {
+        return 'warn';
+    }
+    return 'bad';
+}
+
+/** Test one configured provider and remember the real outcome. */
 function sh_ai_provider_test(int $providerId): array
 {
     $row = sh_ai_provider_row($providerId);
     $adapter = $row ? sh_ai_adapter($row) : null;
-    if ($adapter === null) { return ['ok' => false, 'error' => 'Unknown provider.']; }
+    if ($adapter === null) {
+        return ['ok' => false, 'code' => 'config_incomplete', 'message' => 'This provider type is unknown.',
+                'status' => 0, 'model' => '', 'next' => 'Edit the provider and choose a supported type.',
+                'tested_at' => date('Y-m-d H:i:s'), 'error' => 'This provider type is unknown.'];
+    }
+
     $res = $adapter->testConnection();
+    // A provider can echo part of the request in an error. Never store or
+    // return the decrypted key, even if the vendor repeats it back.
+    $plainKey = function_exists('sh_ai_decrypt') ? sh_ai_decrypt((string)($row['api_key'] ?? '')) : '';
+    if ($plainKey !== '' && strlen($plainKey) >= 8) {
+        foreach (['message', 'error', 'detail', 'next'] as $k) {
+            if (isset($res[$k])) { $res[$k] = str_replace($plainKey, '••••', (string)$res[$k]); }
+        }
+    }
+    if (!isset($res['code']) || $res['code'] === '') {
+        $res['code'] = !empty($res['ok']) ? 'connected' : 'failed';
+    }
+    $res['message'] = (string)($res['message'] ?? ($res['ok'] ? ($res['detail'] ?? 'Connected.') : ($res['error'] ?? 'The test failed.')));
+    $res['message'] = mb_substr(trim(preg_replace('/\s+/', ' ', $res['message']) ?? $res['message']), 0, 240);
+    $res['tested_at'] = (string)($res['tested_at'] ?? date('Y-m-d H:i:s'));
+    $res['status'] = (int)($res['status'] ?? 0);
+    $res['next'] = (string)($res['next'] ?? '');
+    if (!empty($res['ok'])) { $res['detail'] = $res['message']; } else { $res['error'] = $res['message']; }
+
+    sh_ai_test_columns_ensure();
+    $data = [
+        'last_tested_at' => $res['tested_at'],
+        'last_test_ok'   => !empty($res['ok']) ? 1 : 0,
+        'last_test_note' => mb_substr($res['message'], 0, 255),
+    ];
+    if (sh_ai_column_exists('ai_providers', 'last_test_code')) {
+        $data['last_test_code']   = mb_substr((string)$res['code'], 0, 40);
+        $data['last_test_status'] = $res['status'] > 0 ? $res['status'] : null;
+        $data['last_test_next']   = mb_substr((string)$res['next'], 0, 255);
+    }
     try {
-        sh_update('ai_providers', [
-            'last_tested_at' => date('Y-m-d H:i:s'),
-            'last_test_ok'   => !empty($res['ok']) ? 1 : 0,
-            'last_test_note' => mb_substr((string)($res['ok'] ? ($res['detail'] ?? 'OK') : ($res['error'] ?? 'Failed')), 0, 255),
-        ], 'id = ?', [$providerId]);
+        sh_update('ai_providers', $data, 'id = ?', [$providerId]);
         sh_ai_providers_all(true);
-    } catch (Throwable $e) { /* status column is cosmetic */ }
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-provider-test-save');
+    }
     return $res;
 }

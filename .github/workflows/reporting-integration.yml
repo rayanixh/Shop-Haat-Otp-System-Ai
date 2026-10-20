@@ -153,5 +153,12 @@ jobs:
       # stock, and that the saved row is visible to the storefront queries and
       # the Small/Medium/Large category card. It recreates its own tables in
       # the disposable database and runs last, so no later step depends on its state.
+      # Real MySQL proof for the courier work: the additive
+      # courier_test_results table, the seven states, configuration-incomplete
+      # vs unsupported, append-only history, the cascade on courier deletion and
+      # the additive AI test columns on an old ai_providers table. No provider
+      # is called, so no credential and no network access is needed.
+      - name: Courier connection tests and additive schema
+        run: php tests/courier-connection-tests.php
       - name: AI Auto Work full-product save against MySQL
         run: php tests/product-ai-save.php

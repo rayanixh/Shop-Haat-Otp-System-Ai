@@ -142,6 +142,82 @@ class GeminiProvider extends AbstractAIProvider
                 'error' => 'This Gemini model returned no image. Use an image-capable model such as gemini-2.5-flash-image or imagen-4.0-generate-001.'];
     }
 
+    /**
+     * Gemini-specific probe. Step 1 is GET /models, which validates the key
+     * without generating anything and tells us whether the configured model is
+     * visible to this key. Step 2 is a 256-token generateContent call: enough
+     * for a short answer plus the thinking budget of 2.5 models, so MAX_TOKENS
+     * is only reported when the model genuinely never produced text.
+     */
+    public function testConnection(): array
+    {
+        if (!$this->hasKey()) {
+            return $this->testIncomplete('No API key is saved for ' . $this->name() . '.',
+                'Create a key in Google AI Studio, paste it here and save.');
+        }
+        $model = self::cleanId(trim($this->model([])));
+
+        $list = AIHttpClient::get($this->baseUrl() . '/models?pageSize=200', $this->headers(), 20);
+        if (!$list['ok']) { return $this->testHttpFailure($list, $model, 'Google Gemini'); }
+        $known = [];
+        foreach (($list['json']['models'] ?? []) as $m) {
+            $id = self::cleanId((string)($m['name'] ?? ''));
+            if ($id !== '') { $known[$id] = true; }
+        }
+
+        if ($model === '') {
+            return $this->testIncomplete('Google accepted the key. ' . count($known) . ' models are available, but no default text model is selected.',
+                'Choose a default text model (for example gemini-2.5-flash) and save, then test again.');
+        }
+        if ($known && !isset($known[$model]) && !str_starts_with($model, 'imagen')) {
+            return $this->testResult(false, 'model_not_found',
+                'Google does not list the model "' . $model . '" for this key.',
+                ['status' => (int)$list['status'], 'model' => $model,
+                 'next' => 'Pick a model from the catalogue (Models tab) and test again.']);
+        }
+        if (str_starts_with($model, 'imagen')) {
+            return $this->testResult(true, 'connected',
+                'Google accepted the key and lists the image model ' . $model . '. Image generation is checked when you generate an image.',
+                ['status' => (int)$list['status'], 'model' => $model, 'next' => '']);
+        }
+
+        $payload = [
+            'contents' => [['role' => 'user', 'parts' => [['text' => 'Reply with the single word: ready']]]],
+            'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 256],
+        ];
+        $res = AIHttpClient::post($this->baseUrl() . '/models/' . rawurlencode($model) . ':generateContent',
+            $this->headers(), $payload, 20);
+        if (!$res['ok']) { return $this->testHttpFailure($res, $model, 'Google Gemini'); }
+
+        $j = $res['json'];
+        $cand = $j['candidates'][0] ?? null;
+        if ($cand === null) {
+            $why = (string)($j['promptFeedback']['blockReason'] ?? '');
+            return $this->testResult(false, 'provider_error',
+                'Google returned no candidate' . ($why !== '' ? ' (blocked: ' . $why . ')' : '') . '.',
+                ['status' => 200, 'model' => $model,
+                 'next' => 'Try a different text model. A safety block is not an authentication failure.']);
+        }
+        $text = '';
+        foreach (($cand['content']['parts'] ?? []) as $part) { $text .= (string)($part['text'] ?? ''); }
+        $text = trim($text);
+        $finish = (string)($cand['finishReason'] ?? '');
+        if ($text === '') {
+            if ($finish === 'MAX_TOKENS') {
+                return $this->testResult(true, 'token_limit',
+                    'Connected to Google Gemini. ' . $model . ' reached the output-token limit before replying, which means the key is valid.',
+                    ['status' => 200, 'model' => $model,
+                     'next' => 'Raise the token budget for generations, or choose a model with less thinking overhead.']);
+            }
+            return $this->testResult(false, 'provider_error',
+                'Google accepted the request but returned no text' . ($finish !== '' ? ' (' . $finish . ')' : '') . '.',
+                ['status' => 200, 'model' => $model, 'next' => 'Choose a text-capable model and test again.']);
+        }
+        return $this->testResult(true, 'connected',
+            'Connected to Google Gemini. ' . $model . ' replied: ' . mb_substr($text, 0, 40),
+            ['status' => 200, 'model' => $model, 'next' => '']);
+    }
+
     public function listModels(): array
     {
         if (!$this->hasKey()) { return ['ok' => false, 'error' => 'Save an API key first.']; }

@@ -819,14 +819,14 @@
    Nothing is simulated: a failure shows the provider's actual message.
    =================================================================== */
 (function () {
-  var root = document.querySelector('[data-ai-product],[data-ai-category],[data-ai-blog-generate],[data-ai-test],[data-ai-bulk-start],[data-ai-route-provider]');
+  var root = document.querySelector('[data-ai-product],[data-ai-category],[data-ai-blog-generate],[data-ai-test],[data-ai-bulk-start],[data-ai-route-provider],[data-ai-providers]');
   if (!root && !document.querySelector('[data-ai-block]')) return;
 
   var CSRF = window.SH_CSRF || '';
   var BASE = window.SH_BASE || '/';
   var store = {};            // last generated payload per task
 
-  function api(fields) {
+  function api(fields, opts) {
     var body = new FormData();
     body.append('csrf_token', CSRF);
     Object.keys(fields).forEach(function (k) {
@@ -834,10 +834,12 @@
       if (Array.isArray(v)) { v.forEach(function (i) { body.append(k + '[]', i); }); }
       else { body.append(k, v); }
     });
-    return fetch(BASE + 'api/ai.php', {
+    var init = {
       method: 'POST', body: body, credentials: 'same-origin',
       headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    }).then(function (r) {
+    };
+    if (opts && opts.signal) { init.signal = opts.signal; }
+    return fetch(BASE + 'api/ai.php', init).then(function (r) {
       return r.text().then(function (t) {
         var j;
         try { j = JSON.parse(t); }
@@ -852,7 +854,11 @@
           stale.csrfFailed = true;
           throw stale;
         }
-        if (!j.success) { throw new Error(j.error || 'The request failed.'); }
+        if (!j.success) {
+          var failed = new Error(j.error || 'The request failed.');
+          failed.payload = j;
+          throw failed;
+        }
         return j;
       });
     });
@@ -896,6 +902,74 @@
       btn.disabled = false;
     }
   }
+
+  /* ---- Provider connection tests -------------------------------------
+     One button, one card, one explicit state. The request is aborted after
+     45 seconds so the label can never stay on "Testing…"; every path (ok,
+     provider failure, network failure, timeout) writes a visible result and
+     re-enables the button. The server-side probes use 15-20 second timeouts
+     each, so a normal two-call probe (model check + chat) still finishes
+     before the browser gives up and the stored result matches what is shown. */
+  function testToneClass(tone) {
+    return tone === 'ok' ? 'is-ok' : (tone === 'bad' ? 'is-bad' : 'is-warn');
+  }
+  function testBadgeClass(tone) {
+    return tone === 'ok' ? 'sh-badge--ok' : (tone === 'bad' ? 'sh-badge--bad' : 'sh-badge--warn');
+  }
+  function showTestResult(card, data) {
+    if (!card) return;
+    var tone = data.tone || (data.ok ? 'ok' : 'bad');
+    var state = data.state || (data.ok ? 'Connected' : 'Test failed');
+    var chip = card.querySelector('[data-ai-test-chip]');
+    if (chip) { chip.textContent = state; chip.className = 'sh-badge ' + testBadgeClass(tone); }
+    var when = card.querySelector('[data-ai-test-time]');
+    if (when) { when.textContent = 'just now'; }
+    var note = card.querySelector('[data-ai-test-note]');
+    if (note) { note.textContent = data.message || ''; note.hidden = !data.message; }
+    var next = card.querySelector('[data-ai-test-next]');
+    if (next) { next.textContent = data.next || ''; next.hidden = !data.next; }
+    var live = card.querySelector('[data-ai-test-result]');
+    if (live) {
+      live.hidden = false;
+      live.className = 'sh-aiprov__live ' + testToneClass(tone);
+      live.textContent = (data.status ? 'HTTP ' + data.status + ' · ' : '') + (data.message || '');
+    }
+    var stateEl = card.querySelector('[data-ai-test-state]') || card;
+    stateEl.setAttribute('data-ai-test-state', data.code || (data.ok ? 'connected' : 'failed'));
+  }
+  function runProviderTest(btn) {
+    var pid = btn.getAttribute('data-provider') || '';
+    var card = btn.closest('[data-ai-card]') || document.querySelector('[data-ai-card="' + pid + '"]');
+    if (!pid || btn.getAttribute('data-testing') === '1') { return; }
+    btn.setAttribute('data-testing', '1');
+
+    var ctrl = (typeof window.AbortController === 'function') ? new window.AbortController() : null;
+    var timedOut = false;
+    var timer = window.setTimeout(function () {
+      timedOut = true;
+      if (ctrl) { ctrl.abort(); }
+    }, 45000);
+
+    busy(btn, true, 'Testing…');
+    api({ action: 'test_connection', provider_id: pid }, ctrl ? { signal: ctrl.signal } : null)
+      .then(function (j) {
+        showTestResult(card, j);
+      })
+      .catch(function (err) {
+        var aborted = timedOut || (err && err.name === 'AbortError');
+        showTestResult(card, aborted
+          ? { ok: false, code: 'timeout', tone: 'warn', state: 'Timed out', status: 0,
+              message: 'The server did not answer within 45 seconds.', next: 'Retry. If it keeps timing out, check the provider base URL and the server log.' }
+          : { ok: false, code: 'network_error', tone: 'warn', state: 'Network error', status: 0,
+              message: (err && err.message) || 'The test request failed.', next: 'Check your connection, then retry.' });
+      })
+      .finally(function () {
+        window.clearTimeout(timer);
+        btn.removeAttribute('data-testing');
+        busy(btn, false);
+      });
+  }
+  window.shAiTestProvider = runProviderTest;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -1034,17 +1108,7 @@
     /* ---- settings: test connection ---- */
     if (el.hasAttribute('data-ai-test')) {
       ev.preventDefault();
-      var pidT = el.getAttribute('data-provider') || '';
-      var res = pidT ? document.querySelector('[data-ai-test-result="' + pidT + '"]') : document.querySelector('[data-ai-test-result]');
-      busy(el, true, 'Testing…');
-      api({ action: 'test_connection', provider_id: pidT })
-        .then(function (j) {
-          if (res) { res.hidden = false; res.textContent = j.message; res.className = 'sh-airesult sh-airesult--ok'; }
-        })
-        .catch(function (err) {
-          if (res) { res.hidden = false; res.textContent = err.message; res.className = 'sh-airesult sh-airesult--bad'; }
-        })
-        .finally(function () { busy(el, false); });
+      runProviderTest(el);
       return;
     }
 
@@ -1230,6 +1294,15 @@
   }
 
   updateCount();
+
+  /* A provider saved with "Save & test" redirects with ?run_test=1. Run that
+     one test automatically; the button stays available either way. */
+  var auto = document.querySelector('[data-ai-test-autorun]');
+  if (auto) {
+    var autoId = auto.getAttribute('data-ai-test-autorun');
+    var autoBtn = document.querySelector('[data-ai-test][data-provider="' + autoId + '"]');
+    if (autoBtn && !autoBtn.disabled) { setTimeout(function () { autoBtn.click(); }, 120); }
+  }
 })();
 
 /* ===================================================================

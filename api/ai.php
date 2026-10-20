@@ -374,17 +374,30 @@ try {
             sh_json(['success' => true] + $res);
         }
 
-        /* ---------- providers: verify the credentials really work --------- */
+        /* ---------- providers: verify the credentials really work ---------
+         * "success" means the test RAN and produced a real answer. The outcome
+         * is "ok": a rejected key is a completed test, not a failed request, so
+         * the browser can render the provider's actual state without treating
+         * the HTTP call itself as broken. No secret is ever returned.
+         */
         case 'test_connection': {
             $pid = sh_int($_POST['provider_id'] ?? 0);
-            if ($pid <= 0) {
-                $d = sh_ai_default_provider_row();
-                $pid = $d ? (int)$d['id'] : 0;
-            }
-            if ($pid <= 0) { sh_json(['success' => false, 'error' => 'No provider configured.']); }
+            if ($pid <= 0) { sh_json(['success' => false, 'error' => 'Choose a provider to test.'], 400); }
+            if (sh_ai_provider_row($pid) === null) { sh_json(['success' => false, 'error' => 'That provider no longer exists.'], 404); }
             $res = sh_ai_provider_test($pid);
-            if (empty($res['ok'])) { sh_json(['success' => false, 'error' => (string)$res['error']]); }
-            sh_json(['success' => true, 'message' => 'Connection OK. ' . (string)($res['detail'] ?? '')]);
+            $code = (string)($res['code'] ?? (!empty($res['ok']) ? 'connected' : 'failed'));
+            sh_json([
+                'success'    => true,
+                'ok'         => !empty($res['ok']),
+                'code'       => $code,
+                'state'      => sh_ai_test_state_label($code),
+                'tone'       => sh_ai_test_state_tone($code),
+                'status'     => (int)($res['status'] ?? 0),
+                'message'    => (string)($res['message'] ?? ($res['ok'] ? 'Connected.' : 'The test failed.')),
+                'next'       => (string)($res['next'] ?? ''),
+                'model'      => (string)($res['model'] ?? ''),
+                'tested_at'  => (string)($res['tested_at'] ?? date('Y-m-d H:i:s')),
+            ]);
         }
 
         /* ---------- providers: import the live model catalogue ------------ */

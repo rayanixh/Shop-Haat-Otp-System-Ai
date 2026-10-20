@@ -67,6 +67,18 @@ function sh_courier_api_drivers(): array
 }
 
 /**
+ * Drivers that have a provider-specific, read-only connection test.
+ *
+ * This list is deliberately separate from sh_courier_api_drivers(): a passing
+ * connection test must never enable booking for a driver that has no booking
+ * client, and it must never be reported as "API ready" for shipments.
+ */
+function sh_courier_testable_drivers(): array
+{
+    return ['steadfast', 'pathao', 'ecourier', 'paperfly'];
+}
+
+/**
  * Built-in providers shown as static cards in Admin → Couriers. Official brand
  * logos are bundled locally in assets/images/couriers (no hot-linking).
  */
@@ -133,10 +145,47 @@ function sh_courier_by_code(string $code): ?array
     return sh_one('SELECT * FROM couriers WHERE code = ? LIMIT 1', [$code]);
 }
 
+/**
+ * Encryption key for courier credentials. Derived from the database
+ * credentials, which live outside the web root and are never committed.
+ */
+function sh_courier_secret_key(): string
+{
+    $cfg = sh_db_config() ?? [];
+    return hash('sha256', 'shophaat-courier|' . ($cfg['name'] ?? '') . '|' . ($cfg['user'] ?? '') . '|' . ($cfg['pass'] ?? ''), true);
+}
+
+/**
+ * Encrypt the credential JSON for storage. Returns null for an empty set so
+ * the column stays NULL instead of an encrypted empty object.
+ *
+ * Falls back to “plain:” only when OpenSSL is unavailable, which the system
+ * health screen already reports. The prefix makes the fallback explicit.
+ */
+function sh_courier_credentials_store(array $creds): ?string
+{
+    if (!$creds) { return null; }
+    $json = json_encode($creds, JSON_UNESCAPED_SLASHES);
+    if (!is_string($json) || $json === '') { return null; }
+    if (!function_exists('openssl_encrypt')) { return 'plain:' . $json; }
+    $iv = random_bytes(16);
+    $ct = openssl_encrypt($json, 'aes-256-cbc', sh_courier_secret_key(), OPENSSL_RAW_DATA, $iv);
+    return $ct === false ? 'plain:' . $json : 'cou:' . base64_encode($iv . $ct);
+}
+
+/** Read credentials from any stored form: encrypted, legacy plain JSON or plain:. */
 function sh_courier_credentials(array $courier): array
 {
     $raw = (string)($courier['credentials'] ?? '');
     if ($raw === '') { return []; }
+    if (str_starts_with($raw, 'cou:')) {
+        $bin = base64_decode(substr($raw, 4), true);
+        if ($bin === false || strlen($bin) <= 16 || !function_exists('openssl_decrypt')) { return []; }
+        $pt = openssl_decrypt(substr($bin, 16), 'aes-256-cbc', sh_courier_secret_key(), OPENSSL_RAW_DATA, substr($bin, 0, 16));
+        $raw = $pt === false ? '' : $pt;
+    } elseif (str_starts_with($raw, 'plain:')) {
+        $raw = substr($raw, 6);
+    }
     $d = json_decode($raw, true);
     return is_array($d) ? $d : [];
 }
@@ -149,7 +198,7 @@ function sh_courier_fields(string $driver): array
         'pathao'    => ['client_id' => 'Client ID', 'client_secret' => 'Client Secret', 'store_id' => 'Store ID'],
         'redx'      => ['api_access_token' => 'API Access Token'],
         'ecourier'  => ['api_key' => 'API Key', 'api_secret' => 'API Secret', 'user_id' => 'User ID'],
-        'paperfly'  => ['username' => 'Username', 'password' => 'Password'],
+        'paperfly'  => ['paperfly_key' => 'Paperfly Key', 'username' => 'Merchant Username', 'password' => 'Merchant Password'],
         'sundarban' => ['api_key' => 'API Key'],
         default     => [],
     };
@@ -166,6 +215,23 @@ function sh_courier_optional_fields(string $driver): array
         'paperfly'  => ['base_url' => 'API base URL (optional)'],
         'sundarban' => ['base_url' => 'API base URL (optional)'],
         default     => [],
+    };
+}
+
+/**
+ * Short, provider-specific guidance under the optional base-URL field.
+ * Sandbox bases are official hosts, not invented endpoints.
+ */
+function sh_courier_base_url_hint(string $driver): string
+{
+    return match ($driver) {
+        'steadfast' => 'Leave blank for https://portal.packzy.com/api/v1.',
+        'pathao'    => 'Leave blank for live (api-hermes.pathao.com). Sandbox: https://courier-api-sandbox.pathao.com.',
+        'ecourier'  => 'Leave blank for live (backoffice.ecourier.com.bd/api). Sandbox: https://staging.ecourier.com.bd/api.',
+        'paperfly'  => 'Leave blank for https://api.paperfly.com.bd.',
+        'sundarban' => 'No public API host is documented. This value is stored but never called by a test.',
+        'redx'      => 'Leave blank for the RedX production API.',
+        default     => 'Only change this for a sandbox or a private gateway.',
     };
 }
 
@@ -189,9 +255,14 @@ function sh_courier_status_text(array $courier): string
         return 'Manual tracking — no API required.';
     }
     if (!in_array($courier['driver'], sh_courier_api_drivers(), true)) {
+        if (in_array($courier['driver'], sh_courier_testable_drivers(), true)) {
+            return sh_courier_is_configured($courier)
+                ? 'Credentials saved — connection can be tested. Booking is not wired in for this driver.'
+                : 'Enter the merchant credentials to run a connection test.';
+        }
         return sh_courier_is_configured($courier)
-            ? 'API registered but not yet wired in — credentials saved.'
-            : 'API registered but not yet wired in — enter credentials when available.';
+            ? 'Credentials saved. No automated connection test is available for this driver.'
+            : 'No automated connection test is available for this driver.';
     }
     return sh_courier_is_configured($courier)
         ? 'API ready — credentials saved.'
@@ -434,7 +505,7 @@ function sh_shipment_sync_order(array $shipment): array
 // ---------------------------------------------------------------------------
 // HTTP helper (curl first, streams as a fallback — no @ suppression)
 // ---------------------------------------------------------------------------
-function sh_courier_http(string $method, string $url, array $headers = [], ?array $json = null): array
+function sh_courier_http(string $method, string $url, array $headers = [], ?array $json = null, int $timeout = 25): array
 {
     $method = strtoupper($method);
     $payload = $json === null ? null : json_encode($json, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -449,7 +520,7 @@ function sh_courier_http(string $method, string $url, array $headers = [], ?arra
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 25,
+            CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_CUSTOMREQUEST  => $method,
             CURLOPT_HTTPHEADER     => $hdr,
@@ -469,7 +540,7 @@ function sh_courier_http(string $method, string $url, array $headers = [], ?arra
                 'method'        => $method,
                 'header'        => implode("\r\n", $hdr),
                 'content'       => $payload ?? '',
-                'timeout'       => 25,
+                'timeout'       => $timeout,
                 'ignore_errors' => true,
             ],
         ]);
@@ -638,7 +709,7 @@ function sh_courier_fetch_status(int $shipmentId, int $adminId): array
 function sh_steadfast_base_url(array $creds): string
 {
     $base = trim((string)($creds['base_url'] ?? ''));
-    return rtrim($base !== '' ? $base : 'https://portal.pacakge.net/api/v1', '/');
+    return rtrim($base !== '' ? $base : 'https://portal.packzy.com/api/v1', '/');
 }
 
 function sh_steadfast_headers(array $creds): array
@@ -729,23 +800,445 @@ function sh_shipment_consignment_id(array $shipment): string
     return trim((string)($shipment['tracking_number'] ?? ''));
 }
 
+// ---------------------------------------------------------------------------
+// Connection tests (read-only; never books, picks up or charges anything)
+// ---------------------------------------------------------------------------
+
 /**
- * Admin "Test connection" for couriers with a real API client. Uses the
- * Steadfast balance endpoint (read-only) so nothing is booked.
+ * The only states a courier test can end in. Labels are shown verbatim in the
+ * admin; tones map to the existing badge palette.
+ * @return array<string,array{label:string,tone:string}>
  */
-function sh_courier_test(array $courier): array
+function sh_courier_test_states(): array
 {
-    if (!in_array($courier['driver'], sh_courier_api_drivers(), true)) {
-        return ['ok' => false, 'error' => 'No API client is wired in for this courier yet, so there is nothing to test. Manual parcels still work.'];
+    return [
+        'connected'                => ['label' => 'Connected',                 'tone' => 'ok'],
+        'authentication_failed'    => ['label' => 'Authentication failed',     'tone' => 'bad'],
+        'configuration_incomplete' => ['label' => 'Configuration incomplete',  'tone' => 'warn'],
+        'permission_denied'        => ['label' => 'Permission denied',         'tone' => 'bad'],
+        'network_error'            => ['label' => 'Network error',             'tone' => 'warn'],
+        'unsupported'              => ['label' => 'Unsupported automated test','tone' => 'muted'],
+        'failed'                   => ['label' => 'Test failed',               'tone' => 'bad'],
+    ];
+}
+
+function sh_courier_test_state_label(string $state): string
+{
+    $s = sh_courier_test_states();
+    return $s[$state]['label'] ?? 'Test failed';
+}
+
+function sh_courier_test_state_tone(string $state): string
+{
+    $s = sh_courier_test_states();
+    return $s[$state]['tone'] ?? 'bad';
+}
+
+/** Map an HTTP status to a state. 0 means no response at all. */
+function sh_courier_test_state_from_http(int $status): string
+{
+    return match (true) {
+        $status === 0                        => 'network_error',
+        $status === 401                      => 'authentication_failed',
+        $status === 403                      => 'permission_denied',
+        $status === 408, $status === 504     => 'network_error',
+        default                              => 'failed',
+    };
+}
+
+/**
+ * Remove control characters, collapse whitespace, cap the length and replace
+ * any stored credential that the provider echoed back. Called for every
+ * message before it is stored or rendered.
+ */
+function sh_courier_test_scrub(string $text, array $creds = []): string
+{
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text) ?? $text;
+    foreach ($creds as $value) {
+        if (is_scalar($value) && strlen((string)$value) >= 4) {
+            $text = str_replace((string)$value, '••••', $text);
+        }
     }
-    if (!sh_courier_is_configured($courier)) {
-        return ['ok' => false, 'error' => 'Enter the merchant credentials first.'];
-    }
+    $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+    return mb_substr($text, 0, 220);
+}
+
+/** \"A\", \"A and B\", \"A, B and C\" for missing-field messages. */
+function sh_courier_join_words(array $words): string
+{
+    $words = array_values(array_filter(array_map('strval', $words), static fn($w) => $w !== ''));
+    if (count($words) <= 1) { return $words[0] ?? ''; }
+    $last = array_pop($words);
+    return implode(', ', $words) . ' and ' . $last;
+}
+
+/** Standard result. */
+function sh_courier_test_result(string $state, int $httpStatus, string $message, string $next, string $endpoint = '', array $creds = []): array
+{
+    if (!isset(sh_courier_test_states()[$state])) { $state = 'failed'; }
+    return [
+        'ok'          => $state === 'connected',
+        'state'       => $state,
+        'state_label' => sh_courier_test_state_label($state),
+        'tone'        => sh_courier_test_state_tone($state),
+        'http_status' => $httpStatus,
+        'message'     => sh_courier_test_scrub($message, $creds),
+        'next'        => sh_courier_test_scrub($next, $creds),
+        'endpoint'    => $endpoint,
+        'tested_at'   => date('Y-m-d H:i:s'),
+    ];
+}
+
+function sh_courier_test_incomplete(array $missing, string $what): array
+{
+    return sh_courier_test_result('configuration_incomplete', 0,
+        'Configuration incomplete: ' . sh_courier_join_words($missing) . ' must be saved for ' . $what . '.',
+        'Enter the missing merchant credentials on this card, save, then test again.');
+}
+
+/** Turn a failed HTTP response into the right state and an actionable message. */
+function sh_courier_test_http_failure(array $http, string $endpoint, array $creds, string $what): array
+{
+    $status = (int)($http['status'] ?? 0);
+    $state = sh_courier_test_state_from_http($status);
+    $detail = trim((string)($http['error'] ?? ''));
+    if ($detail === '') { $detail = trim((string)($http['body']['message'] ?? '')); }
+
+    $message = match ($state) {
+        'network_error' => $status === 0
+            ? 'No response from ' . $what . '. The host may be unreachable from this server or the base URL may be wrong.'
+            : $what . ' did not answer in time (HTTP ' . $status . ').',
+        'authentication_failed' => $what . ' rejected these credentials (HTTP 401).',
+        'permission_denied' => $what . ' accepted the request but this account has no permission (HTTP 403).',
+        default => $status === 404
+            ? $what . ' returned HTTP 404 — check the API base URL.'
+            : ($status === 429
+                ? $what . ' rate-limited the test (HTTP 429).'
+                : ($status >= 500
+                    ? $what . ' returned a server error (HTTP ' . $status . '). The credentials may still be valid.'
+                    : $what . ' rejected the test request (HTTP ' . $status . ').')),
+    };
+    if ($detail !== '' && !str_contains($message, $detail)) { $message .= ' ' . $detail; }
+
+    $next = match ($state) {
+        'network_error'        => 'Check the base URL and that the server can make outbound HTTPS requests.',
+        'authentication_failed'=> 'Re-enter the credentials, save, then test again.',
+        'permission_denied'    => 'Ask the courier to enable API access for this merchant account.',
+        'failed'               => $status === 429 ? 'Wait a minute and test again.' : 'Read the message, correct the credentials or base URL, and retry.',
+    };
+    return sh_courier_test_result($state, $status, $message, $next, $endpoint, $creds);
+}
+
+/** Credentials the driver requires that are still missing (field => label). */
+function sh_courier_test_missing(array $courier): array
+{
     $creds = sh_courier_credentials($courier);
-    $http = sh_courier_http('GET', sh_steadfast_base_url($creds) . '/get_balance', sh_steadfast_headers($creds));
-    if (!$http['ok']) {
-        return ['ok' => false, 'error' => 'Steadfast did not accept the credentials: ' . sh_courier_api_error($http)];
+    $out = [];
+    foreach (sh_courier_fields((string)$courier['driver']) as $field => $label) {
+        if (trim((string)($creds[$field] ?? '')) === '') { $out[$field] = $label; }
+    }
+    return $out;
+}
+
+/* --- Provider-specific probes -------------------------------------------
+ * Each one uses that provider's own documented read-only operation. None of
+ * them calls a booking, pickup, label or payment endpoint.
+ * ---------------------------------------------------------------------- */
+
+function sh_courier_probe_steadfast(array $courier): array
+{
+    $creds = sh_courier_credentials($courier);
+    $missing = sh_courier_test_missing($courier);
+    if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'Steadfast'); }
+
+    $http = sh_courier_http('GET', sh_steadfast_base_url($creds) . '/get_balance', sh_steadfast_headers($creds), null, 15);
+    if (!$http['ok']) { return sh_courier_test_http_failure($http, '/get_balance', $creds, 'Steadfast'); }
+
+    // The API can answer HTTP 200 with a status field. Never call that connected.
+    $bodyStatus = (int)($http['body']['status'] ?? 200);
+    if ($bodyStatus >= 400) {
+        return sh_courier_test_result(sh_courier_test_state_from_http($bodyStatus), $bodyStatus,
+            'Steadfast did not accept the credentials (status ' . $bodyStatus . ').',
+            'Re-enter the API key and secret key, save, then test again.', '/get_balance', $creds);
     }
     $bal = $http['body']['current_balance'] ?? null;
-    return ['ok' => true, 'message' => 'Connected to Steadfast.' . ($bal !== null ? ' Current balance: ' . sh_money($bal) . '.' : '')];
+    return sh_courier_test_result('connected', (int)$http['status'],
+        'Steadfast accepted the API key and secret key.'
+            . ($bal !== null ? ' Current balance: ' . sh_money($bal) . '.' : ''),
+        'Connection verified. A test never creates a parcel.', '/get_balance', $creds);
+}
+
+function sh_pathao_base_url(array $creds): string
+{
+    $base = trim((string)($creds['base_url'] ?? ''));
+    return rtrim($base !== '' ? $base : 'https://api-hermes.pathao.com', '/');
+}
+
+function sh_courier_probe_pathao(array $courier): array
+{
+    $creds = sh_courier_credentials($courier);
+    $missing = sh_courier_test_missing($courier);
+    if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'Pathao'); }
+
+    $base = sh_pathao_base_url($creds);
+    $login = sh_courier_http('POST', $base . '/aladdin/api/v1/external/login', [],
+        ['client_id' => (string)$creds['client_id'], 'client_secret' => (string)$creds['client_secret']], 15);
+    if (!$login['ok']) {
+        return sh_courier_test_http_failure($login, '/aladdin/api/v1/external/login', $creds, 'Pathao');
+    }
+    $token = trim((string)($login['body']['access_token'] ?? ''));
+    if ($token === '') {
+        return sh_courier_test_result('failed', (int)$login['status'],
+            'Pathao accepted the request but returned no access token.',
+            'Check that the Client ID and Client Secret belong to the merchant API, then retry.',
+            '/aladdin/api/v1/external/login', $creds);
+    }
+
+    $stores = sh_courier_http('GET', $base . '/aladdin/api/v1/stores', ['Authorization' => 'Bearer ' . $token], null, 15);
+    if (!$stores['ok']) {
+        $res = sh_courier_test_http_failure($stores, '/aladdin/api/v1/stores', $creds, 'Pathao');
+        if ($res['state'] === 'authentication_failed') {
+            $res['message'] = 'Pathao issued a token but rejected it for the stores endpoint (HTTP 401). '
+                . 'The token may have expired or the merchant API may be disabled for this account.';
+        }
+        return $res;
+    }
+
+    $data = $stores['body']['data'] ?? [];
+    $list = is_array($data) && isset($data['data']) && is_array($data['data']) ? $data['data'] : $data;
+    if (!is_array($list)) { $list = []; }
+    $storeId = trim((string)$creds['store_id']);
+    $match = null;
+    foreach ($list as $store) {
+        if (!is_array($store)) { continue; }
+        if ((string)($store['store_id'] ?? '') === $storeId) { $match = $store; break; }
+    }
+    if (!$list) {
+        return sh_courier_test_result('configuration_incomplete', (int)$stores['status'],
+            'Pathao accepted the client credentials but this account has no stores.',
+            'Create a store in the Pathao merchant panel, then copy its Store ID here.',
+            '/aladdin/api/v1/stores', $creds);
+    }
+    if ($match === null) {
+        return sh_courier_test_result('configuration_incomplete', (int)$stores['status'],
+            'Pathao accepted the credentials, but Store ID ' . $storeId . ' is not one of this account\'s stores.',
+            'Copy the Store ID from Pathao merchant panel → Stores, save it, then test again.',
+            '/aladdin/api/v1/stores', $creds);
+    }
+    $storeName = trim((string)($match['store_name'] ?? $match['name'] ?? ''));
+    return sh_courier_test_result('connected', (int)$stores['status'],
+        'Pathao accepted the client credentials and found store ' . ($storeName !== '' ? '"' . $storeName . '" ' : '') . '(' . $storeId . ').',
+        'Connection verified. A test never creates an order or a pickup.', '/aladdin/api/v1/stores', $creds);
+}
+
+function sh_ecourier_base_url(array $creds): string
+{
+    $base = trim((string)($creds['base_url'] ?? ''));
+    return rtrim($base !== '' ? $base : 'https://backoffice.ecourier.com.bd/api', '/');
+}
+
+function sh_courier_probe_ecourier(array $courier): array
+{
+    $creds = sh_courier_credentials($courier);
+    $missing = sh_courier_test_missing($courier);
+    if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'eCourier'); }
+
+    $http = sh_courier_http('POST', sh_ecourier_base_url($creds) . '/city-list', [
+        'API-KEY'      => (string)$creds['api_key'],
+        'API-SECRET'   => (string)$creds['api_secret'],
+        'USER-ID'      => (string)$creds['user_id'],
+        'Content-Type' => 'application/json',
+    ], null, 15);
+
+    if ($http['ok']) {
+        $body = $http['body'];
+        $flag = $body['error'] ?? $body['success'] ?? null;
+        $failedFlag = $flag === true || $flag === 1 || $flag === '1' || $flag === 'true'
+            || $flag === false || $flag === 0 || $flag === '0' || $flag === 'false';
+        // eCourier answers HTTP 200 with error=true and a message for bad credentials.
+        if ($failedFlag) {
+            $successLike = in_array($flag, [false, 0, '0', 'false'], true);
+            if (!$successLike) {
+                $msg = (string)($body['message'] ?? $body['error_message'] ?? 'The city list was not returned.');
+                $lower = strtolower($msg);
+                $state = (str_contains($lower, 'key') || str_contains($lower, 'secret') || str_contains($lower, 'user'))
+                    ? 'authentication_failed' : 'failed';
+                return sh_courier_test_result($state, 200,
+                    'eCourier did not accept the request: ' . $msg,
+                    $state === 'authentication_failed'
+                        ? 'Re-enter the API key, API secret and user ID, save, then test again.'
+                        : 'Read the message and correct the merchant settings; nothing was booked.',
+                    '/city-list', $creds);
+            }
+        }
+        $cities = $body['cities'] ?? $body['city_list'] ?? null;
+        $count = is_array($cities) ? count($cities) : null;
+        return sh_courier_test_result('connected', (int)$http['status'],
+            'eCourier accepted the API key, API secret and user ID'
+                . ($count !== null ? ' (' . $count . ' cities returned).' : '.'),
+            'Connection verified. A test never places an order.', '/city-list', $creds);
+    }
+
+    $res = sh_courier_test_http_failure($http, '/city-list', $creds, 'eCourier');
+    if ($res['state'] === 'failed' && (int)($http['status'] ?? 0) === 200) {
+        $res['state'] = 'authentication_failed';
+        $res['state_label'] = sh_courier_test_state_label('authentication_failed');
+        $res['tone'] = sh_courier_test_state_tone('authentication_failed');
+        $res['ok'] = false;
+        $res['next'] = 'Re-enter the API key, API secret and user ID, save, then test again.';
+    }
+    return $res;
+}
+
+function sh_courier_probe_paperfly(array $courier): array
+{
+    $creds = sh_courier_credentials($courier);
+    $missing = sh_courier_test_missing($courier);
+    if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'Paperfly'); }
+
+    // Paperfly publishes no developer documentation and no credential-check
+    // endpoint. Sending a booking or a made-up reference would be dishonest,
+    // so the test stops here and says exactly why.
+    return sh_courier_test_result('unsupported', 0,
+        'Paperfly does not publish an official API or a read-only credential check. No request was sent.',
+        'Ask Paperfly for merchant API access (paperflykey + Basic auth) and keep booking parcels manually here until a supported client is added.');
+}
+
+function sh_courier_probe_sundarban(array $courier): array
+{
+    return sh_courier_test_result('unsupported', 0,
+        'Sundarban Courier has no public merchant API or documented credential scheme. No request was sent.',
+        'Use the Sundarban merchant panel or app. Parcels stay manual in this store.');
+}
+
+function sh_courier_probe_saparibahan(array $courier): array
+{
+    return sh_courier_test_result('unsupported', 0,
+        'SA Paribahan advertises corporate API integration but publishes no endpoint, authentication scheme or sandbox. No request was sent.',
+        'Contact SA Paribahan for corporate API access. Until then, record tracking numbers manually.');
+}
+
+function sh_courier_probe_redx(array $courier): array
+{
+    return sh_courier_test_result('unsupported', 0,
+        'No verified RedX read-only endpoint is implemented in this build. No request was sent.',
+        'RedX credentials remain saved and manual parcels work; keep the token ready for a future client.');
+}
+
+function sh_courier_probe_manual(array $courier): array
+{
+    $isSap = (string)($courier['code'] ?? '') === 'saparibahan';
+    if ($isSap) { return sh_courier_probe_saparibahan($courier); }
+    return sh_courier_test_result('unsupported', 0,
+        'This courier has no API, so there is nothing to connect to. No request was sent.',
+        'Nothing to do — record the tracking number manually when you hand the parcel over.');
+}
+
+// ---------------------------------------------------------------------------
+// Test results: persistence + display
+// ---------------------------------------------------------------------------
+
+function sh_courier_test_table_ensure(): void
+{
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    try { sh_query(sh_courier_test_results_sql()); }
+    catch (Throwable $e) { sh_log_exception($e, 'courier-test-table'); }
+}
+
+function sh_courier_test_record(int $courierId, string $driver, array $result, int $adminId = 0): void
+{
+    if ($courierId <= 0) { return; }
+    sh_courier_test_table_ensure();
+    try {
+        sh_insert('courier_test_results', [
+            'courier_id'  => $courierId,
+            'driver'      => mb_substr($driver, 0, 50),
+            'result_code' => mb_substr((string)($result['state'] ?? 'failed'), 0, 40),
+            'state'       => mb_substr((string)($result['state'] ?? 'failed'), 0, 40),
+            'http_status' => (int)($result['http_status'] ?? 0) > 0 ? (int)$result['http_status'] : null,
+            'note'        => mb_substr((string)($result['message'] ?? ''), 0, 255) ?: null,
+            'next_action' => mb_substr((string)($result['next'] ?? ''), 0, 255) ?: null,
+            'tested_by'   => $adminId > 0 ? $adminId : null,
+            'tested_at'   => (string)($result['tested_at'] ?? date('Y-m-d H:i:s')),
+        ]);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'courier-test-record');
+    }
+}
+
+function sh_courier_last_test(int $courierId): ?array
+{
+    try {
+        return sh_one('SELECT * FROM courier_test_results WHERE courier_id = ? ORDER BY id DESC LIMIT 1', [$courierId]);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function sh_courier_test_ago(string $when): string
+{
+    $ts = strtotime($when);
+    if ($ts === false) { return $when; }
+    $diff = time() - $ts;
+    if ($diff < 60) { return 'just now'; }
+    if ($diff < 3600) { return floor($diff / 60) . ' min ago'; }
+    if ($diff < 86400) { return floor($diff / 3600) . ' h ago'; }
+    if ($diff < 604800) { return floor($diff / 86400) . ' d ago'; }
+    return date('j M Y', $ts);
+}
+
+/**
+ * Compact result block for a courier card / details page. Always explains that
+ * the test is read-only and never shows a stored secret.
+ */
+function sh_courier_test_summary(array $courier): string
+{
+    $last = sh_courier_last_test((int)($courier['id'] ?? 0));
+    if ($last === null) {
+        return '<div class="sh-ctest sh-ctest--none">'
+            . '<p class="sh-ctest__note">No connection test yet. A test sends one read-only request; it never books a parcel or changes an order.</p>'
+            . '</div>';
+    }
+    $state = (string)($last['state'] ?? 'failed');
+    $tone = sh_courier_test_state_tone($state);
+    $badge = $tone === 'ok' ? 'sh-badge--ok' : ($tone === 'bad' ? 'sh-badge--bad' : ($tone === 'warn' ? 'sh-badge--warn' : 'sh-badge--muted'));
+    $when = (string)($last['tested_at'] ?? '');
+    $http = (int)($last['http_status'] ?? 0);
+    $html = '<div class="sh-ctest sh-ctest--' . e($tone) . '" data-courier-test="' . (int)($courier['id'] ?? 0) . '">';
+    $html .= '<div class="sh-ctest__head"><span class="sh-badge ' . $badge . '">' . e(sh_courier_test_state_label($state)) . '</span>'
+        . '<span class="sh-ctest__meta">' . ($http > 0 ? 'HTTP ' . $http . ' · ' : '') . e(sh_courier_test_ago($when)) . '</span></div>';
+    if (trim((string)($last['note'] ?? '')) !== '') {
+        $html .= '<p class="sh-ctest__note">' . e((string)$last['note']) . '</p>';
+    }
+    if (trim((string)($last['next_action'] ?? '')) !== '') {
+        $html .= '<p class="sh-ctest__next"><strong>Next:</strong> ' . e((string)$last['next_action']) . '</p>';
+    }
+    return $html . '</div>';
+}
+
+/**
+ * Run the provider-specific read-only test for one courier and record it.
+ * Nothing here creates a shipment, pickup, label or charge.
+ */
+function sh_courier_test(array $courier, int $adminId = 0): array
+{
+    $driver = (string)($courier['driver'] ?? 'manual');
+    $code = (string)($courier['code'] ?? '');
+
+    $result = match (true) {
+        $code === 'saparibahan' => sh_courier_probe_saparibahan($courier),
+        $driver === 'steadfast' => sh_courier_probe_steadfast($courier),
+        $driver === 'pathao'    => sh_courier_probe_pathao($courier),
+        $driver === 'ecourier'  => sh_courier_probe_ecourier($courier),
+        $driver === 'paperfly'  => sh_courier_probe_paperfly($courier),
+        $driver === 'sundarban' => sh_courier_probe_sundarban($courier),
+        $driver === 'redx'      => sh_courier_probe_redx($courier),
+        default                 => sh_courier_probe_manual($courier),
+    };
+    $result['driver'] = $driver;
+    $result['courier'] = (string)($courier['name'] ?? '');
+    sh_courier_test_record((int)($courier['id'] ?? 0), $driver, $result, $adminId);
+    return $result;
 }

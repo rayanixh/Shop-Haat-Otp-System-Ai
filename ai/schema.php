@@ -73,6 +73,9 @@ function sh_ai_schema_sql(): array
         last_tested_at DATETIME DEFAULT NULL,
         last_test_ok TINYINT(1) DEFAULT NULL,
         last_test_note VARCHAR(255) DEFAULT NULL,
+        last_test_code VARCHAR(40) DEFAULT NULL,
+        last_test_status SMALLINT UNSIGNED DEFAULT NULL,
+        last_test_next VARCHAR(255) DEFAULT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
@@ -269,6 +272,9 @@ function sh_ai_migrate(): array
         ['ai_generations', 'completion_tokens', "ALTER TABLE ai_generations ADD COLUMN completion_tokens INT UNSIGNED NOT NULL DEFAULT 0 AFTER prompt_tokens"],
         ['ai_generations', 'cost',              "ALTER TABLE ai_generations ADD COLUMN cost DECIMAL(14,8) DEFAULT NULL AFTER completion_tokens"],
         ['ai_generations', 'fallback_used',     "ALTER TABLE ai_generations ADD COLUMN fallback_used TINYINT(1) NOT NULL DEFAULT 0 AFTER cost"],
+        ['ai_providers',   'last_test_code',    "ALTER TABLE ai_providers ADD COLUMN last_test_code VARCHAR(40) DEFAULT NULL AFTER last_test_note"],
+        ['ai_providers',   'last_test_status',  "ALTER TABLE ai_providers ADD COLUMN last_test_status SMALLINT UNSIGNED DEFAULT NULL AFTER last_test_code"],
+        ['ai_providers',   'last_test_next',    "ALTER TABLE ai_providers ADD COLUMN last_test_next VARCHAR(255) DEFAULT NULL AFTER last_test_status"],
         ['ai_queue',       'provider_id',       "ALTER TABLE ai_queue ADD COLUMN provider_id INT UNSIGNED DEFAULT NULL AFTER attempts"],
         ['ai_queue',       'model',             "ALTER TABLE ai_queue ADD COLUMN model VARCHAR(120) DEFAULT NULL AFTER provider_id"],
     ] as [$table, $col, $ddl]) {
@@ -340,6 +346,31 @@ function sh_ai_seed_templates(): void
         }
     } catch (Throwable $e) {
         sh_log_exception($e, 'ai-seed-templates');
+    }
+}
+
+/**
+ * Add the richer test-result columns to an install that predates them.
+ *
+ * Called by the connection test itself, so a store upgrading through a normal
+ * page view gets the columns without running the whole installer. Every step is
+ * guarded: if the ALTER fails (old MySQL, no ALTER privilege) the test still
+ * records last_test_ok / last_test_note and the extra detail is simply absent.
+ */
+function sh_ai_test_columns_ensure(): void
+{
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    if (!sh_ai_table_exists('ai_providers')) { return; }
+    $cols = [
+        'last_test_code'   => 'ALTER TABLE ai_providers ADD COLUMN last_test_code VARCHAR(40) DEFAULT NULL AFTER last_test_note',
+        'last_test_status' => 'ALTER TABLE ai_providers ADD COLUMN last_test_status SMALLINT UNSIGNED DEFAULT NULL AFTER last_test_code',
+        'last_test_next'   => 'ALTER TABLE ai_providers ADD COLUMN last_test_next VARCHAR(255) DEFAULT NULL AFTER last_test_status',
+    ];
+    foreach ($cols as $col => $ddl) {
+        if (sh_ai_column_exists('ai_providers', $col)) { continue; }
+        try { sh_query($ddl); } catch (Throwable $e) { sh_log_exception($e, 'ai-test-columns'); }
     }
 }
 

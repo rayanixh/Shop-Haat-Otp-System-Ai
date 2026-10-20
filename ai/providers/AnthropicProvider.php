@@ -80,6 +80,55 @@ class AnthropicProvider extends AbstractAIProvider
         return ['ok' => true, 'data' => $data] + $res;
     }
 
+    /**
+     * Claude probe: one Messages call with a 64-token budget. Claude requires
+     * max_tokens on every request; 64 is enough for a one-word answer, and a
+     * max_tokens stop with no text is reported as a token limit, never a key
+     * problem. No image, no tools, no prompt caching.
+     */
+    public function testConnection(): array
+    {
+        if (!$this->hasKey()) {
+            return $this->testIncomplete('No API key is saved for ' . $this->name() . '.',
+                'Paste the Anthropic key, save it, then test again.');
+        }
+        $model = trim($this->model([]));
+        if ($model === '') {
+            return $this->testIncomplete('No default text model is selected for Claude.',
+                'Choose a Claude model (for example claude-3-5-haiku-latest) and save.');
+        }
+        $payload = [
+            'model'      => $model,
+            'max_tokens' => 64,
+            'messages'   => [['role' => 'user', 'content' => 'Reply with the single word: ready']],
+            'temperature' => 0,
+        ];
+        $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, 20);
+        if (!$res['ok']) { return $this->testHttpFailure($res, $model, 'Anthropic Claude'); }
+
+        $j = $res['json'];
+        $text = '';
+        foreach (($j['content'] ?? []) as $block) {
+            if (($block['type'] ?? '') === 'text') { $text .= (string)($block['text'] ?? ''); }
+        }
+        $text = trim($text);
+        $stop = (string)($j['stop_reason'] ?? '');
+        if ($text === '' && $stop === 'max_tokens') {
+            return $this->testResult(true, 'token_limit',
+                'Connected to Anthropic Claude. ' . $model . ' reached the output-token limit before replying.',
+                ['status' => 200, 'model' => $model,
+                 'next' => 'Raise max tokens for generations; the key itself is valid.']);
+        }
+        if ($text === '') {
+            return $this->testResult(false, 'provider_error',
+                'Anthropic accepted the request but returned no text' . ($stop !== '' ? ' (' . $stop . ')' : '') . '.',
+                ['status' => 200, 'model' => $model, 'next' => 'Choose a Claude model and test again.']);
+        }
+        return $this->testResult(true, 'connected',
+            'Connected to Anthropic Claude. ' . $model . ' replied: ' . mb_substr($text, 0, 40),
+            ['status' => 200, 'model' => $model, 'next' => '']);
+    }
+
     public function listModels(): array
     {
         if (!$this->hasKey()) { return ['ok' => false, 'error' => 'Save an API key first.']; }

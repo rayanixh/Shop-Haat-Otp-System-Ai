@@ -117,6 +117,89 @@ abstract class AbstractAIProvider implements AIProviderInterface
         return ['ok' => false, 'error' => 'No model is selected for ' . $this->name() . '.', 'retryable' => false];
     }
 
+    /* ------------------------------------------------------------------ *
+     * Connection tests
+     *
+     * Every driver overrides testConnection() with the lightest READ-ONLY
+     * request its own API supports. The result shape below is what the
+     * Providers screen stores and renders: a machine code, the HTTP status the
+     * provider actually returned, a short message and one next action. A
+     * token-limit answer is never reported as a bad key.
+     * ------------------------------------------------------------------ */
+
+    /** Standard result for one connection test. Never contains the API key. */
+    protected function testResult(bool $ok, string $code, string $message, array $extra = []): array
+    {
+        $message = trim(preg_replace('/\s+/', ' ', $message) ?? $message);
+        $out = [
+            'ok'        => $ok,
+            'code'      => $code,
+            'message'   => $message,
+            'status'    => (int)($extra['status'] ?? 0),
+            'model'     => (string)($extra['model'] ?? ''),
+            'next'      => (string)($extra['next'] ?? ''),
+            'tested_at' => date('Y-m-d H:i:s'),
+        ];
+        // Older callers read error/detail; keep both in sync with message.
+        if ($ok) { $out['detail'] = $message; } else { $out['error'] = $message; }
+        return $out;
+    }
+
+    protected function testIncomplete(string $message, string $next): array
+    {
+        return $this->testResult(false, 'config_incomplete', $message, ['next' => $next]);
+    }
+
+    /**
+     * Turn a failed AIHttpClient response into an actionable test result.
+     *
+     * @param array{status?:int,error?:string} $http
+     */
+    protected function testHttpFailure(array $http, string $model = '', string $what = ''): array
+    {
+        $status = (int)($http['status'] ?? 0);
+        $code   = AIHttpClient::classify($status);
+        $what   = $what !== '' ? $what : $this->name();
+        $detail = trim((string)($http['error'] ?? ''));
+
+        [$msg, $next] = match ($code) {
+            'network_error' => ['Could not reach ' . $what . '. No HTTP response was received.',
+                                'Check the base URL and that this server can make outbound HTTPS requests.'],
+            'timeout'       => [$what . ' did not answer before the test timed out.',
+                                'Retry the test; if it keeps timing out, check the base URL.'],
+            'auth_failed'   => ['The API key was rejected by ' . $what . '.',
+                                'Paste a current key, save it, then test again.'],
+            'permission_denied' => [$what . ' refused this key access to the requested model.',
+                                'Enable the model for this key in the provider dashboard, or choose another model.'],
+            'model_not_found' => ['The selected model was not found at ' . $what . '.',
+                                'Pick a model the account can use (Models tab) and test again.'],
+            'rate_limited'  => [$what . ' rate-limited the test request.',
+                                'Wait a minute and run the test again.'],
+            'billing'       => [$what . ' reports a billing or credit problem.',
+                                'Add credit or fix billing in the provider dashboard.'],
+            'provider_error'=> [$what . ' returned a server error (HTTP ' . $status . ').',
+                                'Retry later. A server-side error does not necessarily mean the key is wrong.'],
+            default         => ['The test request was rejected by ' . $what . ' (HTTP ' . $status . ').',
+                                'Read the message below, adjust the provider settings and test again.'],
+        };
+        if ($detail !== '') { $msg .= ' ' . $detail; }
+        return $this->testResult(false, $code, $msg, ['status' => $status, 'model' => $model, 'next' => $next]);
+    }
+
+    /** Friendly summary used when a driver only has a text error to work with. */
+    protected function testCodeFromText(string $error): string
+    {
+        $e = strtolower($error);
+        if (str_contains($e, 'timed out') || str_contains($e, 'timeout')) { return 'timeout'; }
+        if (str_contains($e, 'could not reach') || str_contains($e, 'network')) { return 'network_error'; }
+        if (str_contains($e, '401') || str_contains($e, 'rejected')) { return 'auth_failed'; }
+        if (str_contains($e, '403') || str_contains($e, 'not allowed')) { return 'permission_denied'; }
+        if (str_contains($e, '404') || str_contains($e, 'not found')) { return 'model_not_found'; }
+        if (str_contains($e, 'rate limit') || str_contains($e, 'quota')) { return 'rate_limited'; }
+        if (str_contains($e, 'billing') || str_contains($e, 'credit')) { return 'billing'; }
+        return 'failed';
+    }
+
     /** Default structured call: ask for JSON, parse leniently. Drivers override to enable native JSON mode. */
     public function generateStructuredContent(string $system, string $user, array $options = []): array
     {
@@ -141,21 +224,42 @@ abstract class AbstractAIProvider implements AIProviderInterface
         return ['input_text' => 1, 'input_image' => 0, 'output_text' => 1, 'output_image' => 0];
     }
 
+    /**
+     * Generic fallback probe. Every bundled driver overrides this with a probe
+     * that is specific to its own API, so this only runs for a future driver
+     * that has no override yet.
+     */
     public function testConnection(): array
     {
-        if (!$this->hasKey()) { return ['ok' => false, 'error' => 'No API key configured.']; }
-        $model = $this->model([]);
-        if ($model === '') {
-            $list = $this->listModels();
-            if (!empty($list['ok'])) {
-                return ['ok' => true, 'detail' => 'Key accepted. ' . count($list['models']) . ' models available — pick a default model.'];
-            }
-            return ['ok' => false, 'error' => (string)($list['error'] ?? 'No model selected.')];
+        if (!$this->hasKey()) {
+            return $this->testIncomplete('No API key is saved for ' . $this->name() . '.',
+                'Paste the API key, save it, then test again.');
         }
-        $res = $this->generateText('You reply with one word.', 'Reply with the single word: ready',
-            ['model' => $model, 'max_tokens' => 8, 'temperature' => 0]);
-        if (empty($res['ok'])) { return ['ok' => false, 'error' => (string)$res['error']]; }
-        return ['ok' => true, 'detail' => $model . ' responded: ' . mb_substr((string)$res['text'], 0, 40)];
+        $model = trim($this->model([]));
+        if ($model === '') {
+            return $this->testIncomplete('No default text model is selected for ' . $this->name() . '.',
+                'Choose a default text model and save, then test again.');
+        }
+        $res = $this->generateText(
+            'You are a connection probe. Answer with one word.',
+            'Reply with the single word: ready',
+            ['model' => $model, 'max_tokens' => 64, 'temperature' => 0]
+        );
+        if (empty($res['ok'])) {
+            $error = (string)($res['error'] ?? 'The test request failed.');
+            $code = $this->testCodeFromText($error);
+            // A token limit proves the key works; it is not an authentication failure.
+            if (str_contains(strtolower($error), 'token limit')) {
+                return $this->testResult(true, 'token_limit',
+                    'Connected to ' . $this->name() . '. The probe reached the output-token limit before replying.',
+                    ['model' => $model, 'next' => 'Raise the token budget for generations; the key itself is valid.']);
+            }
+            return $this->testResult(false, $code, $error, ['model' => $model,
+                'next' => $code === 'auth_failed' ? 'Paste a current key and save it again.' : 'Review the provider settings and test again.']);
+        }
+        return $this->testResult(true, 'connected',
+            'Connected to ' . $this->name() . '. ' . $model . ' replied: ' . mb_substr(trim((string)$res['text']), 0, 40),
+            ['model' => $model, 'next' => '']);
     }
 
     /** Parse a JSON reply, tolerating code fences and surrounding prose. */
