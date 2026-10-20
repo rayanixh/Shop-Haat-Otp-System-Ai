@@ -505,7 +505,7 @@ function sh_shipment_sync_order(array $shipment): array
 // ---------------------------------------------------------------------------
 // HTTP helper (curl first, streams as a fallback — no @ suppression)
 // ---------------------------------------------------------------------------
-function sh_courier_http(string $method, string $url, array $headers = [], ?array $json = null, int $timeout = 25): array
+function sh_courier_http(string $method, string $url, array $headers = [], array|object|null $json = null, int $timeout = 25): array
 {
     $method = strtoupper($method);
     $payload = $json === null ? null : json_encode($json, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -954,6 +954,13 @@ function sh_courier_probe_steadfast(array $courier): array
     $http = sh_courier_http('GET', sh_steadfast_base_url($creds) . '/get_balance', sh_steadfast_headers($creds), null, 15);
     if (!$http['ok']) { return sh_courier_test_http_failure($http, '/get_balance', $creds, 'Steadfast'); }
 
+    // A wrong base URL can also answer HTTP 200 with a login page. Only a real
+    // JSON body from the balance endpoint counts as a successful connection.
+    if (isset($http['body']['raw']) || $http['body'] === []) {
+        return sh_courier_test_result('failed', (int)$http['status'],
+            'Steadfast answered HTTP ' . (int)$http['status'] . ' but not with the balance JSON. The base URL may point at the website instead of the API.',
+            'Use https://portal.packzy.com/api/v1 (or your private gateway), save, then test again.', '/get_balance', $creds);
+    }
     // The API can answer HTTP 200 with a status field. Never call that connected.
     $bodyStatus = (int)($http['body']['status'] ?? 200);
     if ($bodyStatus >= 400) {
@@ -1004,6 +1011,12 @@ function sh_courier_probe_pathao(array $courier): array
         return $res;
     }
 
+    if (isset($stores['body']['raw'])) {
+        return sh_courier_test_result('failed', (int)$stores['status'],
+            'Pathao issued a token but the stores endpoint returned a non-JSON answer. Check the API base URL.',
+            'Use the live api-hermes.pathao.com host or the official sandbox host, save, then test again.',
+            '/aladdin/api/v1/stores', $creds);
+    }
     $data = $stores['body']['data'] ?? [];
     $list = is_array($data) && isset($data['data']) && is_array($data['data']) ? $data['data'] : $data;
     if (!is_array($list)) { $list = []; }
@@ -1048,28 +1061,34 @@ function sh_courier_probe_ecourier(array $courier): array
         'API-SECRET'   => (string)$creds['api_secret'],
         'USER-ID'      => (string)$creds['user_id'],
         'Content-Type' => 'application/json',
-    ], null, 15);
+    ], (object)[], 15);
 
     if ($http['ok']) {
         $body = $http['body'];
-        $flag = $body['error'] ?? $body['success'] ?? null;
-        $failedFlag = $flag === true || $flag === 1 || $flag === '1' || $flag === 'true'
-            || $flag === false || $flag === 0 || $flag === '0' || $flag === 'false';
-        // eCourier answers HTTP 200 with error=true and a message for bad credentials.
-        if ($failedFlag) {
-            $successLike = in_array($flag, [false, 0, '0', 'false'], true);
-            if (!$successLike) {
-                $msg = (string)($body['message'] ?? $body['error_message'] ?? 'The city list was not returned.');
-                $lower = strtolower($msg);
-                $state = (str_contains($lower, 'key') || str_contains($lower, 'secret') || str_contains($lower, 'user'))
-                    ? 'authentication_failed' : 'failed';
-                return sh_courier_test_result($state, 200,
-                    'eCourier did not accept the request: ' . $msg,
-                    $state === 'authentication_failed'
-                        ? 'Re-enter the API key, API secret and user ID, save, then test again.'
-                        : 'Read the message and correct the merchant settings; nothing was booked.',
-                    '/city-list', $creds);
-            }
+        if (isset($body['raw'])) {
+            return sh_courier_test_result('failed', (int)$http['status'],
+                'eCourier answered HTTP ' . (int)$http['status'] . ' but not with JSON. The base URL may point at the website instead of the API.',
+                'Use backoffice.ecourier.com.bd/api or the official staging host, save, then test again.',
+                '/city-list', $creds);
+        }
+        // eCourier answers HTTP 200 with either error=true or success=false for
+        // a rejected request. Only an explicit failure flag is a failure: a
+        // success=true answer is a pass, not an error.
+        $errorFlag = $body['error'] ?? null;
+        $successFlag = $body['success'] ?? null;
+        $isFailure = $errorFlag === true || $errorFlag === 1 || $errorFlag === '1' || $errorFlag === 'true'
+            || $successFlag === false || $successFlag === 0 || $successFlag === '0' || $successFlag === 'false';
+        if ($isFailure) {
+            $msg = (string)($body['message'] ?? $body['error_message'] ?? 'The city list was not returned.');
+            $lower = strtolower($msg);
+            $state = (str_contains($lower, 'key') || str_contains($lower, 'secret') || str_contains($lower, 'user'))
+                ? 'authentication_failed' : 'failed';
+            return sh_courier_test_result($state, 200,
+                'eCourier did not accept the request: ' . $msg,
+                $state === 'authentication_failed'
+                    ? 'Re-enter the API key, API secret and user ID, save, then test again.'
+                    : 'Read the message and correct the merchant settings; nothing was booked.',
+                '/city-list', $creds);
         }
         $cities = $body['cities'] ?? $body['city_list'] ?? null;
         $count = is_array($cities) ? count($cities) : null;

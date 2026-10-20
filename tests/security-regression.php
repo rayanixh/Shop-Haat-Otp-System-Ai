@@ -3194,6 +3194,28 @@ sh_t('every required courier has a provider-specific probe', function () {
     return true;
 });
 
+sh_t('an HTTP 200 web page is never accepted as a provider answer', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier'] as $fn) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, "['raw']")) {
+            return $fn . ' would accept a non-JSON login page as a successful connection';
+        }
+    }
+
+    $start = strpos($src, 'function sh_courier_probe_ecourier(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the eCourier probe could not be read'; }
+    $eco = substr($src, $start, $end - $start);
+    if (!str_contains($eco, '(object)[]')) { return 'eCourier does not send an empty JSON object to /city-list'; }
+    if (str_contains($eco, '$successLike')) { return 'the eCourier success=true bug is back'; }
+    if (!str_contains($eco, '$successFlag === false')) { return 'eCourier does not treat success=false as a failure'; }
+    return true;
+});
+
 sh_t('a Pathao test uses client credentials and verifies the stored store', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
     $start = strpos($src, 'function sh_courier_probe_pathao(');

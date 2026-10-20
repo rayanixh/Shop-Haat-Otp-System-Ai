@@ -100,6 +100,10 @@ cc_same('configuration_incomplete', $r['state'], 'Steadfast without keys is conf
 cc_same(false, $r['ok'], 'configuration incomplete is not a success');
 cc_assert(str_contains($r['message'], 'API Key'), 'the message names the missing API key');
 
+$r = sh_courier_test($byId($ids['ecourier']));
+cc_same('configuration_incomplete', $r['state'], 'eCourier without credentials is configuration incomplete');
+cc_assert(str_contains($r['message'], 'API Key'), 'the eCourier message names the missing API key');
+
 $r = sh_courier_test($byId($ids['pathao']));
 cc_same('configuration_incomplete', $r['state'], 'Pathao without credentials is configuration incomplete');
 foreach (['Client ID', 'Client Secret', 'Store ID'] as $field) {
