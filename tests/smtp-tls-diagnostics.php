@@ -212,7 +212,7 @@ try {
     tls_assert(!empty($sent['ok']), 'The real test submission failed: ' . ($sent['error'] ?? ''));
     tls_same('smtp', $sent['transport'], 'The test submission used the wrong transport.');
     $message = @file_get_contents($tmp . '/message.txt');
-    tls_assert(is_string($message) && str_contains($message, 'ShopHaat test email'), 'The SMTP server did not receive the test message.');
+    tls_assert(is_string($message) && str_contains($message, 'ShopHaat SMTP test'), 'The SMTP server did not receive the test message naming the SMTP transport.');
     tls_assert(str_contains($message, 'inbox@example.test'), 'The submitted message did not contain the recipient.');
 
     echo "3. unexpected certificate is rejected at the hostname stage, even with the legacy self-signed setting\n";
