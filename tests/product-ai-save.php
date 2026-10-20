@@ -106,6 +106,51 @@ try {
     ]);
     $brandId = (int)sh_insert('brands', ['name' => 'HaatHome', 'slug' => 'haathome', 'status' => 1]);
 
+    // ---------------------------------------------- 0. what the model may set
+    ai_step('A model answer keeps only fields the product form really has');
+    $model = [
+        'title'             => 'Stainless Steel Electric Kettle 1.8L',
+        'short_description' => 'A 1.8 litre kettle for everyday tea and coffee.',
+        'description'       => '<p>Boils water for tea, coffee and cooking.</p><p>Cool-touch handle.</p>',
+        'specifications'    => ["Capacity: 1.8 L", 'Power: 1500 W'],
+        'features'          => ['Boils up to 1.8 litres', 'Cool-touch handle'],
+        'tags'              => ['kettle', 'kitchen appliance'],
+        'meta_title'        => 'Stainless Steel Electric Kettle 1.8L',
+        'meta_description'  => 'A 1.8 litre stainless steel electric kettle.',
+        'focus_keyword'     => 'electric kettle',
+        'related_phrases'   => ['steel kettle', '1.8 litre kettle'],
+        'keywords'          => ['kettle', 'electric kettle'],
+        'image_alt'         => 'Stainless steel electric kettle on a kitchen counter',
+        'category'          => 'Kitchen Appliances',
+        'brand'             => 'HaatHome',
+        'sku'               => 'KET-18L',
+        // Fabricated business data the model must never be able to set:
+        'price' => '999', 'compare_price' => '1999', 'stock' => '500',
+        'status' => 1, 'low_stock_threshold' => 99,
+        'certifications' => ['ISO 9001'], 'warranty' => '5 years',
+        'ingredients' => ['steel'], 'dimensions' => '10x10x10',
+    ];
+    $norm = sh_ai_normalise_product_draft($model);
+    foreach (['price', 'compare_price', 'stock', 'status', 'low_stock_threshold',
+              'certifications', 'warranty', 'ingredients', 'dimensions'] as $forbidden) {
+        ai_assert(!array_key_exists($forbidden, $norm),
+            'the draft exposes a field the model must not control: ' . $forbidden);
+    }
+    ai_assert_same($catSmall, (int)$norm['category_id'], 'an exact category name was not matched to the real row');
+    ai_assert_same($brandId, (int)$norm['brand_id'], 'an exact brand name was not matched to the real row');
+    ai_assert_same('KET-18L', (string)$norm['sku'], 'the generated SKU was not cleaned');
+    ai_assert_same(2, count($norm['tags']), 'the generated tags were lost');
+    ai_assert(str_contains((string)$norm['description'], 'Boils water'), 'the generated description was lost');
+    ai_assert(!str_contains((string)$norm['description'], '<p>'), 'the generated description kept HTML');
+    ai_assert(str_contains((string)$norm['specifications'], 'Capacity: 1.8 L'), 'the generated specifications were lost');
+    ai_assert(str_contains((string)$norm['features'], 'Cool-touch handle'), 'the generated features were lost');
+    ai_assert(str_contains((string)$norm['image_alt'], 'kitchen counter'), 'the generated alt text was lost');
+
+    // A category the model invented stays a visible suggestion, never an id.
+    $invented = sh_ai_normalise_product_draft(['title' => 'Catamaran', 'category' => 'Luxury Yachts']);
+    ai_assert_same(null, $invented['category_id'], 'an invented category was turned into a real category id');
+    ai_assert_same('Luxury Yachts', (string)$invented['category_name'], 'the invented category is not shown as missing');
+
     // ---------------------------------------------------------------- 1. save
     ai_step('Save a complete draft with one call');
     $token = bin2hex(random_bytes(16));
@@ -142,6 +187,10 @@ try {
     ai_assert($id > 0, 'the save returned no product id');
     ai_assert(empty($res['already_saved']), 'the first save was reported as a duplicate');
     echo "created product #{$id}\n";
+
+    // Once a product exists, the draft flags the same SKU instead of pretending.
+    $dupe = sh_ai_normalise_product_draft(['title' => 'Another kettle', 'sku' => 'ket-18l']);
+    ai_assert_same(false, (bool)$dupe['sku_unique'], 'a duplicate SKU was not flagged after a product exists');
 
     // ------------------------------------------------ 2. read the real rows
     ai_step('Verify every saved column through the application data layer');
