@@ -299,7 +299,7 @@ try {
     api_same('inbox@example.test', $post['recipient'] ?? '', 'The POST had the wrong recipient.');
     api_same('noreply@example.test', $post['sender'] ?? '', 'The POST did not use the configured sender.');
     api_same('ShopHaat API Test', $post['sender_name'] ?? '', 'The POST did not use the configured sender name.');
-    api_assert(($post['subject'] ?? '') !== '', 'The POST had no subject.');
+    api_assert(str_starts_with((string)($post['subject'] ?? ''), 'ShopHaat Brevo API test'), 'The test subject does not identify the Brevo API test: ' . (string)($post['subject'] ?? ''));
     api_assert(($post['has_text'] ?? false) === true, 'The POST had no textContent.');
     api_assert(str_contains((string)($post['accept'] ?? ''), 'application/json'), 'The POST did not send an Accept: application/json header.');
     api_assert(str_contains((string)($post['content_type'] ?? ''), 'application/json'), 'The POST did not send a JSON content type.');
@@ -340,7 +340,23 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "10. status codes map to distinct, non-overlapping meanings\n";
+    echo "10. an invalid key on the send path is an authentication failure\n";
+    // ------------------------------------------------------------------
+    $GLOBALS['test_settings']['brevo_api_key'] = 'definitely-not-a-real-key';
+    $unauthorizedSend = sh_mail_send_test('inbox@example.test', sh_mail_transport());
+    api_assert(empty($unauthorizedSend['ok']), 'A 401 send was reported as success.');
+    api_same(401, $unauthorizedSend['http_status'] ?? 0, 'The 401 was not recorded on the send path.');
+    api_same('auth', $unauthorizedSend['category'], 'A 401 send was not categorised as an authentication failure.');
+    api_same('unauthorized', $unauthorizedSend['provider']['code'] ?? '', 'The provider 401 code was not captured.');
+    api_assert(empty($unauthorizedSend['message_id']), 'A rejected send exposed a message id.');
+    api_assert(str_contains((string)$unauthorizedSend['error'], '401'), 'The 401 error does not include the HTTP status.');
+    api_same('unconfirmed', $unauthorizedSend['delivery'] ?? '', 'A failed send changed the delivery state.');
+    api_assert(str_contains(strtolower((string)$unauthorizedSend['error']), 'did not recognise'), 'The 401 error does not explain that the key was not recognised.');
+    api_assert(!str_contains(json_encode($unauthorizedSend), 'definitely-not-a-real-key'), 'The API key leaked into the 401 result.');
+    $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
+
+    // ------------------------------------------------------------------
+    echo "11. status codes map to distinct, non-overlapping meanings\n";
     // ------------------------------------------------------------------
     $provider = ['code' => 'permission_denied', 'message' => 'api key is not authorized for resource "account"', 'detail' => '', 'fields' => []];
     $m403 = sh_brevo_api_status_meaning(403, $provider, 'GET /v3/account');
@@ -359,7 +375,7 @@ try {
     }
 
     // ------------------------------------------------------------------
-    echo "11. a 402 from the account endpoint is billing, not a broken key\n";
+    echo "12. a 402 from the account endpoint is billing, not a broken key\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'payment-required-key';
     $billing = sh_brevo_api_test_connection(['timeout' => 8]);
@@ -368,7 +384,7 @@ try {
     api_same('payment_required', $billing['verdict'], 'The 402 was not carried into the verdict.');
 
     // ------------------------------------------------------------------
-    echo "12. a rate limit carries retry guidance and is not retried\n";
+    echo "13. a rate limit carries retry guidance and is not retried\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'rate-limited-key';
     $beforePosts = count(api_posts($apiDir));
@@ -380,7 +396,7 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "13. a readable account is reachable, but email still unproven\n";
+    echo "14. a readable account is reachable, but email still unproven\n";
     // ------------------------------------------------------------------
     $GLOBALS['test_settings']['brevo_api_key'] = 'test-api-key';
     $beforeReadable = count(api_posts($apiDir));
@@ -396,7 +412,7 @@ try {
     $GLOBALS['test_settings']['brevo_api_key'] = 'account-denied-key';
 
     // ------------------------------------------------------------------
-    echo "14. an unreachable endpoint is a network failure, not an auth failure\n";
+    echo "15. an unreachable endpoint is a network failure, not an auth failure\n";
     // ------------------------------------------------------------------
     api_stop($server);
     usleep(300000);
@@ -407,7 +423,7 @@ try {
     api_assert(!str_contains(strtolower((string)$down['error']), 'invalid key'), 'A transport failure was described as an invalid key.');
 
     // ------------------------------------------------------------------
-    echo "15. one transport failing does not corrupt the other\n";
+    echo "16. one transport failing does not corrupt the other\n";
     // ------------------------------------------------------------------
     api_same('brevo_api', sh_mail_selected_transport(), 'The selected API transport changed after a failure.');
     $GLOBALS['test_settings']['mail_transport'] = 'smtp';

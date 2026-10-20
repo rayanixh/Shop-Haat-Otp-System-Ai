@@ -604,7 +604,7 @@ require __DIR__ . '/_layout.php';
         <div style="font-size:11.5px">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#94a3b8;margin-right:4px"></span>
           <strong>Delivery:</strong>
-          <em><?= $lastSendOk ? 'Unconfirmed — confirm in the inbox or Brevo logs' : 'No accepted send yet' ?></em>
+          <em><?= $lastSendOk ? 'Pending (unconfirmed) — confirm in the inbox or Brevo logs' : 'Pending — no accepted send yet' ?></em>
         </div>
       </div>
 

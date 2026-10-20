@@ -1968,13 +1968,15 @@ function sh_email_delivery_log(array $r): void
  */
 function sh_mail_send_test(string $to, array $transport, array $opts = []): array
 {
-    $subject = 'ShopHaat test email (' . date('d M Y H:i') . ')';
     $viaApi = (string)($transport['driver'] ?? '') === 'brevo_api';
+    // A subject the recipient can recognise immediately, naming the transport
+    // that was actually exercised.
+    $subject = ($viaApi ? 'ShopHaat Brevo API test' : 'ShopHaat SMTP test') . ' (' . date('d M Y H:i') . ')';
     $route = $viaApi
         ? 'Brevo HTTPS API (' . sh_brevo_api_base() . '/smtp/email)'
         : 'SMTP ' . (string)($transport['host'] ?? '') . ':' . (string)($transport['port'] ?? '')
             . ' (' . (string)($transport['encryption'] ?? '') . ')';
-    $text = "This is a real test message from your ShopHaat installation.\n\n"
+    $text = "This is a test email from the ShopHaat email settings.\n\n"
         . "If you are reading it, the selected transport accepted the message for delivery.\n"
         . "Inbox placement still depends on your SPF, DKIM and DMARC records, which a submission\n"
         . "cannot prove — check the provider's delivery report for that.\n\n"
