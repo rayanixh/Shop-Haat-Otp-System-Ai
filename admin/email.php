@@ -440,7 +440,6 @@ require __DIR__ . '/_layout.php';
     // A 403 on the account resource is neither a success nor an authentication
     // failure: the key authenticated but that resource is out of scope. It is
     // shown as an informational amber result, never as "the API is broken".
-    $apiAcctDenied = $isApiTest && $apiVerdict === 'account_denied';
     $apiOk = $isApiTest && ($apiVerdict === 'reachable' || $apiVerdict === 'account_denied');
 
     // Test C is the real POST /v3/smtp/email, which is only run by the
