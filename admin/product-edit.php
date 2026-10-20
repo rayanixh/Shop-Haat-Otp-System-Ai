@@ -75,15 +75,12 @@ if ($form === 'save') {
     if (!$errors) {
         $data = [
             'category_id' => sh_int($_POST['category_id'] ?? 0) ?: null,
-            'brand_id' => sh_int($_POST['brand_id'] ?? 0) ?: null,
             'name' => sh_post('name'),
             'slug' => $slug,
             'sku' => sh_post('sku') ?: null,
             'short_description' => sh_post('short_description') ?: null,
             'description' => sh_post('description') ?: null,
             'specifications' => sh_post('specifications') ?: null,
-            // One feature per line, exactly as the AI draft writes them.
-            'features' => sh_post('features') ?: null,
             // Alt text for the featured image; empty falls back to the name.
             'image_alt' => mb_substr(trim(sh_post('image_alt')), 0, 190) ?: null,
             'price' => (float)sh_post('price'),
@@ -98,8 +95,9 @@ if ($form === 'save') {
             'status' => !empty($_POST['status']) ? 1 : 0,
             // SEO. Values are validated here rather than trusted: URLs must
             // be http(s) or a site path, and the indexing flag is a 0/1.
-            'meta_title'          => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
-            'meta_description'    => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+            // SEO copy has no hard character limit; the columns are TEXT.
+            'meta_title'          => trim(sh_post('meta_title')) ?: null,
+            'meta_description'    => trim(sh_post('meta_description')) ?: null,
             'meta_keywords'       => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
             'seo_focus_keyword'   => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
             'seo_related_phrases' => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
@@ -117,7 +115,7 @@ if ($form === 'save') {
                 sh_update('products', $applyData, 'id = ?', [$id]);
                 if ($stockChanged) { sh_stock_adjust($id, (int)$data['stock'], $stockReason !== '' ? $stockReason : 'Edited in product form', 'manual'); }
                 $diff = [];
-                foreach (['name', 'sku', 'category_id', 'brand_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
+                foreach (['name', 'sku', 'category_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
                     if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) { $diff[$k] = [$before[$k], $data[$k]]; }
                 }
                 if (isset($before['price']) && abs((float)$before['price'] - (float)$data['price']) >= 0.005) {
@@ -174,7 +172,6 @@ $chk = static function (string $k, bool $default = false) use ($editing, $errors
 };
 
 $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
-$brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
 
 $adminPage = 'products';
 $adminTitle = $editing !== null ? 'Edit product' : 'New product';
@@ -196,7 +193,7 @@ require __DIR__ . '/_layout.php';
 
   <div class="sh-panel sh-formcard">
     <div class="sh-panel__body">
-      <form method="post" enctype="multipart/form-data" novalidate>
+      <form method="post" enctype="multipart/form-data" novalidate data-dirty-guard>
         <?= sh_csrf_field() ?>
         <input type="hidden" name="form" value="save">
         <input type="hidden" id="p-id" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
@@ -208,19 +205,12 @@ require __DIR__ . '/_layout.php';
           <div class="sh-field"><label class="sh-field__label" for="p-slug">URL slug</label>
             <input class="sh-input" id="p-slug" name="slug" maxlength="190" value="<?= e($val('slug')) ?>" placeholder="auto-generated from name"></div>
         </div>
-        <div class="sh-grid3">
+        <div class="sh-grid2">
           <div class="sh-field"><label class="sh-field__label" for="p-cat">Category <span class="sh-field__req">*</span></label>
             <select class="sh-select" id="p-cat" name="category_id" required>
               <option value="">Select category</option>
               <?php foreach ($cats as $c): ?>
                 <option value="<?= (int)$c['id'] ?>" <?= (int)$val('category_id') === (int)$c['id'] ? 'selected' : '' ?>><?= e($c['name']) ?></option>
-              <?php endforeach; ?>
-            </select></div>
-          <div class="sh-field"><label class="sh-field__label" for="p-brand">Brand</label>
-            <select class="sh-select" id="p-brand" name="brand_id">
-              <option value="">No brand</option>
-              <?php foreach ($brands as $b): ?>
-                <option value="<?= (int)$b['id'] ?>" <?= (int)$val('brand_id') === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['name']) ?></option>
               <?php endforeach; ?>
             </select></div>
           <div class="sh-field"><label class="sh-field__label" for="p-sku">SKU</label>
@@ -266,9 +256,6 @@ require __DIR__ . '/_layout.php';
           <textarea class="sh-textarea" id="p-desc" name="description" rows="6"><?= e($val('description')) ?></textarea></div>
         <div class="sh-field"><label class="sh-field__label" for="p-spec">Specifications</label>
           <textarea class="sh-textarea" id="p-spec" name="specifications" rows="4" placeholder="One per line: Label: Value"><?= e($val('specifications')) ?></textarea></div>
-        <div class="sh-field"><label class="sh-field__label" for="p-feat">Features and benefits</label>
-          <textarea class="sh-textarea" id="p-feat" name="features" rows="4" placeholder="One feature per line"><?= e($val('features')) ?></textarea>
-          <span class="sh-field__hint">Shown as a bulleted list under the description on the product page.</span></div>
 
         <?php
         // The full SEO editor: title, description, focus keyword, related
@@ -304,6 +291,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-formcard__foot sh-formcard__foot--sticky">
           <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create product' ?></button>
           <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+          <span class="sh-dirty" data-dirty-note hidden><?= sh_icon('info', 13) ?> Unsaved changes</span>
         </div>
       </form>
     </div>

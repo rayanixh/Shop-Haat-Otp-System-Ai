@@ -3,8 +3,8 @@
  *
  * Everything here is progressive enhancement: the fields are plain inputs that
  * work and save correctly with JavaScript switched off. This file only adds
- * live character counts, an approximate search/social preview and a focus
- * keyword note on top of them.
+ * an approximate search/social preview and a focus keyword note on top of
+ * them. It never limits what can be typed or saved.
  *
  * No inline event handlers and no inline <script>, so it stays compatible with
  * the Content-Security-Policy the application sends.
@@ -75,11 +75,6 @@
       noindexNote: panel.querySelector('[data-seo-preview="noindex-note"]')
     };
 
-    var counters = {
-      title: panel.querySelector('[data-seo-count="title"]'),
-      description: panel.querySelector('[data-seo-count="description"]')
-    };
-
     // The server-rendered fallbacks are kept as the "what happens if I leave it
     // empty" text, so clearing a field restores them instead of showing blank.
     var autoTitle = titleInput ? (titleInput.getAttribute('placeholder') || '') : '';
@@ -96,14 +91,6 @@
       return t + suffix;
     }
 
-    /** Mark a counter as too long, close to the limit, or fine. */
-    function markCounter(el, len, softLimit) {
-      if (!el) { return; }
-      el.textContent = String(len);
-      el.classList.toggle('sh-seo-count--over', len > softLimit);
-      el.classList.toggle('sh-seo-count--near', len > softLimit * 0.9 && len <= softLimit);
-    }
-
     function render() {
       var rawTitle = titleInput ? titleInput.value : '';
       var rawDesc = descInput ? descInput.value : '';
@@ -115,9 +102,6 @@
       setText(preview.ogTitle, shownTitle);
       setText(preview.description, shownDesc);
       setText(preview.ogDescription, clip(rawDesc.trim() !== '' ? rawDesc : autoDesc, 120));
-
-      markCounter(counters.title, rawTitle.trim().length, 60);
-      markCounter(counters.description, rawDesc.trim().length, 158);
 
       // URL line.
       var canonTyped = canonInput ? canonInput.value.trim() : '';

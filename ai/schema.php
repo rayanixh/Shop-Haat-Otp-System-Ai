@@ -177,8 +177,8 @@ function sh_ai_schema_sql(): array
         excerpt VARCHAR(500) DEFAULT NULL,
         content MEDIUMTEXT DEFAULT NULL,
         cover_image VARCHAR(190) DEFAULT NULL,
-        meta_title VARCHAR(190) DEFAULT NULL,
-        meta_description VARCHAR(300) DEFAULT NULL,
+        meta_title TEXT NULL,
+        meta_description TEXT NULL,
         meta_keywords VARCHAR(300) DEFAULT NULL,
         author_id INT UNSIGNED DEFAULT NULL,
         source ENUM('manual','ai') NOT NULL DEFAULT 'manual',
@@ -231,8 +231,8 @@ function sh_ai_migrate(): array
 
     // Category SEO columns: the store has none, products already do.
     foreach ([
-        'meta_title'       => "ALTER TABLE categories ADD COLUMN meta_title VARCHAR(190) DEFAULT NULL",
-        'meta_description' => "ALTER TABLE categories ADD COLUMN meta_description VARCHAR(300) DEFAULT NULL",
+        'meta_title'       => "ALTER TABLE categories ADD COLUMN meta_title TEXT NULL",
+        'meta_description' => "ALTER TABLE categories ADD COLUMN meta_description TEXT NULL",
         'meta_keywords'    => "ALTER TABLE categories ADD COLUMN meta_keywords VARCHAR(300) DEFAULT NULL",
     ] as $col => $ddl) {
         if (sh_ai_column_exists('categories', $col)) {

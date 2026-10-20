@@ -615,6 +615,34 @@
     });
   });
 
+  /* ---------- Unsaved-changes guard (never saves) -----------------------
+     Opt-in per form with data-dirty-guard. It only shows a small note and
+     warns before leaving; it never submits, debounces or stores anything. */
+  document.querySelectorAll('form[data-dirty-guard]').forEach(function (form) {
+    var note = form.querySelector('[data-dirty-note]');
+    var dirty = false;
+    function mark() {
+      if (dirty) { return; }
+      dirty = true;
+      if (note) { note.hidden = false; }
+    }
+    form.addEventListener('input', mark);
+    form.addEventListener('change', mark);
+    // Registered on the document after the confirm handler, so a submission
+    // the administrator cancels still counts as unsaved.
+    document.addEventListener('submit', function (ev) {
+      if (ev.target !== form || ev.defaultPrevented) { return; }
+      dirty = false;
+      if (note) { note.hidden = true; }
+    });
+    window.addEventListener('beforeunload', function (ev) {
+      if (!dirty) { return; }
+      ev.preventDefault();
+      ev.returnValue = '';
+      return '';
+    });
+  });
+
   /* ---------- Modals ---------------------------------------------------- */
   document.addEventListener('click', function (ev) {
     var open = ev.target.closest('[data-modal-open]');
@@ -1021,7 +1049,7 @@
     return api(fields).then(function (j) {
       render(task, j.data);
       if (window.shToast) {
-        window.shToast(j.auto_saved ? 'Generated and auto-saved.' : 'Generated. Review, then press Save.', 'success');
+        window.shToast('Generated. Review, then press Save.', 'success');
       }
       return j;
     }).catch(function (err) {
@@ -1899,7 +1927,9 @@
     if (el.value) { window.location.href = target; }
   }, true);
 
-  /* <select data-submit-form-on-change> — submit the surrounding form. */
+  /* <select data-submit-form-on-change> — submit the surrounding GET filter
+     form. Admin write forms never carry this attribute (see the regression
+     test); only the read-only AI model list uses it. */
   document.addEventListener('change', function (ev) {
     var el = ev.target;
     if (!el || !el.hasAttribute || !el.hasAttribute('data-submit-form-on-change')) { return; }

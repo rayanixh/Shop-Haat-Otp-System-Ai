@@ -1666,8 +1666,11 @@ sh_t('Add Product has no AI generator; AI Auto Work is the only entry point', fu
     foreach (['data-product-ai', 'product-ai.js', 'data-ai-draft-run', 'Generate Complete Product with AI', 'product_draft'] as $gone) {
         if (str_contains($editor, $gone)) { return 'the product editor still contains the AI panel (' . $gone . ')'; }
     }
-    if (!str_contains($editor, 'name="features"') || !str_contains($editor, 'name="image_alt"')) {
-        return 'the manual product form cannot edit the generated features/alt text';
+    if (str_contains($editor, 'name="features"') || stripos($editor, 'Features and benefits') !== false) {
+        return 'the removed features field is still in the product form';
+    }
+    if (!str_contains($editor, 'name="image_alt"')) {
+        return 'the manual product form cannot edit the image alt text';
     }
     if (!str_contains($editor, 'name="price"') || !str_contains($editor, 'name="stock"')) {
         return 'the normal manual product form was damaged';
@@ -1694,7 +1697,7 @@ sh_t('the AI create client never writes price, stock or visibility by itself', f
     $js = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
     // The fields applyDraft() copies from the model answer. Price, stock and
     // publication are deliberately absent: the administrator types them.
-    if (preg_match("~\['name', 'slug', 'sku', 'category_id', 'brand_id',.*?\]~s", $js, $m) !== 1) {
+    if (preg_match("~\['name', 'slug', 'sku', 'category_id',.*?\]~s", $js, $m) !== 1) {
         return 'the draft field list is missing';
     }
     foreach (["'price'", "'stock'", "'compare_price'", "'status'"] as $forbidden) {
@@ -1786,10 +1789,10 @@ sh_t('the save endpoint and schema back the create flow', function () {
     if (!str_contains($ensure, "ALTER TABLE products ADD COLUMN")) {
         return 'existing installations have no additive product-column migration';
     }
-    // Storefront: features are rendered as escaped text, and the alt text is used.
+    // Storefront: the removed features section is gone, and the alt text is used.
     $pdp = (string)file_get_contents(SH_ROOT . '/product.php');
-    if (!str_contains($pdp, 'sh-featurelist') || !str_contains($pdp, "e($feature)")) {
-        return 'the product page does not render the generated features safely';
+    if (str_contains($pdp, 'sh-featurelist') || str_contains($pdp, "\$product['features']")) {
+        return 'the product page still renders the removed features section';
     }
     if (!str_contains($pdp, "product['image_alt']")) {
         return 'the product page ignores the generated alt text';
@@ -1923,7 +1926,6 @@ function sh_admin_crud_map(): array
         'admin/payment-methods.php' => ['admin/payment-method-edit.php', 'Add payment method'],
         'admin/couriers.php'        => ['admin/courier-edit.php', 'Add a courier'],
         'admin/coupons.php'         => ['admin/coupon-edit.php', 'Add coupon'],
-        'admin/brands.php'          => ['', 'Add brand'],   // short form: modal
         'admin/admins.php'          => ['admin/admin-edit.php', 'Add admin'],
         'admin/roles.php'           => ['admin/role-edit.php', 'Add role'],
         'admin/verification.php'    => ['admin/verification-provider-edit.php', 'Add provider'],
@@ -2069,7 +2071,7 @@ sh_t('mobile tables can render as record cards', function () {
         if (!str_contains($css, $needle)) { return 'the responsive table card pattern is missing ' . $needle; }
     }
     // The converted listings opt in and label their cells.
-    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php', 'admin/couriers.php', 'admin/coupons.php',
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/couriers.php', 'admin/coupons.php',
               'admin/admins.php', 'admin/roles.php', 'admin/payment-gateways.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         if (!str_contains($src, 'sh-tablewrap--cards')) { return $rel . ' does not opt into the mobile card layout'; }
@@ -3326,6 +3328,173 @@ sh_t('the Steadfast default points at the official host', function () {
 sh_t('paperfly asks for the key its API requires', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
     if (!str_contains($src, "'paperfly_key' => 'Paperfly Key'")) { return 'the paperflykey credential field is missing'; }
+    return true;
+});
+
+sh_section('Admin forms never save on their own');
+
+sh_t('AI generation never writes generated text to a product', function () {
+    $api = (string)file_get_contents(SH_ROOT . '/api/ai.php');
+    if (str_contains($api, 'auto_saved')) { return 'the generate action still reports an automatic save'; }
+    if (str_contains($api, "sh_ai_config()['auto_save']")) { return 'the generate action still applies its result'; }
+
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (str_contains($js, 'auto_saved')) { return 'the admin script still expects an automatic save'; }
+
+    $mgr = (string)file_get_contents(SH_ROOT . '/ai/AIManager.php');
+    if (str_contains($mgr, "sh_ai_setting('auto_save'")) { return 'the auto-save setting is still read'; }
+
+    $settings = (string)file_get_contents(SH_ROOT . '/admin/ai/settings.php');
+    if (str_contains($settings, 'name="auto_save"')) { return 'the auto-save toggle is still offered'; }
+    return true;
+});
+
+sh_t('the category cropper stages the crop instead of saving it', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/category-cropper.js');
+    if (str_contains($js, 'fetch(')) { return 'the cropper still posts to the server'; }
+    if (!str_contains($js, 'croppedImageInput.value = dataUrl')) {
+        return 'the cropper does not stage the image in the form';
+    }
+    $page = (string)file_get_contents(SH_ROOT . '/admin/category-edit.php');
+    if (str_contains($page, "\$form === 'crop'")) { return 'the immediate crop-save endpoint is still present'; }
+    return true;
+});
+
+sh_t('the phone verification switch has an explicit Save button', function () {
+    $page = (string)file_get_contents(SH_ROOT . '/admin/security.php');
+    if (str_contains($page, 'data-phone-verification-toggle')) { return 'the toggle is still wired to auto-submit'; }
+    if (str_contains($page, 'toggle.form.submit();')) { return 'the toggle still submits its form on change'; }
+    if (!str_contains($page, 'Save phone verification')) { return 'the form has no explicit save button'; }
+    return true;
+});
+
+sh_t('editable forms carry a non-saving unsaved-changes guard', function () {
+    foreach (['admin/product-edit.php', 'admin/category-edit.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (!str_contains($body, 'data-dirty-guard')) { return $page . ' has no unsaved-changes guard'; }
+        if (!str_contains($body, 'data-dirty-note')) { return $page . ' has no unsaved-changes note'; }
+    }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (!str_contains($js, 'beforeunload')) { return 'leaving a dirty form is not warned about'; }
+    if (!str_contains($js, "form.addEventListener('input', mark)")) { return 'the guard does not track typing'; }
+    if (str_contains($js, 'navigator.sendBeacon')) { return 'the guard saves in the background'; }
+    return true;
+});
+
+sh_t('only read-only filters submit automatically', function () {
+    $hits = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT . '/admin'));
+    foreach ($it as $file) {
+        if (!$file->isFile() || !str_ends_with($file->getFilename(), '.php')) { continue; }
+        $path = $file->getPathname();
+        $body = (string)file_get_contents($path);
+        if (!str_contains($body, 'data-submit-form-on-change')) { continue; }
+        $hits[] = str_replace(SH_ROOT . '/', '', $path);
+
+        // The surviving uses must sit in a GET filter form; a POST form that
+        // submitted itself on change would write on every field selection.
+        foreach (preg_split('~<form\b~i', $body) ?: [] as $part) {
+            if (!str_contains($part, 'data-submit-form-on-change')) { continue; }
+            if (preg_match('~^[^>]*method="post"~i', $part) === 1) {
+                return str_replace(SH_ROOT . '/', '', $path) . ' still auto-submits a write form';
+            }
+        }
+    }
+    sort($hits);
+    if ($hits !== ['admin/ai/models.php']) {
+        return 'an editable form still submits on change: ' . implode(', ', $hits);
+    }
+    if (substr_count((string)file_get_contents(SH_ROOT . '/admin/ai/models.php'), 'data-submit-form-on-change') !== 2) {
+        return 'the model filter changed without the test being updated';
+    }
+    return true;
+});
+
+sh_section('Brand and features removed from product management');
+
+sh_t('the brand workflow is gone from the admin', function () {
+    if (is_file(SH_ROOT . '/admin/brands.php')) { return 'the brand editor still exists'; }
+    $layout = (string)file_get_contents(SH_ROOT . '/admin/_layout.php');
+    if (str_contains($layout, "'brands.php'")) { return 'the brand editor is still in the navigation'; }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
+    if (str_contains($edit, 'name="brand_id"')) { return 'the product form still has a brand selector'; }
+    if (str_contains($edit, 'FROM brands')) { return 'the product form still reads the brands table'; }
+    $ai = (string)file_get_contents(SH_ROOT . '/admin/ai/products.php');
+    if (str_contains($ai, 'data-f="brand_id"')) { return 'the AI product review form still has a brand selector'; }
+    return true;
+});
+
+sh_t('brand filters and badges are gone from the storefront', function () {
+    $list = (string)file_get_contents(SH_ROOT . '/products.php');
+    if (str_contains($list, 'name="brand[]"')) { return 'the product listing still offers a brand filter'; }
+    if (str_contains($list, '$brandIds')) { return 'the listing still parses brand parameters'; }
+    $category = (string)file_get_contents(SH_ROOT . '/category.php');
+    if (str_contains($category, 'name="brand[]"')) { return 'the category page still offers a brand filter'; }
+    if (str_contains($category, 'sh_brands(')) { return 'the category page still lists brands'; }
+    $product = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (str_contains($product, 'Brand:')) { return 'the product page still prints a brand line'; }
+    return true;
+});
+
+sh_t('features and benefits are gone from every product form and page', function () {
+    foreach (['admin/product-edit.php', 'admin/ai/products.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (str_contains($body, 'name="features"') || str_contains($body, 'data-f="features"')) {
+            return $page . ' still has a features field';
+        }
+        if (stripos($body, 'Features and benefits') !== false) { return $page . ' still labels the section'; }
+    }
+    $product = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (str_contains($product, "\$product['features']")) { return 'the product page still prints features'; }
+    return true;
+});
+
+sh_section('SEO copy has no arbitrary character limit');
+
+sh_t('the SEO editor has no maxlength or target-length advice', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/admin/_seo-fields.php');
+    if (preg_match('~name="meta_title"[^>]*maxlength~s', $src) === 1) { return 'meta_title still has a maxlength'; }
+    if (preg_match('~name="meta_description"[^>]*maxlength~s', $src) === 1) { return 'meta_description still has a maxlength'; }
+    if (stripos($src, 'Aim for') !== false) { return 'the target-length advice is still shown'; }
+    if (str_contains($src, 'data-seo-count')) { return 'the character counter is still shown'; }
+
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (str_contains($js, 'markCounter') || str_contains($js, 'data-seo-count')) {
+        return 'the script still marks fields as over a target length';
+    }
+    return true;
+});
+
+sh_t('the SEO Manager and product saves do not truncate SEO copy', function () {
+    $seo = (string)file_get_contents(SH_ROOT . '/admin/seo.php');
+    if (preg_match('~name="meta_title"[^>]*maxlength~s', $seo) === 1) { return 'the SEO Manager title has a maxlength'; }
+    if (preg_match('~name="meta_description"[^>]*maxlength~s', $seo) === 1) { return 'the SEO Manager description has a maxlength'; }
+    if (str_contains($seo, "'seo_default_description' => 300")) {
+        return 'the default meta description is still capped at 300 characters';
+    }
+    foreach (['admin/seo.php', 'admin/product-edit.php', 'admin/category-edit.php', 'ai/AIManager.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (preg_match('~meta_title[^;\n]{0,120}mb_substr~', $body) === 1) {
+            return $page . ' still truncates meta_title';
+        }
+        if (preg_match('~meta_description[^;\n]{0,120}mb_substr~', $body) === 1) {
+            return $page . ' still truncates meta_description';
+        }
+    }
+    return true;
+});
+
+sh_t('the SEO columns are TEXT and older installs are widened safely', function () {
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (!str_contains($schema, 'meta_title TEXT NULL')) { return 'new products still cap the SEO title'; }
+    if (!str_contains($schema, 'meta_description TEXT NULL')) { return 'new products still cap the meta description'; }
+
+    $seo = (string)file_get_contents(SH_ROOT . '/includes/seo.php');
+    if (!str_contains($seo, 'function sh_seo_widen_text_columns')) { return 'there is no widening migration'; }
+    if (!str_contains($seo, 'MODIFY')) { return 'the widening migration does not alter the columns'; }
+    if (!str_contains($seo, 'information_schema.columns')) { return 'the migration does not inspect the current type'; }
+    if (!str_contains($seo, "sh_setting_save('seo_schema_v', '2')")) { return 'the schema version was not advanced'; }
+    if (str_contains($seo, 'DROP TABLE')) { return 'the SEO migration drops a table'; }
     return true;
 });
 

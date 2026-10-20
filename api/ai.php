@@ -101,12 +101,9 @@ try {
             if ($task === 'image' && !empty($res['data']['file'])) {
                 $payload['url'] = sh_url('uploads/products/' . rawurlencode((string)$res['data']['file']));
             }
-            // Auto-save applies only where a straight column write is unambiguous.
-            if (sh_ai_config()['auto_save']
-                && in_array($task, ['title', 'description', 'short', 'tags', 'seo', 'category_content'], true)) {
-                $applied = sh_ai_apply($task, $refId, (array)$res['data'], $adminId);
-                $payload['auto_saved'] = !empty($applied['ok']);
-            }
+            // Generation never writes to the product. The administrator reviews
+            // the result and uses the explicit Save action (or the AI product
+            // review form) — no background write happens here.
             sh_json($payload);
         }
 

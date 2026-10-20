@@ -40,7 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
     $courierAction = sh_post('courier_action');
-    // "Test connection" saves this form first, then tests the saved record.
+    // The action is labelled "Save & test" in the form: the click is an explicit
+    // save, and only then is one read-only request sent. It is never triggered by
+    // typing or a change event.
     if ($form !== 'save' && $courierAction !== 'test') { sh_redirect($listUrl); }
 }
 
@@ -272,7 +274,7 @@ require __DIR__ . '/_layout.php';
     <div class="sh-formcard__foot sh-formcard__foot--sticky">
       <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $isNew ? 'Create courier' : 'Save changes' ?></button>
       <?php if (!$isNew): ?>
-        <button class="sh-btn sh-btn--ghost" type="submit" name="courier_action" value="test" data-no-lock title="Saves these settings, then sends one read-only request. No parcel is created."><?= sh_icon('zap', 15) ?> Test connection</button>
+        <button class="sh-btn sh-btn--ghost" type="submit" name="courier_action" value="test" data-no-lock title="Saves these settings, then sends one read-only request. No parcel is created."><?= sh_icon('zap', 15) ?> Save &amp; test</button>
       <?php endif; ?>
       <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
       <?php if (!$isNew && !$isProvider): ?>

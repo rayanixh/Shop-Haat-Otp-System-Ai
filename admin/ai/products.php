@@ -3,10 +3,9 @@ require_once __DIR__ . '/_ai.php';
 require_once SH_ROOT . '/includes/product-schema.php';
 sh_product_schema_ensure();
 
-// The create flow needs the real category/brand lists and an honest answer
-// about whether an image model is configured at all.
+// The create flow needs the real category list and an honest answer about
+// whether an image model is configured at all.
 $aiCats = ($aiInstalled ? sh_all('SELECT id, name FROM categories ORDER BY name ASC') : []);
-$aiBrands = ($aiInstalled ? sh_all('SELECT id, name FROM brands ORDER BY name ASC') : []);
 $aiImageReady = $aiInstalled ? sh_ai_image_generation_ready() : ['ok' => false, 'error' => 'AI Auto Work is not installed.'];
 $aiCanCreate = sh_admin_can('products.create');
 if ($aiCanCreate) {
@@ -21,10 +20,9 @@ $tags = [];
 
 if ($pid > 0) {
     $product = sh_one(
-        'SELECT p.*, c.name AS category_name, b.name AS brand_name
+        'SELECT p.*, c.name AS category_name
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
-         LEFT JOIN brands b ON b.id = p.brand_id
          WHERE p.id = ? LIMIT 1', [$pid]
     );
     if ($product !== null && $aiInstalled) {
@@ -124,7 +122,7 @@ require dirname(__DIR__) . '/_layout.php';
               <span class="sh-field__hint">Checked for uniqueness; the storefront URL is built from it.</span></div>
           </div>
 
-          <div class="sh-grid3">
+          <div class="sh-grid2">
             <div class="sh-field"><label class="sh-field__label" for="aic-r-cat">Category <span class="sh-field__req">*</span></label>
               <select class="sh-select" id="aic-r-cat" data-f="category_id">
                 <option value="">Choose an existing category</option>
@@ -133,13 +131,6 @@ require dirname(__DIR__) . '/_layout.php';
                 <?php endforeach; ?>
               </select>
               <span class="sh-field__hint" data-ai-category-note hidden></span></div>
-            <div class="sh-field"><label class="sh-field__label" for="aic-r-brand">Brand</label>
-              <select class="sh-select" id="aic-r-brand" data-f="brand_id">
-                <option value="">No brand</option>
-                <?php foreach ($aiBrands as $b): ?>
-                  <option value="<?= (int)$b['id'] ?>"><?= e((string)$b['name']) ?></option>
-                <?php endforeach; ?>
-              </select></div>
             <div class="sh-field"><label class="sh-field__label" for="aic-r-sku">SKU</label>
               <input class="sh-input" id="aic-r-sku" data-f="sku" maxlength="60"></div>
           </div>
@@ -160,14 +151,9 @@ require dirname(__DIR__) . '/_layout.php';
             <input class="sh-input" id="aic-r-short" data-f="short_description" maxlength="300"></div>
           <div class="sh-field"><label class="sh-field__label" for="aic-r-desc">Full description</label>
             <textarea class="sh-textarea" id="aic-r-desc" data-f="description" rows="8"></textarea></div>
-          <div class="sh-grid2">
-            <div class="sh-field"><label class="sh-field__label" for="aic-r-specs">Specifications</label>
-              <textarea class="sh-textarea" id="aic-r-specs" data-f="specifications" rows="6"
-                        placeholder="One per line: Label: Value"></textarea></div>
-            <div class="sh-field"><label class="sh-field__label" for="aic-r-feat">Features and benefits</label>
-              <textarea class="sh-textarea" id="aic-r-feat" data-f="features" rows="6"
-                        placeholder="One feature per line"></textarea></div>
-          </div>
+          <div class="sh-field"><label class="sh-field__label" for="aic-r-specs">Specifications</label>
+            <textarea class="sh-textarea" id="aic-r-specs" data-f="specifications" rows="6"
+                      placeholder="One per line: Label: Value"></textarea></div>
           <div class="sh-field"><label class="sh-field__label" for="aic-r-tags">Product tags</label>
             <input class="sh-input" id="aic-r-tags" data-f="tags" placeholder="comma, separated, tags">
             <span class="sh-field__hint">Stored in the existing product_tags table.</span></div>
@@ -176,9 +162,9 @@ require dirname(__DIR__) . '/_layout.php';
             <h3 class="sh-formsec__title"><?= sh_icon('search', 15) ?> Search engine fields</h3>
             <div class="sh-grid2">
               <div class="sh-field"><label class="sh-field__label" for="aic-r-mtitle">SEO title</label>
-                <input class="sh-input" id="aic-r-mtitle" data-f="meta_title" maxlength="190"></div>
+                <input class="sh-input" id="aic-r-mtitle" data-f="meta_title"></div>
               <div class="sh-field"><label class="sh-field__label" for="aic-r-mdesc">SEO meta description</label>
-                <input class="sh-input" id="aic-r-mdesc" data-f="meta_description" maxlength="300"></div>
+                <input class="sh-input" id="aic-r-mdesc" data-f="meta_description"></div>
             </div>
             <div class="sh-grid3">
               <div class="sh-field"><label class="sh-field__label" for="aic-r-focus">Focus keyword</label>
@@ -291,7 +277,6 @@ require dirname(__DIR__) . '/_layout.php';
             <img class="sh-aiproduct__img" src="<?= e(sh_product_image($product['image'])) ?>" alt="" loading="lazy">
             <div class="sh-aiproduct__meta">
               <p><strong>Category:</strong> <?= e((string)($product['category_name'] ?? '—')) ?></p>
-              <p><strong>Brand:</strong> <?= e((string)($product['brand_name'] ?? '—')) ?></p>
               <p><strong>Price:</strong> <?= e(sh_money($product['price'])) ?></p>
               <p><strong>Tags:</strong> <?= $tags ? e(implode(', ', $tags)) : 'none yet' ?></p>
             </div>
@@ -347,10 +332,10 @@ require dirname(__DIR__) . '/_layout.php';
       <p class="sh-panel__note">
         Each button sends the product's real data to <?= e($aiConfig['has_key'] ? $aiConfig['provider'] : 'your AI provider') ?>
         and shows the result for review. Nothing is written to the database until you press
-        <strong>Save</strong><?= $aiConfig['auto_save'] ? ' — except that Auto save is currently ON, so text fields are applied immediately.' : '.' ?>
+        <strong>Save product</strong> on the review screen.
       </p>
       <p class="sh-panel__note" style="margin-top:8px">
-        Prompts include the product name, category, brand, price and any existing description, and instruct
+        Prompts include the product name, category, price and any existing description, and instruct
         the model not to invent specifications.
       </p>
     </div>

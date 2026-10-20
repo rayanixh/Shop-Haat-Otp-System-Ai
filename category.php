@@ -32,7 +32,6 @@ $minPrice = sh_get('min_price');
 $maxPrice = sh_get('max_price');
 $rating   = sh_get('rating');
 $inStock  = sh_get('in_stock') === '1';
-$brandIds = array_map('intval', (array)($_GET['brand'] ?? []));
 
 // Child categories, if this category has any. Rendered as cards under the
 // heading so a shopper can drill down; the section is skipped entirely when
@@ -43,7 +42,7 @@ $result = sh_product_search([
     'category_id' => (int)$category['id'],
     'sort' => $sort, 'page' => $page,
     'min_price' => $minPrice, 'max_price' => $maxPrice,
-    'rating' => $rating, 'in_stock' => $inStock, 'brand_ids' => $brandIds,
+    'rating' => $rating, 'in_stock' => $inStock,
 ]);
 
 /*
@@ -73,7 +72,6 @@ $pageBreadcrumbs = [
     ['name' => (string)$category['name'], 'url' => ''],
 ];
 $shWishlist = sh_wishlist_ids();
-$brands = sh_brands();
 
 $baseParams = $_GET;
 unset($baseParams['page']);
@@ -114,17 +112,6 @@ require_once SH_ROOT . '/includes/header.php';
             <input type="number" name="max_price" min="0" placeholder="Max" value="<?= e($maxPrice) ?>" aria-label="Maximum price">
           </div>
         </div>
-        <?php if ($brands): ?>
-        <div class="sh-filters__group">
-          <p class="sh-filters__title">Brand</p>
-          <?php foreach ($brands as $b): ?>
-            <label class="sh-filters__opt">
-              <input type="checkbox" name="brand[]" value="<?= (int)$b['id'] ?>" <?= in_array((int)$b['id'], $brandIds, true) ? 'checked' : '' ?>>
-              <span><?= e($b['name']) ?></span>
-            </label>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
         <div class="sh-filters__group">
           <p class="sh-filters__title">Customer rating</p>
           <?php foreach ([4 => '4 stars & up', 3 => '3 stars & up'] as $rv => $rl): ?>

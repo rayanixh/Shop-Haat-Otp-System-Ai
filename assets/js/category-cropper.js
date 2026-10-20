@@ -494,7 +494,7 @@
     if (btnSave) {
       btnSave.addEventListener('click', function() {
         btnSave.disabled = true;
-        btnSave.textContent = 'Saving...';
+        btnSave.textContent = 'Applying…';
 
         const scale = naturalW / imgPos.w;
         const srcX = Math.max(0, Math.round((box.x - imgPos.x) * scale));
@@ -529,8 +529,12 @@
 
         const dataUrl = exportCanvas.toDataURL('image/jpeg', 0.92);
 
-        // Update form fields
-        if (cropDataInput) cropDataInput.value = cropJson;
+        // Update form fields. The input event tells the form's unsaved-changes
+        // note that there is now something to save; it never submits.
+        if (cropDataInput) {
+          cropDataInput.value = cropJson;
+          try { cropDataInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+        }
         if (croppedImageInput) croppedImageInput.value = dataUrl;
         if (catPreview) {
           catPreview.src = dataUrl;
@@ -539,49 +543,12 @@
         if (catPreviewCap) catPreviewCap.textContent = 'Cropped image (ready to save)';
         if (cropIndicator) cropIndicator.style.display = 'inline-flex';
 
-        // Check if editing an existing category (has id in form)
-        const idInput = document.querySelector('input[name="id"]');
-        const categoryId = idInput ? parseInt(idInput.value, 10) : 0;
-        const hasUnsavedFile = fileInput && fileInput.files && fileInput.files[0];
-
-        // If existing category without pending un-saved file, save crop via AJAX immediately
-        if (categoryId > 0 && !hasUnsavedFile && window.SH_CSRF) {
-          const formData = new FormData();
-          formData.append('form', 'crop');
-          formData.append('id', categoryId);
-          formData.append('crop_data', cropJson);
-          formData.append('cropped_image_data', dataUrl);
-          formData.append('csrf_token', window.SH_CSRF);
-
-          fetch('admin/category-edit.php', {
-            method: 'POST',
-            body: formData,
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-          })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            btnSave.disabled = false;
-            btnSave.textContent = 'Save Crop';
-            if (data && data.ok) {
-              if (catPreview && data.url) catPreview.src = data.url;
-              if (btnOpen && data.orig_url) btnOpen.setAttribute('data-orig-src', data.orig_url);
-              if (catPreviewCap) catPreviewCap.textContent = 'Current cropped image';
-              closeModal();
-            } else {
-              // Saved to form hidden inputs at least
-              closeModal();
-            }
-          })
-          .catch(function() {
-            btnSave.disabled = false;
-            btnSave.textContent = 'Save Crop';
-            closeModal();
-          });
-        } else {
-          btnSave.disabled = false;
-          btnSave.textContent = 'Save Crop';
-          closeModal();
-        }
+        // The crop is only staged in the form's hidden fields. Nothing is
+        // written to the database here: the administrator still has to press
+        // Save changes / Create category, and Cancel therefore really cancels.
+        btnSave.disabled = false;
+        btnSave.textContent = 'Apply crop';
+        closeModal();
       });
     }
   }

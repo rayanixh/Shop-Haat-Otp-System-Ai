@@ -20,7 +20,6 @@ $discount   = sh_get('discount');
 $inStock    = sh_get('in_stock') === '1';
 $flashOnly  = sh_get('flash') === '1';
 $featured   = sh_get('featured') === '1';
-$brandIds   = array_map('intval', (array)($_GET['brand'] ?? []));
 $page       = max(1, sh_int($_GET['page'] ?? 1, 1));
 
 $activeCat = $catSlug !== '' ? sh_category_by_slug($catSlug) : null;
@@ -28,7 +27,6 @@ $activeCat = $catSlug !== '' ? sh_category_by_slug($catSlug) : null;
 $result = sh_product_search([
     'q'           => $q,
     'category_id' => $activeCat['id'] ?? null,
-    'brand_ids'   => $brandIds,
     'min_price'   => $minPrice,
     'max_price'   => $maxPrice,
     'rating'      => $rating,
@@ -64,7 +62,7 @@ elseif ($sort === 'popular') { $heading = 'Best Sellers'; }
 $isSearchView = $q !== '';
 $hasFilters = $isSearchView
     || $minPrice !== '' || $maxPrice !== '' || $rating !== '' || $discount !== ''
-    || $inStock || $flashOnly || $featured || $brandIds !== [] || $sort !== 'popular';
+    || $inStock || $flashOnly || $featured || $sort !== 'popular';
 
 $pageTitle       = $heading;
 $pageDescription = 'Browse ' . $result['total'] . ' products'
@@ -102,7 +100,6 @@ if ($activeCat) {
 }
 
 $shWishlist = sh_wishlist_ids();
-$brands = sh_brands();
 
 // Preserve current filters when building URLs
 $baseParams = $_GET;
@@ -156,18 +153,6 @@ require_once SH_ROOT . '/includes/header.php';
             <input type="number" name="max_price" min="0" step="1" placeholder="Max" value="<?= e($maxPrice) ?>" aria-label="Maximum price">
           </div>
         </div>
-
-        <?php if ($brands): ?>
-        <div class="sh-filters__group">
-          <p class="sh-filters__title">Brand</p>
-          <?php foreach ($brands as $b): ?>
-            <label class="sh-filters__opt">
-              <input type="checkbox" name="brand[]" value="<?= (int)$b['id'] ?>" <?= in_array((int)$b['id'], $brandIds, true) ? 'checked' : '' ?>>
-              <span><?= e($b['name']) ?></span>
-            </label>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
 
         <div class="sh-filters__group">
           <p class="sh-filters__title">Customer rating</p>

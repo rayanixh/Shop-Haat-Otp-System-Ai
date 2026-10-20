@@ -42,55 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
 
-    if ($form === 'crop') {
-        $id = sh_int($_POST['id'] ?? 0);
-        $editingRow = $id > 0 ? sh_one('SELECT * FROM categories WHERE id = ? LIMIT 1', [$id]) : null;
-        if ($id <= 0 || $editingRow === null) {
-            sh_json(['ok' => false, 'error' => 'Category not found.'], 404);
-        }
-
-        $cropRaw = trim((string)sh_post('crop_data'));
-        $cropData = $cropRaw !== '' ? json_decode($cropRaw, true) : null;
-        $dataUrl = trim((string)sh_post('cropped_image_data'));
-
-        if (!is_array($cropData) || empty($cropData['width']) || empty($cropData['height'])) {
-            sh_json(['ok' => false, 'error' => 'Invalid crop coordinates.'], 400);
-        }
-
-        $sourceFile = !empty($editingRow['image_orig']) ? (string)$editingRow['image_orig'] : (string)($editingRow['image'] ?? '');
-        if ($sourceFile === '') {
-            sh_json(['ok' => false, 'error' => 'No image to crop.'], 400);
-        }
-
-        $croppedName = sh_image_crop_from_data($sourceFile, $cropData, $dataUrl);
-        if ($croppedName === null) {
-            sh_json(['ok' => false, 'error' => 'Failed to crop image.'], 500);
-        }
-
-        $oldImage = (string)($editingRow['image'] ?? '');
-        sh_update('categories', [
-            'image'      => $croppedName,
-            'image_orig' => $sourceFile,
-            'image_crop' => $cropRaw,
-        ], 'id = ?', [$id]);
-
-        if ($oldImage !== '' && $oldImage !== $croppedName && $oldImage !== $sourceFile) {
-            sh_category_delete_file($oldImage);
-        }
-
-        sh_audit('category_crop_updated', 'category', $id, (string)$editingRow['name'],
-            ['image' => $oldImage], ['image' => $croppedName, 'crop' => $cropData]);
-
-        sh_json([
-            'ok'        => true,
-            'image'     => $croppedName,
-            'url'       => sh_category_image($croppedName),
-            'orig_url'  => sh_category_orig_image($sourceFile, $croppedName),
-            'crop_data' => $cropRaw,
-            'message'   => 'Category image crop saved successfully.',
-        ]);
-    }
-
     if ($form === 'delete') {
         $id = sh_int($_POST['id'] ?? 0);
         $count = (int)sh_val('SELECT COUNT(*) FROM products WHERE category_id = ?', [$id], 0);
@@ -180,8 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'status' => !empty($_POST['status']) ? 1 : 0,
                 // SEO columns. Each value is validated rather than stored raw:
                 // URLs must be http(s) or a site path, and the flag is a 0/1.
-                'meta_title'           => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
-                'meta_description'     => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+                // SEO copy has no hard character limit; the columns are TEXT.
+                'meta_title'           => trim(sh_post('meta_title')) ?: null,
+                'meta_description'     => trim(sh_post('meta_description')) ?: null,
                 'meta_keywords'        => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
                 'seo_focus_keyword'    => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
                 'seo_related_phrases'  => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
@@ -297,7 +249,7 @@ require __DIR__ . '/_layout.php';
   </div>
 <?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" novalidate id="sh-cat-form">
+<form method="post" enctype="multipart/form-data" novalidate id="sh-cat-form" data-dirty-guard>
   <?= sh_csrf_field() ?>
   <input type="hidden" name="form" value="save">
   <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
@@ -438,6 +390,7 @@ require __DIR__ . '/_layout.php';
     <div class="sh-formcard__foot sh-formcard__foot--sticky">
       <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $isEdit ? 'Save changes' : 'Create category' ?></button>
       <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+      <span class="sh-dirty" data-dirty-note hidden><?= sh_icon('info', 13) ?> Unsaved changes</span>
       <?php if ($isEdit): ?>
         <span class="sh-formcard__spacer"></span>
         <button class="sh-btn sh-btn--bad" type="submit" form="sh-cat-delete"
@@ -526,7 +479,7 @@ require __DIR__ . '/_layout.php';
       <button type="button" class="sh-btn sh-btn--ghost" id="crop-btn-reset"><?= sh_icon('rotate', 13) ?> Reset</button>
       <div style="margin-left:auto;display:flex;gap:8px;">
         <button type="button" class="sh-btn sh-btn--ghost" data-cropper-cancel>Cancel</button>
-        <button type="button" class="sh-btn" id="crop-btn-save"><?= sh_icon('check-circle', 14) ?> Save Crop</button>
+        <button type="button" class="sh-btn" id="crop-btn-save"><?= sh_icon('check-circle', 14) ?> Apply crop</button>
       </div>
     </div>
   </div>

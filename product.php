@@ -177,7 +177,6 @@ require_once SH_ROOT . '/includes/header.php';
         <?= sh_stars((float)$product['rating'], (int)$product['review_count']) ?>
         <span><?= (int)$product['review_count'] ?> review<?= (int)$product['review_count'] === 1 ? '' : 's' ?></span>
         <span><?= (int)$product['sold_count'] ?> sold</span>
-        <?php if ($product['brand_name']): ?><span>Brand: <strong><?= e($product['brand_name']) ?></strong></span><?php endif; ?>
       </div>
 
       <div class="sh-pdp__price">
@@ -250,16 +249,6 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
     <div class="sh-tabs__panel" data-tab-panel="desc">
       <?= nl2br(e($product['description'] ?: $product['short_description'] ?: 'No description available.')) ?>
-      <?php
-      // Features are stored one per line. They are escaped output, never HTML,
-      // so a description written by the AI (or a person) cannot inject markup.
-      $features = array_values(array_filter(array_map('trim', explode("\n", (string)($product['features'] ?? '')))));
-      ?>
-      <?php if ($features): ?>
-        <ul class="sh-featurelist">
-          <?php foreach ($features as $feature): ?><li><?= e($feature) ?></li><?php endforeach; ?>
-        </ul>
-      <?php endif; ?>
     </div>
     <div class="sh-tabs__panel" data-tab-panel="specs" hidden>
       <?php $specs = array_filter(array_map('trim', explode("\n", (string)$product['specifications']))); ?>

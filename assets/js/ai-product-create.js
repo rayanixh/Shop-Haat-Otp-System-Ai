@@ -104,8 +104,8 @@
     var d = draft;
 
     // Only real form fields are written, and every one is editable afterwards.
-    ['name', 'slug', 'sku', 'category_id', 'brand_id',
-     'short_description', 'description', 'specifications', 'features',
+    ['name', 'slug', 'sku', 'category_id',
+     'short_description', 'description', 'specifications',
      'meta_title', 'meta_description', 'focus_keyword', 'related_phrases',
      'keywords', 'image_alt'].forEach(function (k) {
       var el = field(k);
@@ -309,8 +309,8 @@
       image_file: imageFile.value || '',
       gallery_files: []
     };
-    ['name', 'slug', 'sku', 'category_id', 'brand_id', 'price', 'compare_price',
-     'stock', 'short_description', 'description', 'specifications', 'features',
+    ['name', 'slug', 'sku', 'category_id', 'price', 'compare_price',
+     'stock', 'short_description', 'description', 'specifications',
      'meta_title', 'meta_description', 'focus_keyword', 'related_phrases',
      'keywords', 'image_alt'].forEach(function (k) {
       var el = field(k);

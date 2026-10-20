@@ -21,7 +21,7 @@ function sh_perms_catalog(): array
         'Dashboard' => ['dashboard.view' => 'View dashboard'],
         'Orders' => ['orders.view' => 'View orders', 'orders.details' => 'View order details', 'orders.update_status' => 'Update order status', 'orders.cancel' => 'Cancel / return orders'],
         'Payments' => ['payments.view' => 'View payments', 'payments.verify' => 'Verify payments', 'payments.reject' => 'Reject payments', 'payments.refund' => 'Mark refunds (where supported)'],
-        'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories, brands & coupons'],
+        'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories & coupons'],
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],

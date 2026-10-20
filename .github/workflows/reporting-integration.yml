@@ -160,5 +160,12 @@ jobs:
       # is called, so no credential and no network access is needed.
       - name: Courier connection tests and additive schema
         run: php tests/courier-connection-tests.php
+      # SEO copy is editorial, not fixed-width. This upgrades a simulated
+      # VARCHAR(190/300) install in place, proves the old values survive, writes
+      # a title longer than 60 characters and a description longer than 160
+      # through the same data layer the admin form uses, and reads both back
+      # byte-for-byte from products, categories and seo_pages.
+      - name: SEO title and description length
+        run: php tests/seo-content-length.php
       - name: AI Auto Work full-product save against MySQL
         run: php tests/product-ai-save.php

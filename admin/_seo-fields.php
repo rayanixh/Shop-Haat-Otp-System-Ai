@@ -97,23 +97,22 @@ if ($seoPreviewImage === '') { $seoPreviewImage = $seoDefaultImage; }
 
     <div class="sh-field">
       <label class="sh-field__label" for="<?= e($seoPrefix) ?>-title">SEO title</label>
-      <input class="sh-input" id="<?= e($seoPrefix) ?>-title" name="meta_title" maxlength="190"
+      <input class="sh-input" id="<?= e($seoPrefix) ?>-title" name="meta_title"
              value="<?= e($seoTitle) ?>" data-seo-field="title"
              placeholder="<?= e(sh_seo_clip($autoTitle, 70, '')) ?>">
       <span class="sh-field__hint">
-        Aim for about 50–60 characters. <span data-seo-count="title">0</span> used.
         The site name is added automatically unless you write it yourself.
+        Search engines may shorten a long title, so write it for a person.
       </span>
     </div>
 
     <div class="sh-field">
       <label class="sh-field__label" for="<?= e($seoPrefix) ?>-desc">Meta description</label>
-      <textarea class="sh-textarea" id="<?= e($seoPrefix) ?>-desc" name="meta_description" rows="2"
-                maxlength="300" data-seo-field="description"
+      <textarea class="sh-textarea" id="<?= e($seoPrefix) ?>-desc" name="meta_description" rows="3"
+                data-seo-field="description"
                 placeholder="<?= e(sh_seo_clip($autoDesc, 158)) ?>"><?= e($seoDesc) ?></textarea>
       <span class="sh-field__hint">
-        Aim for about 140–160 characters. <span data-seo-count="description">0</span> used.
-        Write it for a person deciding whether to click; Google may rewrite it.
+        No character limit. Write it for a person deciding whether to click; Google may rewrite it.
       </span>
     </div>
 

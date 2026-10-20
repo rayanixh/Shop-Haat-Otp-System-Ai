@@ -113,7 +113,9 @@ function sh_ai_config(): array
         'language'         => sh_ai_setting('language', 'English'),
         'tone'             => sh_ai_setting('tone', 'Professional'),
         'seo_mode'         => sh_ai_setting('seo_mode', '1') === '1',
-        'auto_save'        => sh_ai_setting('auto_save', '0') === '1',
+        // Auto-save is intentionally unavailable: generated text is only ever
+        // written after an explicit Save action in the admin interface.
+        'auto_save'        => false,
         'auto_publish'     => sh_ai_setting('auto_publish', '0') === '1',
         'batch_size'       => max(1, min(25, (int)sh_ai_setting('batch_size', '5'))),
         'max_retries'      => max(0, min(5, (int)sh_ai_setting('max_retries', '2'))),
@@ -453,7 +455,7 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
 {
     $oneLine = static function ($v, int $max): string {
         $s = trim(preg_replace('/\s+/u', ' ', strip_tags((string)$v)) ?? '');
-        return $s === '' ? '' : mb_substr($s, 0, $max);
+        return $s === '' ? '' : ($max > 0 ? mb_substr($s, 0, $max) : $s);
     };
     $list = static function ($v, int $maxItems, int $maxLen): array {
         if (is_string($v)) { $v = preg_split('/[\r\n]+/', $v) ?: []; }
@@ -486,8 +488,10 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
         'brand_name'        => '',
         'sku'               => '',
         'sku_unique'        => true,
-        'meta_title'        => $oneLine($d['meta_title'] ?? '', 190),
-        'meta_description'  => $oneLine($d['meta_description'] ?? '', 300),
+        // SEO copy is not capped: the review form and the TEXT columns accept
+        // whatever the administrator keeps.
+        'meta_title'        => $oneLine($d['meta_title'] ?? '', 0),
+        'meta_description'  => $oneLine($d['meta_description'] ?? '', 0),
         'focus_keyword'     => $oneLine($d['focus_keyword'] ?? '', 120),
         'related_phrases'   => mb_substr(implode(', ', $list($d['related_phrases'] ?? [], 6, 60)), 0, 500),
         'keywords'          => mb_substr(implode(', ', $list($d['keywords'] ?? [], 8, 60)), 0, 300),
@@ -735,8 +739,9 @@ function sh_ai_normalise_seo(array $d): array
     ), static fn($k) => $k !== ''));
 
     return [
-        'meta_title'       => mb_substr(trim(strip_tags((string)($d['meta_title'] ?? ''))), 0, 190),
-        'meta_description' => mb_substr(trim(strip_tags((string)($d['meta_description'] ?? ''))), 0, 300),
+        // SEO copy is stored in TEXT columns: no silent truncation.
+        'meta_title'       => trim(strip_tags((string)($d['meta_title'] ?? ''))),
+        'meta_description' => trim(strip_tags((string)($d['meta_description'] ?? ''))),
         'focus_keyword'    => mb_substr(trim(strip_tags((string)($d['focus_keyword'] ?? ''))), 0, 120),
         'keywords'         => mb_substr(implode(', ', array_slice($kw, 0, 12)), 0, 300),
     ];
@@ -828,8 +833,8 @@ function sh_ai_apply(string $task, int $refId, array $data, ?int $adminId = null
 
             case 'seo':
                 sh_query('UPDATE products SET meta_title = ?, meta_description = ?, meta_keywords = ? WHERE id = ?', [
-                    mb_substr((string)($data['meta_title'] ?? ''), 0, 190) ?: null,
-                    mb_substr((string)($data['meta_description'] ?? ''), 0, 300) ?: null,
+                    trim((string)($data['meta_title'] ?? '')) ?: null,
+                    trim((string)($data['meta_description'] ?? '')) ?: null,
                     mb_substr((string)($data['keywords'] ?? ''), 0, 300) ?: null,
                     $refId,
                 ]);
@@ -858,8 +863,8 @@ function sh_ai_apply(string $task, int $refId, array $data, ?int $adminId = null
                 sh_query('UPDATE categories SET description = ?, meta_title = ?, meta_description = ?, meta_keywords = ?
                           WHERE id = ?', [
                     mb_substr((string)($data['description'] ?? ''), 0, 255) ?: null,
-                    mb_substr((string)($data['meta_title'] ?? ''), 0, 190) ?: null,
-                    mb_substr((string)($data['meta_description'] ?? ''), 0, 300) ?: null,
+                    trim((string)($data['meta_title'] ?? '')) ?: null,
+                    trim((string)($data['meta_description'] ?? '')) ?: null,
                     mb_substr((string)($data['keywords'] ?? ''), 0, 300) ?: null,
                     $refId,
                 ]);
@@ -890,8 +895,8 @@ function sh_ai_save_blog(array $data, ?int $adminId, bool $publish = false): arr
             'slug' => mb_substr($slug, 0, 210),
             'excerpt' => mb_substr((string)($data['excerpt'] ?? ''), 0, 500) ?: null,
             'content' => sh_ai_clean_html((string)($data['content'] ?? '')),
-            'meta_title' => mb_substr((string)($data['meta_title'] ?? ''), 0, 190) ?: null,
-            'meta_description' => mb_substr((string)($data['meta_description'] ?? ''), 0, 300) ?: null,
+            'meta_title' => trim((string)($data['meta_title'] ?? '')) ?: null,
+            'meta_description' => trim((string)($data['meta_description'] ?? '')) ?: null,
             'meta_keywords' => mb_substr((string)($data['keywords'] ?? ''), 0, 300) ?: null,
             'author_id' => $adminId,
             'source' => 'ai',
