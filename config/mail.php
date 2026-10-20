@@ -1003,7 +1003,7 @@ function sh_brevo_api_status_meaning(int $status, array $provider, string $resou
             'kind' => 'permission_denied', 'label' => 'Authenticated but not permitted for ' . $resource . ' (HTTP 403)',
             'cause' => 'The API key is valid, but it is not authorized for ' . $resource . '.' . $suffix
                 . ' This is a permission result for that resource; it is not proof that transactional email is forbidden.',
-            'action' => 'Use a key whose owner has access to transactional email (Brevo → SMTP & API → API Keys & MCP), or run the transactional-email test to confirm sending. Do not treat this as a broken key.',
+            'action' => 'Use a key whose owner has access to transactional email (Brevo → SMTP & API → API Keys & MCP). If the same address is refused for a real send, check the provider-side restrictions: the plan and sending credits, and Brevo → Security → Authorized IPs (the hosting server must be allowed). Do not treat a 403 on its own as a broken key.',
             'retry_after' => $retry,
         ];
     }

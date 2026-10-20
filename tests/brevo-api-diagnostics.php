@@ -362,6 +362,8 @@ try {
     $m403 = sh_brevo_api_status_meaning(403, $provider, 'GET /v3/account');
     api_assert($m403['kind'] === 'permission_denied', '403 was not classified as a permission result.');
     api_assert(!str_contains(strtolower($m403['label']), 'invalid key'), '403 must not be described as an invalid key.');
+    api_assert(str_contains($m403['action'], 'Authorized IPs'), 'The 403 guidance does not point at provider-side IP restrictions.');
+    api_assert(str_contains($m403['action'], 'credits'), 'The 403 guidance does not point at the plan or sending credits.');
     api_same('invalid_credentials', sh_brevo_api_status_meaning(401, $provider, 'GET /v3/account')['kind'], '401 was not classified as invalid credentials.');
     api_same('payment_required', sh_brevo_api_status_meaning(402, ['code' => 'not_enough_credits', 'message' => 'Not enough credits', 'detail' => '', 'fields' => []], 'POST /v3/smtp/email')['kind'], '402 was not classified as a billing problem.');
     $m429 = sh_brevo_api_status_meaning(429, $provider, 'GET /v3/account', 7);
