@@ -1459,7 +1459,7 @@ sh_t('the category grid is responsive and keeps its shape', function () {
         if (!str_contains($block, $need)) { return 'the card rule has no ' . $need; }
     }
     if (preg_match('~\.sh-category-card__media \{[^}]*aspect-ratio:\s*4\s*/\s*3~s', $css) !== 1) {
-        return 'the card image has no fixed 4:3 frame, so rows can shift while images load';
+        return 'the default card image has no fixed 4:3 frame, so rows can shift while images load';
     }
     if (preg_match('~\.sh-category-card__img \{[^}]*object-fit:\s*cover~s', $css) !== 1) {
         return 'the card image is not object-fit: cover';
@@ -1467,27 +1467,28 @@ sh_t('the category grid is responsive and keeps its shape', function () {
     if (strpos($css, 'sh-category-card__img--fallback') === false) {
         return 'flat placeholder artwork would be cropped: no contain rule';
     }
-    // The desktop grid is track-size driven (Settings → Category Display writes
-    // the variable), so more cards fit per row instead of stretching them. The
-    // fallback must be the shipped 50% size: ~110px from the original ~220px.
-    if (preg_match('~\.sh-catgrid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(var\(--sh-cat-min, (\d+)px\), 1fr\)\)~', $css, $m) !== 1) {
-        return 'the category grid is not sized by the --sh-cat-min track variable';
+    // Cards are fixed-size boxes on a wrapping flex line, which is what lets
+    // one category be Small while the next is Large in the same grid.
+    if (preg_match('~\.sh-catgrid \{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap~s', $css) !== 1) {
+        return 'the category grid is not a wrapping flex row';
     }
-    require_once SH_ROOT . '/includes/catalog.php';
-    if ((int)$m[1] !== (int)sh_category_card_min_width(50)) {
-        return 'the CSS fallback is not the 50% default card width';
+    foreach (['small' => 104, 'medium' => 136, 'large' => 216] as $size => $width) {
+        if (preg_match('~\.sh-category-card--' . $size . '\s*\{[^}]*width:\s*' . $width . 'px~s', $css) !== 1) {
+            return 'the ' . $size . ' card has no ' . $width . 'px width rule';
+        }
     }
-    if (sh_category_card_min_width(100) !== 220) { return '100% is not the original 220px card width'; }
-    if (sh_category_card_min_width(50) !== 110) { return 'the 50% default is not half the original card width'; }
-    if (sh_category_card_min_width(40) < 88) { return 'the smallest allowed card is too small to read'; }
-    if (!str_contains(sh_category_display_style_tag(50), '--sh-cat-min:110px')) {
-        return 'the display style tag does not emit the real grid variable';
+    // Medium is the shipped default, roughly half of the old ~220px card.
+    if (preg_match('~\.sh-category-card--medium\s*\{[^}]*width:\s*(\d+)px~s', $css, $m2) !== 1) {
+        return 'the medium card has no width';
     }
-    // Phones keep two comfortable columns; the size setting is for larger screens.
-    if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-catgrid \{ grid-template-columns: repeat\((\d),~s', $css, $m2) !== 1) {
-        return 'the mobile column count is not declared at the 600px breakpoint';
+    if ((int)$m2[1] > 160) { return 'the medium card is still oversized (' . $m2[1] . 'px)'; }
+    if (!str_contains($css, '@media (max-width: 600px)')
+        || preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-category-card--large\s*\{[^}]*width:\s*100%~s', $css) !== 1) {
+        return 'a large card could overflow a phone screen';
     }
-    if ((int)$m2[1] !== 2) { return 'mobile shows ' . $m2[1] . ' category columns, expected 2'; }
+    if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-category-card--medium\s*\{[^}]*calc\(~s', $css) !== 1) {
+        return 'the medium card has no phone width';
+    }
     // Hover and focus feedback, and no layout shift from the name length.
     if (!str_contains($css, '.sh-category-card:hover') || !str_contains($css, '.sh-category-card:focus-visible')) {
         return 'the card has no hover/focus feedback';
@@ -1498,45 +1499,71 @@ sh_t('the category grid is responsive and keeps its shape', function () {
     return true;
 });
 
-sh_t('the category size is a constrained setting with a real preview', function () {
-    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/settings.php'));
-    if (!str_contains($src, "form === 'category_display'")) {
-        return 'the category display form has no server-side handler';
+sh_t('every card carries its saved size as a validated modifier', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    if (array_keys(sh_category_card_sizes()) !== ['small', 'medium', 'large']) {
+        return 'the size allowlist is not exactly small/medium/large';
     }
-    if (preg_match('~preg_match\(\'/\\^\\\\d\{1,3\}\$/\'~', $src) !== 1) {
-        return 'the scale is not validated as a plain integer';
+    if (sh_category_card_size('huge') !== 'medium') { return 'an unknown size does not fall back to medium'; }
+    if (sh_category_card_size(null) !== 'medium') { return 'a missing size does not default to medium'; }
+    foreach (['small', 'medium', 'large'] as $size) {
+        $card = sh_category_card(['name' => 'Example', 'slug' => 'example', 'image' => '', 'card_size' => $size], 0);
+        if (!str_contains($card, 'sh-category-card--' . $size)) {
+            return 'a card with the saved size "' . $size . '" does not render its class';
+        }
+        if (!str_contains($card, 'data-size="' . $size . '"')) {
+            return 'a card does not expose its size for the grid';
+        }
+        if (str_contains($card, 'style=')) { return 'a card renders an inline style from the stored size'; }
     }
-    if (!str_contains($src, '(int)$raw < 40 || (int)$raw > 100')) {
-        return 'the scale is not constrained to the documented 40-100 range';
-    }
-    if (preg_match('~<input[^>]*type="range"[^>]*name="category_card_scale"[^>]*min="40"[^>]*max="100"~s', $src) !== 1) {
-        return 'there is no bounded slider for category_card_scale';
-    }
-    if (!str_contains($src, 'restore_default')) { return 'there is no restore-default control'; }
-    if (!str_contains($src, 'admin/category-display-preview.php')) {
-        return 'the live preview does not use the real storefront grid';
-    }
-    // A routine Save Settings must never write this key: only its own form does.
-    if (preg_match('~if \(\$form === \'general\'\).*?if \(\$form === \'category_display\'\)~s', $src, $m) === 1
-        && str_contains($m[0], "sh_setting_save('category_card_scale'")) {
-        return 'the general settings form overwrites the saved category size';
-    }
-    // Only the validated integer is persisted, never the posted string.
-    if (!str_contains($src, "sh_setting_save('category_card_scale', (string)\$scale)")) {
-        return 'the unvalidated posted value reaches the settings table';
-    }
+    false;
     return true;
 });
 
-sh_t('the category display preview is the storefront card renderer', function () {
-    $path = SH_ROOT . '/admin/category-display-preview.php';
-    if (!is_file($path)) { return 'the preview page is missing'; }
-    $src = sh_source_without_comments((string)file_get_contents($path));
-    if (!str_contains($src, "sh_require_perm('settings.view')")) { return 'the preview is not permission checked'; }
-    if (!str_contains($src, 'sh_category_cards(')) { return 'the preview does not use the real card helper'; }
-    if (!str_contains($src, "assets/css/app.css")) { return 'the preview does not load the storefront stylesheet'; }
-    if (!str_contains($src, 'sh_category_display_style_tag(')) { return 'the preview does not use the real grid variable'; }
-    if (!str_contains($src, 'noindex,nofollow')) { return 'the preview is indexable'; }
+sh_t('the category size is chosen per category and validated on save', function () {
+    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/category-edit.php'));
+    // The three options are real radio inputs, so the control works by keyboard.
+    foreach (['small', 'medium', 'large'] as $size) {
+        if (!str_contains($src, 'sh_category_card_sizes()')) { return 'the editor does not use the size allowlist'; }
+        break;
+    }
+    if (preg_match('~foreach \(sh_category_card_sizes\(\) as~', $src) !== 1) {
+        return 'the editor does not loop over the size allowlist';
+    }
+    if (preg_match_all('~name="card_size"~', $src) !== 1) {
+        return 'the editor renders more than one card_size input by hand';
+    }
+    if (preg_match('~<input[^>]*type="radio"[^>]*name="card_size"~s', $src) !== 1) {
+        return 'the card size control is not a radio group';
+    }
+    if (!str_contains($src, "'card_size' => sh_category_card_size(")) {
+        return 'the posted size is not funnelled through the allowlist before saving';
+    }
+    if (str_contains($src, "sh_post('card_size')") && !str_contains($src, 'sh_category_card_size')) {
+        return 'the raw posted size reaches the database';
+    }
+    // It must be part of the audit diff too, so a change is traceable.
+    if (!str_contains($src, "'sort_order', 'card_size'")) {
+        return 'a card-size change is not recorded in the audit diff';
+    }
+    // A saved value must be read back into the form, never reset to medium.
+    if (!str_contains($src, "\$editing['card_size']")) {
+        return 'the editor does not read the saved size back';
+    }
+    // The schema default is the backward-compatible migration for old rows.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (preg_match("~card_size ENUM\\('small','medium','large'\\) NOT NULL DEFAULT 'medium'~", $schema) !== 1) {
+        return 'the categories table has no bounded card_size column with a medium default';
+    }
+    $migrate = (string)file_get_contents(SH_ROOT . '/includes/category-image.php');
+    if (!str_contains($migrate, 'card_size')) {
+        return 'existing installations have no automatic card_size migration';
+    }
+    // Never arbitrary CSS/JS: the value is a token and the class is built from it.
+    $catalog = (string)file_get_contents(SH_ROOT . '/includes/catalog.php');
+    if (str_contains($catalog, 'sh_category_card_size($cat') && str_contains($catalog, 'style=')) {
+        return 'the card size is written as an inline style';
+    }
     return true;
 });
 
@@ -1634,20 +1661,187 @@ sh_t('a generated draft can only carry fields that really exist', function () {
     return true;
 });
 
-sh_t('the AI panel never fills price, stock or visibility', function () {
-    $js = (string)file_get_contents(SH_ROOT . '/assets/js/product-ai.js');
-    foreach (['#p-price', '#p-cmp', '#p-stock', '#p-th', '#p-flash', 'is_featured', 'is_flash_sale', 'name="status"'] as $bad) {
-        if (str_contains($js, $bad)) { return 'the AI client writes ' . $bad; }
+sh_t('Add Product has no AI generator; AI Auto Work is the only entry point', function () {
+    $editor = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/product-edit.php'));
+    foreach (['data-product-ai', 'product-ai.js', 'data-ai-draft-run', 'Generate Complete Product with AI', 'product_draft'] as $gone) {
+        if (str_contains($editor, $gone)) { return 'the product editor still contains the AI panel (' . $gone . ')'; }
     }
-    if (str_contains($js, 'form.submit') || str_contains($js, "action', 'save'")) {
-        return 'the AI client can submit the product form';
+    if (!str_contains($editor, 'name="features"') || !str_contains($editor, 'name="image_alt"')) {
+        return 'the manual product form cannot edit the generated features/alt text';
     }
-    $panel = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
-    $panelAt = strpos($panel, 'data-product-ai');
-    $formAt = strpos($panel, '<form method="post"');
-    if ($panelAt === false) { return 'the AI panel is missing from the product editor'; }
-    if ($formAt !== false && $panelAt > $formAt) {
-        return 'the AI panel sits inside the product form';
+    if (!str_contains($editor, 'name="price"') || !str_contains($editor, 'name="stock"')) {
+        return 'the normal manual product form was damaged';
+    }
+    if (is_file(SH_ROOT . '/assets/js/product-ai.js')) {
+        return 'the removed Add Product AI client is still shipped';
+    }
+
+    // The generator lives in AI Auto Work, next to the per-product tools.
+    $auto = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/ai/products.php'));
+    foreach (['data-ai-create', 'Generate Full Product', 'data-ai-save-product', 'data-ai-create-review'] as $need) {
+        if (!str_contains($auto, $need)) { return 'AI Auto Work is missing ' . $need; }
+    }
+    if (!str_contains((string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js'), "action: 'save_product'")) {
+        return 'the AI Auto Work client does not call the save_product action';
+    }
+    if (substr_count($auto, 'data-ai-create-start') !== 1) {
+        return 'AI Auto Work does not have exactly one create form';
+    }
+    return true;
+});
+
+sh_t('the AI create client never writes price, stock or visibility by itself', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    // The fields applyDraft() copies from the model answer. Price, stock and
+    // publication are deliberately absent: the administrator types them.
+    if (preg_match("~\['name', 'slug', 'sku', 'category_id', 'brand_id',.*?\]~s", $js, $m) !== 1) {
+        return 'the draft field list is missing';
+    }
+    foreach (["'price'", "'stock'", "'compare_price'", "'status'"] as $forbidden) {
+        if (str_contains($m[0], $forbidden)) {
+            return 'the AI draft writes ' . $forbidden . ' into the review form';
+        }
+    }
+    // Save must go through the server action that wraps a transaction.
+    if (!str_contains($js, "action: 'save_product'")) {
+        return 'the client does not use the transactional save action';
+    }
+    if (str_contains($js, 'product-edit.php" method="post"')) {
+        return 'the client submits the product form directly';
+    }
+    return true;
+});
+
+sh_t('a full product is saved in one all-or-nothing transaction', function () {
+    $studio = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/ai/ProductStudio.php'));
+    foreach (['beginTransaction', 'commit()', 'rollBack()', "sh_insert('products'", 'product_tags', 'product_images'] as $need) {
+        if (!str_contains($studio, $need)) { return 'the save path is missing ' . $need; }
+    }
+    // The row must be read back BEFORE the commit, otherwise "saved" is a claim.
+    $read = strpos($studio, 'SELECT * FROM products WHERE id = ?');
+    $commit = strpos($studio, '$pdo->commit();');
+    if ($read === false || $commit === false || $read > $commit) {
+        return 'the save path commits without verifying the written row';
+    }
+    // Retrying with the same token must find the existing product first.
+    if (strpos($studio, 'WHERE ai_draft_token = ?') === false) {
+        return 'the save path has no idempotency lookup';
+    }
+    if (strpos($studio, 'WHERE ai_draft_token = ?') > strpos($studio, "sh_insert('products'")) {
+        return 'the idempotency check runs after the insert';
+    }
+    // A failure must not report success: the transaction is rolled back and the
+    // function returns ok=false.
+    $catchAt = strpos($studio, 'catch (Throwable $e) {', strpos($studio, 'beginTransaction'));
+    if ($catchAt === false) { return 'the save path has no failure handler'; }
+    $catch = substr($studio, $catchAt, 1400);
+    if (!str_contains($catch, 'rollBack()') || !str_contains($catch, "'ok' => false")) {
+        return 'a failed save does not roll back and return an error';
+    }
+    if (!str_contains($studio, 'sh_seo_cache_invalidate()')) {
+        return 'a saved product does not invalidate the SEO/sitemap cache';
+    }
+    // Uploaded files are deleted on rollback, generated ones are kept for retry.
+    if (!str_contains($studio, 'sh_delete_upload($imageFile')) {
+        return 'a rolled-back upload is left orphaned on disk';
+    }
+    // The slug follows the store's own rules and is uniqueness-checked.
+    if (!str_contains($studio, 'sh_slug(') || !str_contains($studio, 'FROM products WHERE slug = ?')) {
+        return 'the save path does not enforce the store slug rules';
+    }
+    // Price and stock are validated, never derived from the model.
+    if (!str_contains($studio, 'Enter the selling price. AI never invents a price.')) {
+        return 'a missing price is not rejected';
+    }
+    // The SEO columns are added by a separate migration on an existing store.
+    // The save writes them, so the save path must run that migration itself.
+    if (!str_contains($studio, 'sh_seo_schema_ensure()')) {
+        return 'the save path can write SEO fields without ensuring their columns exist';
+    }
+    // A generated image must exist on disk under the naming rule it trusts.
+    if (!str_contains($studio, 'ai-\d{8}') || !str_contains($studio, '[a-f0-9]{16}')) {
+        return 'the save path does not restrict generated image filenames';
+    }
+    return true;
+});
+
+sh_t('the save endpoint and schema back the create flow', function () {
+    $api = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/api/ai.php'));
+    if (strpos($api, "case 'save_product'") === false) { return 'api/ai.php has no save_product action'; }
+    if (strpos($api, "case 'product_image'") === false) { return 'the image retry action is missing'; }
+    $clientSrc = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    if (!str_contains($clientSrc, "action: 'product_image'")) {
+        return 'the image retry action exists but the client never calls it';
+    }
+    $saveAt = strpos($api, "case 'save_product'");
+    $seg = substr($api, $saveAt, 1200);
+    foreach (["sh_admin_can('products.create')", 'sh_ai_throttle', 'sh_ai_save_full_product'] as $need) {
+        if (!str_contains($seg, $need)) { return 'save_product does not check ' . $need; }
+    }
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    foreach (['features TEXT', 'image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
+        if (!str_contains($schema, $need)) { return 'install/schema.php is missing ' . $need; }
+    }
+    $ensure = (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
+    if (!str_contains($ensure, "ALTER TABLE products ADD COLUMN")) {
+        return 'existing installations have no additive product-column migration';
+    }
+    // Storefront: features are rendered as escaped text, and the alt text is used.
+    $pdp = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (!str_contains($pdp, 'sh-featurelist') || !str_contains($pdp, "e($feature)")) {
+        return 'the product page does not render the generated features safely';
+    }
+    if (!str_contains($pdp, "product['image_alt']")) {
+        return 'the product page ignores the generated alt text';
+    }
+    return true;
+});
+
+sh_t('the AI create client only touches controls the panel really renders', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    $markup = (string)file_get_contents(SH_ROOT . '/admin/ai/products.php');
+
+    // A renamed data attribute is silent in production: querySelector returns
+    // null, the field is skipped and Save writes an empty value. Catch it here.
+    preg_match_all('~querySelector\([\'"]\[(data-ai-[a-z0-9-]+)\]~', $js, $m);
+    $missing = [];
+    if (count($m[1]) < 15) {
+        return 'the selector scan found almost nothing in the client';
+    }
+    foreach (array_unique($m[1]) as $attr) {
+        if (preg_match('~' . preg_quote($attr, '~') . '(?![a-z0-9-])~', $markup) !== 1) {
+            $missing[] = $attr;
+        }
+    }
+    if ($missing) {
+        return 'the client selects attributes the panel does not render: ' . implode(', ', $missing);
+    }
+
+    // Both field maps (render + collect) name the review controls.
+    if (!preg_match_all("~\[\s*'name',\s*'slug'.*?\]~s", $js, $lists)) {
+        return 'the client no longer has an explicit field map';
+    }
+    if (count($lists[0]) < 2) {
+        return 'the client field map could not be read';
+    }
+    foreach ($lists[0] as $list) {
+        preg_match_all("~'([a-z0-9_]+)'~", $list, $names);
+        foreach (array_unique($names[1]) as $name) {
+            if (!str_contains($markup, 'data-f="' . $name . '"')) {
+                return 'the client writes a field the review form does not have: ' . $name;
+            }
+        }
+    }
+
+    // The two recovery paths promised by the brief: retry and manual upload.
+    if (!str_contains($markup, 'data-ai-image-retry') || !str_contains($markup, 'data-ai-upload')) {
+        return 'the review form has no image retry and no manual upload';
+    }
+    if (!str_contains($markup, 'data-ai-image-file')) {
+        return 'the generated image file is never posted back to the save handler';
+    }
+    if (!str_contains($js, 'request.image = uploadedFile')) {
+        return 'a manually uploaded photo is not sent as a file';
     }
     return true;
 });

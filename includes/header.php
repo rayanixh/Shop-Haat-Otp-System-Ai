@@ -87,7 +87,6 @@ $shTransition = sh_transition_config();
 <?php endif; ?>
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
 <?= sh_theme_style_tag() ?>
-<?= sh_category_display_style_tag() ?>
 <script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
 <?= sh_transition_head($shTransition) ?>
 </head>

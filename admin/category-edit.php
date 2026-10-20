@@ -172,6 +172,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'image_orig' => $imgResult['orig_file'] ?? ($editingRow['image_orig'] ?? $imgResult['file']),
                 'image_crop' => $imgResult['crop_data'] ?? ($editingRow['image_crop'] ?? null),
                 'description' => sh_post('description') ?: null,
+                // Card size: only one of the three known tokens is ever stored.
+                // sh_category_card_size() maps anything else to "medium", so a
+                // tampered POST cannot write a class name, CSS or markup.
+                'card_size' => sh_category_card_size($_POST['card_size'] ?? 'medium'),
                 'sort_order' => sh_int($_POST['sort_order'] ?? 0),
                 'status' => !empty($_POST['status']) ? 1 : 0,
                 // SEO columns. Each value is validated rather than stored raw:
@@ -204,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                     $diff = [];
-                    foreach (['name', 'slug', 'parent_id', 'status', 'sort_order'] as $k) {
+                    foreach (['name', 'slug', 'parent_id', 'status', 'sort_order', 'card_size'] as $k) {
                         if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) {
                             $diff[$k] = [$before[$k], $data[$k]];
                         }
@@ -247,6 +251,10 @@ $val = static function (string $k, $fb = '') use ($editing, $errors) {
 };
 $chkStatus = $errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1;
 $curImage  = sh_category_image($val('image'));
+// The saved size wins; a validation failure keeps what was just posted.
+$cardSize  = sh_category_card_size($errors ? ($_POST['card_size'] ?? 'medium') : ($editing['card_size'] ?? 'medium'));
+$sizePhoto = $curImage !== '' ? $curImage : sh_category_placeholder_image();
+$sizeName  = trim((string)$val('name')) !== '' ? trim((string)$val('name')) : 'Example category';
 $storedImage = trim((string)$val('image'));
 $missingImage = $curImage === '' && $storedImage !== '';
 $curOrigImage = sh_category_orig_image($editing['image_orig'] ?? null, $editing['image'] ?? null);
@@ -258,7 +266,7 @@ $productCount = $isEdit ? (int)sh_val('SELECT COUNT(*) FROM products WHERE categ
 
 $adminPage = 'categories';
 $adminTitle = $isEdit ? 'Edit category' : 'New category';
-$adminScripts = ['assets/js/category-cropper.js'];
+$adminScripts = ['assets/js/category-cropper.js', 'assets/js/category-size.js'];
 require __DIR__ . '/_layout.php';
 ?>
 
@@ -369,6 +377,33 @@ require __DIR__ . '/_layout.php';
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="sh-formsec">
+        <h3 class="sh-formsec__title"><?= sh_icon('grid', 15) ?> Category card size</h3>
+        <p class="sh-formsec__desc">
+          How this category is drawn in the storefront category grids (homepage and category pages).
+          Each category keeps its own size, so the grid can mix them. <strong>Medium</strong> is the default.
+        </p>
+        <div class="sh-catsize" data-cat-size-group role="radiogroup" aria-label="Category card size">
+          <?php foreach (sh_category_card_sizes() as $sizeKey => $sizeLabel): ?>
+            <label class="sh-catsize__opt<?= $cardSize === $sizeKey ? ' is-on' : '' ?>">
+              <input type="radio" name="card_size" value="<?= e($sizeKey) ?>"
+                     <?= $cardSize === $sizeKey ? 'checked' : '' ?> data-cat-size>
+              <span class="sh-catsize__label"><span class="sh-catsize__dot" aria-hidden="true"></span><?= e($sizeLabel) ?></span>
+              <span class="sh-catsize__preview" aria-hidden="true">
+                <span class="sh-category-card sh-category-card--<?= e($sizeKey) ?>">
+                  <span class="sh-category-card__media">
+                    <img class="sh-category-card__img<?= $curImage === '' ? ' sh-category-card__img--fallback' : '' ?>"
+                         src="<?= e($sizePhoto) ?>" alt="" loading="lazy" decoding="async">
+                  </span>
+                  <span class="sh-category-card__name" title="<?= e($sizeName) ?>"><?= e($sizeName) ?></span>
+                </span>
+              </span>
+            </label>
+          <?php endforeach; ?>
+        </div>
+        <p class="sh-field__hint">The previews use this category's own picture and name at their real size.</p>
       </div>
 
       <div class="sh-formsec">

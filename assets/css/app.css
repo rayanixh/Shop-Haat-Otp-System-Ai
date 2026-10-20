@@ -295,19 +295,20 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-sidecard__link:hover { color: #fff; gap: 7px; }
 
 /* 7. CATEGORIES ----------------------------------------------------------- */
-/* Product-category grid: a real photo on top, the name underneath. The image
-   frame is a fixed 4:3 so every card is the same height and the grid never
-   shifts while images load; the count is deliberately not shown any more.
+/* Product-category grid: a real photo on top, the name underneath. One card is
+   a fixed-width box and the row is a wrapping flex line, which is what lets a
+   category have its own Small / Medium / Large size (chosen in the category
+   editor) while every other card in the same grid keeps its own size.
 
-   The track has a minimum width (--sh-cat-min) instead of a fixed column
-   count, so the browser fits as many whole cards per row as the container
-   allows. Settings → Category Display writes that variable; the fallback below
-   is the shipped 50% default, so a fresh install is already half-size even
-   before the setting is saved. Type sizes are deliberately NOT scaled with it:
-   the card gets smaller, the label stays readable. */
-.sh-catgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--sh-cat-min, 110px), 1fr)); gap: 12px; }
+   Widths, image ratio and type size move together, so a "small" card is really
+   smaller rather than just having smaller text. Medium is the shipped default:
+   136px wide, roughly the 110-140px target after the old oversized 220px cards.
+
+   Nothing here is written by the browser: the only thing the server emits is one
+   of the three modifier classes. */
+.sh-catgrid { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; }
 .sh-category-card {
-  display: flex; flex-direction: column; min-width: 0;
+  display: flex; flex-direction: column; min-width: 0; flex: 0 0 auto;
   background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: var(--sh-radius);
   overflow: hidden; text-align: center;
   box-shadow: var(--sh-shadow); transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
@@ -333,6 +334,40 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
   padding: 9px 8px 11px; font-size: 12.5px; font-weight: 600; line-height: 1.34; color: var(--sh-ink);
   min-height: 42px; overflow: hidden; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+/* The three sizes. Medium is the baseline every other rule starts from. */
+.sh-category-card--medium { width: 136px; }
+.sh-category-card--small  { width: 104px; }
+.sh-category-card--small .sh-category-card__media { aspect-ratio: 1 / 1; }
+.sh-category-card--small .sh-category-card__name {
+  font-size: 11.5px; padding: 7px 6px 9px; min-height: 36px; line-height: 1.3;
+}
+.sh-category-card--small .sh-category-card__img--fallback { padding: 10px; }
+.sh-category-card--large  { width: 216px; }
+.sh-category-card--large .sh-category-card__media { aspect-ratio: 16 / 10; }
+.sh-category-card--large .sh-category-card__name {
+  font-size: 14.5px; padding: 10px 10px 12px; min-height: 46px;
+}
+
+/* Tablet: keep the same three steps, a little wider so names stay readable. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .sh-catgrid { gap: 10px; }
+  .sh-category-card--medium { width: 148px; }
+  .sh-category-card--small  { width: 112px; }
+  .sh-category-card--large  { width: 236px; }
+}
+
+/* Phone: the sizes become fractions of the row, so the grid can never overflow
+   and a Large card still fits a narrow screen on one line. */
+@media (max-width: 600px) {
+  .sh-catgrid { gap: 8px; }
+  .sh-category-card--medium { width: calc((100% - 8px) / 2); }
+  .sh-category-card--small  { width: calc((100% - 16px) / 3); }
+  .sh-category-card--large  { width: 100%; }
+  .sh-category-card--small .sh-category-card__name { font-size: 11px; padding: 6px 4px 8px; }
+  .sh-category-card__name { padding: 8px 6px 10px; }
+  .sh-category-card--large .sh-category-card__name { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sh-category-card, .sh-category-card__img { transition: none; }
@@ -490,6 +525,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-tabs__panel[hidden] { display: none; }
 .sh-spectable td { padding: 8px 10px; border-bottom: 1px solid var(--sh-line-2); font-size: 13.5px; }
 .sh-spectable td:first-child { color: var(--sh-muted); width: 210px; }
+/* Feature bullets under the description. Escaped text, plain list styling. */
+.sh-featurelist { margin: 12px 0 0; padding: 0 0 0 20px; }
+.sh-featurelist li { margin: 5px 0; font-size: 13.5px; color: var(--sh-ink-2); line-height: 1.5; }
+.sh-featurelist li::marker { color: var(--sh-brand); }
 .sh-review { padding: 14px 0; border-bottom: 1px solid var(--sh-line-2); }
 .sh-review:last-child { border-bottom: 0; }
 .sh-review__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1409,7 +1448,6 @@ body.sh-modal-open { overflow: hidden; }
   .sh-wrap { padding: 0 10px; }
   .sh-section { padding: 11px; border-radius: 7px; }
   .sh-section__title { font-size: 15.5px; }
-  .sh-catgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .sh-product-grid, .sh-product-grid--5, .sh-product-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .sh-strip > * { flex: 0 0 150px; }
   .sh-grid2, .sh-grid3 { grid-template-columns: 1fr; }
@@ -1457,7 +1495,6 @@ body.sh-modal-open { overflow: hidden; }
   .sh-paylayout .sh-mini-item__price { margin-left: 54px; text-align: left; }
 }
 @media (max-width: 380px) {
-  .sh-catgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-product-card__now { font-size: 14px; }
   .sh-bottomnav a { font-size: 9.5px; }
   .sh-slide__title { font-size: 19px; }
@@ -2746,44 +2783,79 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-summary-bar { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* 21c. CATEGORY DISPLAY SETTING ------------------------------------------- */
-/* The admin control writes ONE variable (--sh-cat-min). Everything below is
-   chrome for the control and its live preview; none of it changes the grid. */
-.sh-catdisplay__controls { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 18px; align-items: start; }
-.sh-catdisplay__value { font-size: 14px; font-weight: 800; color: var(--sh-brand); min-width: 46px; text-align: right;
-  font-variant-numeric: tabular-nums; }
-.sh-range { width: 100%; max-width: 260px; accent-color: var(--sh-brand); height: 26px; cursor: pointer; }
-.sh-catdisplay__previewwrap { min-width: 0; }
-.sh-catdisplay__previewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
-.sh-catdisplay__devices { display: inline-flex; gap: 4px; flex-wrap: wrap; }
-.sh-catdisplay__devices .is-on { background: var(--sh-brand-soft); color: var(--sh-brand); border-color: var(--sh-brand-soft); font-weight: 700; }
-.sh-catdisplay__frame { border: 1px solid var(--sh-line); border-radius: 9px; overflow: hidden; background: #fff; margin-left: auto; }
-.sh-catdisplay__iframe { display: block; width: 100%; height: 360px; border: 0; background: var(--sh-bg-2); }
-@media (max-width: 900px) {
-  .sh-catdisplay__controls { grid-template-columns: minmax(0, 1fr); }
-  .sh-catdisplay__frame { margin-left: 0; }
-  .sh-catdisplay__iframe { height: 300px; }
+/* 21c. CATEGORY CARD SIZE CHOOSER ----------------------------------------- */
+/* Three real radio tiles, each showing the category card at its real size.
+   The width/ratio/type rules live in section 7; this is only the chooser. */
+.sh-catsize { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
+.sh-catsize__opt {
+  position: relative; display: flex; flex-direction: column; gap: 9px;
+  padding: 11px 13px 13px; border: 1px solid var(--sh-line); border-radius: 9px;
+  background: #fff; cursor: pointer; min-width: 0;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.sh-catsize__opt:hover { border-color: var(--sh-brand); }
+.sh-catsize__opt.is-on { border-color: var(--sh-brand); box-shadow: 0 0 0 2px var(--sh-brand-soft); }
+.sh-catsize__opt input {
+  position: absolute; width: 1px; height: 1px; margin: 0; padding: 0;
+  opacity: 0; pointer-events: none;
+}
+.sh-catsize__opt:focus-within { outline: 2px solid var(--sh-brand); outline-offset: 2px; }
+.sh-catsize__label {
+  display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700;
+  color: var(--sh-heading);
+}
+.sh-catsize__dot {
+  width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--sh-line);
+  background: #fff; flex: 0 0 auto;
+}
+.sh-catsize__opt.is-on .sh-catsize__dot { border-color: var(--sh-brand); background: var(--sh-brand); }
+.sh-catsize__preview { display: flex; align-items: flex-end; min-height: 128px; pointer-events: none; }
+.sh-catsize__preview .sh-category-card { box-shadow: none; }
+@media (max-width: 600px) {
+  .sh-catsize { gap: 9px; }
+  .sh-catsize__opt { flex: 1 1 100%; }
+  .sh-catsize__preview { min-height: 0; }
 }
 
-/* 21d. AI COMPLETE PRODUCT PANEL ------------------------------------------ */
-.sh-aidraft__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 8px; }
-.sh-aidraft__status { font-size: 12.5px; color: var(--sh-muted); min-width: 0; }
-.sh-aidraft__status--busy { color: var(--sh-brand); font-weight: 600; }
-.sh-aidraft__status--ok { color: var(--sh-ok); font-weight: 600; }
-.sh-aidraft__status--error { color: var(--sh-bad); font-weight: 600; }
-.sh-aidraft .sh-btn.is-busy { opacity: .75; cursor: progress; }
-.sh-aidraft__result { margin-top: 12px; border: 1px solid var(--sh-line); border-radius: 9px; background: var(--sh-bg-2); padding: 12px 14px; }
-.sh-aidraft__resulthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.sh-aidraft__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.sh-aidraft__row { display: grid; grid-template-columns: 170px minmax(0, 1fr) auto; gap: 10px; align-items: center;
-  padding: 8px 0; border-top: 1px solid var(--sh-line); font-size: 12.5px; }
-.sh-aidraft__row:first-child { border-top: 0; }
-.sh-aidraft__row--empty .sh-aidraft__value { color: var(--sh-muted); font-style: italic; }
-.sh-aidraft__name { font-weight: 700; color: var(--sh-heading); }
-.sh-aidraft__value { min-width: 0; overflow-wrap: anywhere; color: var(--sh-ink-2); line-height: 1.4; }
-.sh-aidraft__actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-@media (max-width: 860px) {
-  .sh-aidraft__row { grid-template-columns: minmax(0, 1fr) auto; }
-  .sh-aidraft__name { grid-column: 1 / -1; }
-  .sh-aidraft__value { grid-column: 1; }
+/* 21d. AI AUTO WORK — GENERATE FULL PRODUCT ------------------------------- */
+.sh-aicreate__start { max-width: 100%; }
+.sh-aicreate__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.sh-aicreate__status { font-size: 12.5px; color: var(--sh-muted); min-width: 0; }
+.sh-aicreate__status--busy { color: var(--sh-brand); font-weight: 600; }
+.sh-aicreate__status--ok { color: var(--sh-ok); font-weight: 600; }
+.sh-aicreate__status--error { color: var(--sh-bad); font-weight: 600; }
+.sh-aicreate__review { margin-top: 16px; border-top: 1px solid var(--sh-line); padding-top: 16px; }
+.sh-aicreate__grid { display: grid; grid-template-columns: minmax(0, 1fr) 262px; gap: 18px; align-items: start; }
+.sh-aicreate__fields { min-width: 0; }
+.sh-aicreate__side { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.sh-aicreate__image {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; aspect-ratio: 1 / 1; border: 1px dashed var(--sh-line);
+  border-radius: 9px; background: var(--sh-bg-2); overflow: hidden;
+}
+.sh-aicreate__image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sh-aicreate__imageempty { font-size: 12px; color: var(--sh-muted); padding: 10px; text-align: center; }
+.sh-aicreate__image-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+.sh-aicreate__image-actions .sh-btn { flex: 1 1 auto; justify-content: center; }
+.sh-aicreate__gallery { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+.sh-aicreate__gallery img {
+  width: 72px; height: 72px; object-fit: cover; border-radius: 7px; border: 1px solid var(--sh-line);
+}
+.sh-aicreate__notes {
+  font-size: 12.5px; color: var(--sh-ink-2); background: var(--sh-bg-2);
+  border: 1px solid var(--sh-line); border-radius: 9px; padding: 10px 12px;
+}
+.sh-aicreate__notes ul { margin: 6px 0 0; padding-left: 18px; }
+.sh-aicreate__notes li { margin: 3px 0; }
+.sh-aicreate__notice { border-radius: 9px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+.sh-aicreate__notice--warn { background: rgba(224, 150, 0, .10); border: 1px solid rgba(224, 150, 0, .35); }
+.sh-aicreate__notice--bad { background: rgba(201, 48, 48, .08); border: 1px solid rgba(201, 48, 48, .32); }
+.sh-aicreate__notice ul { margin: 6px 0 0; padding-left: 18px; }
+.sh-aicreate__saved { margin-top: 14px; }
+.sh-aicreate__savedactions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.sh-input--error, .sh-textarea--error { border-color: var(--sh-bad) !important; }
+@media (max-width: 900px) {
+  .sh-aicreate__grid { grid-template-columns: minmax(0, 1fr); }
+  .sh-aicreate__side { order: -1; }
+  .sh-aicreate__image { max-width: 260px; }
 }

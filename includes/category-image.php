@@ -16,7 +16,10 @@
 declare(strict_types=1);
 
 /**
- * Self-healing migration for category crop and original image storage.
+ * Self-healing migration for category image storage and card size.
+ *
+ * Runs once per request at most, and only adds a column that is really missing,
+ * so it is safe on a live store and on every supported MySQL/MariaDB version.
  */
 function sh_category_schema_ensure(): void
 {
@@ -30,6 +33,10 @@ function sh_category_schema_ensure(): void
         $cols = [
             'image_orig' => 'VARCHAR(190) DEFAULT NULL',
             'image_crop' => 'TEXT DEFAULT NULL',
+            // Storefront card size chosen per category. Existing rows take the
+            // column default, so every pre-existing category becomes "medium"
+            // exactly like a category created after this release.
+            'card_size'  => "ENUM('small','medium','large') NOT NULL DEFAULT 'medium'",
         ];
         foreach ($cols as $col => $def) {
             $n = (int)sh_val(

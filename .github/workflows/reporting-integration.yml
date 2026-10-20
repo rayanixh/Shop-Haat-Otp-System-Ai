@@ -119,6 +119,18 @@ jobs:
       # again for the reporting test below.
       - name: Installer seeding decision (demo data on and off)
         run: php tests/installer-demo-data.php
+      # The proof the browser cannot give: the same function the save endpoint
+      # calls, against real MySQL. It asserts that every generated field lands
+      # in its column (description, specifications, features, SEO, alt text),
+      # that the category relationship, tags and gallery are written, that the
+      # same draft token can never create a second product, that a forced
+      # database failure rolls the whole save back, that the retry then
+      # succeeds, that validation refuses a missing price/category/negative
+      # stock, and that the saved row is visible to the storefront queries and
+      # the Small/Medium/Large category card. It recreates its own tables in
+      # the disposable database and leaves it empty again.
+      - name: AI Auto Work full-product save against MySQL
+        run: php tests/product-ai-save.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
       - name: Exercise session expiry through customer HTTP routes

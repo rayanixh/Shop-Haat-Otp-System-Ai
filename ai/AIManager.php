@@ -13,6 +13,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/schema.php';
 require_once __DIR__ . '/PromptManager.php';
 require_once __DIR__ . '/ProviderManager.php';
+require_once __DIR__ . '/ProductStudio.php';
 
 const SH_AI_MAX_BATCH = 200;
 
@@ -286,15 +287,17 @@ function sh_ai_draft_image_from_product(int $productId): ?array
 }
 
 /**
- * Generate a Complete Product draft from what the admin has typed so far.
+ * Generate a complete product draft from a product name.
  *
  * Nothing is written to the database. Every value returned has been normalised
- * against the REAL form: categories and brands must exist, SKU uniqueness is
+ * against the REAL form: categories and brands must exist, the slug and SKU are
  * checked against the products table, and price/stock/cost are never requested
- * or accepted.
+ * or accepted. When an image-generation model is configured, the featured photo
+ * is produced in the same call — and when it is not, the answer says so instead
+ * of pretending the draft is complete.
  *
- * @param array $input name, short_description, known (array), product_id, field
- * @return array{ok:bool,error?:string,data?:array,via?:array,image_used?:bool,image_note?:string}
+ * @param array $input name, known (array), product_id, field, image, want_image, want_gallery
+ * @return array{ok:bool,error?:string,data?:array,via?:array,image?:array,image_used?:bool,image_note?:string}
  */
 function sh_ai_product_draft(array $input, ?int $adminId = null): array
 {
@@ -331,6 +334,8 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
         'short'          => 'Produce only "short_description". Leave every other key empty.',
         'description'    => 'Produce only "description". Leave every other key empty.',
         'specifications' => 'Produce only "specifications". Leave every other key empty.',
+        'features'       => 'Produce only "features". Leave every other key empty.',
+        'tags'           => 'Produce only "tags". Leave every other key empty.',
         'category'       => 'Produce only "category". Leave every other key empty.',
         'brand'          => 'Produce only "brand". Leave every other key empty.',
         'sku'            => 'Produce only "sku". Leave every other key empty.',
@@ -386,7 +391,7 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
         'type'           => 'product_full',
         // A whole draft is a long answer; give it room without touching the
         // global default that the small single-field tasks rely on.
-        'options'        => ['max_tokens' => 2400],
+        'options'        => ['max_tokens' => 3000],
     ];
     if ($image !== null) { $meta['image'] = $image; }
 
@@ -396,13 +401,42 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
                 'image_supplied' => $imageSupplied];
     }
 
+    $data = sh_ai_normalise_product_draft((array)($r['data'] ?? []), !empty($input['product_id']) ? (int)$input['product_id'] : 0);
+
+    // The slug is built here, with the store's own helper and a uniqueness
+    // check, so the model can never invent a URL that collides with another
+    // product. The administrator can still edit it in the review form; the save
+    // path validates it again.
+    $data['slug'] = sh_ai_unique_product_slug((string)$data['title'], $name);
+    // One token per draft: retrying the save cannot create a second product.
+    $data['token'] = bin2hex(random_bytes(16));
+
+    // Featured image generation, when an image model is configured. A failure is
+    // reported as a failure — the draft is never described as complete.
+    $imageResult = null;
+    if (!empty($input['want_image'])) {
+        $imageResult = sh_ai_generate_product_image($data + ['name' => $name], $adminId);
+    }
+
+    $gallery = [];
+    if (!empty($input['want_gallery']) && !empty($imageResult['ok'])) {
+        for ($i = 1; $i <= 2; $i++) {
+            $alt = sh_ai_generate_product_image($data + ['name' => $name], $adminId);
+            if (!empty($alt['ok'])) {
+                $gallery[] = ['file' => (string)$alt['file'], 'url' => (string)$alt['url']];
+            }
+        }
+    }
+
     return [
         'ok'             => true,
-        'data'           => sh_ai_normalise_product_draft((array)($r['data'] ?? []), !empty($input['product_id']) ? (int)$input['product_id'] : 0),
+        'data'           => $data,
         'via'            => sh_ai_via($r),
         'image_used'     => !empty($r['image_used']),
         'image_supplied' => $imageSupplied,
         'image_note'     => (string)($r['image_note'] ?? 'none'),
+        'image'          => $imageResult,
+        'gallery'        => $gallery,
     ];
 }
 
@@ -438,8 +472,14 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
     $out = [
         'title'             => $oneLine($d['title'] ?? '', 190),
         'short_description' => $oneLine($d['short_description'] ?? '', 300),
-        'description'       => sh_ai_clean_html((string)($d['description'] ?? '')),
-        'specifications'    => implode("\n", $list($d['specifications'] ?? [], 20, 160)),
+        // Plain text, because product.php prints the description with
+        // nl2br(e()): HTML saved here would be shown to shoppers as tags.
+        'description'       => sh_ai_plain_text((string)($d['description'] ?? ''), 8000),
+        'specifications'    => implode("\n", $list($d['specifications'] ?? [], 20, 200)),
+        'features'          => implode("\n", $list($d['features'] ?? [], 12, 240)),
+        'tags'              => array_slice($list($d['tags'] ?? [], 12, 60), 0, 12),
+        // Filled by the caller with a unique, store-valid slug.
+        'slug'              => '',
         'category_id'       => null,
         'category_name'     => '',
         'brand_id'          => null,
@@ -506,7 +546,7 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
 
     // Descriptions must not smuggle a price or a stock figure into the draft.
     // (The prompt forbids it; this keeps a bad answer out of the form as well.)
-    foreach (['title', 'short_description', 'description'] as $k) {
+    foreach (['title', 'short_description', 'description', 'features'] as $k) {
         $txt = $out[$k];
         if (preg_match('/(?:৳|Tk\.?|BDT|\$|€|£)\s?\d|\d+\s?(?:৳|tk|bdt|in stock|pieces? left)/iu', $txt) === 1) {
             $out['notes'][] = 'The draft mentioned a price or stock figure; it was removed. Set prices and stock yourself.';
@@ -755,8 +795,10 @@ function sh_ai_apply(string $task, int $refId, array $data, ?int $adminId = null
                 return ['ok' => true];
 
             case 'description':
+                // Stored as plain text: the storefront prints it with nl2br(e()),
+                // so keeping the model's HTML would show literal tags to shoppers.
                 sh_query('UPDATE products SET description = ? WHERE id = ?',
-                    [sh_ai_clean_html((string)($data['description'] ?? '')), $refId]);
+                    [sh_ai_plain_text((string)($data['description'] ?? ''), 8000), $refId]);
                 return ['ok' => true];
 
             case 'short':
