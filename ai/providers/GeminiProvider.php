@@ -52,8 +52,14 @@ class GeminiProvider extends AbstractAIProvider
             'maxOutputTokens' => (int)($options['max_tokens'] ?? 1200),
         ];
         if ($json) { $gen['responseMimeType'] = 'application/json'; }
+        // Gemini takes inline image bytes as their own part, before the text.
+        $parts = [['text' => $user]];
+        $image = $this->imageOption($options);
+        if ($image !== null) {
+            array_unshift($parts, ['inline_data' => ['mime_type' => $image['mime'], 'data' => $image['data']]]);
+        }
         $payload = [
-            'contents' => [['role' => 'user', 'parts' => [['text' => $user]]]],
+            'contents' => [['role' => 'user', 'parts' => $parts]],
             'generationConfig' => $gen,
         ];
         if ($system !== '') { $payload['system_instruction'] = ['parts' => [['text' => $system]]]; }

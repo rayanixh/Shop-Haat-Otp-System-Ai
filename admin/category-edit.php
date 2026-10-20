@@ -393,6 +393,8 @@ require __DIR__ . '/_layout.php';
         $seoLabel   = 'category';
         $seoBaseUrl = sh_seo_base();
         $seoPath    = 'category.php?slug={slug}';
+        // The category's own picture, so the preview matches the real page.
+        $seoImage   = sh_seo_category_image(['image' => (string)($seoRow['image'] ?? '')]);
         require __DIR__ . '/_seo-fields.php';
         ?>
       </div>

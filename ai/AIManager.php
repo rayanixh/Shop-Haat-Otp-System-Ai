@@ -223,6 +223,303 @@ function sh_ai_product_context(int $productId): ?array
  * ------------------------------------------------------------------ */
 
 /**
+ * Validate an image the admin attached to a Complete Product request.
+ *
+ * The bytes are read from PHP's temporary upload and then DISCARDED: nothing is
+ * written to uploads/. A draft generation must not leave orphan files behind,
+ * and the real product image is only stored when the normal Save Product form
+ * is submitted.
+ *
+ * @return array{ok:bool,error?:string,image?:array{data:string,mime:string}}
+ */
+function sh_ai_draft_image_from_upload(array $file, int $maxBytes = 3_000_000): array
+{
+    if (!isset($file['error']) || is_array($file['error'])) {
+        return ['ok' => false, 'error' => 'Invalid image upload.'];
+    }
+    if ((int)$file['error'] === UPLOAD_ERR_NO_FILE) {
+        return ['ok' => false, 'error' => 'No image selected.'];
+    }
+    if ((int)$file['error'] !== UPLOAD_ERR_OK) {
+        return ['ok' => false, 'error' => 'The image could not be read from the upload.'];
+    }
+    if (!is_uploaded_file((string)($file['tmp_name'] ?? ''))) {
+        return ['ok' => false, 'error' => 'Invalid upload source.'];
+    }
+    if ((int)($file['size'] ?? 0) > $maxBytes) {
+        return ['ok' => false, 'error' => 'The reference image must be ' . sh_bytes_label($maxBytes) . ' or smaller.'];
+    }
+
+    set_error_handler(static fn(): bool => true);
+    try { $info = getimagesize((string)$file['tmp_name']); } finally { restore_error_handler(); }
+    $allowed = ['image/jpeg' => 'image/jpeg', 'image/png' => 'image/png', 'image/webp' => 'image/webp'];
+    $mime = is_array($info) ? (string)($info['mime'] ?? '') : '';
+    if (!isset($allowed[$mime])) {
+        return ['ok' => false, 'error' => 'The reference image must be a JPG, PNG or WebP picture.'];
+    }
+    $bytes = (string)file_get_contents((string)$file['tmp_name']);
+    if ($bytes === '') { return ['ok' => false, 'error' => 'The reference image was empty.']; }
+
+    return ['ok' => true, 'image' => ['data' => base64_encode($bytes), 'mime' => $allowed[$mime]]];
+}
+
+/** The saved product image as bytes + MIME, or null when it does not exist. */
+function sh_ai_draft_image_from_product(int $productId): ?array
+{
+    if ($productId <= 0) { return null; }
+    try {
+        $row = sh_one('SELECT image FROM products WHERE id = ? LIMIT 1', [$productId]);
+    } catch (Throwable $e) { return null; }
+    $file = basename((string)($row['image'] ?? ''));
+    if ($file === '') { return null; }
+    $path = SH_UPLOAD_DIR . '/products/' . $file;
+    if (!is_file($path) || !is_readable($path)) { return null; }
+
+    set_error_handler(static fn(): bool => true);
+    try { $info = getimagesize($path); } finally { restore_error_handler(); }
+    $mime = is_array($info) ? strtolower((string)($info['mime'] ?? '')) : '';
+    if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) { return null; }
+    $bytes = (string)file_get_contents($path);
+    if ($bytes === '') { return null; }
+
+    return ['data' => base64_encode($bytes), 'mime' => $mime];
+}
+
+/**
+ * Generate a Complete Product draft from what the admin has typed so far.
+ *
+ * Nothing is written to the database. Every value returned has been normalised
+ * against the REAL form: categories and brands must exist, SKU uniqueness is
+ * checked against the products table, and price/stock/cost are never requested
+ * or accepted.
+ *
+ * @param array $input name, short_description, known (array), product_id, field
+ * @return array{ok:bool,error?:string,data?:array,via?:array,image_used?:bool,image_note?:string}
+ */
+function sh_ai_product_draft(array $input, ?int $adminId = null): array
+{
+    $name = trim(preg_replace('/\s+/u', ' ', strip_tags((string)($input['name'] ?? ''))) ?? '');
+    if ($name === '') {
+        return ['ok' => false, 'error' => 'Enter the product name first — it is the only required input.'];
+    }
+    $name = mb_substr($name, 0, 190);
+
+    $known = is_array($input['known'] ?? null) ? $input['known'] : [];
+    $knownLines = [];
+    foreach (['brand' => 'Brand', 'model' => 'Model', 'size' => 'Size', 'material' => 'Material',
+              'colour' => 'Colour', 'dimensions' => 'Dimensions'] as $k => $label) {
+        $v = trim((string)($known[$k] ?? ''));
+        if ($v !== '') { $knownLines[] = $label . ': ' . mb_substr($v, 0, 200); }
+    }
+    $notes = trim((string)($known['notes'] ?? ''));
+    if ($notes !== '') { $knownLines[] = 'Notes: ' . mb_substr($notes, 0, 600); }
+    $specs = trim((string)($known['specs'] ?? ''));
+    if ($specs !== '') { $knownLines[] = "Specifications the admin supplied:\n" . mb_substr($specs, 0, 2000); }
+
+    try {
+        $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
+        $catNames = array_map(static fn($c) => '- ' . $c['name'], $cats);
+    } catch (Throwable $e) { $cats = []; $catNames = []; }
+    try {
+        $brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
+        $brandNames = array_map(static fn($b) => '- ' . $b['name'], $brands);
+    } catch (Throwable $e) { $brands = []; $brandNames = []; }
+
+    $field = trim((string)($input['field'] ?? ''));
+    $fieldFocus = [
+        'title'          => 'Produce only "title". Leave every other key empty.',
+        'short'          => 'Produce only "short_description". Leave every other key empty.',
+        'description'    => 'Produce only "description". Leave every other key empty.',
+        'specifications' => 'Produce only "specifications". Leave every other key empty.',
+        'category'       => 'Produce only "category". Leave every other key empty.',
+        'brand'          => 'Produce only "brand". Leave every other key empty.',
+        'sku'            => 'Produce only "sku". Leave every other key empty.',
+        'seo'            => 'Produce only "meta_title", "meta_description", "focus_keyword", "related_phrases" and "keywords". Leave every other key empty.',
+        'image_alt'      => 'Produce only "image_alt". Leave every other key empty.',
+    ];
+    $focusText = $field !== '' && isset($fieldFocus[$field])
+        ? $fieldFocus[$field]
+        : 'Produce every applicable field in the object.';
+
+    // The image is only offered to the model when the routed model advertises
+    // image input. Otherwise the prompt says plainly that no image is attached,
+    // so the model cannot be led to believe it "saw" the product.
+    $image = null;
+    $imageNote = 'No image is attached. Use only the text facts above.';
+    $imageSupplied = false;
+    if (isset($input['image']) && is_array($input['image']) && (string)($input['image']['data'] ?? '') !== '') {
+        $imageSupplied = true;
+        $image = $input['image'];
+    } elseif (!empty($input['product_id'])) {
+        $saved = sh_ai_draft_image_from_product((int)$input['product_id']);
+        if ($saved !== null) { $image = $saved; $imageSupplied = true; }
+    }
+
+    if ($image !== null) {
+        $route = sh_ai_route('product_full');
+        $vision = $route['provider'] !== null && $route['model'] !== ''
+            && sh_ai_model_accepts_image((int)$route['provider']['id'], (string)$route['model']);
+        if ($vision) {
+            $imageNote = 'A photo of the actual product is attached. Describe only what is clearly '
+                       . 'visible in it; if a label is unreadable, treat that detail as unknown.';
+        } else {
+            $image = null;
+            $imageNote = 'An image was supplied but the configured AI model cannot read images (or no '
+                       . 'text model is selected), so no image is attached. Use only the text facts above '
+                       . 'and do not describe the photo.';
+        }
+    }
+
+    $vars = [
+        'name'              => $name,
+        'short_description' => trim((string)($input['short_description'] ?? '')),
+        'known'             => implode("\n", $knownLines),
+        'categories'        => implode("\n", $catNames),
+        'brands'            => implode("\n", $brandNames),
+        'image_note'        => $imageNote,
+        'focus'             => $focusText,
+    ];
+    $meta = [
+        'admin_id'       => $adminId,
+        'reference_type' => 'product',
+        'reference_id'   => !empty($input['product_id']) ? (int)$input['product_id'] : null,
+        'type'           => 'product_full',
+        // A whole draft is a long answer; give it room without touching the
+        // global default that the small single-field tasks rely on.
+        'options'        => ['max_tokens' => 2400],
+    ];
+    if ($image !== null) { $meta['image'] = $image; }
+
+    $r = sh_ai_generate_json('product_full', $vars, $meta);
+    if (empty($r['ok'])) {
+        return ['ok' => false, 'error' => (string)($r['error'] ?? 'The AI request failed.'),
+                'image_supplied' => $imageSupplied];
+    }
+
+    return [
+        'ok'             => true,
+        'data'           => sh_ai_normalise_product_draft((array)($r['data'] ?? []), !empty($input['product_id']) ? (int)$input['product_id'] : 0),
+        'via'            => sh_ai_via($r),
+        'image_used'     => !empty($r['image_used']),
+        'image_supplied' => $imageSupplied,
+        'image_note'     => (string)($r['image_note'] ?? 'none'),
+    ];
+}
+
+/**
+ * Constrain a model's JSON to the fields that really exist on the product form.
+ *
+ * Unknown keys are dropped (so a hallucinated "price" can never reach the form),
+ * categories and brands are matched against the live tables, and length limits
+ * match the database columns.
+ *
+ * @return array<string,mixed>
+ */
+function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
+{
+    $oneLine = static function ($v, int $max): string {
+        $s = trim(preg_replace('/\s+/u', ' ', strip_tags((string)$v)) ?? '');
+        return $s === '' ? '' : mb_substr($s, 0, $max);
+    };
+    $list = static function ($v, int $maxItems, int $maxLen): array {
+        if (is_string($v)) { $v = preg_split('/[\r\n]+/', $v) ?: []; }
+        if (!is_array($v)) { return []; }
+        $out = [];
+        foreach ($v as $item) {
+            if (!is_scalar($item)) { continue; }
+            $s = trim(preg_replace('/\s+/u', ' ', strip_tags((string)$item)) ?? '');
+            if ($s === '') { continue; }
+            $out[] = mb_substr($s, 0, $maxLen);
+            if (count($out) >= $maxItems) { break; }
+        }
+        return $out;
+    };
+
+    $out = [
+        'title'             => $oneLine($d['title'] ?? '', 190),
+        'short_description' => $oneLine($d['short_description'] ?? '', 300),
+        'description'       => sh_ai_clean_html((string)($d['description'] ?? '')),
+        'specifications'    => implode("\n", $list($d['specifications'] ?? [], 20, 160)),
+        'category_id'       => null,
+        'category_name'     => '',
+        'brand_id'          => null,
+        'brand_name'        => '',
+        'sku'               => '',
+        'sku_unique'        => true,
+        'meta_title'        => $oneLine($d['meta_title'] ?? '', 190),
+        'meta_description'  => $oneLine($d['meta_description'] ?? '', 300),
+        'focus_keyword'     => $oneLine($d['focus_keyword'] ?? '', 120),
+        'related_phrases'   => mb_substr(implode(', ', $list($d['related_phrases'] ?? [], 6, 60)), 0, 500),
+        'keywords'          => mb_substr(implode(', ', $list($d['keywords'] ?? [], 8, 60)), 0, 300),
+        'image_alt'         => $oneLine($d['image_alt'] ?? '', 160),
+        'notes'             => $list($d['notes'] ?? [], 4, 220),
+    ];
+
+    // Category: an exact, case-insensitive match against a real category only.
+    $want = $oneLine($d['category'] ?? '', 190);
+    if ($want !== '') {
+        try {
+            foreach (sh_all('SELECT id, name FROM categories ORDER BY name ASC') as $c) {
+                if (mb_strtolower((string)$c['name']) === mb_strtolower($want)) {
+                    $out['category_id'] = (int)$c['id'];
+                    $out['category_name'] = (string)$c['name'];
+                    break;
+                }
+            }
+        } catch (Throwable $e) { /* no categories table: suggestion stays empty */ }
+        if ($out['category_id'] === null) {
+            // Keep the model's wording as a visible suggestion, never as an id.
+            $out['category_name'] = $want;
+        }
+    }
+
+    // Brand: same rule. Never creates a brand.
+    $wantBrand = $oneLine($d['brand'] ?? '', 120);
+    if ($wantBrand !== '') {
+        try {
+            foreach (sh_all('SELECT id, name FROM brands ORDER BY name ASC') as $b) {
+                if (mb_strtolower((string)$b['name']) === mb_strtolower($wantBrand)) {
+                    $out['brand_id'] = (int)$b['id'];
+                    $out['brand_name'] = (string)$b['name'];
+                    break;
+                }
+            }
+        } catch (Throwable $e) { /* no brands table: suggestion stays empty */ }
+        if ($out['brand_id'] === null) { $out['brand_name'] = $wantBrand; }
+    }
+
+    // SKU: cleaned to the characters the field accepts, and its uniqueness is
+    // checked against the real table. The flag is information for the admin,
+    // never a claim made without looking.
+    $sku = strtoupper(preg_replace('/[^A-Za-z0-9._-]/', '', $oneLine($d['sku'] ?? '', 60)) ?? '');
+    $sku = mb_substr($sku, 0, 60);
+    if ($sku !== '') {
+        try {
+            $dupe = sh_one('SELECT id FROM products WHERE sku = ? AND id <> ? LIMIT 1', [$sku, $productId]);
+            $out['sku'] = $sku;
+            $out['sku_unique'] = $dupe === null;
+        } catch (Throwable $e) {
+            $out['sku'] = $sku;
+            $out['sku_unique'] = false;
+        }
+    }
+
+    // Descriptions must not smuggle a price or a stock figure into the draft.
+    // (The prompt forbids it; this keeps a bad answer out of the form as well.)
+    foreach (['title', 'short_description', 'description'] as $k) {
+        $txt = $out[$k];
+        if (preg_match('/(?:৳|Tk\.?|BDT|\$|€|£)\s?\d|\d+\s?(?:৳|tk|bdt|in stock|pieces? left)/iu', $txt) === 1) {
+            $out['notes'][] = 'The draft mentioned a price or stock figure; it was removed. Set prices and stock yourself.';
+            $out[$k] = trim((string)preg_replace('/(?:৳|Tk\.?|BDT|\$|€|£)\s?\d[\d,.]*|\d+\s?(?:৳|tk|bdt|in stock|pieces? left)/iu', '', $txt));
+            $out['notes'] = array_values(array_slice($out['notes'], 0, 4));
+        }
+    }
+
+    // A field that the model omitted stays empty so the form keeps its value.
+    return $out;
+}
+
+/**
  * Run one AI task against one product/category.
  *
  * @return array{ok:bool,task:string,data?:array,error?:string}

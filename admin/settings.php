@@ -67,6 +67,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($form === 'category_display') {
+        // Only this form writes category_card_scale, so routine settings saves
+        // can never overwrite the administrator's choice. The value is a plain
+        // integer percentage; no CSS, HTML or JavaScript is ever accepted.
+        $restore = !empty($_POST['restore_default']);
+        $raw = $restore ? '50' : trim((string)($_POST['category_card_scale'] ?? ''));
+        if (preg_match('/^\d{1,3}$/', $raw) !== 1 || (int)$raw < 40 || (int)$raw > 100) {
+            sh_flash('error', 'Category card size must be a whole number between 40 and 100.');
+            sh_redirect('admin/settings.php');
+        }
+        $scale = (int)$raw;
+        sh_setting_save('category_card_scale', (string)$scale);
+        sh_log_line('admin', 'Category display size set to ' . $scale . '% by ' . $admin['email']);
+        sh_flash('success', $restore
+            ? 'Category card size restored to the 50% default.'
+            : 'Category display saved: cards at ' . $scale . '% of the original size.');
+        sh_redirect('admin/settings.php');
+    }
+
     if ($form === 'remove_logo') {
         sh_setting_save('site_logo', '');
         sh_flash('success', 'Logo removed. The text wordmark will be shown instead.');
@@ -123,6 +142,14 @@ $orderPrefixInput = isset($errors['order_number_prefix'])
 
 $adminPage = 'settings';
 $adminTitle = 'General Settings';
+
+// Category Display: the saved scale, and the real preview route (an iframe of
+// the storefront grid, not a mock-up).
+$categoryScale = sh_category_card_scale();
+$categoryPreviewUrl = sh_url('admin/category-display-preview.php') . '?scale=' . $categoryScale;
+$adminScripts = is_array($adminScripts ?? null) ? $adminScripts : [];
+$adminScripts['category_display'] = 'assets/js/category-display.js';
+
 require __DIR__ . '/_layout.php';
 ?>
 <?php if ($errors): ?>
@@ -271,6 +298,65 @@ require __DIR__ . '/_layout.php';
     <button class="sh-btn sh-btn--lg" type="submit"><?= sh_icon('check-circle', 16) ?> Save settings</button>
   </div>
 </form>
+
+<div class="sh-panel sh-catdisplay" id="category-display" style="margin-top:14px"
+     data-category-display
+     data-preview-base="<?= e(sh_url('admin/category-display-preview.php')) ?>">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('grid', 17) ?> Category Display</h2>
+  </div>
+  <div class="sh-panel__body">
+    <p class="sh-panel__note">
+      How large the product-category cards are on the storefront (homepage and category pages).
+      100% is the original size; the default 50% shows roughly twice as many cards per row.
+      Only the card box changes — the category name keeps its normal, readable size.
+    </p>
+
+    <form method="post" novalidate>
+      <?= sh_csrf_field() ?>
+      <input type="hidden" name="form" value="category_display">
+
+      <div class="sh-catdisplay__controls">
+        <div class="sh-field" style="max-width:420px;margin-bottom:0">
+          <label class="sh-field__label" for="cat-scale">Category card size</label>
+          <div style="display:flex;align-items:center;gap:12px">
+            <input class="sh-range" id="cat-scale" type="range" name="category_card_scale"
+                   min="40" max="100" step="5" value="<?= (int)$categoryScale ?>"
+                   data-cat-scale aria-describedby="cat-scale-hint">
+            <output class="sh-catdisplay__value" for="cat-scale" data-cat-scale-value><?= (int)$categoryScale ?>%</output>
+          </div>
+          <span class="sh-field__hint" id="cat-scale-hint">
+            From 40% to 100% in 5% steps. Applies to every category grid on the storefront.
+          </span>
+        </div>
+
+        <div class="sh-catdisplay__previewwrap">
+          <div class="sh-catdisplay__previewbar">
+            <span class="sh-field__label" style="margin:0">Live preview</span>
+            <div class="sh-catdisplay__devices" role="group" aria-label="Preview width">
+              <button class="sh-btn sh-btn--sm sh-btn--ghost is-on" type="button" data-preview-width="100%">Desktop</button>
+              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-preview-width="768px">Tablet</button>
+              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-preview-width="390px">Mobile</button>
+            </div>
+          </div>
+          <div class="sh-catdisplay__frame" data-preview-shell style="max-width:100%">
+            <iframe class="sh-catdisplay__iframe" src="<?= e($categoryPreviewUrl) ?>"
+                    title="Live preview of the storefront category grid" loading="lazy"></iframe>
+          </div>
+          <p class="sh-field__hint" style="margin-top:6px">
+            The preview is the real storefront grid and stylesheet. Nothing is published until you save.
+          </p>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
+        <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save category display</button>
+        <button class="sh-btn sh-btn--ghost" type="submit" name="restore_default" value="1"
+                formnovalidate><?= sh_icon('history', 15) ?> Restore default (50%)</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <?php if ($logo !== ''): ?>
   <form method="post" style="margin-top:10px" data-confirm="Remove the site logo?">

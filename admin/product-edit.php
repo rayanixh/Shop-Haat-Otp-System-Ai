@@ -170,6 +170,36 @@ $chk = static function (string $k, bool $default = false) use ($editing, $errors
 $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
 $brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
 
+/* -------------------------------------------------------------------------
+ * AI — Complete Product draft
+ *
+ * This panel only ever PRE-FILLS the form below. It never saves, never
+ * publishes and never touches price, stock or visibility; those stay exactly as
+ * the administrator set them until the normal Save Product button is pressed.
+ * ---------------------------------------------------------------------- */
+// Only an administrator who could actually save the resulting draft needs the panel.
+$aiCanUse = sh_admin_can('ai.use') && sh_admin_can($editing !== null ? 'products.edit' : 'products.create');
+$aiInstalled = false;
+$aiConfigured = false;
+$aiVision = false;
+$aiProviderName = '';
+if ($aiCanUse) {
+    require_once SH_ROOT . '/ai/AIManager.php';
+    $aiInstalled = sh_ai_installed();
+    if ($aiInstalled) {
+        $aiCfg = sh_ai_config();
+        $aiConfigured = !empty($aiCfg['has_key']);
+        $aiRoute = sh_ai_route('product_full');
+        $aiProviderName = (string)($aiRoute['provider']['name'] ?? '');
+        $aiVision = $aiRoute['provider'] !== null && $aiRoute['model'] !== ''
+            && sh_ai_model_accepts_image((int)$aiRoute['provider']['id'], (string)$aiRoute['model']);
+    }
+}
+if ($aiCanUse) {
+    $adminScripts = is_array($adminScripts ?? null) ? $adminScripts : [];
+    $adminScripts['product_ai'] = 'assets/js/product-ai.js';
+}
+
 $adminPage = 'products';
 $adminTitle = $editing !== null ? 'Edit product' : 'New product';
 require __DIR__ . '/_layout.php';
@@ -188,13 +218,93 @@ require __DIR__ . '/_layout.php';
     <div><strong>Please fix the following:</strong><ul class="sh-alert__list"><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div>
 <?php endif; ?>
 
+<?php if ($aiCanUse): ?>
+  <div class="sh-panel sh-aidraft" data-product-ai
+       data-ai-endpoint="<?= e(sh_url('api/ai.php')) ?>"
+       data-ai-vision="<?= $aiVision ? '1' : '0' ?>">
+    <div class="sh-panel__head">
+      <h2 class="sh-panel__title"><?= sh_icon('cpu', 17) ?> Generate Complete Product with AI</h2>
+      <?php if ($aiConfigured && $aiProviderName !== ''): ?>
+        <span class="sh-badge sh-badge--muted"><?= e($aiProviderName) ?></span>
+      <?php endif; ?>
+    </div>
+    <div class="sh-panel__body">
+      <p class="sh-panel__note">
+        Write the product name (and anything you already know) in the form below, choose the image, then let AI
+        draft the rest. Every value it produces is placed in the form for you to review and edit —
+        <strong>nothing is saved or published until you press “<?= $editing ? 'Save changes' : 'Create product' ?>”</strong>.
+        Price, compare-at price, stock, stock status and visibility are never generated or changed.
+      </p>
+
+      <?php if (!$aiInstalled): ?>
+        <div class="sh-alert sh-alert--warning"><?= sh_icon('alert', 17) ?>
+          <div><strong>AI Auto Work is not installed.</strong>
+            Open <a href="<?= e(sh_url('admin/ai/settings.php')) ?>">AI Settings</a> and run the installer to
+            create its tables. The generator stays disabled until then — nothing is faked.</div></div>
+      <?php elseif (!$aiConfigured): ?>
+        <div class="sh-alert sh-alert--warning"><?= sh_icon('alert', 17) ?>
+          <div><strong>No AI provider is ready.</strong>
+            Add a provider and its API key under
+            <a href="<?= e(sh_url('admin/ai/providers.php')) ?>">AI Providers</a>.
+            The generator stays disabled until then.</div></div>
+      <?php endif; ?>
+
+      <div class="sh-grid3">
+        <div class="sh-field"><label class="sh-field__label" for="ai-model">Model (optional)</label>
+          <input class="sh-input" id="ai-model" maxlength="120" data-ai-known="model" placeholder="e.g. iPhone 15"></div>
+        <div class="sh-field"><label class="sh-field__label" for="ai-size">Size (optional)</label>
+          <input class="sh-input" id="ai-size" maxlength="120" data-ai-known="size" placeholder="e.g. 128 GB / XL"></div>
+        <div class="sh-field"><label class="sh-field__label" for="ai-material">Material (optional)</label>
+          <input class="sh-input" id="ai-material" maxlength="120" data-ai-known="material" placeholder="e.g. cotton"></div>
+      </div>
+      <div class="sh-grid2">
+        <div class="sh-field"><label class="sh-field__label" for="ai-colour">Colour (optional)</label>
+          <input class="sh-input" id="ai-colour" maxlength="120" data-ai-known="colour" placeholder="e.g. midnight black"></div>
+        <div class="sh-field"><label class="sh-field__label" for="ai-notes">Anything else (optional)</label>
+          <input class="sh-input" id="ai-notes" maxlength="600" data-ai-known="notes" placeholder="e.g. comes with a charger"></div>
+      </div>
+      <p class="sh-field__hint" style="margin-top:-4px">
+        Brand and specifications are taken from the fields below, so you do not have to type them twice.
+      </p>
+
+      <div class="sh-aidraft__bar">
+        <button class="sh-btn" type="button" data-ai-draft-run
+                <?= ($aiInstalled && $aiConfigured) ? '' : 'disabled' ?>>
+          <?= sh_icon('cpu', 15) ?> Generate Complete Product with AI
+        </button>
+        <span class="sh-aidraft__status" data-ai-draft-status role="status" aria-live="polite"></span>
+      </div>
+
+      <p class="sh-field__hint" data-ai-vision-note>
+        <?= $aiVision
+            ? 'The chosen product image is sent to your AI provider as a visual reference, because the selected model can read images.'
+            : 'Your configured AI model cannot read images, so the image is <strong>not</strong> analysed — the draft is built from the text you enter only.' ?>
+      </p>
+
+      <div class="sh-aidraft__result" data-ai-draft-result hidden>
+        <div class="sh-aidraft__resulthead">
+          <div>
+            <p class="sh-field__label" style="margin:0">Draft ready for review</p>
+            <p class="sh-field__hint" data-ai-draft-meta style="margin:2px 0 0"></p>
+          </div>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-ai-draft-run-all>
+            <?= sh_icon('refresh', 14) ?> Generate All Fields
+          </button>
+        </div>
+        <ul class="sh-aidraft__list" data-ai-draft-list></ul>
+        <p class="sh-field__hint" data-ai-draft-notes hidden></p>
+      </div>
+    </div>
+  </div>
+<?php endif; ?>
+
   <div class="sh-panel sh-formcard">
     <div class="sh-panel__body">
       <form method="post" enctype="multipart/form-data" novalidate>
         <?= sh_csrf_field() ?>
         <input type="hidden" name="form" value="save">
-        <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
-        <input type="hidden" name="current_image" value="<?= e($val('image')) ?>">
+        <input type="hidden" id="p-id" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
+        <input type="hidden" id="p-current-image" name="current_image" value="<?= e($val('image')) ?>">
 
         <div class="sh-grid2">
           <div class="sh-field"><label class="sh-field__label" for="p-name">Product name <span class="sh-field__req">*</span></label>
@@ -271,6 +381,11 @@ require __DIR__ . '/_layout.php';
         $seoLabel   = 'product';
         $seoBaseUrl = sh_seo_base();
         $seoPath    = 'product.php?slug={slug}';
+        // The preview must show THIS product's picture, not a placeholder. The
+        // helper returns '' when the file is gone, so the preview can say so.
+        $seoImage        = $val('image') !== '' ? sh_seo_product_image(['image' => $val('image')]) : '';
+        $seoImageInput   = 'p-img';
+        $seoImageCurrent = 'p-current-image';
         require __DIR__ . '/_seo-fields.php';
         ?>
         <div class="sh-grid3">

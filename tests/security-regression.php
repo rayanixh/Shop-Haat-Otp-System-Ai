@@ -1467,12 +1467,23 @@ sh_t('the category grid is responsive and keeps its shape', function () {
     if (strpos($css, 'sh-category-card__img--fallback') === false) {
         return 'flat placeholder artwork would be cropped: no contain rule';
     }
-    // 4-6 columns on desktop, 2 on phones.
-    if (preg_match('~\.sh-catgrid \{ display: grid; grid-template-columns: repeat\((\d),~', $css, $m) !== 1) {
-        return 'the desktop column count is not a plain repeat()';
+    // The desktop grid is track-size driven (Settings → Category Display writes
+    // the variable), so more cards fit per row instead of stretching them. The
+    // fallback must be the shipped 50% size: ~110px from the original ~220px.
+    if (preg_match('~\.sh-catgrid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(var\(--sh-cat-min, (\d+)px\), 1fr\)\)~', $css, $m) !== 1) {
+        return 'the category grid is not sized by the --sh-cat-min track variable';
     }
-    $desktop = (int)$m[1];
-    if ($desktop < 4 || $desktop > 6) { return 'the desktop grid has ' . $desktop . ' columns, expected 4-6'; }
+    require_once SH_ROOT . '/includes/catalog.php';
+    if ((int)$m[1] !== (int)sh_category_card_min_width(50)) {
+        return 'the CSS fallback is not the 50% default card width';
+    }
+    if (sh_category_card_min_width(100) !== 220) { return '100% is not the original 220px card width'; }
+    if (sh_category_card_min_width(50) !== 110) { return 'the 50% default is not half the original card width'; }
+    if (sh_category_card_min_width(40) < 88) { return 'the smallest allowed card is too small to read'; }
+    if (!str_contains(sh_category_display_style_tag(50), '--sh-cat-min:110px')) {
+        return 'the display style tag does not emit the real grid variable';
+    }
+    // Phones keep two comfortable columns; the size setting is for larger screens.
     if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-catgrid \{ grid-template-columns: repeat\((\d),~s', $css, $m2) !== 1) {
         return 'the mobile column count is not declared at the 600px breakpoint';
     }
@@ -1483,6 +1494,160 @@ sh_t('the category grid is responsive and keeps its shape', function () {
     }
     if (preg_match('~\.sh-category-card__name \{[^}]*min-height~s', $css) !== 1) {
         return 'category names can make cards uneven';
+    }
+    return true;
+});
+
+sh_t('the category size is a constrained setting with a real preview', function () {
+    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/settings.php'));
+    if (!str_contains($src, "form === 'category_display'")) {
+        return 'the category display form has no server-side handler';
+    }
+    if (preg_match('~preg_match\(\'/\\^\\\\d\{1,3\}\$/\'~', $src) !== 1) {
+        return 'the scale is not validated as a plain integer';
+    }
+    if (!str_contains($src, '(int)$raw < 40 || (int)$raw > 100')) {
+        return 'the scale is not constrained to the documented 40-100 range';
+    }
+    if (preg_match('~<input[^>]*type="range"[^>]*name="category_card_scale"[^>]*min="40"[^>]*max="100"~s', $src) !== 1) {
+        return 'there is no bounded slider for category_card_scale';
+    }
+    if (!str_contains($src, 'restore_default')) { return 'there is no restore-default control'; }
+    if (!str_contains($src, 'admin/category-display-preview.php')) {
+        return 'the live preview does not use the real storefront grid';
+    }
+    // A routine Save Settings must never write this key: only its own form does.
+    if (preg_match('~if \(\$form === \'general\'\).*?if \(\$form === \'category_display\'\)~s', $src, $m) === 1
+        && str_contains($m[0], "sh_setting_save('category_card_scale'")) {
+        return 'the general settings form overwrites the saved category size';
+    }
+    // Only the validated integer is persisted, never the posted string.
+    if (!str_contains($src, "sh_setting_save('category_card_scale', (string)\$scale)")) {
+        return 'the unvalidated posted value reaches the settings table';
+    }
+    return true;
+});
+
+sh_t('the category display preview is the storefront card renderer', function () {
+    $path = SH_ROOT . '/admin/category-display-preview.php';
+    if (!is_file($path)) { return 'the preview page is missing'; }
+    $src = sh_source_without_comments((string)file_get_contents($path));
+    if (!str_contains($src, "sh_require_perm('settings.view')")) { return 'the preview is not permission checked'; }
+    if (!str_contains($src, 'sh_category_cards(')) { return 'the preview does not use the real card helper'; }
+    if (!str_contains($src, "assets/css/app.css")) { return 'the preview does not load the storefront stylesheet'; }
+    if (!str_contains($src, 'sh_category_display_style_tag(')) { return 'the preview does not use the real grid variable'; }
+    if (!str_contains($src, 'noindex,nofollow')) { return 'the preview is indexable'; }
+    return true;
+});
+
+sh_t('the email delivery log has one home, in the System group', function () {
+    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/_layout.php'));
+    if (substr_count($src, "'email-log.php'") !== 1) {
+        return 'the delivery log appears in more than one navigation group';
+    }
+    $entry = strpos($src, "'email-log.php'");
+    $system = strpos($src, "'System' =>");
+    if ($entry === false || $system === false || $entry < $system) {
+        return 'the delivery log is not listed under System';
+    }
+    // Moving the navigation must not break the existing URL, its guards or its
+    // redaction: the page itself is unchanged and still permission checked.
+    if (!is_file(SH_ROOT . '/admin/email-log.php')) { return 'the log page file was moved or removed'; }
+    $page = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/email-log.php'));
+    if (!str_contains($page, "sh_require_perm('integrations.manage')")) {
+        return 'the log page lost its permission check';
+    }
+    if (!str_contains($page, "\$adminPage = 'email_log'")) {
+        return 'the log page does not highlight its System navigation row';
+    }
+    return true;
+});
+
+sh_t('the SEO preview shows the real product image, not a placeholder', function () {
+    $seo = (string)file_get_contents(SH_ROOT . '/admin/_seo-fields.php');
+    foreach (['data-seo-image=', 'data-seo-image-input=', 'data-seo-preview="image"'] as $need) {
+        if (!str_contains($seo, $need)) { return 'the SEO block does not expose ' . $need; }
+    }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
+    if (preg_match('~\$seoImage\s*=\s*\$val\(\'image\'\)~', $edit) !== 1) {
+        return 'the editor does not resolve the saved product image for the preview';
+    }
+    if (str_contains($edit, 'SH_UPLOAD_DIR')) { return 'the editor leaks a filesystem path into the form'; }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (!str_contains($js, 'data-seo-image')) { return 'the preview script ignores the product image'; }
+    if (!str_contains($js, 'createObjectURL')) { return 'a newly chosen image does not update the preview'; }
+    if (preg_match('~^(?!.*blob:).*absoluteUrl~m', $js) === 1 && !str_contains($js, 'blob:')) {
+        return 'blob: preview URLs would be mangled';
+    }
+    if (preg_match('~(localhost|127\.0\.0\.1|file://)~', $js) === 1) {
+        return 'the preview script builds an address the browser cannot reach';
+    }
+    return true;
+});
+
+sh_t('the complete-product draft is server-side and permissioned', function () {
+    $api = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/api/ai.php'));
+    foreach (["case 'product_draft'", "sh_admin_can('ai.use')",
+              "\$needed = \$productId > 0 ? 'products.edit' : 'products.create'", 'sh_admin_can($needed)',
+              'sh_ai_product_draft', 'sh_ai_draft_image_from_upload'] as $need) {
+        if (!str_contains($api, $need)) { return 'api/ai.php is missing ' . $need; }
+    }
+    if (preg_match('~[\'"](sk-[A-Za-z0-9]|api_key[\'"]\s*=>)~', $api) === 1) {
+        return 'the endpoint appears to return credentials';
+    }
+    $mgr = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/ai/AIManager.php'));
+    if (!str_contains($mgr, "'image_used'")) { return 'the manager does not report whether the image was used'; }
+    // An unread image must never be described as analysed.
+    if (!str_contains($mgr, 'cannot read images')) { return 'the prompt can still imply an unread image was seen'; }
+    return true;
+});
+
+sh_t('a generated draft can only carry fields that really exist', function () {
+    require_once SH_ROOT . '/ai/AIManager.php';
+    $d = sh_ai_normalise_product_draft([
+        'title' => '  <b>Cotton Panjabi</b>  ',
+        'short_description' => "Soft cotton panjabi.\n",
+        'description' => '<p>Nice</p><script>alert(1)</script>',
+        'specifications' => "Material: Cotton\n\n<script>x</script>",
+        'category' => 'A Category That Does Not Exist',
+        'brand' => 'Brand That Does Not Exist',
+        'sku' => 'sh-abc 123',
+        'meta_title' => 'Cotton Panjabi',
+        'keywords' => ['panjabi', 'cotton'],
+        'image_alt' => 'A cotton panjabi',
+        'price' => 1200,
+        'compare_price' => 1500,
+        'stock' => 77,
+        'low_stock_threshold' => 3,
+        'status' => 1,
+        'is_featured' => 1,
+    ]);
+    foreach (['price', 'compare_price', 'stock', 'low_stock_threshold', 'status', 'is_featured'] as $forbidden) {
+        if (array_key_exists($forbidden, $d)) { return 'the draft carries the forbidden field ' . $forbidden; }
+    }
+    if ($d['title'] !== 'Cotton Panjabi') { return 'the title kept its markup: ' . $d['title']; }
+    if (str_contains($d['description'], '<script')) { return 'the description kept a script tag'; }
+    if (str_contains($d['specifications'], '<')) { return 'the specifications kept markup'; }
+    if ($d['category_id'] !== null) { return 'a non-existent category was mapped to an id'; }
+    if ($d['brand_id'] !== null) { return 'a non-existent brand was mapped to an id'; }
+    if ($d['sku'] !== 'SH-ABC123') { return 'the SKU was not cleaned to the allowed characters'; }
+    return true;
+});
+
+sh_t('the AI panel never fills price, stock or visibility', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/product-ai.js');
+    foreach (['#p-price', '#p-cmp', '#p-stock', '#p-th', '#p-flash', 'is_featured', 'is_flash_sale', 'name="status"'] as $bad) {
+        if (str_contains($js, $bad)) { return 'the AI client writes ' . $bad; }
+    }
+    if (str_contains($js, 'form.submit') || str_contains($js, "action', 'save'")) {
+        return 'the AI client can submit the product form';
+    }
+    $panel = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
+    $panelAt = strpos($panel, 'data-product-ai');
+    $formAt = strpos($panel, '<form method="post"');
+    if ($panelAt === false) { return 'the AI panel is missing from the product editor'; }
+    if ($formAt !== false && $panelAt > $formAt) {
+        return 'the AI panel sits inside the product form';
     }
     return true;
 });

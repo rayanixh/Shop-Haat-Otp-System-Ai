@@ -93,6 +93,54 @@ function sh_ai_default_templates(): array
                       . "- meta_description max 155 characters.\n- Return ONLY the JSON object."
                       . "{{seo}}{{tone}}{{language}}",
         ],
+        'product_full' => [
+            'label'  => 'Complete product draft',
+            'system' => 'You are an expert e-commerce catalogue editor. Reply with ONE JSON object only — '
+                      . 'no prose, no markdown, no code fences.',
+            'user'   => "Build a reviewable draft for one product listing.\n\n"
+                      . "Product name given by the admin: {{name}}\n"
+                      . "Short description given by the admin: {{short_description}}\n"
+                      . "Known facts (brand, model, size, material, colour, notes): {{known}}\n"
+                      . "Existing categories:\n{{categories}}\n"
+                      . "Existing brands:\n{{brands}}\n"
+                      . "{{image_note}}\n{{focus}}\n\n"
+                      . "Return a JSON object with exactly these keys:\n"
+                      . "{\"title\":\"...\",\"short_description\":\"...\",\"description\":\"<p>...</p>\","
+                      . "\"specifications\":[\"Label: Value\"],\"category\":\"\",\"brand\":\"\",\"sku\":\"\","
+                      . "\"meta_title\":\"...\",\"meta_description\":\"...\",\"focus_keyword\":\"...\","
+                      . "\"related_phrases\":[\"...\"],\"keywords\":[\"...\"],\"image_alt\":\"...\","
+                      . "\"notes\":[\"...\"]}\n\n"
+                      . "Rules:\n"
+                      . "- Use ONLY the facts above and what is clearly visible in the attached image "
+                      . "(when an image is attached). Anything else is unknown.\n"
+                      . "- NEVER invent or guess: price, sale price, cost, stock, availability, SKU uniqueness, "
+                      . "warranty, certifications, manufacturer claims, ingredients, safety information, "
+                      . "measurements or technical specifications.\n"
+                      . "- If a fact is not supplied and not clearly visible, leave it out instead of guessing. "
+                      . "Empty string or empty list is the correct answer for an unknown field.\n"
+                      . "- title: at most 70 characters, plain text, no quotation marks. Keep the product name "
+                      . "recognisable; do not add claims or model numbers that were not given.\n"
+                      . "- short_description: one sentence, at most 160 characters, no markdown.\n"
+                      . "- description: 90-180 words of clean HTML using only <p>, <ul>, <li> and <strong>. "
+                      . "It must not contradict the short description, and must not repeat it word for word.\n"
+                      . "- specifications: only facts supplied above or clearly visible on the product. One "
+                      . "\"Label: Value\" per list item. Empty list when nothing is known.\n"
+                      . "- category: exactly one name from Existing categories, copied character for character. "
+                      . "Empty string if none fits. Never invent a category.\n"
+                      . "- brand: exactly one name from Existing brands, or empty string. Never invent a brand "
+                      . "and never read a brand from a logo that is not clearly legible.\n"
+                      . "- sku: a short code the admin may accept as a suggestion (letters, digits, dashes). "
+                      . "Never claim it is unique.\n"
+                      . "- meta_title: at most 60 characters. meta_description: at most 155 characters. "
+                      . "focus_keyword: 2-5 words. related_phrases: 2-6 phrases. keywords: 4-8 terms. "
+                      . "No keyword stuffing.\n"
+                      . "- image_alt: at most 120 characters describing the product itself, not the file name "
+                      . "or the camera. Empty string when no image is attached.\n"
+                      . "- notes: up to 4 short sentences about anything uncertain that the admin should check.\n"
+                      . "- Never output a price, a currency symbol, a stock count or a delivery promise.\n"
+                      . "{{seo}}{{tone}}{{language}}",
+        ],
+
         'image_prompt' => [
             'label'  => 'Product image prompt',
             'system' => 'You reply with the image prompt text only — one paragraph, no quotes.',

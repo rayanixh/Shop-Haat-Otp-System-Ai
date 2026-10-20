@@ -63,6 +63,7 @@ function sh_ai_tasks(): array
         'product_short'       => ['label' => 'Short description',    'group' => 'Products', 'kind' => 'text'],
         'product_tags'        => ['label' => 'Product tags',         'group' => 'Products', 'kind' => 'text'],
         'product_category'    => ['label' => 'Category suggestion',  'group' => 'Products', 'kind' => 'text'],
+        'product_full'        => ['label' => 'Complete product draft', 'group' => 'Products', 'kind' => 'text'],
         'product_seo'         => ['label' => 'Product SEO',          'group' => 'SEO',      'kind' => 'text'],
         'category_content'    => ['label' => 'Category content',     'group' => 'SEO',      'kind' => 'text'],
         'blog_post'           => ['label' => 'Blog post',            'group' => 'Blog',     'kind' => 'text'],
@@ -279,6 +280,31 @@ function sh_ai_model_supports(int $providerId, string $modelId, string $kind): b
     return $kind === 'image' ? !empty($m['output_image']) : !empty($m['output_text']);
 }
 
+/**
+ * Can this exact provider/model READ an image as part of a text request?
+ *
+ * This is different from sh_ai_model_supports(...,'image'), which asks whether
+ * the model can GENERATE images. Vision is reported by the provider's model
+ * catalogue (OpenRouter modalities, our capability guesses for OpenAI-compatible
+ * endpoints, Claude and Gemini), and an unlisted/manual model falls back to the
+ * driver's guess. When this returns false the caller must not send an image and
+ * must not claim the image was analysed.
+ */
+function sh_ai_model_accepts_image(int $providerId, string $modelId): bool
+{
+    $modelId = trim($modelId);
+    if ($providerId <= 0 || $modelId === '') { return false; }
+    $m = sh_ai_model_row($providerId, $modelId);
+    if ($m !== null) {
+        return (int)$m['status'] === 1 && !empty($m['input_image']);
+    }
+    $row = sh_ai_provider_row($providerId);
+    $adapter = $row !== null ? sh_ai_adapter($row) : null;
+    if ($adapter === null) { return false; }
+    $caps = $adapter->guessCapabilities($modelId);
+    return !empty($caps['input_image']);
+}
+
 /** Providers that have at least one enabled image-capable model — for the Image AI picker. */
 function sh_ai_image_capable_targets(): array
 {
@@ -411,16 +437,32 @@ function sh_ai_dispatch(string $op, string $task, array $args, array $meta = [])
     $options = ($meta['options'] ?? []) + ['temperature' => $cfg['temperature'], 'max_tokens' => $cfg['max_tokens']];
     $last = ['ok' => false, 'error' => 'The AI request failed.'];
 
+    // Optional reference image for models that can READ images. The caller has
+    // already validated it and base64-encoded the bytes; it is never logged and
+    // it is only attached when the routed model really advertises image input.
+    $imageIn = null;
+    if (isset($meta['image']) && is_array($meta['image']) && (string)($meta['image']['data'] ?? '') !== '') {
+        $imageIn = ['data' => (string)$meta['image']['data'], 'mime' => (string)($meta['image']['mime'] ?? '')];
+    }
+
     foreach ($attempts as $i => $at) {
         $adapter = sh_ai_adapter($at['provider']);
         if ($adapter === null) { $last = ['ok' => false, 'error' => 'Unknown provider driver.']; continue; }
         $options['model'] = $at['model'];
 
+        // Per-attempt, so a text-only primary can fall back to a vision model
+        // (or the other way round) without ever sending an image to a model
+        // that would reject it.
+        $attemptOptions = $options;
+        $imageSent = $imageIn !== null && $op !== 'image'
+            && sh_ai_model_accepts_image((int)$at['provider']['id'], $at['model']);
+        if ($imageSent) { $attemptOptions['image'] = $imageIn; }
+
         $started = microtime(true);
         $res = match ($op) {
-            'structured' => $adapter->generateStructuredContent((string)$args['system'], (string)$args['user'], $options),
-            'image'      => $adapter->generateImage((string)$args['prompt'], $options),
-            default      => $adapter->generateText((string)$args['system'], (string)$args['user'], $options),
+            'structured' => $adapter->generateStructuredContent((string)$args['system'], (string)$args['user'], $attemptOptions),
+            'image'      => $adapter->generateImage((string)$args['prompt'], $attemptOptions),
+            default      => $adapter->generateText((string)$args['system'], (string)$args['user'], $attemptOptions),
         };
         $ms = (int)round((microtime(true) - $started) * 1000);
 
@@ -446,6 +488,10 @@ function sh_ai_dispatch(string $op, string $task, array $args, array $meta = [])
             $res['provider_id'] = (int)$at['provider']['id'];
             $res['model'] = (string)($res['model'] ?? $at['model']);
             $res['fallback_used'] = $at['fallback'];
+            // The truth about the image, so no caller can claim an image was
+            // analysed when the model never received one.
+            $res['image_used'] = $imageSent;
+            $res['image_note'] = $imageIn === null ? 'none' : ($imageSent ? 'sent' : 'unsupported');
             return $res;
         }
         $last = $res;

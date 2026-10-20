@@ -31,11 +31,21 @@ class AnthropicProvider extends AbstractAIProvider
         if (!$this->hasKey()) { return $this->noKey(); }
         $model = $this->model($options);
         if ($model === '') { return $this->noModel(); }
+        // Content blocks: the reference photo (when the routed model reads
+        // images) plus the instruction text. Claude takes base64 image blocks.
+        $content = [['type' => 'text', 'text' => $user]];
+        $image = $this->imageOption($options);
+        if ($image !== null) {
+            array_unshift($content, [
+                'type' => 'image',
+                'source' => ['type' => 'base64', 'media_type' => $image['mime'], 'data' => $image['data']],
+            ]);
+        }
         $payload = [
             'model'       => $model,
             'max_tokens'  => max(1, (int)($options['max_tokens'] ?? 1200)),
             'temperature' => min(1.0, max(0.0, (float)($options['temperature'] ?? 0.7))),
-            'messages'    => [['role' => 'user', 'content' => $user]],
+            'messages'    => [['role' => 'user', 'content' => $content]],
         ];
         if ($system !== '') { $payload['system'] = $system; }
         if (!empty($options['json'])) {

@@ -84,6 +84,29 @@ abstract class AbstractAIProvider implements AIProviderInterface
         return $m;
     }
 
+    /**
+     * The optional reference image carried in $options['image'].
+     *
+     * Only the caller (sh_ai_dispatch) decides WHETHER an image may be sent; it
+     * has already checked the routed model's advertised input capabilities. This
+     * helper is the last line of defence: base64 only, image MIME only, no data:
+     * URLs, no file paths and no URLs the browser could fetch on our behalf.
+     *
+     * @return array{data:string,mime:string}|null
+     */
+    protected function imageOption(array $options): ?array
+    {
+        $img = $options['image'] ?? null;
+        if (!is_array($img)) { return null; }
+        $data = preg_replace('/\s+/', '', (string)($img['data'] ?? '')) ?? '';
+        $mime = strtolower(trim((string)($img['mime'] ?? '')));
+        if ($data === '' || preg_match('~^image/(jpeg|png|webp)$~', $mime) !== 1) { return null; }
+        // ~4.5 MB of base64 is already far beyond what a product photo needs.
+        if (strlen($data) > 6_000_000) { return null; }
+        if (base64_decode($data, true) === false) { return null; }
+        return ['data' => $data, 'mime' => $mime];
+    }
+
     protected function noKey(): array
     {
         return ['ok' => false, 'error' => 'No API key is saved for ' . $this->name() . '.', 'retryable' => false];

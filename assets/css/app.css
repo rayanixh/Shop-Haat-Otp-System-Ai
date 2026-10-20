@@ -297,8 +297,15 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 /* 7. CATEGORIES ----------------------------------------------------------- */
 /* Product-category grid: a real photo on top, the name underneath. The image
    frame is a fixed 4:3 so every card is the same height and the grid never
-   shifts while images load; the count is deliberately not shown any more. */
-.sh-catgrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+   shifts while images load; the count is deliberately not shown any more.
+
+   The track has a minimum width (--sh-cat-min) instead of a fixed column
+   count, so the browser fits as many whole cards per row as the container
+   allows. Settings → Category Display writes that variable; the fallback below
+   is the shipped 50% default, so a fresh install is already half-size even
+   before the setting is saved. Type sizes are deliberately NOT scaled with it:
+   the card gets smaller, the label stays readable. */
+.sh-catgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--sh-cat-min, 110px), 1fr)); gap: 12px; }
 .sh-category-card {
   display: flex; flex-direction: column; min-width: 0;
   background: var(--sh-card); border: 1px solid var(--sh-line); border-radius: var(--sh-radius);
@@ -1319,7 +1326,6 @@ body.sh-modal-open { overflow: hidden; }
 /* 21. RESPONSIVE ---------------------------------------------------------- */
 @media (max-width: 1200px) {
   .sh-promo { grid-template-columns: 200px 1fr 236px; }
-  .sh-catgrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .sh-product-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .sh-product-grid--5 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
@@ -1396,7 +1402,6 @@ body.sh-modal-open { overflow: hidden; }
   .sh-footer { padding-bottom: 56px; }
 }
 @media (max-width: 720px) {
-  .sh-catgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-product-grid, .sh-product-grid--5, .sh-product-grid--4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -2739,4 +2744,46 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 
 @media (max-width: 480px) {
   .sh-summary-bar { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 21c. CATEGORY DISPLAY SETTING ------------------------------------------- */
+/* The admin control writes ONE variable (--sh-cat-min). Everything below is
+   chrome for the control and its live preview; none of it changes the grid. */
+.sh-catdisplay__controls { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.sh-catdisplay__value { font-size: 14px; font-weight: 800; color: var(--sh-brand); min-width: 46px; text-align: right;
+  font-variant-numeric: tabular-nums; }
+.sh-range { width: 100%; max-width: 260px; accent-color: var(--sh-brand); height: 26px; cursor: pointer; }
+.sh-catdisplay__previewwrap { min-width: 0; }
+.sh-catdisplay__previewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 7px; }
+.sh-catdisplay__devices { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.sh-catdisplay__devices .is-on { background: var(--sh-brand-soft); color: var(--sh-brand); border-color: var(--sh-brand-soft); font-weight: 700; }
+.sh-catdisplay__frame { border: 1px solid var(--sh-line); border-radius: 9px; overflow: hidden; background: #fff; margin-left: auto; }
+.sh-catdisplay__iframe { display: block; width: 100%; height: 360px; border: 0; background: var(--sh-bg-2); }
+@media (max-width: 900px) {
+  .sh-catdisplay__controls { grid-template-columns: minmax(0, 1fr); }
+  .sh-catdisplay__frame { margin-left: 0; }
+  .sh-catdisplay__iframe { height: 300px; }
+}
+
+/* 21d. AI COMPLETE PRODUCT PANEL ------------------------------------------ */
+.sh-aidraft__bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 8px; }
+.sh-aidraft__status { font-size: 12.5px; color: var(--sh-muted); min-width: 0; }
+.sh-aidraft__status--busy { color: var(--sh-brand); font-weight: 600; }
+.sh-aidraft__status--ok { color: var(--sh-ok); font-weight: 600; }
+.sh-aidraft__status--error { color: var(--sh-bad); font-weight: 600; }
+.sh-aidraft .sh-btn.is-busy { opacity: .75; cursor: progress; }
+.sh-aidraft__result { margin-top: 12px; border: 1px solid var(--sh-line); border-radius: 9px; background: var(--sh-bg-2); padding: 12px 14px; }
+.sh-aidraft__resulthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.sh-aidraft__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sh-aidraft__row { display: grid; grid-template-columns: 170px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 8px 0; border-top: 1px solid var(--sh-line); font-size: 12.5px; }
+.sh-aidraft__row:first-child { border-top: 0; }
+.sh-aidraft__row--empty .sh-aidraft__value { color: var(--sh-muted); font-style: italic; }
+.sh-aidraft__name { font-weight: 700; color: var(--sh-heading); }
+.sh-aidraft__value { min-width: 0; overflow-wrap: anywhere; color: var(--sh-ink-2); line-height: 1.4; }
+.sh-aidraft__actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 860px) {
+  .sh-aidraft__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .sh-aidraft__name { grid-column: 1 / -1; }
+  .sh-aidraft__value { grid-column: 1; }
 }

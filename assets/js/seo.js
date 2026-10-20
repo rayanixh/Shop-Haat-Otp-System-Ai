@@ -15,11 +15,12 @@
   var SH_BASE = typeof window.SH_BASE === 'string' ? window.SH_BASE : '/';
 
   /** Absolute URL for a value the owner typed: a full URL is kept, a path is
-   *  resolved against the site root. */
+   *  resolved against the site root. A browser-generated blob URL (a file the
+   *  admin just picked, not uploaded yet) is already usable as-is. */
   function absoluteUrl(value) {
     var v = (value || '').trim();
     if (v === '') { return ''; }
-    if (/^https?:\/\//i.test(v)) { return v; }
+    if (/^(https?:|blob:)/i.test(v)) { return v; }
     if (v.charAt(0) === '/') { return SH_BASE.replace(/\/+$/, '') + v; }
     return SH_BASE + v.replace(/^\.?\//, '');
   }
@@ -49,6 +50,15 @@
     var imageInput = panel.querySelector('[data-seo-field="image"]');
     var noindexInput = panel.querySelector('[data-seo-field="noindex"]');
     if (!titleInput && !descInput) { return; }
+
+    // The entity's own picture (the product image), and the file input that can
+    // replace it before the form is saved. Both are optional; without them the
+    // preview simply has no fallback image, exactly as before.
+    var entityImage = panel.getAttribute('data-seo-image') || '';
+    var siteImage = panel.getAttribute('data-seo-default-image') || '';
+    var entityFile = document.getElementById(panel.getAttribute('data-seo-image-input') || '');
+    var entityCurrent = document.getElementById(panel.getAttribute('data-seo-image-current') || '');
+    var pickedObjectUrl = '';
 
     var brand = (panel.getAttribute('data-seo-brand') || '').trim();
     var suffix = panel.getAttribute('data-seo-suffix') || (brand ? ' | ' + brand : '');
@@ -118,9 +128,15 @@
         setText(preview.host, hostSource.replace(/^https?:\/\//i, '').split('/')[0]);
       }
 
-      // Social image, with a plain-text fallback when there is none.
+      // Social image, with a plain-text fallback when there is none. Precedence
+      // mirrors the server: a typed sharing image, then the file the admin has
+      // just picked (not uploaded yet), then the entity's saved image.
       if (preview.image) {
-        var src = absoluteUrl(imageInput ? imageInput.value : '');
+        var typedImage = imageInput ? imageInput.value : '';
+        var savedImage = entityImage;
+        if (entityCurrent && entityCurrent.value === '') { savedImage = ''; }
+        var fallbackImage = pickedObjectUrl !== '' ? pickedObjectUrl : (savedImage !== '' ? savedImage : siteImage);
+        var src = absoluteUrl(typedImage !== '' ? typedImage : fallbackImage);
         if (src !== '') {
           if (preview.image.getAttribute('src') !== src) { preview.image.setAttribute('src', src); }
           preview.image.style.display = 'block';
@@ -181,6 +197,22 @@
       el.addEventListener('input', render);
       el.addEventListener('change', render);
     });
+
+    // Choosing a replacement product image updates the preview immediately.
+    // The file is not uploaded yet, so a local object URL is used — it points at
+    // the browser's own copy, never at a server path.
+    if (entityFile) {
+      entityFile.addEventListener('change', function () {
+        var file = entityFile.files && entityFile.files[0];
+        if (pickedObjectUrl !== '' && window.URL && window.URL.revokeObjectURL) {
+          window.URL.revokeObjectURL(pickedObjectUrl);
+        }
+        pickedObjectUrl = file && window.URL && window.URL.createObjectURL
+          ? window.URL.createObjectURL(file)
+          : '';
+        render();
+      });
+    }
     var focusField = panel.querySelector('[data-seo-field="focus"]');
     if (focusField) { focusField.addEventListener('input', render); }
     if (noindexInput) { noindexInput.addEventListener('change', render); }

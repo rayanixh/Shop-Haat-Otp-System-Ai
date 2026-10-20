@@ -56,11 +56,22 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         return ['ok' => true, 'json' => $j];
     }
 
-    protected function messages(string $system, string $user): array
+    protected function messages(string $system, string $user, array $options = []): array
     {
+        // A vision-capable model receives the product photo as a content part on
+        // the same user message. Text-only models get the plain string, so this
+        // branch is never reached for them (sh_ai_dispatch checks first).
+        $image = $this->imageOption($options);
+        $userContent = $user;
+        if ($image !== null) {
+            $userContent = [
+                ['type' => 'text', 'text' => $user],
+                ['type' => 'image_url', 'image_url' => ['url' => 'data:' . $image['mime'] . ';base64,' . $image['data']]],
+            ];
+        }
         return array_values(array_filter([
             $system !== '' ? ['role' => 'system', 'content' => $system] : null,
-            ['role' => 'user', 'content' => $user],
+            ['role' => 'user', 'content' => $userContent],
         ]));
     }
 
@@ -78,7 +89,7 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         if ($model === '') { return $this->noModel(); }
         $payload = [
             'model'       => $model,
-            'messages'    => $this->messages($system, $user),
+            'messages'    => $this->messages($system, $user, $options),
             'temperature' => (float)($options['temperature'] ?? 0.7),
             'max_tokens'  => (int)($options['max_tokens'] ?? 1200),
         ];

@@ -19,6 +19,7 @@ try { sh_db(); } catch (Throwable $e) {
 }
 
 require_once SH_ROOT . '/includes/admin-auth.php';
+require_once SH_ROOT . '/includes/admin-perms.php';
 require_once SH_ROOT . '/ai/AIManager.php';
 
 sh_session_start();
@@ -107,6 +108,80 @@ try {
                 $payload['auto_saved'] = !empty($applied['ok']);
             }
             sh_json($payload);
+        }
+
+        /* ---------- Complete Product draft (nothing is saved) ------------- */
+        case 'product_draft': {
+            // Writing the product may happen later through the normal Save
+            // Product form, so the matching product permission is required here.
+            if (!sh_admin_can('ai.use')) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to use AI Auto Work.'], 403);
+            }
+            $productId = sh_int($_POST['product_id'] ?? 0);
+            // A new product needs create rights; an existing one needs edit rights.
+            $needed = $productId > 0 ? 'products.edit' : 'products.create';
+            if (!sh_admin_can($needed)) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to ' . ($productId > 0 ? 'edit this product.' : 'create products.')], 403);
+            }
+            if (!sh_ai_throttle($adminId, 20)) {
+                sh_json(['success' => false, 'error' => 'Too many AI requests in the last minute. Please wait a moment.'], 429);
+            }
+
+            $name = mb_substr(trim(sh_post('name')), 0, 190);
+            if ($name === '') {
+                sh_json(['success' => false, 'error' => 'Enter the product name first.'], 400);
+            }
+
+            // Only fields the panel really offers, each a bounded string.
+            $field = sh_post('field');
+            $allowedFields = ['', 'title', 'short', 'description', 'specifications',
+                              'category', 'brand', 'sku', 'seo', 'image_alt'];
+            if (!in_array($field, $allowedFields, true)) {
+                sh_json(['success' => false, 'error' => 'Unknown field to regenerate.'], 400);
+            }
+
+            $knownIn = json_decode((string)($_POST['known'] ?? ''), true);
+            $known = [];
+            if (is_array($knownIn)) {
+                foreach (['brand', 'model', 'size', 'material', 'colour', 'dimensions', 'notes', 'specs'] as $k) {
+                    if (!isset($knownIn[$k]) || !is_scalar($knownIn[$k])) { continue; }
+                    $known[$k] = mb_substr(trim((string)$knownIn[$k]), 0, $k === 'specs' ? 2000 : 600);
+                }
+            }
+
+            // The reference image: the file the admin has just selected (not
+            // uploaded yet), else the product's saved image on the edit screen.
+            $image = null;
+            if (!empty($_FILES['image']['name'])) {
+                $up = sh_ai_draft_image_from_upload($_FILES['image']);
+                if (empty($up['ok'])) {
+                    sh_json(['success' => false, 'error' => (string)($up['error'] ?? 'The image could not be read.')], 400);
+                }
+                $image = $up['image'];
+            }
+
+            $res = sh_ai_product_draft([
+                'name'              => $name,
+                'short_description' => mb_substr(trim(sh_post('short_description')), 0, 300),
+                'known'             => $known,
+                'field'             => $field,
+                'product_id'        => $productId,
+                'image'             => $image,
+            ], $adminId);
+
+            if (empty($res['ok'])) {
+                sh_json(['success' => false, 'error' => (string)$res['error']]);
+            }
+
+            sh_json([
+                'success'        => true,
+                'task'           => 'product_full',
+                'field'          => $field,
+                'data'           => $res['data'],
+                'via'            => $res['via'] ?? null,
+                'image_used'     => !empty($res['image_used']),
+                'image_supplied' => !empty($res['image_supplied']),
+            ]);
         }
 
         /* ---------- persist an approved result ---------------------------- */

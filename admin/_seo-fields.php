@@ -14,6 +14,11 @@
  *   $seoBrand   string  brand name used in the generated preview title
  *   $seoBaseUrl string  canonical base for the preview URL
  *   $seoPath    string  the public path pattern, e.g. product.php?slug=…
+ *
+ * Optional (the entity's own picture — the same one the storefront would use):
+ *   $seoImage        string  absolute URL of the saved entity image
+ *   $seoImageInput   string  id of the file input that can replace it
+ *   $seoImageCurrent string  id of the hidden input holding the saved filename
  */
 
 declare(strict_types=1);
@@ -21,6 +26,11 @@ declare(strict_types=1);
 $seoPrefix  = $seoPrefix ?? 'seo';
 $seoRow     = is_array($seoRow ?? null) ? $seoRow : [];
 $seoLabel   = $seoLabel ?? 'page';
+// The picture the page itself would publish. An empty value means the entity
+// has no image, so the preview must say so instead of showing nothing.
+$seoImage        = trim((string)($seoImage ?? ''));
+$seoImageInput   = trim((string)($seoImageInput ?? ''));
+$seoImageCurrent = trim((string)($seoImageCurrent ?? ''));
 $seoBrand   = trim((string)($seoBrand ?? ''));
 if ($seoBrand === '') { $seoBrand = (string)sh_setting('site_name', 'ShopHaat'); }
 $seoBaseUrl = rtrim($seoBaseUrl ?? '', '/');
@@ -56,9 +66,25 @@ $autoDesc  = $autoDesc !== '' ? sh_seo_plain($autoDesc) : ('Shop ' . $seoName . 
 $autoCanon = ($seoBaseUrl !== '' && $seoPath !== '')
     ? $seoBaseUrl . '/' . str_replace('{slug}', rawurlencode((string)($seoRow['slug'] ?? '')), $seoPath)
     : '';
+
+// The preview shows the image this page would really publish: an explicit
+// sharing image first, then the product's own picture. Both are absolute public
+// URLs — never a server path and never a data: URI.
+$seoPreviewImage = $seoOgImage !== '' ? sh_seo_image_url($seoOgImage) : '';
+if ($seoPreviewImage === '') { $seoPreviewImage = $seoImage; }
+$seoPreviewImage = sh_seo_image_url($seoPreviewImage);
+// Last resort is the site-wide default, exactly like sh_seo_meta(). The preview
+// is honest about which one it is showing.
+$seoDefaultImage = sh_seo_image_url(sh_seo_get('seo_default_image'));
+if ($seoDefaultImage === '') { $seoDefaultImage = sh_seo_image_url((string)sh_setting('site_logo', '')); }
+if ($seoPreviewImage === '') { $seoPreviewImage = $seoDefaultImage; }
 ?>
 <div class="sh-panel" id="<?= e($seoPrefix) ?>-panel" data-seo-block="1"
-     data-seo-brand="<?= e($seoBrand) ?>" data-seo-suffix="<?= e($seoSuffix) ?>">
+     data-seo-brand="<?= e($seoBrand) ?>" data-seo-suffix="<?= e($seoSuffix) ?>"
+     data-seo-image="<?= e($seoImage) ?>"
+     data-seo-image-input="<?= e($seoImageInput) ?>"
+     data-seo-image-current="<?= e($seoImageCurrent) ?>"
+     data-seo-default-image="<?= e($seoDefaultImage) ?>">
   <div class="sh-panel__head">
     <h2 class="sh-panel__title"><?= sh_icon('search', 17) ?> Search engine listing</h2>
   </div>
@@ -138,6 +164,8 @@ $autoCanon = ($seoBaseUrl !== '' && $seoPath !== '')
              placeholder="uploads/… or https://… — empty uses the site default">
       <span class="sh-field__hint">
         Used when this page is shared on Facebook, WhatsApp, Messenger or X. Around 1200×630 looks best.
+        Leave empty to use this <?= e($seoLabel) ?>'s own image<?= $seoLabel === 'product' ? ' (the product image above)' : '' ?>,
+        then the site's default image.
       </span>
     </div>
 
@@ -176,8 +204,9 @@ $autoCanon = ($seoBaseUrl !== '' && $seoPath !== '')
 
       <div style="display:flex;gap:12px;align-items:flex-start;margin-top:12px;border:1px solid var(--sh-line);border-radius:9px;padding:12px;background:#fff;max-width:620px">
         <div style="width:96px;height:96px;flex:none;border-radius:8px;background:var(--sh-brand-soft);display:grid;place-items:center;overflow:hidden">
-          <img data-seo-preview="image" alt="" style="width:100%;height:100%;object-fit:cover;display:none">
-          <span data-seo-preview="image-fallback" style="font-size:11px;color:var(--sh-muted);text-align:center">No image</span>
+          <img data-seo-preview="image" alt=""<?= $seoPreviewImage !== '' ? ' src="' . e($seoPreviewImage) . '"' : '' ?>
+               style="width:100%;height:100%;object-fit:cover;display:<?= $seoPreviewImage !== '' ? 'block' : 'none' ?>">
+          <span data-seo-preview="image-fallback" style="font-size:11px;color:var(--sh-muted);text-align:center;<?= $seoPreviewImage !== '' ? 'display:none' : '' ?>">No image</span>
         </div>
         <div style="min-width:0">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--sh-muted)" data-seo-preview="host">

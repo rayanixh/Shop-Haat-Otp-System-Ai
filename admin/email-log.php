@@ -129,7 +129,7 @@ function sh_email_dns_state(string $domain): array
 
 $dns = sh_email_dns_state($sendingDomain);
 
-$adminPage = 'email-log';
+$adminPage = 'email_log';   // matches the System navigation row so it highlights
 $adminTitle = 'Email Delivery Log';
 require __DIR__ . '/_layout.php';
 ?>

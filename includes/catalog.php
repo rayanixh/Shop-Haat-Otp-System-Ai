@@ -44,6 +44,53 @@ function sh_category_thumb(?string $file): string
 }
 
 /**
+ * How large category cards are drawn, as a percentage of the original size.
+ *
+ * 100% reproduces the original five-column desktop grid (a card roughly 220px
+ * wide); the default 50% is therefore a card roughly half that width. Only the
+ * card box scales — the name keeps its own readable type size.
+ *
+ * Stored in the existing settings table as `category_card_scale`. Values that
+ * are missing or out of range fall back to the 50% default rather than failing
+ * the page: a bad row must never break the storefront.
+ */
+function sh_category_card_scale(): int
+{
+    static $scale = null;
+    if ($scale !== null) { return $scale; }
+    $raw = trim((string)sh_setting('category_card_scale', '50'));
+    $v = preg_match('/^\d{1,3}$/', $raw) === 1 ? (int)$raw : 50;
+    if ($v < 40 || $v > 100) { $v = 50; }
+    return $scale = $v;
+}
+
+/**
+ * Minimum card width in pixels for the current scale.
+ *
+ * The original card was ~220px wide at the five-column desktop layout, so this
+ * is that width scaled down. It is the grid's minimum track size: the browser
+ * fits as many whole cards per row as it can, which is what makes a smaller
+ * setting show more categories instead of stretching each one.
+ */
+function sh_category_card_min_width(?int $scale = null): int
+{
+    $scale = $scale ?? sh_category_card_scale();
+    if ($scale < 40 || $scale > 100) { $scale = 50; }
+    return max(88, min(220, (int)round(220 * $scale / 100)));
+}
+
+/**
+ * The one declaration that drives the category grid size.
+ *
+ * Printed next to the theme block on the storefront and in the admin preview,
+ * so both use the same real CSS variable and cannot drift apart.
+ */
+function sh_category_display_style_tag(?int $scale = null): string
+{
+    return '<style id="sh-category-display">:root{--sh-cat-min:' . sh_category_card_min_width($scale) . 'px}</style>';
+}
+
+/**
  * Render one product-category card.
  *
  * Used everywhere a category card appears (the homepage showcase and the
