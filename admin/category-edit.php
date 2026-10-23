@@ -42,55 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
 
-    if ($form === 'crop') {
-        $id = sh_int($_POST['id'] ?? 0);
-        $editingRow = $id > 0 ? sh_one('SELECT * FROM categories WHERE id = ? LIMIT 1', [$id]) : null;
-        if ($id <= 0 || $editingRow === null) {
-            sh_json(['ok' => false, 'error' => 'Category not found.'], 404);
-        }
-
-        $cropRaw = trim((string)sh_post('crop_data'));
-        $cropData = $cropRaw !== '' ? json_decode($cropRaw, true) : null;
-        $dataUrl = trim((string)sh_post('cropped_image_data'));
-
-        if (!is_array($cropData) || empty($cropData['width']) || empty($cropData['height'])) {
-            sh_json(['ok' => false, 'error' => 'Invalid crop coordinates.'], 400);
-        }
-
-        $sourceFile = !empty($editingRow['image_orig']) ? (string)$editingRow['image_orig'] : (string)($editingRow['image'] ?? '');
-        if ($sourceFile === '') {
-            sh_json(['ok' => false, 'error' => 'No image to crop.'], 400);
-        }
-
-        $croppedName = sh_image_crop_from_data($sourceFile, $cropData, $dataUrl);
-        if ($croppedName === null) {
-            sh_json(['ok' => false, 'error' => 'Failed to crop image.'], 500);
-        }
-
-        $oldImage = (string)($editingRow['image'] ?? '');
-        sh_update('categories', [
-            'image'      => $croppedName,
-            'image_orig' => $sourceFile,
-            'image_crop' => $cropRaw,
-        ], 'id = ?', [$id]);
-
-        if ($oldImage !== '' && $oldImage !== $croppedName && $oldImage !== $sourceFile) {
-            sh_category_delete_file($oldImage);
-        }
-
-        sh_audit('category_crop_updated', 'category', $id, (string)$editingRow['name'],
-            ['image' => $oldImage], ['image' => $croppedName, 'crop' => $cropData]);
-
-        sh_json([
-            'ok'        => true,
-            'image'     => $croppedName,
-            'url'       => sh_category_image($croppedName),
-            'orig_url'  => sh_category_orig_image($sourceFile, $croppedName),
-            'crop_data' => $cropRaw,
-            'message'   => 'Category image crop saved successfully.',
-        ]);
-    }
-
     if ($form === 'delete') {
         $id = sh_int($_POST['id'] ?? 0);
         $count = (int)sh_val('SELECT COUNT(*) FROM products WHERE category_id = ?', [$id], 0);
@@ -172,12 +123,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'image_orig' => $imgResult['orig_file'] ?? ($editingRow['image_orig'] ?? $imgResult['file']),
                 'image_crop' => $imgResult['crop_data'] ?? ($editingRow['image_crop'] ?? null),
                 'description' => sh_post('description') ?: null,
+                // Card size: only one of the three known tokens is ever stored.
+                // sh_category_card_size() maps anything else to "medium", so a
+                // tampered POST cannot write a class name, CSS or markup.
+                'card_size' => sh_category_card_size($_POST['card_size'] ?? 'medium'),
                 'sort_order' => sh_int($_POST['sort_order'] ?? 0),
                 'status' => !empty($_POST['status']) ? 1 : 0,
                 // SEO columns. Each value is validated rather than stored raw:
                 // URLs must be http(s) or a site path, and the flag is a 0/1.
-                'meta_title'           => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
-                'meta_description'     => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+                // SEO copy has no hard character limit; the columns are TEXT.
+                'meta_title'           => trim(sh_post('meta_title')) ?: null,
+                'meta_description'     => trim(sh_post('meta_description')) ?: null,
                 'meta_keywords'        => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
                 'seo_focus_keyword'    => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
                 'seo_related_phrases'  => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
@@ -204,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                     $diff = [];
-                    foreach (['name', 'slug', 'parent_id', 'status', 'sort_order'] as $k) {
+                    foreach (['name', 'slug', 'parent_id', 'status', 'sort_order', 'card_size'] as $k) {
                         if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) {
                             $diff[$k] = [$before[$k], $data[$k]];
                         }
@@ -247,6 +203,10 @@ $val = static function (string $k, $fb = '') use ($editing, $errors) {
 };
 $chkStatus = $errors ? !empty($_POST['status']) : (int)($editing['status'] ?? 1) === 1;
 $curImage  = sh_category_image($val('image'));
+// The saved size wins; a validation failure keeps what was just posted.
+$cardSize  = sh_category_card_size($errors ? ($_POST['card_size'] ?? 'medium') : ($editing['card_size'] ?? 'medium'));
+$sizePhoto = $curImage !== '' ? $curImage : sh_category_placeholder_image();
+$sizeName  = trim((string)$val('name')) !== '' ? trim((string)$val('name')) : 'Example category';
 $storedImage = trim((string)$val('image'));
 $missingImage = $curImage === '' && $storedImage !== '';
 $curOrigImage = sh_category_orig_image($editing['image_orig'] ?? null, $editing['image'] ?? null);
@@ -258,7 +218,7 @@ $productCount = $isEdit ? (int)sh_val('SELECT COUNT(*) FROM products WHERE categ
 
 $adminPage = 'categories';
 $adminTitle = $isEdit ? 'Edit category' : 'New category';
-$adminScripts = ['assets/js/category-cropper.js'];
+$adminScripts = ['assets/js/category-cropper.js', 'assets/js/category-size.js'];
 require __DIR__ . '/_layout.php';
 ?>
 
@@ -289,7 +249,7 @@ require __DIR__ . '/_layout.php';
   </div>
 <?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" novalidate id="sh-cat-form">
+<form method="post" enctype="multipart/form-data" novalidate id="sh-cat-form" data-dirty-guard>
   <?= sh_csrf_field() ?>
   <input type="hidden" name="form" value="save">
   <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
@@ -372,6 +332,33 @@ require __DIR__ . '/_layout.php';
       </div>
 
       <div class="sh-formsec">
+        <h3 class="sh-formsec__title"><?= sh_icon('grid', 15) ?> Category card size</h3>
+        <p class="sh-formsec__desc">
+          How this category is drawn in the storefront category grids (homepage and category pages).
+          Each category keeps its own size, so the grid can mix them. <strong>Medium</strong> is the default.
+        </p>
+        <div class="sh-catsize" data-cat-size-group role="radiogroup" aria-label="Category card size">
+          <?php foreach (sh_category_card_sizes() as $sizeKey => $sizeLabel): ?>
+            <label class="sh-catsize__opt<?= $cardSize === $sizeKey ? ' is-on' : '' ?>">
+              <input type="radio" name="card_size" value="<?= e($sizeKey) ?>"
+                     <?= $cardSize === $sizeKey ? 'checked' : '' ?> data-cat-size>
+              <span class="sh-catsize__label"><span class="sh-catsize__dot" aria-hidden="true"></span><?= e($sizeLabel) ?></span>
+              <span class="sh-catsize__preview" aria-hidden="true">
+                <span class="sh-category-card sh-category-card--<?= e($sizeKey) ?>">
+                  <span class="sh-category-card__media">
+                    <img class="sh-category-card__img<?= $curImage === '' ? ' sh-category-card__img--fallback' : '' ?>"
+                         src="<?= e($sizePhoto) ?>" alt="" loading="lazy" decoding="async">
+                  </span>
+                  <span class="sh-category-card__name" title="<?= e($sizeName) ?>"><?= e($sizeName) ?></span>
+                </span>
+              </span>
+            </label>
+          <?php endforeach; ?>
+        </div>
+        <p class="sh-field__hint">The previews use this category's own picture and name at their real size.</p>
+      </div>
+
+      <div class="sh-formsec">
         <h3 class="sh-formsec__title"><?= sh_icon('file-text', 15) ?> Description and visibility</h3>
         <?= sh_admin_field('Description',
             '<textarea class="sh-textarea" id="c-desc" name="description" rows="3">' . e($val('description')) . '</textarea>',
@@ -393,6 +380,8 @@ require __DIR__ . '/_layout.php';
         $seoLabel   = 'category';
         $seoBaseUrl = sh_seo_base();
         $seoPath    = 'category.php?slug={slug}';
+        // The category's own picture, so the preview matches the real page.
+        $seoImage   = sh_seo_category_image(['image' => (string)($seoRow['image'] ?? '')]);
         require __DIR__ . '/_seo-fields.php';
         ?>
       </div>
@@ -401,6 +390,7 @@ require __DIR__ . '/_layout.php';
     <div class="sh-formcard__foot sh-formcard__foot--sticky">
       <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $isEdit ? 'Save changes' : 'Create category' ?></button>
       <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+      <span class="sh-dirty" data-dirty-note hidden><?= sh_icon('info', 13) ?> Unsaved changes</span>
       <?php if ($isEdit): ?>
         <span class="sh-formcard__spacer"></span>
         <button class="sh-btn sh-btn--bad" type="submit" form="sh-cat-delete"
@@ -489,7 +479,7 @@ require __DIR__ . '/_layout.php';
       <button type="button" class="sh-btn sh-btn--ghost" id="crop-btn-reset"><?= sh_icon('rotate', 13) ?> Reset</button>
       <div style="margin-left:auto;display:flex;gap:8px;">
         <button type="button" class="sh-btn sh-btn--ghost" data-cropper-cancel>Cancel</button>
-        <button type="button" class="sh-btn" id="crop-btn-save"><?= sh_icon('check-circle', 14) ?> Save Crop</button>
+        <button type="button" class="sh-btn" id="crop-btn-save"><?= sh_icon('check-circle', 14) ?> Apply crop</button>
       </div>
     </div>
   </div>

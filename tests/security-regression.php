@@ -1459,7 +1459,7 @@ sh_t('the category grid is responsive and keeps its shape', function () {
         if (!str_contains($block, $need)) { return 'the card rule has no ' . $need; }
     }
     if (preg_match('~\.sh-category-card__media \{[^}]*aspect-ratio:\s*4\s*/\s*3~s', $css) !== 1) {
-        return 'the card image has no fixed 4:3 frame, so rows can shift while images load';
+        return 'the default card image has no fixed 4:3 frame, so rows can shift while images load';
     }
     if (preg_match('~\.sh-category-card__img \{[^}]*object-fit:\s*cover~s', $css) !== 1) {
         return 'the card image is not object-fit: cover';
@@ -1467,22 +1467,384 @@ sh_t('the category grid is responsive and keeps its shape', function () {
     if (strpos($css, 'sh-category-card__img--fallback') === false) {
         return 'flat placeholder artwork would be cropped: no contain rule';
     }
-    // 4-6 columns on desktop, 2 on phones.
-    if (preg_match('~\.sh-catgrid \{ display: grid; grid-template-columns: repeat\((\d),~', $css, $m) !== 1) {
-        return 'the desktop column count is not a plain repeat()';
+    // Cards are fixed-size boxes on a wrapping flex line, which is what lets
+    // one category be Small while the next is Large in the same grid.
+    if (preg_match('~\.sh-catgrid \{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap~s', $css) !== 1) {
+        return 'the category grid is not a wrapping flex row';
     }
-    $desktop = (int)$m[1];
-    if ($desktop < 4 || $desktop > 6) { return 'the desktop grid has ' . $desktop . ' columns, expected 4-6'; }
-    if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-catgrid \{ grid-template-columns: repeat\((\d),~s', $css, $m2) !== 1) {
-        return 'the mobile column count is not declared at the 600px breakpoint';
+    foreach (['small' => 104, 'medium' => 136, 'large' => 216] as $size => $width) {
+        if (preg_match('~\.sh-category-card--' . $size . '\s*\{[^}]*width:\s*' . $width . 'px~s', $css) !== 1) {
+            return 'the ' . $size . ' card has no ' . $width . 'px width rule';
+        }
     }
-    if ((int)$m2[1] !== 2) { return 'mobile shows ' . $m2[1] . ' category columns, expected 2'; }
+    // Medium is the shipped default, roughly half of the old ~220px card.
+    if (preg_match('~\.sh-category-card--medium\s*\{[^}]*width:\s*(\d+)px~s', $css, $m2) !== 1) {
+        return 'the medium card has no width';
+    }
+    if ((int)$m2[1] > 160) { return 'the medium card is still oversized (' . $m2[1] . 'px)'; }
+    if (!str_contains($css, '@media (max-width: 600px)')
+        || preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-category-card--large\s*\{[^}]*width:\s*100%~s', $css) !== 1) {
+        return 'a large card could overflow a phone screen';
+    }
+    if (preg_match('~@media \(max-width: 600px\) \{[^@]*?\.sh-category-card--medium\s*\{[^}]*calc\(~s', $css) !== 1) {
+        return 'the medium card has no phone width';
+    }
     // Hover and focus feedback, and no layout shift from the name length.
     if (!str_contains($css, '.sh-category-card:hover') || !str_contains($css, '.sh-category-card:focus-visible')) {
         return 'the card has no hover/focus feedback';
     }
     if (preg_match('~\.sh-category-card__name \{[^}]*min-height~s', $css) !== 1) {
         return 'category names can make cards uneven';
+    }
+    return true;
+});
+
+sh_t('every card carries its saved size as a validated modifier', function () {
+    require_once SH_ROOT . '/includes/catalog.php';
+    if (array_keys(sh_category_card_sizes()) !== ['small', 'medium', 'large']) {
+        return 'the size allowlist is not exactly small/medium/large';
+    }
+    if (sh_category_card_size('huge') !== 'medium') { return 'an unknown size does not fall back to medium'; }
+    if (sh_category_card_size(null) !== 'medium') { return 'a missing size does not default to medium'; }
+    foreach (['small', 'medium', 'large'] as $size) {
+        $card = sh_category_card(['name' => 'Example', 'slug' => 'example', 'image' => '', 'card_size' => $size], 0);
+        if (!str_contains($card, 'sh-category-card--' . $size)) {
+            return 'a card with the saved size "' . $size . '" does not render its class';
+        }
+        if (!str_contains($card, 'data-size="' . $size . '"')) {
+            return 'a card does not expose its size for the grid';
+        }
+        if (str_contains($card, 'style=')) { return 'a card renders an inline style from the stored size'; }
+    }
+    false;
+    return true;
+});
+
+sh_t('the category size is chosen per category and validated on save', function () {
+    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/category-edit.php'));
+    // The three options are real radio inputs, so the control works by keyboard.
+    foreach (['small', 'medium', 'large'] as $size) {
+        if (!str_contains($src, 'sh_category_card_sizes()')) { return 'the editor does not use the size allowlist'; }
+        break;
+    }
+    if (preg_match('~foreach \(sh_category_card_sizes\(\) as~', $src) !== 1) {
+        return 'the editor does not loop over the size allowlist';
+    }
+    if (preg_match_all('~name="card_size"~', $src) !== 1) {
+        return 'the editor renders more than one card_size input by hand';
+    }
+    if (preg_match('~<input[^>]*type="radio"[^>]*name="card_size"~s', $src) !== 1) {
+        return 'the card size control is not a radio group';
+    }
+    if (!str_contains($src, "'card_size' => sh_category_card_size(")) {
+        return 'the posted size is not funnelled through the allowlist before saving';
+    }
+    if (str_contains($src, "sh_post('card_size')") && !str_contains($src, 'sh_category_card_size')) {
+        return 'the raw posted size reaches the database';
+    }
+    // It must be part of the audit diff too, so a change is traceable.
+    if (!str_contains($src, "'sort_order', 'card_size'")) {
+        return 'a card-size change is not recorded in the audit diff';
+    }
+    // A saved value must be read back into the form, never reset to medium.
+    if (!str_contains($src, "\$editing['card_size']")) {
+        return 'the editor does not read the saved size back';
+    }
+    // The schema default is the backward-compatible migration for old rows.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (preg_match("~card_size ENUM\\('small','medium','large'\\) NOT NULL DEFAULT 'medium'~", $schema) !== 1) {
+        return 'the categories table has no bounded card_size column with a medium default';
+    }
+    $migrate = (string)file_get_contents(SH_ROOT . '/includes/category-image.php');
+    if (!str_contains($migrate, 'card_size')) {
+        return 'existing installations have no automatic card_size migration';
+    }
+    // Never arbitrary CSS/JS: the value is a token and the class is built from it.
+    $catalog = (string)file_get_contents(SH_ROOT . '/includes/catalog.php');
+    if (str_contains($catalog, 'sh_category_card_size($cat') && str_contains($catalog, 'style=')) {
+        return 'the card size is written as an inline style';
+    }
+    return true;
+});
+
+sh_t('the email delivery log has one home, in the System group', function () {
+    $src = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/_layout.php'));
+    if (substr_count($src, "'email-log.php'") !== 1) {
+        return 'the delivery log appears in more than one navigation group';
+    }
+    $entry = strpos($src, "'email-log.php'");
+    $system = strpos($src, "'System' =>");
+    if ($entry === false || $system === false || $entry < $system) {
+        return 'the delivery log is not listed under System';
+    }
+    // Moving the navigation must not break the existing URL, its guards or its
+    // redaction: the page itself is unchanged and still permission checked.
+    if (!is_file(SH_ROOT . '/admin/email-log.php')) { return 'the log page file was moved or removed'; }
+    $page = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/email-log.php'));
+    if (!str_contains($page, "sh_require_perm('integrations.manage')")) {
+        return 'the log page lost its permission check';
+    }
+    if (!str_contains($page, "\$adminPage = 'email_log'")) {
+        return 'the log page does not highlight its System navigation row';
+    }
+    return true;
+});
+
+sh_t('the SEO preview shows the real product image, not a placeholder', function () {
+    $seo = (string)file_get_contents(SH_ROOT . '/admin/_seo-fields.php');
+    foreach (['data-seo-image=', 'data-seo-image-input=', 'data-seo-preview="image"'] as $need) {
+        if (!str_contains($seo, $need)) { return 'the SEO block does not expose ' . $need; }
+    }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
+    if (preg_match('~\$seoImage\s*=\s*\$val\(\'image\'\)~', $edit) !== 1) {
+        return 'the editor does not resolve the saved product image for the preview';
+    }
+    if (str_contains($edit, 'SH_UPLOAD_DIR')) { return 'the editor leaks a filesystem path into the form'; }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (!str_contains($js, 'data-seo-image')) { return 'the preview script ignores the product image'; }
+    if (!str_contains($js, 'createObjectURL')) { return 'a newly chosen image does not update the preview'; }
+    if (preg_match('~^(?!.*blob:).*absoluteUrl~m', $js) === 1 && !str_contains($js, 'blob:')) {
+        return 'blob: preview URLs would be mangled';
+    }
+    if (preg_match('~(localhost|127\.0\.0\.1|file://)~', $js) === 1) {
+        return 'the preview script builds an address the browser cannot reach';
+    }
+    return true;
+});
+
+sh_t('the complete-product draft is server-side and permissioned', function () {
+    $api = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/api/ai.php'));
+    foreach (["case 'product_draft'", "sh_admin_can('ai.use')",
+              "\$needed = \$productId > 0 ? 'products.edit' : 'products.create'", 'sh_admin_can($needed)',
+              'sh_ai_product_draft', 'sh_ai_draft_image_from_upload'] as $need) {
+        if (!str_contains($api, $need)) { return 'api/ai.php is missing ' . $need; }
+    }
+    if (preg_match('~[\'"](sk-[A-Za-z0-9]|api_key[\'"]\s*=>)~', $api) === 1) {
+        return 'the endpoint appears to return credentials';
+    }
+    $mgr = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/ai/AIManager.php'));
+    if (!str_contains($mgr, "'image_used'")) { return 'the manager does not report whether the image was used'; }
+    // An unread image must never be described as analysed.
+    if (!str_contains($mgr, 'cannot read images')) { return 'the prompt can still imply an unread image was seen'; }
+    return true;
+});
+
+sh_t('a generated draft can only carry fields that really exist', function () {
+    require_once SH_ROOT . '/ai/AIManager.php';
+    $d = sh_ai_normalise_product_draft([
+        'title' => '  <b>Cotton Panjabi</b>  ',
+        'short_description' => "Soft cotton panjabi.\n",
+        'description' => '<p>Nice</p><script>alert(1)</script>',
+        'specifications' => "Material: Cotton\n\n<script>x</script>",
+        'category' => 'A Category That Does Not Exist',
+        'brand' => 'Brand That Does Not Exist',
+        'sku' => 'sh-abc 123',
+        'meta_title' => 'Cotton Panjabi',
+        'keywords' => ['panjabi', 'cotton'],
+        'image_alt' => 'A cotton panjabi',
+        'price' => 1200,
+        'compare_price' => 1500,
+        'stock' => 77,
+        'low_stock_threshold' => 3,
+        'status' => 1,
+        'is_featured' => 1,
+    ]);
+    foreach (['price', 'compare_price', 'stock', 'low_stock_threshold', 'status', 'is_featured'] as $forbidden) {
+        if (array_key_exists($forbidden, $d)) { return 'the draft carries the forbidden field ' . $forbidden; }
+    }
+    if ($d['title'] !== 'Cotton Panjabi') { return 'the title kept its markup: ' . $d['title']; }
+    if (str_contains($d['description'], '<script')) { return 'the description kept a script tag'; }
+    if (str_contains($d['specifications'], '<')) { return 'the specifications kept markup'; }
+    if ($d['category_id'] !== null) { return 'a non-existent category was mapped to an id'; }
+    if ($d['brand_id'] !== null) { return 'a non-existent brand was mapped to an id'; }
+    if ($d['sku'] !== 'SH-ABC123') { return 'the SKU was not cleaned to the allowed characters'; }
+    return true;
+});
+
+sh_t('Add Product has no AI generator; AI Auto Work is the only entry point', function () {
+    $editor = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/product-edit.php'));
+    foreach (['data-product-ai', 'product-ai.js', 'data-ai-draft-run', 'Generate Complete Product with AI', 'product_draft'] as $gone) {
+        if (str_contains($editor, $gone)) { return 'the product editor still contains the AI panel (' . $gone . ')'; }
+    }
+    if (str_contains($editor, 'name="features"') || stripos($editor, 'Features and benefits') !== false) {
+        return 'the removed features field is still in the product form';
+    }
+    if (!str_contains($editor, 'name="image_alt"')) {
+        return 'the manual product form cannot edit the image alt text';
+    }
+    if (!str_contains($editor, 'name="price"') || !str_contains($editor, 'name="stock"')) {
+        return 'the normal manual product form was damaged';
+    }
+    if (is_file(SH_ROOT . '/assets/js/product-ai.js')) {
+        return 'the removed Add Product AI client is still shipped';
+    }
+
+    // The generator lives in AI Auto Work, next to the per-product tools.
+    $auto = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/ai/products.php'));
+    foreach (['data-ai-create', 'Generate Full Product', 'data-ai-save-product', 'data-ai-create-review'] as $need) {
+        if (!str_contains($auto, $need)) { return 'AI Auto Work is missing ' . $need; }
+    }
+    if (!str_contains((string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js'), "action: 'save_product'")) {
+        return 'the AI Auto Work client does not call the save_product action';
+    }
+    if (substr_count($auto, 'data-ai-create-start') !== 1) {
+        return 'AI Auto Work does not have exactly one create form';
+    }
+    return true;
+});
+
+sh_t('the AI create client never writes price, stock or visibility by itself', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    // The fields applyDraft() copies from the model answer. Price, stock and
+    // publication are deliberately absent: the administrator types them.
+    if (preg_match("~\['name', 'slug', 'sku', 'category_id',.*?\]~s", $js, $m) !== 1) {
+        return 'the draft field list is missing';
+    }
+    foreach (["'price'", "'stock'", "'compare_price'", "'status'"] as $forbidden) {
+        if (str_contains($m[0], $forbidden)) {
+            return 'the AI draft writes ' . $forbidden . ' into the review form';
+        }
+    }
+    // Save must go through the server action that wraps a transaction.
+    if (!str_contains($js, "action: 'save_product'")) {
+        return 'the client does not use the transactional save action';
+    }
+    if (str_contains($js, 'product-edit.php" method="post"')) {
+        return 'the client submits the product form directly';
+    }
+    return true;
+});
+
+sh_t('a full product is saved in one all-or-nothing transaction', function () {
+    $studio = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/ai/ProductStudio.php'));
+    foreach (['beginTransaction', 'commit()', 'rollBack()', "sh_insert('products'", 'product_tags', 'product_images'] as $need) {
+        if (!str_contains($studio, $need)) { return 'the save path is missing ' . $need; }
+    }
+    // The row must be read back BEFORE the commit, otherwise "saved" is a claim.
+    $read = strpos($studio, 'SELECT * FROM products WHERE id = ?');
+    $commit = strpos($studio, '$pdo->commit();');
+    if ($read === false || $commit === false || $read > $commit) {
+        return 'the save path commits without verifying the written row';
+    }
+    // Retrying with the same token must find the existing product first.
+    if (strpos($studio, 'WHERE ai_draft_token = ?') === false) {
+        return 'the save path has no idempotency lookup';
+    }
+    if (strpos($studio, 'WHERE ai_draft_token = ?') > strpos($studio, "sh_insert('products'")) {
+        return 'the idempotency check runs after the insert';
+    }
+    // A failure must not report success: the transaction is rolled back and the
+    // function returns ok=false.
+    $catchAt = strpos($studio, 'catch (Throwable $e) {', strpos($studio, 'beginTransaction'));
+    if ($catchAt === false) { return 'the save path has no failure handler'; }
+    $catch = substr($studio, $catchAt, 1400);
+    if (!str_contains($catch, 'rollBack()') || !str_contains($catch, "'ok' => false")) {
+        return 'a failed save does not roll back and return an error';
+    }
+    if (!str_contains($studio, 'sh_seo_cache_invalidate()')) {
+        return 'a saved product does not invalidate the SEO/sitemap cache';
+    }
+    // Uploaded files are deleted on rollback, generated ones are kept for retry.
+    if (!str_contains($studio, 'sh_delete_upload($imageFile')) {
+        return 'a rolled-back upload is left orphaned on disk';
+    }
+    // The slug follows the store's own rules and is uniqueness-checked.
+    if (!str_contains($studio, 'sh_slug(') || !str_contains($studio, 'FROM products WHERE slug = ?')) {
+        return 'the save path does not enforce the store slug rules';
+    }
+    // Price and stock are validated, never derived from the model.
+    if (!str_contains($studio, 'Enter the selling price. AI never invents a price.')) {
+        return 'a missing price is not rejected';
+    }
+    // The SEO columns are added by a separate migration on an existing store.
+    // The save writes them, so the save path must run that migration itself.
+    if (!str_contains($studio, 'sh_seo_schema_ensure()')) {
+        return 'the save path can write SEO fields without ensuring their columns exist';
+    }
+    // A generated image must exist on disk under the naming rule it trusts.
+    if (!str_contains($studio, 'ai-\d{8}') || !str_contains($studio, '[a-f0-9]{16}')) {
+        return 'the save path does not restrict generated image filenames';
+    }
+    return true;
+});
+
+sh_t('the save endpoint and schema back the create flow', function () {
+    $api = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/api/ai.php'));
+    if (strpos($api, "case 'save_product'") === false) { return 'api/ai.php has no save_product action'; }
+    if (strpos($api, "case 'product_image'") === false) { return 'the image retry action is missing'; }
+    $clientSrc = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    if (!str_contains($clientSrc, "action: 'product_image'")) {
+        return 'the image retry action exists but the client never calls it';
+    }
+    $saveAt = strpos($api, "case 'save_product'");
+    $seg = substr($api, $saveAt, 1200);
+    foreach (["sh_admin_can('products.create')", 'sh_ai_throttle', 'sh_ai_save_full_product'] as $need) {
+        if (!str_contains($seg, $need)) { return 'save_product does not check ' . $need; }
+    }
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    foreach (['features TEXT', 'image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
+        if (!str_contains($schema, $need)) { return 'install/schema.php is missing ' . $need; }
+    }
+    $ensure = (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
+    if (!str_contains($ensure, "ALTER TABLE products ADD COLUMN")) {
+        return 'existing installations have no additive product-column migration';
+    }
+    // Storefront: the removed features section is gone, and the alt text is used.
+    $pdp = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (str_contains($pdp, 'sh-featurelist') || str_contains($pdp, "\$product['features']")) {
+        return 'the product page still renders the removed features section';
+    }
+    if (!str_contains($pdp, "product['image_alt']")) {
+        return 'the product page ignores the generated alt text';
+    }
+    return true;
+});
+
+sh_t('the AI create client only touches controls the panel really renders', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    $markup = (string)file_get_contents(SH_ROOT . '/admin/ai/products.php');
+
+    // A renamed data attribute is silent in production: querySelector returns
+    // null, the field is skipped and Save writes an empty value. Catch it here.
+    preg_match_all('~querySelector\([\'"]\[(data-ai-[a-z0-9-]+)\]~', $js, $m);
+    $missing = [];
+    if (count($m[1]) < 15) {
+        return 'the selector scan found almost nothing in the client';
+    }
+    foreach (array_unique($m[1]) as $attr) {
+        if (preg_match('~' . preg_quote($attr, '~') . '(?![a-z0-9-])~', $markup) !== 1) {
+            $missing[] = $attr;
+        }
+    }
+    if ($missing) {
+        return 'the client selects attributes the panel does not render: ' . implode(', ', $missing);
+    }
+
+    // Both field maps (render + collect) name the review controls.
+    if (!preg_match_all("~\[\s*'name',\s*'slug'.*?\]~s", $js, $lists)) {
+        return 'the client no longer has an explicit field map';
+    }
+    if (count($lists[0]) < 2) {
+        return 'the client field map could not be read';
+    }
+    foreach ($lists[0] as $list) {
+        preg_match_all("~'([a-z0-9_]+)'~", $list, $names);
+        foreach (array_unique($names[1]) as $name) {
+            if (!str_contains($markup, 'data-f="' . $name . '"')) {
+                return 'the client writes a field the review form does not have: ' . $name;
+            }
+        }
+    }
+
+    // The two recovery paths promised by the brief: retry and manual upload.
+    if (!str_contains($markup, 'data-ai-image-retry') || !str_contains($markup, 'data-ai-upload')) {
+        return 'the review form has no image retry and no manual upload';
+    }
+    if (!str_contains($markup, 'data-ai-image-file')) {
+        return 'the generated image file is never posted back to the save handler';
+    }
+    if (!str_contains($js, 'request.image = uploadedFile')) {
+        return 'a manually uploaded photo is not sent as a file';
     }
     return true;
 });
@@ -1564,7 +1926,6 @@ function sh_admin_crud_map(): array
         'admin/payment-methods.php' => ['admin/payment-method-edit.php', 'Add payment method'],
         'admin/couriers.php'        => ['admin/courier-edit.php', 'Add a courier'],
         'admin/coupons.php'         => ['admin/coupon-edit.php', 'Add coupon'],
-        'admin/brands.php'          => ['', 'Add brand'],   // short form: modal
         'admin/admins.php'          => ['admin/admin-edit.php', 'Add admin'],
         'admin/roles.php'           => ['admin/role-edit.php', 'Add role'],
         'admin/verification.php'    => ['admin/verification-provider-edit.php', 'Add provider'],
@@ -1710,7 +2071,7 @@ sh_t('mobile tables can render as record cards', function () {
         if (!str_contains($css, $needle)) { return 'the responsive table card pattern is missing ' . $needle; }
     }
     // The converted listings opt in and label their cells.
-    foreach (['admin/categories.php', 'admin/products.php', 'admin/brands.php', 'admin/couriers.php', 'admin/coupons.php',
+    foreach (['admin/categories.php', 'admin/products.php', 'admin/couriers.php', 'admin/coupons.php',
               'admin/admins.php', 'admin/roles.php', 'admin/payment-gateways.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . '/' . $rel);
         if (!str_contains($src, 'sh-tablewrap--cards')) { return $rel . ' does not opt into the mobile card layout'; }
@@ -2474,6 +2835,120 @@ sh_t('the SMTP password is never rendered, logged or returned', function () {
     return true;
 });
 
+sh_t('the Brevo API key is server-side only and delivery TLS verification is never disabled', function () {
+    $admin = sh_email_src('admin/email.php');
+    if (preg_match('~value="<\?=\s*e\(\(string\)sh_setting\(\'brevo_api_key~', $admin) === 1) {
+        return 'admin/email.php renders the stored Brevo API key';
+    }
+    if (!str_contains($admin, 'name="brevo_api_key"') || !str_contains($admin, 'type="password"')) {
+        return 'the Brevo API key field is not a masked password input';
+    }
+    if (!str_contains($admin, 'sh_verify_encrypt($apiKey)')) {
+        return 'the Brevo API key is not encrypted before storage';
+    }
+
+    $mail = sh_email_src('config/mail.php');
+    $sendAt = strpos($mail, 'function sh_mail_send(');
+    $sendEnd = $sendAt === false ? false : strpos($mail, 'function sh_mail_send_legacy(', $sendAt);
+    if ($sendAt === false || $sendEnd === false) { return 'sh_mail_send() could not be read'; }
+    $send = substr($mail, $sendAt, $sendEnd - $sendAt);
+    foreach (["'verify_peer'       => true", "'verify_peer_name'  => true", "'allow_self_signed' => false", "'peer_name'         => \$cleanHost"] as $needle) {
+        if (!str_contains($send, $needle)) { return 'the delivery path does not enforce TLS validation: ' . $needle; }
+    }
+    if (preg_match('~sh_setting\(\s*[\'\"]smtp_allow_self_signed~', $send) === 1) {
+        return 'the delivery path still reads the retired self-signed setting';
+    }
+    if (str_contains($send, 'CURLOPT_SSL_VERIFYPEER => false') || str_contains($send, 'CURLOPT_SSL_VERIFYHOST => 0')) {
+        return 'the delivery path disables HTTPS verification';
+    }
+
+    $apiAt = strpos($mail, 'function sh_brevo_api_request(');
+    $apiEnd = $apiAt === false ? false : strpos($mail, 'function sh_brevo_api_send(', $apiAt);
+    if ($apiAt === false || $apiEnd === false) { return 'sh_brevo_api_request() could not be read'; }
+    $api = substr($mail, $apiAt, $apiEnd - $apiAt);
+    foreach (['CURLOPT_SSL_VERIFYPEER => true', 'CURLOPT_SSL_VERIFYHOST => 2', "'verify_peer' => true", "'verify_peer_name' => true"] as $needle) {
+        if (!str_contains($api, $needle)) { return 'the Brevo API path does not enforce TLS validation: ' . $needle; }
+    }
+    if (!str_contains($mail, "'inspection_only' => true")) {
+        return 'the read-only certificate inspector is not labelled as inspection-only';
+    }
+    return true;
+});
+
+sh_t('a 403 from the Brevo account resource is reported as a permission, not an auth failure', function () {
+    $mail = sh_email_src('config/mail.php');
+    $at = strpos($mail, 'function sh_brevo_api_test_connection(');
+    $end = $at === false ? false : strpos($mail, 'function sh_mail_send(', $at);
+    if ($at === false || $end === false) { return 'sh_brevo_api_test_connection() could not be read'; }
+    $fn = substr($mail, $at, $end - $at);
+
+    // The checks must stay separate and the account check must be described as
+    // informational, so a 403 there can never read as "the API is broken" or
+    // "the key is invalid". The historical list endpoint is a log query that
+    // needs an email/messageId/templateId filter; it must not be used as a
+    // permission probe, and transaction email must not be claimed before a
+    // real POST has succeeded.
+    if (str_contains($fn, "'/smtp/emails'")) { return 'the diagnostics still query the historical transactional-email log'; }
+    if (!str_contains($fn, 'POST /v3/smtp/email')) { return 'the transactional check does not name the documented send endpoint'; }
+    if (!str_contains($fn, "'not_tested'")) { return 'transactional email is not reported as not tested until a real send'; }
+    if (!str_contains($fn, 'informational')) { return 'the account check is not labelled informational'; }
+    if (!str_contains($fn, "=== 403")) { return '403 is not handled separately in the API diagnostics'; }
+    if (!str_contains($fn, "'permission_denied'")) { return 'the diagnostics never report a resource permission result'; }
+    if (str_contains($fn, "'api_auth'")) { return 'the conflating api_auth stage is still reported'; }
+
+    $statusAt = strpos($mail, 'function sh_brevo_api_status_meaning(');
+    $statusEnd = $statusAt === false ? false : strpos($mail, 'function sh_brevo_api_request(', $statusAt);
+    if ($statusAt === false || $statusEnd === false) { return 'sh_brevo_api_status_meaning() could not be read'; }
+    $status = substr($mail, $statusAt, $statusEnd - $statusAt);
+    foreach (['402', '403', '429', '401'] as $code) {
+        if (!str_contains($status, '=== ' . $code)) { return 'HTTP ' . $code . ' is not handled separately'; }
+    }
+    if (preg_match('~\$status\s*>=\s*200\s*&&\s*\$status\s*<\s*300~', $status) !== 1) {
+        return 'success is not restricted to 2xx; a 403 could be treated as success';
+    }
+    if (str_contains($status, "kind' => 'ok'") && !str_contains($status, 'Accepted')) {
+        return 'the success branch is not explicit';
+    }
+    return true;
+});
+
+sh_t('Brevo credentials never cross transports and a denied send is never retried', function () {
+    $mail = sh_email_src('config/mail.php');
+
+    $keyAt = strpos($mail, 'function sh_brevo_api_key_info(');
+    $keyEnd = $keyAt === false ? false : strpos($mail, 'function sh_brevo_api_key(', $keyAt);
+    if ($keyAt === false || $keyEnd === false) { return 'sh_brevo_api_key_info() could not be read'; }
+    $keyFn = substr($mail, $keyAt, $keyEnd - $keyAt);
+    if (!str_contains($keyFn, "'smtp_key'")) { return 'an SMTP key in the API field is not identified'; }
+    if (!str_contains($keyFn, "\$out['key'] = '';")) { return 'an SMTP key in the API field is not blanked before use'; }
+
+    if (!str_contains($mail, 'function sh_mail_credential_mismatch(')) { return 'the SMTP credential check is missing'; }
+    $mismatchAt = strpos($mail, 'function sh_mail_credential_mismatch(');
+    $mismatchEnd = strpos($mail, 'function sh_mail_send(', $mismatchAt);
+    $mismatch = substr($mail, $mismatchAt, $mismatchEnd - $mismatchAt);
+    if (!str_contains($mismatch, 'xkeysib-')) { return 'an API key in the SMTP password is not detected'; }
+
+    $sendAt = strpos($mail, 'function sh_mail_send(');
+    $sendEnd = $sendAt === false ? false : strpos($mail, 'function sh_mail_send_legacy(', $sendAt);
+    $send = substr($mail, $sendAt, $sendEnd - $sendAt);
+    if (substr_count($send, 'sh_mail_credential_mismatch(') < 1) { return 'sh_mail_send() does not refuse a cross-transport credential'; }
+
+    $apiSendAt = strpos($mail, 'function sh_brevo_api_send(');
+    $apiSendEnd = $apiSendAt === false ? false : strpos($mail, 'function sh_brevo_api_test_connection(', $apiSendAt);
+    $apiSend = substr($mail, $apiSendAt, $apiSendEnd - $apiSendAt);
+    if (str_contains($apiSend, 'sleep(')) { return 'the API send waits and retries instead of reporting the result'; }
+    if (!str_contains($apiSend, "'permission'")) { return 'a denied API send is not categorised as a permission failure'; }
+
+    // The API key header is added only when a key is actually sent.
+    $reqAt = strpos($mail, 'function sh_brevo_api_request(');
+    $reqEnd = strpos($mail, 'function sh_brevo_api_send(', $reqAt);
+    $req = substr($mail, $reqAt, $reqEnd - $reqAt);
+    if (!str_contains($req, "if (\$key !== '') { \$headers[] = 'api-key: ' . \$key; }")) {
+        return 'the api-key header is not conditional on a key being sent';
+    }
+    return true;
+});
+
 sh_t('email templates escape interpolated values and ship a text alternative', function () {
     $src = sh_email_src('includes/mail.php');
     if (!str_contains($src, 'function sh_email_e(')) { return 'the email escaper is missing'; }
@@ -2539,6 +3014,487 @@ sh_t('existing accounts are grandfathered once instead of being locked out', fun
     if (!str_contains($mail, "sh_setting('email_verify_grandfathered', '0') !== '1'")) { return 'the one-time grandfathering guard is missing'; }
     if (!str_contains($mail, "sh_setting_save('email_verify_grandfathered', '1')")) { return 'the grandfathering is not recorded'; }
     if (!str_contains($mail, 'UPDATE users SET email_verified = 1')) { return 'existing accounts are not grandfathered'; }
+    return true;
+});
+
+sh_section('AI provider connection tests');
+
+sh_t('every bundled AI driver has its own connection test', function () {
+    $files = [
+        'AbstractAIProvider.php'       => 'the shared fallback',
+        'OpenAICompatibleProvider.php' => 'OpenAI-compatible endpoints',
+        'OpenAIProvider.php'           => 'OpenAI',
+        'OpenRouterProvider.php'       => 'OpenRouter',
+        'GeminiProvider.php'           => 'Google Gemini',
+        'AnthropicProvider.php'        => 'Anthropic Claude',
+    ];
+    foreach ($files as $file => $label) {
+        $src = (string)file_get_contents(SH_ROOT . '/ai/providers/' . $file);
+        if (!str_contains($src, 'public function testConnection(): array')) {
+            return $label . ' has no testConnection() override';
+        }
+        if (!str_contains($src, 'testResult(')) { return $label . ' does not build a structured test result'; }
+    }
+    return true;
+});
+
+sh_t('the Gemini probe cannot mistake a token limit for a bad key', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/ai/providers/GeminiProvider.php');
+    if (!str_contains($src, '/models?pageSize=200')) { return 'the key is not checked with a read-only /models call'; }
+    if (!str_contains($src, ':generateContent')) { return 'the text probe does not use generateContent'; }
+    if (!str_contains($src, "'maxOutputTokens' => 256")) { return 'the probe budget is not large enough for thinking models'; }
+    if (!str_contains($src, "if (\$finish === 'MAX_TOKENS')")) { return 'MAX_TOKENS is not classified explicitly'; }
+    if (!str_contains($src, "testResult(true, 'token_limit'")) { return 'a token limit is not reported as a valid connection'; }
+    return true;
+});
+
+sh_t('no provider probe uses an eight-token budget', function () {
+    $dir = SH_ROOT . '/ai/providers';
+    foreach (glob($dir . '/*.php') ?: [] as $file) {
+        $src = (string)file_get_contents($file);
+        if (preg_match("/max_(?:completion_)?tokens'?\s*=>\s*8\b/", $src)) {
+            return basename($file) . ' still asks for only 8 output tokens';
+        }
+    }
+    return true;
+});
+
+sh_t('OpenRouter validates the key before spending tokens', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/ai/providers/OpenRouterProvider.php');
+    if (!str_contains($src, "'/auth/key'")) { return 'the /auth/key check is missing'; }
+    if (!str_contains($src, "'max_tokens' => 64")) { return 'the chat probe budget changed unexpectedly'; }
+    if (str_contains($src, "'max_tokens' => 8")) { return 'the old eight-token probe is still present'; }
+    return true;
+});
+
+sh_t('a provider test stores the code, HTTP status and next action', function () {
+    $pm = (string)file_get_contents(SH_ROOT . '/ai/ProviderManager.php');
+    foreach (["'last_test_code'", "'last_test_status'", "'last_test_next'", 'sh_ai_test_columns_ensure()'] as $needle) {
+        if (!str_contains($pm, $needle)) { return 'ProviderManager is missing ' . $needle; }
+    }
+    $schema = (string)file_get_contents(SH_ROOT . '/ai/schema.php');
+    foreach (['last_test_code VARCHAR(40)', 'last_test_status SMALLINT UNSIGNED', 'last_test_next VARCHAR(255)'] as $needle) {
+        if (!str_contains($schema, $needle)) { return 'ai_providers is missing ' . $needle; }
+    }
+    if (!str_contains($schema, 'function sh_ai_test_columns_ensure()')) { return 'existing installs have no additive migration'; }
+    return true;
+});
+
+sh_t('the test endpoint returns the real outcome instead of a bare failure', function () {
+    $api = (string)file_get_contents(SH_ROOT . '/api/ai.php');
+    $start = strpos($api, "case 'test_connection':");
+    if ($start === false) { return 'test_connection is missing'; }
+    $end = strpos($api, "case 'sync_models':", $start);
+    $fn = $end === false ? substr($api, $start) : substr($api, $start, $end - $start);
+    foreach (["'ok'         =>", "'code'       =>", "'state'      =>", "'next'       =>", "'tested_at'  =>"] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the response omits ' . trim($needle); }
+    }
+    if (str_contains($fn, 'api_key')) { return 'the test response mentions the API key'; }
+    return true;
+});
+
+sh_t('the Providers screen never renders a stored key', function () {
+    $page = (string)file_get_contents(SH_ROOT . '/admin/ai/providers.php');
+    if (!str_contains($page, 'sh_ai_provider_masked_key($editing)')) { return 'the edit form does not show the masked key'; }
+    if (preg_match('/value="<\?=\s*e\(\$[^)]*\[.api_key.\]/', $page)) { return 'a stored key is printed into an input value'; }
+    if (!str_contains($page, 'type="password"')) { return 'the key field is not a password input'; }
+    if (!str_contains($page, 'data-modal-open="sh-aiprov-add"')) { return 'there is no Add provider action'; }
+    if (!str_contains($page, 'sh_admin_modal(')) { return 'the Add provider chooser is missing'; }
+    if (!str_contains($page, 'data-ai-card=')) { return 'the cards have no test-state scope'; }
+    if (str_contains($page, 'style="display:inline"')) { return 'actions still use inline forms that break alignment'; }
+    return true;
+});
+
+sh_t('the browser test handler always restores its button', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    foreach (['AbortController', '45000', "removeAttribute('data-testing')", 'busy(btn, false)', 'function showTestResult', 'data-ai-test-autorun'] as $needle) {
+        if (!str_contains($js, $needle)) { return 'app.js is missing ' . $needle; }
+    }
+    $start = strpos($js, 'function runProviderTest(btn)');
+    $end = strpos($js, 'window.shAiTestProvider', $start);
+    if ($start === false || $end === false) { return 'runProviderTest() could not be read'; }
+    $fn = substr($js, $start, $end - $start);
+    if (substr_count($fn, 'busy(btn, false)') !== 1) { return 'the busy state is not reset in exactly one finally path'; }
+    if (!str_contains($fn, '.finally(')) { return 'the reset is not in a finally block'; }
+    return true;
+});
+
+sh_t('the redesigned provider cards have a responsive grid and no fixed heights', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    foreach (['.sh-aiprov-grid', '.sh-aiprov__meta', '.sh-aiprov-stats', '.sh-aiprov__actions', '.sh-aiprov-pick'] as $needle) {
+        if (!str_contains($css, $needle)) { return 'the stylesheet is missing ' . $needle; }
+    }
+    $start = strpos($css, '/* Providers screen: compact cards');
+    $block = $start === false ? '' : substr($css, $start, 9000);
+    if ($block === '') { return 'the provider stylesheet block could not be read'; }
+    if (preg_match('/\.sh-aiprov(?:::?[a-z_-]+)?\s*\{[^}]*height:\s*\d/', $block)) { return 'a provider card has a fixed height'; }
+    if (preg_match('/\.sh-aiprov__meta\s*\{[^}]*height:\s*\d/', $block)) { return 'the metadata grid has a fixed height'; }
+    if (preg_match('/gradient\(/i', $block)) { return 'the provider styles use a gradient'; }
+    return true;
+});
+
+sh_section('Courier connection tests');
+
+require_once SH_ROOT . '/includes/courier.php';
+
+sh_t('the test vocabulary covers every state the admin can see', function () {
+    $states = sh_courier_test_states();
+    foreach (['connected', 'authentication_failed', 'configuration_incomplete', 'permission_denied',
+              'network_error', 'unsupported', 'failed'] as $key) {
+        if (!isset($states[$key])) { return 'missing state ' . $key; }
+        if (trim((string)$states[$key]['label']) === '') { return $key . ' has no label'; }
+    }
+    if (sh_courier_test_state_label('unsupported') !== 'Unsupported automated test') {
+        return 'the unsupported state is not worded honestly';
+    }
+    return true;
+});
+
+sh_t('HTTP statuses map to authentication, permission and network states', function () {
+    $map = [
+        0   => 'network_error',
+        401 => 'authentication_failed',
+        403 => 'permission_denied',
+        408 => 'network_error',
+        500 => 'failed',
+    ];
+    foreach ($map as $status => $expected) {
+        if (sh_courier_test_state_from_http($status) !== $expected) {
+            return 'HTTP ' . $status . ' maps to ' . sh_courier_test_state_from_http($status) . ', expected ' . $expected;
+        }
+    }
+    return true;
+});
+
+sh_t('a test message cannot leak a stored credential', function () {
+    $msg = 'Invalid key sk-live-SECRET123 for merchant';
+    $clean = sh_courier_test_scrub($msg, ['sk-live-SECRET123']);
+    if (str_contains($clean, 'sk-live-SECRET123')) { return 'the credential survived sanitising'; }
+    if (!str_contains($clean, '••••')) { return 'the credential was not replaced'; }
+    if (str_contains($clean, "\n")) { return 'control characters were not stripped'; }
+    $long = sh_courier_test_scrub(str_repeat('x', 500));
+    if (mb_strlen($long) > 220) { return 'messages are not capped'; }
+    return true;
+});
+
+sh_t('every required courier has a provider-specific probe', function () {
+    foreach (['steadfast', 'pathao', 'ecourier', 'paperfly', 'sundarban', 'saparibahan'] as $name) {
+        if (!function_exists('sh_courier_probe_' . $name)) { return 'sh_courier_probe_' . $name . '() is missing'; }
+    }
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach ([
+        "sh_courier_probe_steadfast" => "sh_steadfast_base_url(\$creds) . '/get_balance'",
+        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/external/login'",
+        "sh_courier_probe_ecourier"  => "'/city-list'",
+    ] as $fn => $needle) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, $needle)) { return $fn . ' does not call its documented endpoint'; }
+    }
+    return true;
+});
+
+sh_t('an HTTP 200 web page is never accepted as a provider answer', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier'] as $fn) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, "['raw']")) {
+            return $fn . ' would accept a non-JSON login page as a successful connection';
+        }
+    }
+
+    $start = strpos($src, 'function sh_courier_probe_ecourier(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the eCourier probe could not be read'; }
+    $eco = substr($src, $start, $end - $start);
+    if (!str_contains($eco, '(object)[]')) { return 'eCourier does not send an empty JSON object to /city-list'; }
+    if (str_contains($eco, '$successLike')) { return 'the eCourier success=true bug is back'; }
+    if (!str_contains($eco, '$successFlag === false')) { return 'eCourier does not treat success=false as a failure'; }
+    return true;
+});
+
+sh_t('a Pathao test uses client credentials and verifies the stored store', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_probe_pathao(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the Pathao probe could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['client_id', 'client_secret', 'access_token', '/aladdin/api/v1/stores', 'store_id'] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the Pathao probe is missing ' . $needle; }
+    }
+    if (str_contains($fn, 'username') || str_contains($fn, 'password')) {
+        return 'the probe asks for username/password, which the official client_credentials flow does not need';
+    }
+    if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
+        return 'a missing or unknown store is not reported as configuration incomplete';
+    }
+    return true;
+});
+
+sh_t('an ambiguous provider is never reported as connected', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['sh_courier_probe_paperfly', 'sh_courier_probe_sundarban', 'sh_courier_probe_saparibahan'] as $fn) {
+        $start = strpos($src, 'function ' . $fn . '(');
+        $end = $start === false ? false : strpos($src, "\n}\n", $start);
+        if ($start === false || $end === false) { return $fn . '() could not be read'; }
+        $body = substr($src, $start, $end - $start);
+        if (!str_contains($body, "'unsupported'")) { return $fn . ' does not return the unsupported state'; }
+        if (str_contains($body, 'sh_courier_http(')) { return $fn . ' sends a request even though no API is documented'; }
+    }
+    return true;
+});
+
+sh_t('connection tests never book, pick up or charge', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_test(array $courier');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'sh_courier_test() could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['sh_courier_book', 'sh_shipment_create', 'create_order', 'create_pickup', 'new_order', 'sh_shipment_set_status'] as $needle) {
+        if (str_contains($fn, $needle)) { return 'the test path references ' . $needle; }
+    }
+    // And the probes themselves must not call a booking endpoint.
+    $probeStart = strpos($src, 'function sh_courier_probe_steadfast(');
+    $probeEnd = strpos($src, '// Test results: persistence + display', $probeStart);
+    $probes = $probeStart === false || $probeEnd === false ? '' : substr($src, $probeStart, $probeEnd - $probeStart);
+    foreach (['/create_order', '/orders', 'create_pickup', 'new_order', '/order-place'] as $needle) {
+        if (str_contains($probes, $needle)) { return 'a probe contains the booking path ' . $needle; }
+    }
+    return true;
+});
+
+sh_t('test results get their own additive table and never touch shipments', function () {
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (!str_contains($schema, 'function sh_courier_test_results_sql()')) { return 'the shared DDL function is missing'; }
+    if (!str_contains($schema, 'CREATE TABLE IF NOT EXISTS courier_test_results')) { return 'the table is not created idempotently'; }
+    if (!str_contains($schema, 'sh_courier_test_results_sql(),')) { return 'the installer does not create the table'; }
+    foreach (['result_code VARCHAR(40)', 'state VARCHAR(40)', 'http_status SMALLINT UNSIGNED', 'tested_by INT UNSIGNED', 'tested_at DATETIME'] as $needle) {
+        if (!str_contains($schema, $needle)) { return 'courier_test_results is missing ' . $needle; }
+    }
+    if (str_contains($schema, 'DROP TABLE')) { return 'the migration drops a table'; }
+    foreach (['shipments', 'shipment_events', 'couriers'] as $table) {
+        if (preg_match('/ALTER TABLE\s+' . $table . '/i', $schema)) { return 'the migration alters ' . $table; }
+    }
+    $courier = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (!str_contains($courier, 'function sh_courier_test_record(')) { return 'results are not persisted'; }
+    if (!str_contains($courier, 'function sh_courier_last_test(')) { return 'the last result cannot be read back'; }
+    if (!str_contains($courier, 'function sh_courier_test_summary(')) { return 'there is no shared result display'; }
+    return true;
+});
+
+sh_t('the test action exists on the card and on the courier details page', function () {
+    $list = (string)file_get_contents(SH_ROOT . '/admin/couriers.php');
+    if (!str_contains($list, 'name="courier_action" value="test"')) { return 'the card has no test action'; }
+    if (!str_contains($list, 'sh_courier_test_summary($c)')) { return 'the card does not show the last result'; }
+    if (str_contains($list, "if (\$apiReady): ?>\n          <button")) { return 'the test is still hidden for non-booking drivers'; }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/courier-edit.php');
+    if (!str_contains($edit, 'name="courier_action" value="test"')) { return 'the details page has no test action'; }
+    if (!str_contains($edit, 'sh_courier_test($saved')) { return 'the details page does not run the test after saving'; }
+    if (!str_contains($edit, 'sh_courier_test_summary($editing)')) { return 'the details page does not show the last result'; }
+    return true;
+});
+
+sh_t('courier credentials are encrypted at rest with a legacy fallback', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    foreach (['function sh_courier_credentials_store(', 'function sh_courier_secret_key(', "str_starts_with(\$raw, 'cou:')"] as $needle) {
+        if (!str_contains($src, $needle)) { return 'the courier credential encryption is missing ' . $needle; }
+    }
+    if (!str_contains($src, 'openssl_encrypt(')) { return 'credentials are not encrypted'; }
+    if (!str_contains($src, '$d = json_decode($raw, true);')) { return 'plain legacy JSON is no longer readable'; }
+    foreach (['admin/couriers.php', 'admin/courier-edit.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (str_contains($body, "'credentials'  => \$creds ? json_encode(\$creds")) {
+            return $page . ' still writes plaintext credentials';
+        }
+        if (!str_contains($body, 'sh_courier_credentials_store($creds)')) {
+            return $page . ' does not encrypt the credentials it saves';
+        }
+    }
+    return true;
+});
+
+sh_t('the Steadfast default points at the official host', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (str_contains($src, 'portal.pacakge.net')) { return 'the misspelled portal host is still the default'; }
+    if (!str_contains($src, 'https://portal.packzy.com/api/v1')) { return 'the official packzy host is not the default'; }
+    return true;
+});
+
+sh_t('paperfly asks for the key its API requires', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    if (!str_contains($src, "'paperfly_key' => 'Paperfly Key'")) { return 'the paperflykey credential field is missing'; }
+    return true;
+});
+
+sh_section('Admin forms never save on their own');
+
+sh_t('AI generation never writes generated text to a product', function () {
+    $api = (string)file_get_contents(SH_ROOT . '/api/ai.php');
+    if (str_contains($api, 'auto_saved')) { return 'the generate action still reports an automatic save'; }
+    if (str_contains($api, "sh_ai_config()['auto_save']")) { return 'the generate action still applies its result'; }
+
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (str_contains($js, 'auto_saved')) { return 'the admin script still expects an automatic save'; }
+
+    $mgr = (string)file_get_contents(SH_ROOT . '/ai/AIManager.php');
+    if (str_contains($mgr, "sh_ai_setting('auto_save'")) { return 'the auto-save setting is still read'; }
+
+    $settings = (string)file_get_contents(SH_ROOT . '/admin/ai/settings.php');
+    if (str_contains($settings, 'name="auto_save"')) { return 'the auto-save toggle is still offered'; }
+    return true;
+});
+
+sh_t('the category cropper stages the crop instead of saving it', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/category-cropper.js');
+    if (str_contains($js, 'fetch(')) { return 'the cropper still posts to the server'; }
+    if (!str_contains($js, 'croppedImageInput.value = dataUrl')) {
+        return 'the cropper does not stage the image in the form';
+    }
+    $page = (string)file_get_contents(SH_ROOT . '/admin/category-edit.php');
+    if (str_contains($page, "\$form === 'crop'")) { return 'the immediate crop-save endpoint is still present'; }
+    return true;
+});
+
+sh_t('the phone verification switch has an explicit Save button', function () {
+    $page = (string)file_get_contents(SH_ROOT . '/admin/security.php');
+    if (str_contains($page, 'data-phone-verification-toggle')) { return 'the toggle is still wired to auto-submit'; }
+    if (str_contains($page, 'toggle.form.submit();')) { return 'the toggle still submits its form on change'; }
+    if (!str_contains($page, 'Save phone verification')) { return 'the form has no explicit save button'; }
+    return true;
+});
+
+sh_t('editable forms carry a non-saving unsaved-changes guard', function () {
+    foreach (['admin/product-edit.php', 'admin/category-edit.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (!str_contains($body, 'data-dirty-guard')) { return $page . ' has no unsaved-changes guard'; }
+        if (!str_contains($body, 'data-dirty-note')) { return $page . ' has no unsaved-changes note'; }
+    }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (!str_contains($js, 'beforeunload')) { return 'leaving a dirty form is not warned about'; }
+    if (!str_contains($js, "form.addEventListener('input', mark)")) { return 'the guard does not track typing'; }
+    if (str_contains($js, 'navigator.sendBeacon')) { return 'the guard saves in the background'; }
+    return true;
+});
+
+sh_t('only read-only filters submit automatically', function () {
+    $hits = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT . '/admin'));
+    foreach ($it as $file) {
+        if (!$file->isFile() || !str_ends_with($file->getFilename(), '.php')) { continue; }
+        $path = $file->getPathname();
+        $body = (string)file_get_contents($path);
+        if (!str_contains($body, 'data-submit-form-on-change')) { continue; }
+        $hits[] = str_replace(SH_ROOT . '/', '', $path);
+
+        // The surviving uses must sit in a GET filter form; a POST form that
+        // submitted itself on change would write on every field selection.
+        foreach (preg_split('~<form\b~i', $body) ?: [] as $part) {
+            if (!str_contains($part, 'data-submit-form-on-change')) { continue; }
+            if (preg_match('~^[^>]*method="post"~i', $part) === 1) {
+                return str_replace(SH_ROOT . '/', '', $path) . ' still auto-submits a write form';
+            }
+        }
+    }
+    sort($hits);
+    if ($hits !== ['admin/ai/models.php']) {
+        return 'an editable form still submits on change: ' . implode(', ', $hits);
+    }
+    if (substr_count((string)file_get_contents(SH_ROOT . '/admin/ai/models.php'), 'data-submit-form-on-change') !== 2) {
+        return 'the model filter changed without the test being updated';
+    }
+    return true;
+});
+
+sh_section('Brand and features removed from product management');
+
+sh_t('the brand workflow is gone from the admin', function () {
+    if (is_file(SH_ROOT . '/admin/brands.php')) { return 'the brand editor still exists'; }
+    $layout = (string)file_get_contents(SH_ROOT . '/admin/_layout.php');
+    if (str_contains($layout, "'brands.php'")) { return 'the brand editor is still in the navigation'; }
+    $edit = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
+    if (str_contains($edit, 'name="brand_id"')) { return 'the product form still has a brand selector'; }
+    if (str_contains($edit, 'FROM brands')) { return 'the product form still reads the brands table'; }
+    $ai = (string)file_get_contents(SH_ROOT . '/admin/ai/products.php');
+    if (str_contains($ai, 'data-f="brand_id"')) { return 'the AI product review form still has a brand selector'; }
+    return true;
+});
+
+sh_t('brand filters and badges are gone from the storefront', function () {
+    $list = (string)file_get_contents(SH_ROOT . '/products.php');
+    if (str_contains($list, 'name="brand[]"')) { return 'the product listing still offers a brand filter'; }
+    if (str_contains($list, '$brandIds')) { return 'the listing still parses brand parameters'; }
+    $category = (string)file_get_contents(SH_ROOT . '/category.php');
+    if (str_contains($category, 'name="brand[]"')) { return 'the category page still offers a brand filter'; }
+    if (str_contains($category, 'sh_brands(')) { return 'the category page still lists brands'; }
+    $product = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (str_contains($product, 'Brand:')) { return 'the product page still prints a brand line'; }
+    return true;
+});
+
+sh_t('features and benefits are gone from every product form and page', function () {
+    foreach (['admin/product-edit.php', 'admin/ai/products.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (str_contains($body, 'name="features"') || str_contains($body, 'data-f="features"')) {
+            return $page . ' still has a features field';
+        }
+        if (stripos($body, 'Features and benefits') !== false) { return $page . ' still labels the section'; }
+    }
+    $product = (string)file_get_contents(SH_ROOT . '/product.php');
+    if (str_contains($product, "\$product['features']")) { return 'the product page still prints features'; }
+    return true;
+});
+
+sh_section('SEO copy has no arbitrary character limit');
+
+sh_t('the SEO editor has no maxlength or target-length advice', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/admin/_seo-fields.php');
+    if (preg_match('~name="meta_title"[^>]*maxlength~s', $src) === 1) { return 'meta_title still has a maxlength'; }
+    if (preg_match('~name="meta_description"[^>]*maxlength~s', $src) === 1) { return 'meta_description still has a maxlength'; }
+    if (stripos($src, 'Aim for') !== false) { return 'the target-length advice is still shown'; }
+    if (str_contains($src, 'data-seo-count')) { return 'the character counter is still shown'; }
+
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (str_contains($js, 'markCounter') || str_contains($js, 'data-seo-count')) {
+        return 'the script still marks fields as over a target length';
+    }
+    return true;
+});
+
+sh_t('the SEO Manager and product saves do not truncate SEO copy', function () {
+    $seo = (string)file_get_contents(SH_ROOT . '/admin/seo.php');
+    if (preg_match('~name="meta_title"[^>]*maxlength~s', $seo) === 1) { return 'the SEO Manager title has a maxlength'; }
+    if (preg_match('~name="meta_description"[^>]*maxlength~s', $seo) === 1) { return 'the SEO Manager description has a maxlength'; }
+    if (str_contains($seo, "'seo_default_description' => 300")) {
+        return 'the default meta description is still capped at 300 characters';
+    }
+    foreach (['admin/seo.php', 'admin/product-edit.php', 'admin/category-edit.php', 'ai/AIManager.php'] as $page) {
+        $body = (string)file_get_contents(SH_ROOT . '/' . $page);
+        if (preg_match('~meta_title[^;\n]{0,120}mb_substr~', $body) === 1) {
+            return $page . ' still truncates meta_title';
+        }
+        if (preg_match('~meta_description[^;\n]{0,120}mb_substr~', $body) === 1) {
+            return $page . ' still truncates meta_description';
+        }
+    }
+    return true;
+});
+
+sh_t('the SEO columns are TEXT and older installs are widened safely', function () {
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
+    if (!str_contains($schema, 'meta_title TEXT NULL')) { return 'new products still cap the SEO title'; }
+    if (!str_contains($schema, 'meta_description TEXT NULL')) { return 'new products still cap the meta description'; }
+
+    $seo = (string)file_get_contents(SH_ROOT . '/includes/seo.php');
+    if (!str_contains($seo, 'function sh_seo_widen_text_columns')) { return 'there is no widening migration'; }
+    if (!str_contains($seo, 'MODIFY')) { return 'the widening migration does not alter the columns'; }
+    if (!str_contains($seo, 'information_schema.columns')) { return 'the migration does not inspect the current type'; }
+    if (!str_contains($seo, "sh_setting_save('seo_schema_v', '2')")) { return 'the schema version was not advanced'; }
+    if (str_contains($seo, 'DROP TABLE')) { return 'the SEO migration drops a table'; }
     return true;
 });
 

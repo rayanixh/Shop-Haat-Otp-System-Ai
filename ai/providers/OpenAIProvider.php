@@ -27,6 +27,31 @@ class OpenAIProvider extends OpenAICompatibleProvider
         return $h;
     }
 
+    /**
+     * OpenAI-only first step: GET /models/{id} is a free, read-only check that
+     * the key is valid and the configured model is visible to it. It catches a
+     * typo in the model id before spending a single token. The inherited chat
+     * probe then proves the model really answers.
+     */
+    public function testConnection(): array
+    {
+        if (!$this->hasKey()) { return parent::testConnection(); }
+        $model = trim($this->model([]));
+        if ($model === '') { return parent::testConnection(); }
+
+        $check = AIHttpClient::get($this->baseUrl() . '/models/' . rawurlencode($model), $this->headers(), 15);
+        if (!$check['ok']) {
+            if ((int)($check['status'] ?? 0) === 404) {
+                return $this->testResult(false, 'model_not_found',
+                    'OpenAI does not list the model "' . $model . '" for this key.',
+                    ['status' => 404, 'model' => $model,
+                     'next' => 'Open Models, load the catalogue and choose a model this key can use.']);
+            }
+            return $this->testHttpFailure($check, $model, 'OpenAI');
+        }
+        return parent::testConnection();
+    }
+
     protected function describeModel(string $id, array $m): array
     {
         $row = parent::describeModel($id, $m);

@@ -124,6 +124,30 @@ final class AIHttpClient
         return ['ok' => false, 'status' => $status, 'json' => $json, 'raw' => $raw, 'error' => $error, 'retryable' => $retryable];
     }
 
+    /**
+     * Stable machine code for a test outcome, from an HTTP status.
+     *
+     * "network_error" is status 0 (nothing came back). The codes are stored on
+     * ai_providers.last_test_code and rendered as an admin-facing state, so the
+     * Providers screen can say "authentication failed" instead of showing a
+     * generic failure for every problem.
+     */
+    public static function classify(int $status): string
+    {
+        return match (true) {
+            $status === 0   => 'network_error',
+            $status === 401 => 'auth_failed',
+            $status === 402 => 'billing',
+            $status === 403 => 'permission_denied',
+            $status === 404 => 'model_not_found',
+            $status === 408 => 'timeout',
+            $status === 429 => 'rate_limited',
+            $status >= 500  => 'provider_error',
+            $status >= 400  => 'failed',
+            default         => 'connected',
+        };
+    }
+
     /** Turn a provider error into something an admin can act on. */
     public static function friendly(int $status, string $message): string
     {

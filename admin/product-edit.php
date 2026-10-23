@@ -16,10 +16,12 @@ require_once dirname(__DIR__) . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/catalog.php';
+require_once SH_ROOT . '/includes/product-schema.php';
 
 // SEO columns: the save handler writes to them, so ensure they exist first.
 require_once SH_ROOT . '/includes/seo.php';
 sh_seo_schema_ensure();
+sh_product_schema_ensure();
 
 sh_session_start();
 sh_require_admin();
@@ -73,13 +75,14 @@ if ($form === 'save') {
     if (!$errors) {
         $data = [
             'category_id' => sh_int($_POST['category_id'] ?? 0) ?: null,
-            'brand_id' => sh_int($_POST['brand_id'] ?? 0) ?: null,
             'name' => sh_post('name'),
             'slug' => $slug,
             'sku' => sh_post('sku') ?: null,
             'short_description' => sh_post('short_description') ?: null,
             'description' => sh_post('description') ?: null,
             'specifications' => sh_post('specifications') ?: null,
+            // Alt text for the featured image; empty falls back to the name.
+            'image_alt' => mb_substr(trim(sh_post('image_alt')), 0, 190) ?: null,
             'price' => (float)sh_post('price'),
             // compare_price is NOT NULL in the schema; 0 means "no compare-at price".
             'compare_price' => sh_post('compare_price') !== '' ? (float)sh_post('compare_price') : 0,
@@ -92,8 +95,9 @@ if ($form === 'save') {
             'status' => !empty($_POST['status']) ? 1 : 0,
             // SEO. Values are validated here rather than trusted: URLs must
             // be http(s) or a site path, and the indexing flag is a 0/1.
-            'meta_title'          => mb_substr(trim(sh_post('meta_title')), 0, 190) ?: null,
-            'meta_description'    => mb_substr(trim(sh_post('meta_description')), 0, 300) ?: null,
+            // SEO copy has no hard character limit; the columns are TEXT.
+            'meta_title'          => trim(sh_post('meta_title')) ?: null,
+            'meta_description'    => trim(sh_post('meta_description')) ?: null,
             'meta_keywords'       => mb_substr(trim(sh_post('meta_keywords')), 0, 300) ?: null,
             'seo_focus_keyword'   => mb_substr(trim(sh_post('seo_focus_keyword')), 0, 120) ?: null,
             'seo_related_phrases' => mb_substr(trim(sh_post('seo_related_phrases')), 0, 500) ?: null,
@@ -111,7 +115,7 @@ if ($form === 'save') {
                 sh_update('products', $applyData, 'id = ?', [$id]);
                 if ($stockChanged) { sh_stock_adjust($id, (int)$data['stock'], $stockReason !== '' ? $stockReason : 'Edited in product form', 'manual'); }
                 $diff = [];
-                foreach (['name', 'sku', 'category_id', 'brand_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
+                foreach (['name', 'sku', 'category_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
                     if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) { $diff[$k] = [$before[$k], $data[$k]]; }
                 }
                 if (isset($before['price']) && abs((float)$before['price'] - (float)$data['price']) >= 0.005) {
@@ -168,7 +172,6 @@ $chk = static function (string $k, bool $default = false) use ($editing, $errors
 };
 
 $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
-$brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
 
 $adminPage = 'products';
 $adminTitle = $editing !== null ? 'Edit product' : 'New product';
@@ -190,11 +193,11 @@ require __DIR__ . '/_layout.php';
 
   <div class="sh-panel sh-formcard">
     <div class="sh-panel__body">
-      <form method="post" enctype="multipart/form-data" novalidate>
+      <form method="post" enctype="multipart/form-data" novalidate data-dirty-guard>
         <?= sh_csrf_field() ?>
         <input type="hidden" name="form" value="save">
-        <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
-        <input type="hidden" name="current_image" value="<?= e($val('image')) ?>">
+        <input type="hidden" id="p-id" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
+        <input type="hidden" id="p-current-image" name="current_image" value="<?= e($val('image')) ?>">
 
         <div class="sh-grid2">
           <div class="sh-field"><label class="sh-field__label" for="p-name">Product name <span class="sh-field__req">*</span></label>
@@ -202,19 +205,12 @@ require __DIR__ . '/_layout.php';
           <div class="sh-field"><label class="sh-field__label" for="p-slug">URL slug</label>
             <input class="sh-input" id="p-slug" name="slug" maxlength="190" value="<?= e($val('slug')) ?>" placeholder="auto-generated from name"></div>
         </div>
-        <div class="sh-grid3">
+        <div class="sh-grid2">
           <div class="sh-field"><label class="sh-field__label" for="p-cat">Category <span class="sh-field__req">*</span></label>
             <select class="sh-select" id="p-cat" name="category_id" required>
               <option value="">Select category</option>
               <?php foreach ($cats as $c): ?>
                 <option value="<?= (int)$c['id'] ?>" <?= (int)$val('category_id') === (int)$c['id'] ? 'selected' : '' ?>><?= e($c['name']) ?></option>
-              <?php endforeach; ?>
-            </select></div>
-          <div class="sh-field"><label class="sh-field__label" for="p-brand">Brand</label>
-            <select class="sh-select" id="p-brand" name="brand_id">
-              <option value="">No brand</option>
-              <?php foreach ($brands as $b): ?>
-                <option value="<?= (int)$b['id'] ?>" <?= (int)$val('brand_id') === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['name']) ?></option>
               <?php endforeach; ?>
             </select></div>
           <div class="sh-field"><label class="sh-field__label" for="p-sku">SKU</label>
@@ -247,6 +243,10 @@ require __DIR__ . '/_layout.php';
           <input class="sh-input" id="p-img" type="file" name="image" accept="image/*">
           <span class="sh-field__hint">PNG, JPG, WebP or GIF. Maximum <?= e(sh_bytes_label(sh_server_upload_limit())) ?> (your server's limit).</span>
           <span class="sh-field__hint">JPG, PNG or WebP. Max 3 MB.</span></div>
+        <div class="sh-field"><label class="sh-field__label" for="p-img-alt">Image alt text</label>
+          <input class="sh-input" id="p-img-alt" name="image_alt" maxlength="190" value="<?= e($val('image_alt')) ?>"
+                 placeholder="Describe the product for screen readers and search engines">
+          <span class="sh-field__hint">Leave empty to use the product name. AI Auto Work fills this when it generates the draft.</span></div>
         <?php if ($val('image') !== ''): ?>
           <p style="margin:-4px 0 12px"><img src="<?= e(sh_product_image($val('image'))) ?>" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:7px;border:1px solid var(--sh-line)"></p>
         <?php endif; ?>
@@ -271,6 +271,11 @@ require __DIR__ . '/_layout.php';
         $seoLabel   = 'product';
         $seoBaseUrl = sh_seo_base();
         $seoPath    = 'product.php?slug={slug}';
+        // The preview must show THIS product's picture, not a placeholder. The
+        // helper returns '' when the file is gone, so the preview can say so.
+        $seoImage        = $val('image') !== '' ? sh_seo_product_image(['image' => $val('image')]) : '';
+        $seoImageInput   = 'p-img';
+        $seoImageCurrent = 'p-current-image';
         require __DIR__ . '/_seo-fields.php';
         ?>
         <div class="sh-grid3">
@@ -286,6 +291,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-formcard__foot sh-formcard__foot--sticky">
           <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $editing ? 'Save changes' : 'Create product' ?></button>
           <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
+          <span class="sh-dirty" data-dirty-note hidden><?= sh_icon('info', 13) ?> Unsaved changes</span>
         </div>
       </form>
     </div>

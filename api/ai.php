@@ -19,6 +19,7 @@ try { sh_db(); } catch (Throwable $e) {
 }
 
 require_once SH_ROOT . '/includes/admin-auth.php';
+require_once SH_ROOT . '/includes/admin-perms.php';
 require_once SH_ROOT . '/ai/AIManager.php';
 
 sh_session_start();
@@ -100,13 +101,174 @@ try {
             if ($task === 'image' && !empty($res['data']['file'])) {
                 $payload['url'] = sh_url('uploads/products/' . rawurlencode((string)$res['data']['file']));
             }
-            // Auto-save applies only where a straight column write is unambiguous.
-            if (sh_ai_config()['auto_save']
-                && in_array($task, ['title', 'description', 'short', 'tags', 'seo', 'category_content'], true)) {
-                $applied = sh_ai_apply($task, $refId, (array)$res['data'], $adminId);
-                $payload['auto_saved'] = !empty($applied['ok']);
-            }
+            // Generation never writes to the product. The administrator reviews
+            // the result and uses the explicit Save action (or the AI product
+            // review form) — no background write happens here.
             sh_json($payload);
+        }
+
+        /* ---------- Complete Product draft (nothing is saved) ------------- */
+        case 'product_draft': {
+            // Writing the product may happen later through the normal Save
+            // Product form, so the matching product permission is required here.
+            if (!sh_admin_can('ai.use')) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to use AI Auto Work.'], 403);
+            }
+            $productId = sh_int($_POST['product_id'] ?? 0);
+            // A new product needs create rights; an existing one needs edit rights.
+            $needed = $productId > 0 ? 'products.edit' : 'products.create';
+            if (!sh_admin_can($needed)) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to ' . ($productId > 0 ? 'edit this product.' : 'create products.')], 403);
+            }
+            if (!sh_ai_throttle($adminId, 20)) {
+                sh_json(['success' => false, 'error' => 'Too many AI requests in the last minute. Please wait a moment.'], 429);
+            }
+
+            $name = mb_substr(trim(sh_post('name')), 0, 190);
+            if ($name === '') {
+                sh_json(['success' => false, 'error' => 'Enter the product name first.'], 400);
+            }
+
+            // Only fields the panel really offers, each a bounded string.
+            $field = sh_post('field');
+            $allowedFields = ['', 'title', 'short', 'description', 'specifications',
+                              'category', 'brand', 'sku', 'seo', 'image_alt'];
+            if (!in_array($field, $allowedFields, true)) {
+                sh_json(['success' => false, 'error' => 'Unknown field to regenerate.'], 400);
+            }
+
+            $knownIn = json_decode((string)($_POST['known'] ?? ''), true);
+            $known = [];
+            if (is_array($knownIn)) {
+                foreach (['brand', 'model', 'size', 'material', 'colour', 'dimensions', 'notes', 'specs'] as $k) {
+                    if (!isset($knownIn[$k]) || !is_scalar($knownIn[$k])) { continue; }
+                    $known[$k] = mb_substr(trim((string)$knownIn[$k]), 0, $k === 'specs' ? 2000 : 600);
+                }
+            }
+
+            // The reference image: the file the admin has just selected (not
+            // uploaded yet), else the product's saved image on the edit screen.
+            $image = null;
+            if (!empty($_FILES['image']['name'])) {
+                $up = sh_ai_draft_image_from_upload($_FILES['image']);
+                if (empty($up['ok'])) {
+                    sh_json(['success' => false, 'error' => (string)($up['error'] ?? 'The image could not be read.')], 400);
+                }
+                $image = $up['image'];
+            }
+
+            // A full draft is the normal path for AI Auto Work: the product name
+            // is the only required input. "want_image" asks the server to create
+            // the featured photo with the configured image model.
+            $wantImage = !empty($_POST['want_image']) || $field === '';
+            $wantGallery = !empty($_POST['want_gallery']);
+
+            $res = sh_ai_product_draft([
+                'name'              => $name,
+                'short_description' => mb_substr(trim(sh_post('short_description')), 0, 300),
+                'known'             => $known,
+                'field'             => $field,
+                'product_id'        => $productId,
+                'image'             => $image,
+                'want_image'        => $wantImage,
+                'want_gallery'      => $wantGallery,
+            ], $adminId);
+
+            if (empty($res['ok'])) {
+                sh_json(['success' => false, 'error' => (string)$res['error']]);
+            }
+
+            $image = $res['image'] ?? null;
+            $gallery = $res['gallery'] ?? [];
+
+            sh_json([
+                'success'        => true,
+                'task'           => 'product_full',
+                'field'          => $field,
+                'data'           => $res['data'],
+                'via'            => $res['via'] ?? null,
+                'image_used'     => !empty($res['image_used']),
+                'image_supplied' => !empty($res['image_supplied']),
+                // The truth about the image: ok=false with the real reason is a
+                // failure the interface must show, never a quiet success.
+                'image'          => $image === null ? null : [
+                    'ok'    => !empty($image['ok']),
+                    'file'  => (string)($image['file'] ?? ''),
+                    'url'   => (string)($image['url'] ?? ''),
+                    'error' => (string)($image['error'] ?? ''),
+                ],
+                'gallery'        => array_map(static fn($g) => [
+                    'file' => (string)($g['file'] ?? ''),
+                    'url'  => (string)($g['url'] ?? ''),
+                ], (array)$gallery),
+            ]);
+        }
+
+        /* ---------- generate just the featured image for a draft ---------- */
+        case 'product_image': {
+            if (!sh_admin_can('products.create')) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to create products.'], 403);
+            }
+            if (!sh_ai_throttle($adminId, 20)) {
+                sh_json(['success' => false, 'error' => 'Too many requests in the last minute. Please wait a moment.'], 429);
+            }
+            $name = mb_substr(trim(sh_post('name')), 0, 190);
+            if ($name === '') {
+                sh_json(['success' => false, 'error' => 'Enter the product name first.'], 400);
+            }
+            $draft = ['name' => $name, 'title' => $name];
+            $decoded = json_decode((string)($_POST['data'] ?? ''), true);
+            if (is_array($decoded)) {
+                foreach (['title', 'short_description', 'category_name'] as $k) {
+                    if (isset($decoded[$k]) && is_scalar($decoded[$k])) {
+                        $draft[$k] = mb_substr((string)$decoded[$k], 0, 300);
+                    }
+                }
+            }
+            $image = sh_ai_generate_product_image($draft, $adminId);
+            if (empty($image['ok'])) {
+                sh_json(['success' => false, 'error' => (string)($image['error'] ?? 'The image could not be generated.')], 422);
+            }
+            sh_json(['success' => true, 'file' => (string)$image['file'], 'url' => (string)$image['url']]);
+        }
+
+        /* ---------- save a reviewed full product (one transaction) -------- */
+        case 'save_product': {
+            if (!sh_admin_can('products.create')) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to create products.'], 403);
+            }
+            if (!sh_ai_throttle($adminId, 20)) {
+                sh_json(['success' => false, 'error' => 'Too many requests in the last minute. Please wait a moment.'], 429);
+            }
+
+            $raw = (string)($_POST['data'] ?? '');
+            $data = json_decode($raw, true);
+            if (!is_array($data)) {
+                sh_json(['success' => false, 'error' => 'Nothing to save. Review the draft first.'], 400);
+            }
+
+            $res = sh_ai_save_full_product($data, $adminId);
+            if (empty($res['ok'])) {
+                sh_json(array_filter([
+                    'success' => false,
+                    'error'   => (string)($res['error'] ?? 'The product could not be saved.'),
+                    'fields'  => $res['fields'] ?? null,
+                ], static fn($v) => $v !== null), 422);
+            }
+
+            sh_json([
+                'success'       => true,
+                'id'            => (int)$res['id'],
+                'slug'          => (string)($res['slug'] ?? ''),
+                'url'           => (string)($res['url'] ?? ''),
+                'admin_url'     => (string)($res['admin_url'] ?? ''),
+                'already_saved' => !empty($res['already_saved']),
+                'image_url'     => (string)($res['image_url'] ?? ''),
+                'tags'          => $res['tags'] ?? [],
+                'gallery'       => $res['gallery'] ?? [],
+                'verify'        => $res['verify'] ?? [],
+                'message'       => (string)($res['message'] ?? 'Product saved.'),
+            ]);
         }
 
         /* ---------- persist an approved result ---------------------------- */
@@ -121,6 +283,12 @@ try {
             $allowed = ['title', 'description', 'short', 'tags', 'seo', 'category', 'image', 'category_content'];
             if (!in_array($task, $allowed, true) || $refId <= 0) {
                 sh_json(['success' => false, 'error' => 'Unknown save target.'], 400);
+            }
+            // Generating is one permission; writing is another. Without this an
+            // operator with only ai.use could edit products they cannot open.
+            $needed = $task === 'category_content' ? 'catalog.manage' : 'products.edit';
+            if (!sh_admin_can($needed)) {
+                sh_json(['success' => false, 'error' => 'You do not have permission to change this item.'], 403);
             }
             $res = sh_ai_apply($task, $refId, $data, $adminId);
             if (empty($res['ok'])) { sh_json(['success' => false, 'error' => (string)$res['error']]); }
@@ -203,17 +371,30 @@ try {
             sh_json(['success' => true] + $res);
         }
 
-        /* ---------- providers: verify the credentials really work --------- */
+        /* ---------- providers: verify the credentials really work ---------
+         * "success" means the test RAN and produced a real answer. The outcome
+         * is "ok": a rejected key is a completed test, not a failed request, so
+         * the browser can render the provider's actual state without treating
+         * the HTTP call itself as broken. No secret is ever returned.
+         */
         case 'test_connection': {
             $pid = sh_int($_POST['provider_id'] ?? 0);
-            if ($pid <= 0) {
-                $d = sh_ai_default_provider_row();
-                $pid = $d ? (int)$d['id'] : 0;
-            }
-            if ($pid <= 0) { sh_json(['success' => false, 'error' => 'No provider configured.']); }
+            if ($pid <= 0) { sh_json(['success' => false, 'error' => 'Choose a provider to test.'], 400); }
+            if (sh_ai_provider_row($pid) === null) { sh_json(['success' => false, 'error' => 'That provider no longer exists.'], 404); }
             $res = sh_ai_provider_test($pid);
-            if (empty($res['ok'])) { sh_json(['success' => false, 'error' => (string)$res['error']]); }
-            sh_json(['success' => true, 'message' => 'Connection OK. ' . (string)($res['detail'] ?? '')]);
+            $code = (string)($res['code'] ?? (!empty($res['ok']) ? 'connected' : 'failed'));
+            sh_json([
+                'success'    => true,
+                'ok'         => !empty($res['ok']),
+                'code'       => $code,
+                'state'      => sh_ai_test_state_label($code),
+                'tone'       => sh_ai_test_state_tone($code),
+                'status'     => (int)($res['status'] ?? 0),
+                'message'    => (string)($res['message'] ?? ($res['ok'] ? 'Connected.' : 'The test failed.')),
+                'next'       => (string)($res['next'] ?? ''),
+                'model'      => (string)($res['model'] ?? ''),
+                'tested_at'  => (string)($res['tested_at'] ?? date('Y-m-d H:i:s')),
+            ]);
         }
 
         /* ---------- providers: import the live model catalogue ------------ */

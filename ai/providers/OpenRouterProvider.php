@@ -103,24 +103,64 @@ class OpenRouterProvider extends OpenAICompatibleProvider
         return ['ok' => true, 'models' => $out];
     }
 
+    /**
+     * Two-step, provider-specific probe:
+     *   1. GET /auth/key — validates the key and returns its spend limit.
+     *   2. One 64-token chat message to the configured model, only when a text
+     *      model is set. An image-only OpenRouter provider skips step 2.
+     */
     public function testConnection(): array
     {
-        if (!$this->hasKey()) { return ['ok' => false, 'error' => 'No API key configured.']; }
-        // /auth/key validates the key and reports limits without spending tokens.
+        if (!$this->hasKey()) {
+            return $this->testIncomplete('No API key is saved for ' . $this->name() . '.',
+                'Paste the OpenRouter key, save it, then test again.');
+        }
         $res = AIHttpClient::get($this->baseUrl() . '/auth/key', $this->headers(), 20);
-        if (!$res['ok']) { return ['ok' => false, 'error' => $res['error']]; }
+        if (!$res['ok']) { return $this->testHttpFailure($res, '', 'OpenRouter'); }
+
         $d = $res['json']['data'] ?? [];
         $bits = [];
-        if (isset($d['label'])) { $bits[] = 'Key "' . (string)$d['label'] . '"'; }
+        if (isset($d['label']) && (string)$d['label'] !== '') { $bits[] = 'key "' . (string)$d['label'] . '"'; }
         if (isset($d['limit']) && $d['limit'] !== null) { $bits[] = 'limit $' . number_format((float)$d['limit'], 2); }
         if (isset($d['usage'])) { $bits[] = 'used $' . number_format((float)$d['usage'], 4); }
-        $detail = $bits ? implode(', ', $bits) . '.' : 'Key accepted.';
-        $model = $this->model([]);
-        if ($model !== '') {
-            $t = $this->generateText('You reply with one word.', 'Reply with the single word: ready', ['model' => $model, 'max_tokens' => 8, 'temperature' => 0]);
-            if (empty($t['ok'])) { return ['ok' => false, 'error' => $detail . ' But the model "' . $model . '" failed: ' . (string)$t['error']]; }
-            $detail .= ' ' . $model . ' responded.';
+        $summary = $bits ? ' (' . implode(', ', $bits) . ')' : '';
+
+        $model = trim($this->model([]));
+        if ($model === '') {
+            $imageModel = trim((string)($this->row['default_image_model'] ?? ''));
+            if ($imageModel !== '') {
+                return $this->testResult(true, 'connected',
+                    'OpenRouter accepted the key' . $summary . '. No text model is set; image model: ' . $imageModel . '.',
+                    ['status' => (int)$res['status'], 'model' => $imageModel, 'next' => '']);
+            }
+            return $this->testIncomplete('OpenRouter accepted the key' . $summary . ', but no default text model is selected.',
+                'Choose a default text model and save, then test again.');
         }
-        return ['ok' => true, 'detail' => $detail];
+
+        $payload = [
+            'model'    => $model,
+            'messages' => [['role' => 'user', 'content' => 'Reply with the single word: ready']],
+            'max_tokens' => 64,
+        ];
+        $chat = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(),
+            $this->decorateChatPayload($payload), 20);
+        if (!$chat['ok']) { return $this->testHttpFailure($chat, $model, 'OpenRouter'); }
+        $j = $chat['json'];
+        $choice = $j['choices'][0] ?? [];
+        $text = trim((string)($choice['message']['content'] ?? ''));
+        $finish = (string)($choice['finish_reason'] ?? '');
+        if ($text === '' && $finish === 'length') {
+            return $this->testResult(true, 'token_limit',
+                'OpenRouter accepted the key' . $summary . '. ' . $model . ' reached its output-token limit on the probe.',
+                ['status' => 200, 'model' => $model, 'next' => 'Raise the token budget for generations; the key is valid.']);
+        }
+        if ($text === '') {
+            return $this->testResult(false, 'provider_error',
+                'OpenRouter accepted the key but ' . $model . ' returned an empty reply' . ($finish !== '' ? ' (' . $finish . ')' : '') . '.',
+                ['status' => 200, 'model' => $model, 'next' => 'Pick a text-capable model and test again.']);
+        }
+        return $this->testResult(true, 'connected',
+            'Connected to OpenRouter' . $summary . '. ' . $model . ' replied: ' . mb_substr($text, 0, 40),
+            ['status' => 200, 'model' => $model, 'next' => '']);
     }
 }

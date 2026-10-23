@@ -98,15 +98,13 @@ $total = (int)sh_val("SELECT COUNT(*) FROM products p WHERE $whereSql", $args, 0
 $pages = max(1, (int)ceil($total / $per));
 $page = min($page, $pages);
 $rows = sh_all(
-    "SELECT p.*, c.name AS category_name, b.name AS brand_name
+    "SELECT p.*, c.name AS category_name
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
-     LEFT JOIN brands b ON b.id = p.brand_id
      WHERE $whereSql ORDER BY p.id DESC LIMIT $per OFFSET " . (($page - 1) * $per),
     $args
 );
 $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
-$brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
 
 $adminPage = 'products';
 $adminTitle = 'Products';

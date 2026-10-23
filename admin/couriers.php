@@ -52,45 +52,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/couriers.php');
     }
 
-    // Per-provider card: enable toggle + credentials + tracking template only.
-    if ($form === 'card') {
+    // Per-provider card: enable toggle, credentials, tracking template and the
+    // read-only connection test. "Test connection" posts the same form, so
+    // credentials typed but not yet saved are stored first and then tested —
+    // the admin never has to save, reload and find the button again.
+    $courierAction = sh_post('courier_action');
+    if ($form === 'card' || $form === 'test' || $courierAction === 'test') {
         $id = sh_int($_POST['id'] ?? 0);
         $c = sh_courier_by_id($id);
         if ($c === null) { sh_flash('error', 'That courier does not exist.'); sh_redirect('admin/couriers.php'); }
+
         $creds = sh_courier_credentials($c);
         foreach (array_merge(sh_courier_fields($c['driver']), sh_courier_optional_fields($c['driver'])) as $field => $label) {
             $posted = trim((string)($_POST['cred_' . $field] ?? ''));
             if ($posted !== '') { $creds[$field] = $posted; }
         }
         if (!empty($_POST['clear_credentials'])) { $creds = []; }
-        $tracking = sh_post('tracking_url');
+        $tracking = trim(sh_post('tracking_url'));
         if ($tracking !== '' && !preg_match('~^https?://~i', $tracking)) {
             sh_flash('error', 'The tracking URL must start with http:// or https://.');
             sh_redirect('admin/couriers.php#courier-' . $id);
         }
         $newStatus = !empty($_POST['status']) ? 1 : 0;
-        sh_update('couriers', [
-            'status'       => $newStatus,
-            'tracking_url' => $tracking !== '' ? $tracking : null,
-            'credentials'  => $creds ? json_encode($creds, JSON_UNESCAPED_SLASHES) : null,
-        ], 'id = ?', [$id]);
+        try {
+            sh_update('couriers', [
+                'status'       => $newStatus,
+                'tracking_url' => $tracking !== '' ? $tracking : null,
+                'credentials'  => sh_courier_credentials_store($creds),
+            ], 'id = ?', [$id]);
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'courier-card-save');
+            sh_flash('error', 'The courier settings could not be saved.');
+            sh_redirect('admin/couriers.php#courier-' . $id);
+        }
         sh_log_line('admin', 'Courier "' . $c['name'] . '" updated by ' . $admin['email']);
         $oldCreds = sh_courier_credentials($c);
         $credChanged = $oldCreds !== $creds;
         $oldA = ['enabled' => (int)$c['status'], 'tracking_url' => (string)($c['tracking_url'] ?? ''), 'credentials' => $oldCreds ? '•••• (hidden)' : '(empty)'];
         $newA = ['enabled' => $newStatus, 'tracking_url' => $tracking, 'credentials' => $creds ? ($credChanged ? '•••• (changed)' : '•••• (hidden)') : '(empty)'];
         if ($oldA !== $newA) { sh_audit('settings_changed', 'settings', $id, 'courier_' . $c['code'], $oldA, $newA); }
-        sh_flash('success', $c['name'] . ' saved.');
-        sh_redirect('admin/couriers.php#courier-' . $id);
-    }
 
-    if ($form === 'test') {
-        $id = sh_int($_POST['id'] ?? 0);
-        $c = sh_courier_by_id($id);
-        if ($c === null) { sh_flash('error', 'That courier does not exist.'); }
-        else {
-            $r = sh_courier_test($c);
-            sh_flash($r['ok'] ? 'success' : 'error', $r['ok'] ? $r['message'] : $r['error']);
+        if ($form === 'test' || $courierAction === 'test') {
+            $fresh = sh_courier_by_id($id);
+            $r = $fresh !== null ? sh_courier_test($fresh, (int)$admin['id']) : null;
+            if ($r === null) {
+                sh_flash('error', 'The courier disappeared before the test ran.');
+            } else {
+                $type = $r['state'] === 'connected' ? 'success' : (in_array($r['state'], ['unsupported'], true) ? 'info' : 'error');
+                sh_flash($type, $r['state_label'] . ': ' . $r['message'] . ($r['next'] !== '' ? ' ' . $r['next'] : ''));
+                sh_log_line('admin', 'Courier "' . $c['name'] . '" test by ' . $admin['email'] . ': ' . $r['state']);
+            }
+        } else {
+            sh_flash('success', $c['name'] . ' saved.');
         }
         sh_redirect('admin/couriers.php#courier-' . $id);
     }
@@ -149,15 +162,19 @@ $otherRows = array_values(array_filter($rows, static fn($c) => !isset($providers
         <div class="sh-courier__tags">
           <span class="sh-statuspill <?= $on ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>"><?= $on ? 'Enabled' : 'Disabled' ?></span>
           <?php if ($apiReady): ?>
-            <span class="sh-badge <?= $configured ? 'sh-badge--ok' : 'sh-badge--warn' ?>"><?= $configured ? 'API connected' : 'API — credentials needed' ?></span>
+            <span class="sh-badge <?= $configured ? 'sh-badge--ok' : 'sh-badge--warn' ?>"><?= $configured ? 'API ready' : 'Credentials needed' ?></span>
           <?php elseif (in_array($c['driver'], ['manual', 'custom'], true)): ?>
             <span class="sh-badge sh-badge--muted">Manual tracking</span>
+          <?php elseif (in_array($c['driver'], sh_courier_testable_drivers(), true)): ?>
+            <span class="sh-badge <?= $configured ? 'sh-badge--muted' : 'sh-badge--warn' ?>"><?= $configured ? 'Credentials saved' : 'Test available' ?></span>
           <?php else: ?>
             <span class="sh-badge sh-badge--muted"><?= $configured ? 'Credentials saved' : 'Manual tracking' ?></span>
           <?php endif; ?>
         </div>
       </div>
     </div>
+
+    <?= sh_courier_test_summary($c) ?>
 
     <form method="post" novalidate autocomplete="off" class="sh-courier__form">
       <?= sh_csrf_field() ?>
@@ -180,6 +197,7 @@ $otherRows = array_values(array_filter($rows, static fn($c) => !isset($providers
                      placeholder="<?= $has ? 'Saved — leave blank to keep' : 'Issued by ' . e($c['name']) ?>">
               <button class="sh-secret__btn" type="button" data-reveal="<?= e($fid) ?>" aria-label="Show or hide"><?= sh_icon('eye', 15) ?></button>
             </div>
+            <?php if ($field === 'base_url'): ?><span class="sh-field__hint"><?= e(sh_courier_base_url_hint($c['driver'])) ?></span><?php endif; ?>
           </div>
         <?php endforeach; ?>
         <?php if ($creds): ?>
@@ -193,11 +211,10 @@ $otherRows = array_values(array_filter($rows, static fn($c) => !isset($providers
         <span class="sh-field__hint">Use <code>{tracking}</code> where the consignment number goes.</span>
       </div>
 
+      <p class="sh-courier__testhint"><?= sh_icon('shield', 13) ?> A connection test is read-only: it never books a parcel, requests a pickup or changes an order.</p>
       <div class="sh-actions">
         <button class="sh-btn sh-btn--sm" type="submit"><?= sh_icon('check-circle', 14) ?> Save</button>
-        <?php if ($apiReady): ?>
-          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="form" value="test" formnovalidate><?= sh_icon('shield', 14) ?> Test connection</button>
-        <?php endif; ?>
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="courier_action" value="test" formnovalidate data-no-lock><?= sh_icon('zap', 14) ?> Test connection</button>
         <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e($prov['site']) ?>" target="_blank" rel="noopener"><?= sh_icon('external', 14) ?> Merchant portal</a>
         <a class="sh-courier__edit" href="<?= e(sh_url('admin/courier-edit.php?edit=' . (int)$c['id'])) ?>"><?= sh_icon('pencil', 13) ?> Advanced</a>
       </div>

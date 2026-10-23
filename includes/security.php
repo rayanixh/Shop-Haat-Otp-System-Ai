@@ -61,7 +61,10 @@ function sh_security_setting(string $key, string $default): string
  */
 function sh_csp_policy(): string
 {
-    $imgExtra = "'self' data: https:";
+    // blob: is needed for the admin's "preview the image I just picked" path:
+    // a file the browser holds locally, before any upload has happened. It is
+    // still same-origin content, never a remote fetch.
+    $imgExtra = "'self' blob: data: https:";
     $directives = [
         "default-src 'self'",
         "base-uri 'self'",

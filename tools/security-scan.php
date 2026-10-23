@@ -538,7 +538,7 @@ foreach (sh_scan_list($SH_ROOT, ['php'], $SH_SKIP_DIRS) as $path) {
 $publicEndpoints = [
     'index.php' => 'storefront', 'shop.php' => 'storefront', 'products.php' => 'catalogue',
     'product.php' => 'catalogue', 'category.php' => 'catalogue', 'search.php' => 'catalogue',
-    'brands.php' => 'catalogue', 'brand.php' => 'catalogue', 'offers.php' => 'catalogue',
+    'brand.php' => 'catalogue', 'offers.php' => 'catalogue',
     'about.php' => 'content', 'contact.php' => 'content', 'faq.php' => 'content',
     'page.php' => 'content', 'terms.php' => 'content', 'privacy.php' => 'content',
     'refund-policy.php' => 'content', 'shipping-policy.php' => 'content',

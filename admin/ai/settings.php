@@ -68,7 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_ai_setting_save('language', mb_substr(sh_post('language') ?: 'English', 0, 40));
         sh_ai_setting_save('tone', mb_substr(sh_post('tone') ?: 'Professional', 0, 40));
         sh_ai_setting_save('seo_mode', !empty($_POST['seo_mode']) ? '1' : '0');
-        sh_ai_setting_save('auto_save', !empty($_POST['auto_save']) ? '1' : '0');
         sh_ai_setting_save('auto_publish', !empty($_POST['auto_publish']) ? '1' : '0');
 
         if (!$errors) {
@@ -195,9 +194,6 @@ require dirname(__DIR__) . '/_layout.php';
         <label class="sh-toggle" style="margin-bottom:10px">
           <input type="checkbox" name="seo_mode" value="1" <?= $aiConfig['seo_mode'] ? 'checked' : '' ?>>
           <span class="sh-toggle__track"></span><span>SEO optimisation</span></label>
-        <label class="sh-toggle" style="margin-bottom:10px">
-          <input type="checkbox" name="auto_save" value="1" <?= $aiConfig['auto_save'] ? 'checked' : '' ?>>
-          <span class="sh-toggle__track"></span><span>Auto save generated text to the product</span></label>
         <label class="sh-toggle" style="margin-bottom:14px">
           <input type="checkbox" name="auto_publish" value="1" <?= $aiConfig['auto_publish'] ? 'checked' : '' ?>>
           <span class="sh-toggle__track"></span><span>Allow blog posts to be published directly (default is draft)</span></label>

@@ -171,6 +171,27 @@ try {
         exit;
     }
 
+    if ($cmd === 'set-api-key') {
+        // Stored exactly the way the admin form stores it, so the test can
+        // prove the form preserves it when the field is left blank. The
+        // encryption helper is not part of the base bootstrap.
+        require_once getcwd() . '/includes/verification.php';
+        sh_setting_save('brevo_api_key', sh_verify_encrypt((string)($argv[2] ?? '')));
+        echo "saved\n";
+        exit;
+    }
+
+    if ($cmd === 'api-key-state') {
+        // includes/mail.php (loaded above) already provides config/mail.php.
+        $info = sh_brevo_api_key_info();
+        // Never print the key itself: only its state and a hash that the test
+        // can compare to prove it was not overwritten.
+        echo 'state=' . $info['state'] . "\n";
+        echo 'prefix=' . $info['prefix'] . "\n";
+        echo 'hash=' . ($info['key'] === '' ? '' : hash('sha256', $info['key'])) . "\n";
+        exit;
+    }
+
     if ($cmd === 'save-secrets') {
         // Distinctive values, so an echo of either one into HTML is detectable.
         sh_setting_save('smtp_password', $argv[2] ?? '');
@@ -223,7 +244,11 @@ try {
 FIXTURES
 
 fixtures() {
-  php "$TMP_DIR/fixtures.php" "$@" 2>/dev/null || fail "fixture command '${1}' failed"
+  local prepend=()
+  if [[ -f "$TMP_DIR/ca-bootstrap.php" ]]; then
+    prepend=(-d "auto_prepend_file=$TMP_DIR/ca-bootstrap.php")
+  fi
+  php "${prepend[@]}" "$TMP_DIR/fixtures.php" "$@" 2>/dev/null || fail "fixture command '${1}' failed"
 }
 
 # The pages under test require the email + password authentication mode; the
@@ -235,7 +260,25 @@ set_store_setting authentication_mode email_password
 set_store_setting email_forgot_enabled 1
 set_store_setting email_verify_enabled 1
 
-php -S "127.0.0.1:${PORT}" router.php >"$SERVER_LOG" 2>&1 &
+# The recovery flow must authenticate over a verified TLS channel, exactly like
+# production. Generate a throwaway CA and server certificate for the capture
+# SMTP server, and make the web server trust only that CA.
+SMTP_CA="$TMP_DIR/smtp-ca.pem"
+SMTP_CERT="$TMP_DIR/smtp-server.pem"
+SMTP_KEY="$TMP_DIR/smtp-server.key"
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 -keyout "$TMP_DIR/smtp-ca.key" -out "$SMTP_CA" \
+  -subj "/CN=ShopHaat HTTP Test CA" -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1 \
+  || fail 'could not generate the test CA'
+openssl req -newkey rsa:2048 -sha256 -nodes -keyout "$SMTP_KEY" -out "$TMP_DIR/smtp.csr" \
+  -subj "/CN=127.0.0.1" >/dev/null 2>&1 || fail 'could not generate the test server key'
+printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >"$TMP_DIR/smtp.ext"
+openssl x509 -req -in "$TMP_DIR/smtp.csr" -CA "$SMTP_CA" -CAkey "$TMP_DIR/smtp-ca.key" \
+  -CAcreateserial -out "$SMTP_CERT" -days 2 -sha256 -extfile "$TMP_DIR/smtp.ext" >/dev/null 2>&1 \
+  || fail 'could not sign the test server certificate'
+printf '<?php define("SH_MAIL_CA_BUNDLE", %s);\n' "$(php -r 'echo var_export($argv[1], true);' "$SMTP_CA")" >"$TMP_DIR/ca-bootstrap.php"
+
+php -d "auto_prepend_file=$TMP_DIR/ca-bootstrap.php" -S "127.0.0.1:${PORT}" router.php >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 40); do
   if curl -sS "${BASE}/login.php" >/dev/null 2>&1; then break; fi
@@ -273,7 +316,7 @@ assert_contains "$forgot_guest" 'name="email"' 'the recovery entry page has no e
 # ---------------------------------------------------------------------------
 echo 'Recovery over real SMTP'
 mkdir -p "$SMTP_DIR"
-php tests/smtp-capture-server.php "$SMTP_PORT" normal "$SMTP_DIR" >"$TMP_DIR/smtp.log" 2>&1 &
+php tests/smtp-tls-server.php "$SMTP_PORT" "$SMTP_CERT" "$SMTP_KEY" normal "$SMTP_DIR" >"$TMP_DIR/smtp.log" 2>&1 &
 SMTP_PID=$!
 for _ in $(seq 1 40); do
   [[ -f "$SMTP_DIR/ready" ]] && break
@@ -284,7 +327,7 @@ done
 set_store_setting smtp_enabled 1
 set_store_setting smtp_host 127.0.0.1
 set_store_setting smtp_port "$SMTP_PORT"
-set_store_setting smtp_encryption none
+set_store_setting smtp_encryption tls
 set_store_setting smtp_username 'apiuser'
 set_store_setting smtp_password "$SMTP_PASSWORD"
 set_store_setting smtp_from_email 'noreply@shophaat.test'
@@ -306,9 +349,18 @@ if ! grep -Eqi '^Location: .*/?reset-password\.php' "$forgot_headers"; then
   dump_app_log 'forgot-password'
   fail 'forgot-password.php did not hand off to the reset page after a real submission'
 fi
-# The code must have gone out over an authenticated SMTP session.
-assert_contains "$(cat "$SMTP_DIR/message.txt" 2>/dev/null)" 'AUTH LOGIN' \
-  'the recovery code was not submitted over authenticated SMTP'
+# The code must have gone out over an authenticated SMTP session that started
+# only after the TLS handshake completed.
+smtp_conversation=''
+for _ in $(seq 1 30); do
+  smtp_conversation="$(cat "$SMTP_DIR"/conversation-*.txt 2>/dev/null || true)"
+  if [[ "$smtp_conversation" == *'[tls] C: AUTH LOGIN'* ]]; then break; fi
+  sleep 0.1
+done
+assert_contains "$smtp_conversation" '[tls] C: AUTH LOGIN' \
+  'the recovery code was not submitted over authenticated, encrypted SMTP'
+assert_absent "$smtp_conversation" 'AUTH before TLS' \
+  'authentication was attempted before the TLS handshake'
 
 # The code only exists in the delivered message: read it from the captured SMTP
 # submission and prove the database itself never holds it in the clear.
@@ -503,6 +555,82 @@ guest_log="$(curl -sS -A "$DESKTOP_UA" -L --max-redirs 2 -c "$GUEST_JAR" -b "$GU
 assert_absent "$guest_log" 'DMARC' 'the delivery log rendered for a signed-out visitor'
 assert_absent "$guest_log" "$WEBHOOK_SECRET" 'the delivery log leaked the webhook secret to a signed-out visitor'
 echo "::notice title=Admin email screens::rendered=email.php,email-log.php | secrets echoed=none | signed-out=blocked"
+
+# ---------------------------------------------------------------------------
+# 5. Brevo API credential handling in the real admin form: the stored key is
+#    never echoed, a blank field never overwrites it, and an SMTP key is
+#    refused instead of being stored in the API field.
+# ---------------------------------------------------------------------------
+echo 'Brevo API credential handling'
+API_SENTINEL="xkeysib-acceptance-sentinel-0123456789"
+API_SENTINEL_HASH="$(printf '%s' "$API_SENTINEL" | sha256sum | cut -d' ' -f1)"
+original_api_key="$(read_setting brevo_api_key)"
+original_api_enabled="$(read_setting brevo_api_enabled)"
+original_from_name="$(read_setting smtp_from_name)"
+fixtures set-api-key "$API_SENTINEL" >/dev/null
+
+brevo_page="$(curl -sS -A "$DESKTOP_UA" -c "$admin_jar" -b "$admin_jar" "${BASE}/admin/email.php?tab=brevo")"
+assert_no_php_diagnostic "$brevo_page" 'GET /admin/email.php?tab=brevo'
+assert_absent "$brevo_page" "$API_SENTINEL" 'the Brevo API tab echoed the stored API key'
+assert_contains "$brevo_page" 'Brevo API Diagnostics' 'the Brevo API diagnostics panel did not render'
+assert_contains "$brevo_page" 'Run Brevo API Diagnostics' 'the A/B/C diagnostics action is missing'
+assert_contains "$brevo_page" 'Send Test Email' 'the send-test action is missing for the API transport'
+brevo_token="$(printf '%s' "$brevo_page" | csrf_from_html)"
+[[ -n "$brevo_token" ]] || fail 'the Brevo API tab did not provide a CSRF token'
+
+# Blank key field: the saved secret must survive.
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$admin_jar" -b "$admin_jar" \
+  -X POST --data-urlencode "csrf_token=${brevo_token}" \
+  --data-urlencode 'form=brevo_api_settings' \
+  --data-urlencode 'brevo_api_key=' \
+  --data-urlencode 'brevo_api_enabled=1' \
+  --data-urlencode 'smtp_from_email=noreply@example.test' \
+  --data-urlencode 'smtp_from_name=HTTP Email Test' \
+  --data-urlencode 'smtp_reply_to=' \
+  --data-urlencode 'smtp_timeout=20' \
+  "${BASE}/admin/email.php"
+api_state="$(fixtures api-key-state)"
+assert_contains "$api_state" 'state=ok' 'a blank API key field did not preserve the stored key'
+assert_contains "$api_state" "hash=${API_SENTINEL_HASH}" 'the stored API key was changed by a blank submission'
+
+# An SMTP key in the API field must be refused and must not replace the key.
+smtp_key_error="$(curl -sS -A "$DESKTOP_UA" -c "$admin_jar" -b "$admin_jar" \
+  -X POST --data-urlencode "csrf_token=${brevo_token}" \
+  --data-urlencode 'form=brevo_api_settings' \
+  --data-urlencode 'brevo_api_key=xsmtpsib-acceptance-smtp-key-0123456789' \
+  --data-urlencode 'brevo_api_enabled=1' \
+  --data-urlencode 'smtp_from_email=noreply@example.test' \
+  --data-urlencode 'smtp_from_name=HTTP Email Test' \
+  --data-urlencode 'smtp_reply_to=' \
+  --data-urlencode 'smtp_timeout=20' \
+  "${BASE}/admin/email.php")"
+assert_no_php_diagnostic "$smtp_key_error" 'POST /admin/email.php with an SMTP key'
+assert_contains "$smtp_key_error" 'SMTP key' 'an SMTP key in the API field was not identified as an SMTP key'
+assert_contains "$smtp_key_error" 'xkeysib-' 'the error does not say which key shape belongs in the API field'
+assert_absent "$smtp_key_error" 'xsmtpsib-acceptance-smtp-key-0123456789' 'the rejected SMTP key was echoed back into the page'
+api_state="$(fixtures api-key-state)"
+assert_contains "$api_state" "hash=${API_SENTINEL_HASH}" 'an SMTP key in the API field overwrote the stored API key'
+
+# Clearing is explicit and only happens when asked for.
+curl -sS -A "$DESKTOP_UA" -o /dev/null -c "$admin_jar" -b "$admin_jar" \
+  -X POST --data-urlencode "csrf_token=${brevo_token}" \
+  --data-urlencode 'form=brevo_api_settings' \
+  --data-urlencode 'brevo_api_key=' \
+  --data-urlencode 'clear_brevo_key=1' \
+  --data-urlencode 'brevo_api_enabled=1' \
+  --data-urlencode 'smtp_from_email=noreply@example.test' \
+  --data-urlencode 'smtp_from_name=HTTP Email Test' \
+  --data-urlencode 'smtp_reply_to=' \
+  --data-urlencode 'smtp_timeout=20' \
+  "${BASE}/admin/email.php"
+api_state="$(fixtures api-key-state)"
+assert_contains "$api_state" 'state=missing' 'an explicit clear did not remove the API key'
+echo "::notice title=Brevo API credentials::blank=preserved | smtp-key=refused | clear=explicit | echoed=none"
+
+# The store's real settings are restored before the next section runs.
+set_store_setting brevo_api_key "$original_api_key"
+set_store_setting brevo_api_enabled "${original_api_enabled:-0}"
+set_store_setting smtp_from_name "$original_from_name"
 
 # Restore the settings this test changed.
 set_store_setting smtp_enabled "${original_smtp_enabled:-0}"

@@ -9,6 +9,10 @@ require_once SH_ROOT . '/includes/catalog.php';
 // The SEO helpers are used while this page builds its metadata, before
 // includes/header.php is loaded, so the engine must be required here.
 require_once SH_ROOT . '/includes/seo.php';
+// Features and alt text are additive columns; ensure they exist before the row
+// is read with SELECT * so the page can render them.
+require_once SH_ROOT . '/includes/product-schema.php';
+sh_product_schema_ensure();
 
 $slug = sh_get('slug');
 $product = $slug !== '' ? sh_product_by_slug($slug) : null;
@@ -150,7 +154,9 @@ require_once SH_ROOT . '/includes/header.php';
     <!-- Gallery -->
     <div data-gallery>
       <div class="sh-gallery__main">
-        <img data-gallery-main src="<?= e(sh_product_image($gallery[0])) ?>" alt="<?= e($product['name']) ?>" width="460" height="460">
+        <img data-gallery-main src="<?= e(sh_product_image($gallery[0])) ?>"
+             alt="<?= e(trim((string)($product['image_alt'] ?? '')) !== '' ? (string)$product['image_alt'] : (string)$product['name']) ?>"
+             width="460" height="460">
       </div>
       <?php if (count($gallery) > 1): ?>
         <div class="sh-gallery__thumbs">
@@ -171,7 +177,6 @@ require_once SH_ROOT . '/includes/header.php';
         <?= sh_stars((float)$product['rating'], (int)$product['review_count']) ?>
         <span><?= (int)$product['review_count'] ?> review<?= (int)$product['review_count'] === 1 ? '' : 's' ?></span>
         <span><?= (int)$product['sold_count'] ?> sold</span>
-        <?php if ($product['brand_name']): ?><span>Brand: <strong><?= e($product['brand_name']) ?></strong></span><?php endif; ?>
       </div>
 
       <div class="sh-pdp__price">

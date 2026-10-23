@@ -17,7 +17,7 @@ $adminId = (int)($admin['id'] ?? 0);
 
 $aiInstalled = sh_ai_installed();
 $aiConfig = $aiInstalled ? sh_ai_config() : ['has_key' => false, 'provider' => '', 'provider_id' => 0, 'driver' => '',
-    'auto_save' => false, 'auto_publish' => false, 'model' => '', 'image_model' => '', 'language' => 'English',
+    'auto_publish' => false, 'model' => '', 'image_model' => '', 'language' => 'English',
     'tone' => 'Professional', 'seo_mode' => true, 'temperature' => 0.7, 'max_tokens' => 1200, 'batch_size' => 5,
     'max_retries' => 2, 'fallback_enabled' => false];
 

@@ -35,10 +35,15 @@ $listUrl = sh_url('admin/couriers.php') . ($keepQs !== '' ? '?' . $keepQs : '');
 
 $form = '';
 
+$courierAction = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
-    if ($form !== 'save') { sh_redirect($listUrl); }
+    $courierAction = sh_post('courier_action');
+    // The action is labelled "Save & test" in the form: the click is an explicit
+    // save, and only then is one read-only request sent. It is never triggered by
+    // typing or a change event.
+    if ($form !== 'save' && $courierAction !== 'test') { sh_redirect($listUrl); }
 }
 
 if ($form === 'save') {
@@ -85,7 +90,7 @@ if ($form === 'save') {
             'logo'         => $logo ?: null,
             'tracking_url' => sh_post('tracking_url') ?: null,
             'description'  => sh_post('description') ?: null,
-            'credentials'  => $creds ? json_encode($creds, JSON_UNESCAPED_SLASHES) : null,
+            'credentials'  => sh_courier_credentials_store($creds),
             'sort_order'   => sh_int($_POST['sort_order'] ?? 0),
             'status'       => !empty($_POST['status']) ? 1 : 0,
         ];
@@ -97,7 +102,20 @@ if ($form === 'save') {
             sh_log_exception($e, 'courier-save');
             $errors['general'] = 'The courier could not be saved.';
         }
-        if (!$errors) { sh_redirect($listUrl); }
+        if (!$errors) {
+            if ($courierAction === 'test' && $id > 0) {
+                $saved = sh_courier_by_id($id);
+                $r = $saved !== null ? sh_courier_test($saved, (int)$admin['id']) : null;
+                if ($r === null) {
+                    sh_flash('error', 'The courier was saved but could not be reloaded for the test.');
+                } else {
+                    $type = $r['state'] === 'connected' ? 'success' : (in_array($r['state'], ['unsupported'], true) ? 'info' : 'error');
+                    sh_flash($type, $r['state_label'] . ': ' . $r['message'] . ($r['next'] !== '' ? ' ' . $r['next'] : ''));
+                }
+                sh_redirect('admin/courier-edit.php?edit=' . $id);
+            }
+            sh_redirect($listUrl);
+        }
     }
     $editId = $id;
 }
@@ -149,6 +167,10 @@ require __DIR__ . '/_layout.php';
     <div class="sh-stat"><span class="sh-stat__label">Availability</span>
       <span class="sh-stat__value" style="font-size:14px"><?= (int)$editing['status'] === 1 ? 'Enabled' : 'Disabled' ?></span></div>
   </div>
+<?php endif; ?>
+
+<?php if (!$isNew): ?>
+  <div class="sh-ctest--page"><?= sh_courier_test_summary($editing) ?></div>
 <?php endif; ?>
 
 <?php if ($isProvider): ?>
@@ -217,7 +239,9 @@ require __DIR__ . '/_layout.php';
                 '<div class="sh-secret"><input class="sh-input" id="' . e($fid) . '" type="password" name="cred_' . e($field) . '"'
                 . ' autocomplete="new-password" spellcheck="false" placeholder="' . ($has ? 'Saved — leave blank to keep' : 'Issued by the courier') . '">'
                 . '<button class="sh-secret__btn" type="button" data-reveal="' . e($fid) . '" aria-label="Show or hide">' . sh_icon('eye', 15) . '</button></div>',
-                $has ? 'A value is stored for this field.' : '', $errors['cred_' . $field] ?? null) ?>
+                ($has ? 'A value is stored for this field.' : '')
+                    . ($field === 'base_url' ? ' ' . e(sh_courier_base_url_hint($editDriver)) : ''),
+                $errors['cred_' . $field] ?? null) ?>
           <?php endforeach; ?>
           <?php if ($editCreds): ?>
             <label class="sh-check" style="margin-bottom:12px"><input type="checkbox" name="clear_credentials" value="1">
@@ -249,6 +273,9 @@ require __DIR__ . '/_layout.php';
     </div>
     <div class="sh-formcard__foot sh-formcard__foot--sticky">
       <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> <?= $isNew ? 'Create courier' : 'Save changes' ?></button>
+      <?php if (!$isNew): ?>
+        <button class="sh-btn sh-btn--ghost" type="submit" name="courier_action" value="test" data-no-lock title="Saves these settings, then sends one read-only request. No parcel is created."><?= sh_icon('zap', 15) ?> Save &amp; test</button>
+      <?php endif; ?>
       <a class="sh-btn sh-btn--ghost" href="<?= e($listUrl) ?>">Cancel</a>
       <?php if (!$isNew && !$isProvider): ?>
         <span class="sh-formcard__spacer"></span>

@@ -660,7 +660,7 @@ echo "::notice title=Category probe::probe=${probe_file} | ${probe_state}"
 rm -f tests/tmp-probe.php
 
 home_cards="$(fetch_page '/')"
-card_count="$(count_of 'class="sh-category-card"' "$home_cards")"
+card_count="$(count_of '<a class="sh-category-card ' "$home_cards")"
 if [[ "$card_count" -lt 1 ]]; then
   echo '::error title=Category cards::the homepage rendered no category cards'
   fail 'the homepage rendered no product category cards'
@@ -669,7 +669,7 @@ assert_contains "$home_cards" "$probe_label" 'the homepage did not draw the prob
 
 # Only the cards are inspected for a count: a cart or order summary legitimately
 # prints "2 items" elsewhere on the site.
-card_blocks="$(printf '%s' "$home_cards" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+card_blocks="$(printf '%s' "$home_cards" | awk '/<a class="sh-category-card / { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
 [[ -n "$card_blocks" ]] || fail 'the category cards could not be isolated from the homepage markup'
 if printf '%s' "$card_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
   fail 'a category card still prints an item count'
@@ -715,9 +715,9 @@ fi
 # fall back to the neutral artwork instead of breaking.
 cat_page="$(fetch_page "/category.php?slug=category-card-probe")"
 assert_contains "$cat_page" "$probe_child_label" 'the category page did not draw its child category as a card'
-cat_cards="$(count_of 'class="sh-category-card"' "$cat_page")"
+cat_cards="$(count_of '<a class="sh-category-card ' "$cat_page")"
 [[ "$cat_cards" -ge 1 ]] || fail 'the category page drew no child category cards'
-cat_blocks="$(printf '%s' "$cat_page" | awk '/<a class="sh-category-card"/ { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
+cat_blocks="$(printf '%s' "$cat_page" | awk '/<a class="sh-category-card / { inside = 1 } inside { print } inside && index($0, "</a>") { inside = 0 }')"
 if printf '%s' "$cat_blocks" | grep -qE '[0-9]+[[:space:]]+items'; then
   fail 'a category page card still prints an item count'
 fi

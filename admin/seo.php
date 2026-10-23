@@ -40,11 +40,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Your role can view the SEO settings but not change them.';
     } elseif ($form === 'settings') {
         // ---- text fields -------------------------------------------------
-        // Lengths match the columns these values can end up in, so a saved
-        // value can never be silently truncated by the database later.
+        // Lengths match the columns/keys these values are stored in. A 0 means
+        // "editorial copy": it is stored in the settings TEXT column exactly as
+        // written, because a default description has no target length.
         $limits = [
             'seo_title_suffix'      => 60,
-            'seo_default_description' => 300,
+            'seo_default_description' => 0,
             'seo_default_keywords'  => 300,
             'seo_lang'              => 10,
             'seo_locale'            => 20,
@@ -57,7 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'seo_ga_measurement_id' => 40,
         ];
         foreach ($limits as $key => $max) {
-            sh_seo_save($key, mb_substr(trim((string)sh_post($key)), 0, $max));
+            $value = trim((string)sh_post($key));
+            sh_seo_save($key, $max > 0 ? mb_substr($value, 0, $max) : $value);
         }
 
         // ---- URLs ---------------------------------------------------------
@@ -159,8 +161,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             seo_canonical = VALUES(seo_canonical), seo_noindex = VALUES(seo_noindex)',
                         [
                             $key,
-                            mb_substr(trim((string)sh_post('meta_title')), 0, 190) ?: null,
-                            mb_substr(trim((string)sh_post('meta_description')), 0, 300) ?: null,
+                            trim((string)sh_post('meta_title')) ?: null,
+                            trim((string)sh_post('meta_description')) ?: null,
                             mb_substr(trim((string)sh_post('meta_keywords')), 0, 300) ?: null,
                             mb_substr($cleanImage, 0, 190) ?: null,
                             mb_substr($cleanCanonical, 0, 255) ?: null,
@@ -380,9 +382,9 @@ $counts = $audit['counts'];
       </div>
       <div class="sh-field">
         <label class="sh-field__label" for="seo-default-desc">Default meta description</label>
-        <textarea class="sh-textarea" id="seo-default-desc" name="seo_default_description" rows="2" maxlength="300"
+        <textarea class="sh-textarea" id="seo-default-desc" name="seo_default_description" rows="3"
                   placeholder="<?= e((string)sh_setting('site_description', 'Leave empty to use the store description from General Settings')) ?>"><?= e($s('seo_default_description')) ?></textarea>
-        <span class="sh-field__hint">Around 140–160 characters reads best in a search result.</span>
+        <span class="sh-field__hint">No character limit. Search engines may shorten the snippet they show.</span>
       </div>
       <div class="sh-field">
         <label class="sh-field__label" for="seo-default-kw">Default keywords</label>
@@ -624,13 +626,13 @@ $counts = $audit['counts'];
 
       <div class="sh-field">
         <label class="sh-field__label" for="seo-page-title">SEO title</label>
-        <input class="sh-input" id="seo-page-title" name="meta_title" maxlength="190"
+        <input class="sh-input" id="seo-page-title" name="meta_title"
                value="<?= e((string)($editRow['meta_title'] ?? '')) ?>"
                placeholder="Leave empty to generate from the page">
       </div>
       <div class="sh-field">
         <label class="sh-field__label" for="seo-page-desc">Meta description</label>
-        <textarea class="sh-textarea" id="seo-page-desc" name="meta_description" rows="2" maxlength="300"
+        <textarea class="sh-textarea" id="seo-page-desc" name="meta_description" rows="3"
                   placeholder="Leave empty to generate from the page"><?= e((string)($editRow['meta_description'] ?? '')) ?></textarea>
       </div>
       <div class="sh-grid2">

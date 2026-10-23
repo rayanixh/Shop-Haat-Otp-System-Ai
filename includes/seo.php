@@ -307,7 +307,11 @@ function sh_seo_schema_ensure(): void
     $done = true;
 
     try {
-        if (sh_setting('seo_schema_v', '') === '1') { return; }
+        // Version 2 widens the two SEO text columns: they are editorial copy,
+        // not fixed-width identifiers, and an administrator may legitimately
+        // write more than the old 190/300 characters. The ALTERs are additive
+        // and never truncate existing data.
+        if (sh_setting('seo_schema_v', '') === '2') { return; }
         $pdo = sh_db();
         // DDL implicitly commits in MySQL/MariaDB, so never run it inside a
         // transaction that a checkout or payment flow depends on.
@@ -318,8 +322,8 @@ function sh_seo_schema_ensure(): void
 
         $columns = [
             'products' => [
-                'meta_title'           => 'VARCHAR(190) DEFAULT NULL',
-                'meta_description'     => 'VARCHAR(300) DEFAULT NULL',
+                'meta_title'           => 'TEXT NULL',
+                'meta_description'     => 'TEXT NULL',
                 'meta_keywords'        => 'VARCHAR(300) DEFAULT NULL',
                 'seo_focus_keyword'    => 'VARCHAR(120) DEFAULT NULL',
                 'seo_related_phrases'  => 'VARCHAR(500) DEFAULT NULL',
@@ -328,8 +332,8 @@ function sh_seo_schema_ensure(): void
                 'seo_noindex'          => 'TINYINT(1) NOT NULL DEFAULT 0',
             ],
             'categories' => [
-                'meta_title'           => 'VARCHAR(190) DEFAULT NULL',
-                'meta_description'     => 'VARCHAR(300) DEFAULT NULL',
+                'meta_title'           => 'TEXT NULL',
+                'meta_description'     => 'TEXT NULL',
                 'meta_keywords'        => 'VARCHAR(300) DEFAULT NULL',
                 'seo_focus_keyword'    => 'VARCHAR(120) DEFAULT NULL',
                 'seo_related_phrases'  => 'VARCHAR(500) DEFAULT NULL',
@@ -364,8 +368,8 @@ function sh_seo_schema_ensure(): void
         // Overrides for pages that have no database row of their own.
         $pdo->exec("CREATE TABLE IF NOT EXISTS seo_pages (
             page_key VARCHAR(40) NOT NULL,
-            meta_title VARCHAR(190) DEFAULT NULL,
-            meta_description VARCHAR(300) DEFAULT NULL,
+            meta_title TEXT NULL,
+            meta_description TEXT NULL,
             meta_keywords VARCHAR(300) DEFAULT NULL,
             seo_og_image VARCHAR(190) DEFAULT NULL,
             seo_canonical VARCHAR(255) DEFAULT NULL,
@@ -374,11 +378,51 @@ function sh_seo_schema_ensure(): void
             PRIMARY KEY (page_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-        sh_setting_save('seo_schema_v', '1');
+        // An install created by an older release still has VARCHAR(190/300)
+        // here. Widen those columns in place; the values are preserved.
+        sh_seo_widen_text_columns();
+        sh_setting_save('seo_schema_v', '2');
     } catch (Throwable $e) {
         // The SEO layer must never be the reason a storefront page fails.
         sh_log_exception($e, 'seo-schema');
     }
+}
+
+/**
+ * Widen meta_title / meta_description to TEXT where an older schema used a
+ * fixed VARCHAR. Safe to call repeatedly: each column is inspected first and
+ * skipped when it is already a text type. Returns the number of columns changed.
+ */
+function sh_seo_widen_text_columns(): int
+{
+    $targets = [
+        'products'   => ['meta_title', 'meta_description'],
+        'categories' => ['meta_title', 'meta_description'],
+        'seo_pages'  => ['meta_title', 'meta_description'],
+        'blog_posts' => ['meta_title', 'meta_description'],
+    ];
+    $changed = 0;
+    foreach ($targets as $table => $columns) {
+        if (!sh_table_exists($table)) { continue; }
+        foreach ($columns as $column) {
+            if (!sh_table_has_column($table, $column)) { continue; }
+            $type = strtolower((string)sh_val(
+                'SELECT DATA_TYPE FROM information_schema.columns
+                 WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',
+                [$table, $column], ''
+            ));
+            if (in_array($type, ['tinytext', 'text', 'mediumtext', 'longtext'], true)) { continue; }
+            try {
+                // Identifiers are literals from the list above, never input.
+                sh_query('ALTER TABLE `' . $table . '` MODIFY `' . $column . '` TEXT NULL');
+                $changed++;
+            } catch (Throwable $e) {
+                // Never let a widening failure break a page view.
+                sh_log_exception($e, 'seo-widen-text');
+            }
+        }
+    }
+    return $changed;
 }
 
 /** An override row for a page key, or an empty array. */

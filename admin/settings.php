@@ -123,6 +123,13 @@ $orderPrefixInput = isset($errors['order_number_prefix'])
 
 $adminPage = 'settings';
 $adminTitle = 'General Settings';
+
+// Category Display: the saved scale, and the real preview route (an iframe of
+// the storefront grid, not a mock-up).
+
+$adminScripts = is_array($adminScripts ?? null) ? $adminScripts : [];
+
+
 require __DIR__ . '/_layout.php';
 ?>
 <?php if ($errors): ?>
@@ -178,7 +185,7 @@ require __DIR__ . '/_layout.php';
           <input class="sh-input" id="st-tag" name="site_tagline" maxlength="150" value="<?= e($s('site_tagline')) ?>"></div>
       </div>
       <div class="sh-field"><label class="sh-field__label" for="st-desc">Meta description</label>
-        <textarea class="sh-textarea" id="st-desc" name="site_description" rows="2" maxlength="300"><?= e($s('site_description')) ?></textarea>
+        <textarea class="sh-textarea" id="st-desc" name="site_description" rows="3"><?= e($s('site_description')) ?></textarea>
         <span class="sh-field__hint">Used as the default description in search results.</span></div>
       <div class="sh-field"><label class="sh-field__label" for="st-url">Canonical website URL</label>
         <input class="sh-input <?= isset($errors['site_url']) ? 'sh-input--error' : '' ?>" id="st-url" type="url" name="site_url"

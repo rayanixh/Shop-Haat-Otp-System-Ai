@@ -13,7 +13,7 @@ function sh_schema_tables(): array
         'addresses', 'settings', 'notifications', 'notification_logs', 'app_logs',
         'promo_slides', 'whatsapp_messages', 'whatsapp_message_statuses',
         'telegram_admin_log', 'telegram_updates',
-        'couriers', 'shipments', 'shipment_events',
+        'couriers', 'shipments', 'shipment_events', 'courier_test_results',
         'otp_verifications', 'security_logs', 'password_resets',
         'email_challenges', 'email_log',
     ];
@@ -74,6 +74,7 @@ function sh_schema_sql(): array
         image VARCHAR(190) DEFAULT NULL,
         image_orig VARCHAR(190) DEFAULT NULL,
         image_crop TEXT DEFAULT NULL,
+        card_size ENUM('small','medium','large') NOT NULL DEFAULT 'medium',
         description VARCHAR(255) DEFAULT NULL,
         sort_order INT NOT NULL DEFAULT 0,
         status TINYINT(1) NOT NULL DEFAULT 1,
@@ -107,6 +108,9 @@ function sh_schema_sql(): array
         short_description VARCHAR(300) DEFAULT NULL,
         description TEXT,
         specifications TEXT,
+        features TEXT,
+        image_alt VARCHAR(190) DEFAULT NULL,
+        ai_draft_token VARCHAR(64) DEFAULT NULL,
         price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         compare_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         stock INT NOT NULL DEFAULT 0,
@@ -121,12 +125,13 @@ function sh_schema_sql(): array
         is_flash_sale TINYINT(1) NOT NULL DEFAULT 0,
         flash_sale_ends_at DATETIME DEFAULT NULL,
         status TINYINT(1) NOT NULL DEFAULT 1,
-        meta_title VARCHAR(190) DEFAULT NULL,
-        meta_description VARCHAR(300) DEFAULT NULL,
+        meta_title TEXT NULL,
+        meta_description TEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         UNIQUE KEY uq_products_slug (slug),
+        UNIQUE KEY uq_products_draft_token (ai_draft_token),
         KEY idx_products_category (category_id),
         KEY idx_products_brand (brand_id),
         KEY idx_products_status (status),
@@ -599,7 +604,39 @@ function sh_courier_schema_sql(): array
             CONSTRAINT fk_shipment_events_shipment FOREIGN KEY (shipment_id) REFERENCES shipments (id) ON DELETE CASCADE,
             CONSTRAINT fk_shipment_events_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
         ) $E",
+
+        sh_courier_test_results_sql(),
     ];
+}
+
+/**
+ * One row per courier connection test: the real outcome, the HTTP status the
+ * provider returned and the next action shown to the admin.
+ *
+ * Additive only. It is created by CREATE TABLE IF NOT EXISTS from both the
+ * installer and the lazy schema ensure, so an existing store gets it without
+ * touching couriers, credentials, shipments or orders.
+ */
+function sh_courier_test_results_sql(): string
+{
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return "CREATE TABLE IF NOT EXISTS courier_test_results (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        courier_id INT UNSIGNED DEFAULT NULL,
+        driver VARCHAR(50) NOT NULL DEFAULT '',
+        result_code VARCHAR(40) NOT NULL DEFAULT 'failed',
+        state VARCHAR(40) NOT NULL DEFAULT 'failed',
+        http_status SMALLINT UNSIGNED DEFAULT NULL,
+        note VARCHAR(255) DEFAULT NULL,
+        next_action VARCHAR(255) DEFAULT NULL,
+        tested_by INT UNSIGNED DEFAULT NULL,
+        tested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_ctr_courier (courier_id, tested_at),
+        KEY idx_ctr_state (state),
+        CONSTRAINT fk_ctr_courier FOREIGN KEY (courier_id) REFERENCES couriers (id) ON DELETE CASCADE,
+        CONSTRAINT fk_ctr_admin FOREIGN KEY (tested_by) REFERENCES admins (id) ON DELETE SET NULL
+    ) $E";
 }
 
 /**
@@ -908,7 +945,13 @@ function sh_email_settings_defaults(): array
         'email_otp_resend_cooldown'     => '60',
         'email_otp_email_limit'         => '3',
         'email_otp_ip_limit'            => '10',
-        // Provider feedback and signing.
+        // Delivery transport. SMTP is the default; the Brevo HTTPS API is an
+        // explicit opt-in and never selected automatically.
+        'mail_transport'                => 'smtp',
+        'brevo_api_enabled'             => '0',
+        'brevo_api_key'                 => '',
+        // Provider feedback and signing. smtp_allow_self_signed is retired and
+        // kept at 0: outgoing TLS verification is always enforced.
         'email_webhook_secret'          => '',
         'smtp_allow_self_signed'        => '0',
         'dkim_enabled'                  => '0',
@@ -1246,6 +1289,7 @@ function sh_schema_seed(PDO $pdo, array $opts): void
         'messenger_page_id'    => '',
         'messenger_token'      => '',
         'messenger_recipient'  => '',
+        'mail_transport'       => 'smtp',
         'smtp_enabled'         => '0',
         'smtp_host'            => '',
         'smtp_port'            => '587',
@@ -1254,6 +1298,8 @@ function sh_schema_seed(PDO $pdo, array $opts): void
         'smtp_password'        => '',
         'smtp_from_email'      => $email,
         'smtp_from_name'       => $siteName,
+        'brevo_api_enabled'    => '0',
+        'brevo_api_key'        => '',
         'admin_notify_email'   => $email,
     ];
     $st = $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)

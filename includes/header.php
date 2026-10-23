@@ -129,7 +129,7 @@ $shTransition = sh_transition_config();
       <div class="sh-search" id="sh-search">
         <form class="sh-search__form" action="<?= e(sh_url('products.php')) ?>" method="get" role="search" autocomplete="off">
           <input class="sh-search__input" type="search" name="q" id="sh-search-input"
-                 value="<?= e($shSearchQ) ?>" placeholder="Search for products, brands and categories"
+                 value="<?= e($shSearchQ) ?>" placeholder="Search for products and categories"
                  aria-label="Search products">
           <button class="sh-search__btn" type="submit" aria-label="Search"><?= sh_icon('search', 18) ?><span>Search</span></button>
         </form>

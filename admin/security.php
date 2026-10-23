@@ -169,8 +169,9 @@ require __DIR__ . '/_layout.php';
     <span>Test mode code (shown because the provider is “offline”): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
 <?php endif; ?>
 
-<!-- Phone Verification master switch -->
-<form method="post" novalidate>
+<!-- Phone Verification master switch. It has an explicit Save button: changing
+     the checkbox alone never writes anything. -->
+<form method="post" novalidate data-confirm="Change the phone verification setting? When it is ON, customers sign in with a mobile number and a one-time code.">
   <?= sh_csrf_field() ?>
   <input type="hidden" name="form" value="phone_verification">
   <div class="sh-panel">
@@ -178,7 +179,7 @@ require __DIR__ . '/_layout.php';
       <h2 class="sh-panel__title"><?= sh_icon('shield', 17) ?> Phone Verification</h2>
       <div class="sh-panel__actions">
         <label class="sh-toggle">
-          <input type="checkbox" name="phone_verification" value="1" data-phone-verification-toggle
+          <input type="checkbox" name="phone_verification" value="1"
                  <?= $phoneVerificationOn ? 'checked' : '' ?>>
           <span class="sh-toggle__track"></span>
           <span><strong><?= $phoneVerificationOn ? 'ON' : 'OFF' ?></strong></span>
@@ -192,6 +193,10 @@ require __DIR__ . '/_layout.php';
         <div class="sh-alert sh-alert--info" style="margin:0"><?= sh_icon('info', 17) ?>
           <span>Phone verification is currently disabled.</span></div>
       <?php endif; ?>
+      <div class="sh-actions" style="margin-top:12px">
+        <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save phone verification</button>
+        <span class="sh-field__hint">Nothing changes until you press this button.</span>
+      </div>
     </div>
   </div>
 </form>
@@ -498,20 +503,6 @@ require __DIR__ . '/_layout.php';
 
 <script<?= sh_csp_nonce_attr() ?>>
 (function () {
-  // Phone Verification master switch: confirm, then submit the toggle form.
-  var toggle = document.querySelector('[data-phone-verification-toggle]');
-  if (toggle) {
-    toggle.addEventListener('change', function () {
-      if (!confirm(toggle.checked
-          ? 'Turn phone verification ON? Customers will sign in with a phone number and a one-time code.'
-          : 'Turn phone verification OFF? Customers will sign in with email and password.')) {
-        toggle.checked = !toggle.checked;
-        return;
-      }
-      toggle.form.submit();
-    });
-  }
-
   // Provider dropdown: switching providers reloads the page so only the
   // newly selected provider's fields (and credentials) are ever rendered.
   var sel = document.querySelector('[data-provider-select]');

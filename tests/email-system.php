@@ -69,23 +69,61 @@ function email_prepare(PDO $pdo): void
     sh_setting_save('email_verification_required', '0');
 }
 
-/** A minimal SMTP listener that records one conversation and answers like a server. */
+/** Generate one throwaway CA and server certificate for the capture SMTP servers. */
+function email_tls_material(): array
+{
+    static $material = null;
+    if (is_array($material)) { return $material; }
+    $dir = sys_get_temp_dir() . '/shophaat-smtp-ca-' . bin2hex(random_bytes(4));
+    @mkdir($dir, 0777, true);
+    $ca = $dir . '/ca.pem';
+    $cert = $dir . '/server.pem';
+    $key = $dir . '/server.key';
+    $ext = $dir . '/server.ext';
+    file_put_contents($ext, "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n");
+    $steps = [
+        'req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 -keyout ' . escapeshellarg($dir . '/ca.key')
+            . ' -out ' . escapeshellarg($ca) . ' -subj ' . escapeshellarg('/CN=ShopHaat Email System CA')
+            . ' -addext ' . escapeshellarg('basicConstraints=critical,CA:TRUE')
+            . ' -addext ' . escapeshellarg('keyUsage=critical,keyCertSign,cRLSign'),
+        'req -newkey rsa:2048 -sha256 -nodes -keyout ' . escapeshellarg($key)
+            . ' -out ' . escapeshellarg($dir . '/server.csr') . ' -subj ' . escapeshellarg('/CN=127.0.0.1'),
+        'x509 -req -in ' . escapeshellarg($dir . '/server.csr') . ' -CA ' . escapeshellarg($ca)
+            . ' -CAkey ' . escapeshellarg($dir . '/ca.key') . ' -CAcreateserial -out ' . escapeshellarg($cert)
+            . ' -days 2 -sha256 -extfile ' . escapeshellarg($ext),
+    ];
+    foreach ($steps as $step) {
+        $out = [];
+        $code = 0;
+        @exec('openssl ' . $step . ' 2>&1', $out, $code);
+        if ($code !== 0) {
+            throw new RuntimeException('Could not generate the SMTP test certificate: ' . implode(' ', $out));
+        }
+    }
+    $material = ['ca' => $ca, 'cert' => $cert, 'key' => $key];
+    return $material;
+}
+
+/** A real STARTTLS SMTP listener that records the conversation and the message. */
 function email_spawn_smtp(string $mode, int $port): array
 {
+    $material = email_tls_material();
     $dir = sys_get_temp_dir() . '/shophaat-smtp-' . bin2hex(random_bytes(4));
     @mkdir($dir, 0777, true);
-    $script = __DIR__ . '/smtp-capture-server.php';
+    $script = __DIR__ . '/smtp-tls-server.php';
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' '
-        . escapeshellarg((string)$port) . ' ' . escapeshellarg($mode) . ' '
+        . escapeshellarg((string)$port) . ' ' . escapeshellarg($material['cert']) . ' '
+        . escapeshellarg($material['key']) . ' ' . escapeshellarg($mode) . ' '
         . escapeshellarg($dir) . ' > ' . escapeshellarg($dir . '/server.log') . ' 2>&1 &';
     exec($cmd);
-    // Wait for the listener to accept a connection (up to 5 s).
-    for ($i = 0; $i < 50; $i++) {
+    // Wait for the listener to report readiness (up to 8 s).
+    for ($i = 0; $i < 80; $i++) {
         usleep(100000);
-        $conn = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.3);
-        if (is_resource($conn)) { fclose($conn); return ['dir' => $dir, 'port' => $port, 'mode' => $mode]; }
+        if (is_file($dir . '/ready')) {
+            return ['dir' => $dir, 'port' => $port, 'mode' => $mode];
+        }
     }
-    throw new RuntimeException('The capture SMTP server did not start on port ' . $port);
+    throw new RuntimeException('The STARTTLS SMTP server did not start on port ' . $port);
 }
 
 /** Decode one base64 MIME part out of a captured message. */
@@ -114,10 +152,14 @@ if (!function_exists('stream_socket_server') || !function_exists('fsockopen')) {
 email_phase('A transport via capture SMTP');
 // ===========================================================================
 if (function_exists('stream_socket_server')) {
+    // The transport itself must never relax verification, so the test installs
+    // its throwaway CA as the trust anchor instead.
+    $emailTls = email_tls_material();
+    if (!defined('SH_MAIL_CA_BUNDLE')) { define('SH_MAIL_CA_BUNDLE', $emailTls['ca']); }
     $port = 25000 + random_int(1, 900);
     $server = email_spawn_smtp('normal', $port);
     $transport = [
-        'driver' => 'smtp', 'host' => '127.0.0.1', 'port' => $port, 'encryption' => 'none',
+        'driver' => 'smtp', 'host' => '127.0.0.1', 'port' => $port, 'encryption' => 'tls',
         'username' => 'apiuser', 'password' => 'correct-horse-battery-staple',
         'from_email' => 'noreply@shophaat.test', 'from_name' => 'ShopHaat Test',
         'timeout' => 5, 'dkim_enabled' => false,

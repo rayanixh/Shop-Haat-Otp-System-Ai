@@ -44,6 +44,40 @@ function sh_category_thumb(?string $file): string
 }
 
 /**
+ * The three card sizes a category can be given from the admin editor.
+ *
+ * The stored value is a short token, never a number, a CSS string or a class
+ * name supplied by the browser: the storefront only ever sees one of these
+ * three keys, and anything else falls back to "medium".
+ *
+ * @return array<string,string>
+ */
+function sh_category_card_sizes(): array
+{
+    return ['small' => 'Small', 'medium' => 'Medium', 'large' => 'Large'];
+}
+
+/**
+ * Normalise a stored or posted card size.
+ *
+ * This is the ONLY place the value is trusted. Unknown, missing or malformed
+ * values become "medium", which is also the column default, so a category that
+ * predates the setting renders exactly like a newly created one.
+ */
+function sh_category_card_size($value): string
+{
+    $v = strtolower(trim((string)$value));
+    return isset(sh_category_card_sizes()[$v]) ? $v : 'medium';
+}
+
+/** Human label for a stored size ("Medium"). */
+function sh_category_card_size_label($value): string
+{
+    $sizes = sh_category_card_sizes();
+    return $sizes[sh_category_card_size($value)];
+}
+
+/**
  * Render one product-category card.
  *
  * Used everywhere a category card appears (the homepage showcase and the
@@ -64,7 +98,10 @@ function sh_category_card(array $cat, int $index = 0): string
     $img    = sh_category_thumb($cat['image'] ?? null);
     $hasImg = $img !== sh_category_placeholder_image();
 
-    return '<a class="sh-category-card" href="' . e($href) . '">'
+    $size = sh_category_card_size($cat['card_size'] ?? null);
+
+    return '<a class="sh-category-card sh-category-card--' . e($size) . '"'
+        . ' data-size="' . e($size) . '" href="' . e($href) . '">'
         . '<span class="sh-category-card__media">'
         . '<img class="sh-category-card__img' . ($hasImg ? '' : ' sh-category-card__img--fallback') . '"'
         . ' src="' . e($img) . '" alt="' . e($name) . '" width="400" height="300"'
