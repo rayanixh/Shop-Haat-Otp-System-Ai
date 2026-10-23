@@ -87,6 +87,7 @@ $ids = [
     'pathao'      => $insertCourier('pathao', 'pathao', 'Pathao Courier'),
     'ecourier'    => $insertCourier('ecourier', 'ecourier', 'eCourier'),
     'paperfly'    => $insertCourier('paperfly', 'paperfly', 'Paperfly'),
+    'redx'        => $insertCourier('redx', 'redx', 'RedX'),
     'sundarban'   => $insertCourier('sundarban', 'sundarban', 'Sundarban Courier'),
     'saparibahan' => $insertCourier('saparibahan', 'custom', 'SA Paribahan'),
     'manual'      => $insertCourier('manual', 'manual', 'Manual Courier'),
@@ -106,9 +107,16 @@ cc_assert(str_contains($r['message'], 'API Key'), 'the eCourier message names th
 
 $r = sh_courier_test($byId($ids['pathao']));
 cc_same('configuration_incomplete', $r['state'], 'Pathao without credentials is configuration incomplete');
-foreach (['Client ID', 'Client Secret', 'Store ID'] as $field) {
+// The official password-grant flow needs the merchant username/password too.
+foreach (['Client ID', 'Client Secret', 'Merchant Username', 'Merchant Password', 'Store ID'] as $field) {
     cc_assert(str_contains($r['message'], $field), 'Pathao message names ' . $field);
 }
+cc_same(0, $r['http_status'], 'Pathao sent no request before credentials exist');
+
+$r = sh_courier_test($byId($ids['redx']));
+cc_same('configuration_incomplete', $r['state'], 'RedX without a token is configuration incomplete');
+cc_assert(str_contains($r['message'], 'API Access Token'), 'the RedX message names the missing token');
+cc_same(0, $r['http_status'], 'RedX sent no request without a token');
 
 // --- 2. Providers without a documented API stay unsupported --------------
 cc_step('unsupported providers');

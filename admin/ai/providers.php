@@ -328,7 +328,7 @@ require dirname(__DIR__) . '/_layout.php';
   ?>
   <article class="sh-aiprov" id="provider-<?= (int)$p['id'] ?>" data-ai-providers data-ai-card="<?= (int)$p['id'] ?>">
     <header class="sh-aiprov__head">
-      <span class="sh-aiprov__mark sh-aiprov__mark--<?= e($tone) ?>" data-driver="<?= e($driver) ?>"><?= sh_icon($driverIcon($driver), 19) ?></span>
+      <span class="sh-aiprov__mark" data-driver="<?= e($driver) ?>"><?= sh_icon($driverIcon($driver), 19) ?></span>
       <div class="sh-aiprov__id">
         <h2 class="sh-aiprov__name"><?= e((string)$p['name']) ?></h2>
         <p class="sh-aiprov__type"><?= e(sh_ai_driver_label($driver)) ?><?= !$hasKey ? ' · no key' : '' ?></p>
@@ -354,12 +354,13 @@ require dirname(__DIR__) . '/_layout.php';
         <dd class="sh-break"><?= e((string)($p['default_image_model'] ?: '—')) ?></dd>
       </div>
       <div class="sh-aiprov__meta-item">
-        <dt>Models</dt>
-        <dd><?= $modelCount ?> catalogued</dd>
+        <dt>API key</dt>
+        <dd><?php $masked = $hasKey ? sh_ai_provider_masked_key($p) : ''; ?>
+          <?= $masked !== '' ? '<code>' . e($masked) . '</code>' : 'not saved' ?></dd>
       </div>
       <div class="sh-aiprov__meta-item">
-        <dt>Catalogue synced</dt>
-        <dd><?= $p['models_synced_at'] ? e(sh_ai_ago((string)$p['models_synced_at'])) : 'never' ?></dd>
+        <dt>Models</dt>
+        <dd><?= $modelCount ?> catalogued<?= $p['models_synced_at'] ? ' · synced ' . e(sh_ai_ago((string)$p['models_synced_at'])) : '' ?></dd>
       </div>
     </dl>
 

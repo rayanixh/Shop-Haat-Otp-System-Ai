@@ -75,7 +75,7 @@ function sh_courier_api_drivers(): array
  */
 function sh_courier_testable_drivers(): array
 {
-    return ['steadfast', 'pathao', 'ecourier', 'paperfly'];
+    return ['steadfast', 'pathao', 'ecourier', 'paperfly', 'redx'];
 }
 
 /**
@@ -195,7 +195,12 @@ function sh_courier_fields(string $driver): array
 {
     return match ($driver) {
         'steadfast' => ['api_key' => 'API Key', 'secret_key' => 'Secret Key'],
-        'pathao'    => ['client_id' => 'Client ID', 'client_secret' => 'Client Secret', 'store_id' => 'Store ID'],
+        // Pathao's official token flow is a password grant: the client pair
+        // plus the merchant username/password, then a store id (docs:
+        // POST /aladdin/api/v1/issue-token, then GET /aladdin/api/v1/stores).
+        'pathao'    => ['client_id' => 'Client ID', 'client_secret' => 'Client Secret',
+                        'username' => 'Merchant Username', 'password' => 'Merchant Password',
+                        'store_id' => 'Store ID'],
         'redx'      => ['api_access_token' => 'API Access Token'],
         'ecourier'  => ['api_key' => 'API Key', 'api_secret' => 'API Secret', 'user_id' => 'User ID'],
         'paperfly'  => ['paperfly_key' => 'Paperfly Key', 'username' => 'Merchant Username', 'password' => 'Merchant Password'],
@@ -230,7 +235,7 @@ function sh_courier_base_url_hint(string $driver): string
         'ecourier'  => 'Leave blank for live (backoffice.ecourier.com.bd/api). Sandbox: https://staging.ecourier.com.bd/api.',
         'paperfly'  => 'Leave blank for https://api.paperfly.com.bd.',
         'sundarban' => 'No public API host is documented. This value is stored but never called by a test.',
-        'redx'      => 'Leave blank for the RedX production API.',
+        'redx'      => 'Leave blank for https://openapi.redx.com.bd/v1.0.0-beta.',
         default     => 'Only change this for a sandbox or a private gateway.',
     };
 }
@@ -525,6 +530,9 @@ function sh_courier_http(string $method, string $url, array $headers = [], array
             CURLOPT_CUSTOMREQUEST  => $method,
             CURLOPT_HTTPHEADER     => $hdr,
             CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            // Never follow a redirect with credentials or a request body.
+            CURLOPT_FOLLOWLOCATION => false,
         ]);
         if ($payload !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, $payload); }
         $body = curl_exec($ch);
@@ -988,17 +996,37 @@ function sh_courier_probe_pathao(array $courier): array
     if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'Pathao'); }
 
     $base = sh_pathao_base_url($creds);
-    $login = sh_courier_http('POST', $base . '/aladdin/api/v1/external/login', [],
-        ['client_id' => (string)$creds['client_id'], 'client_secret' => (string)$creds['client_secret']], 15);
+    // Pathao's official Merchant API issues tokens with a password grant:
+    // POST /aladdin/api/v1/issue-token with the client pair and the merchant
+    // username/password. The token is used for this test only and discarded;
+    // nothing is persisted and no order or pickup can result from it.
+    $login = sh_courier_http('POST', $base . '/aladdin/api/v1/issue-token', [], [
+        'client_id'     => (string)$creds['client_id'],
+        'client_secret' => (string)$creds['client_secret'],
+        'grant_type'    => 'password',
+        'username'      => (string)$creds['username'],
+        'password'      => (string)$creds['password'],
+    ], 15);
     if (!$login['ok']) {
-        return sh_courier_test_http_failure($login, '/aladdin/api/v1/external/login', $creds, 'Pathao');
+        $status = (int)($login['status'] ?? 0);
+        // Hermes answers 400 (invalid_grant) or 401 (invalid_client) when any
+        // part of the credential set is wrong: an authentication failure, not
+        // a generic rejection.
+        if ($status === 400 || $status === 401) {
+            $detail = trim((string)($login['error'] ?? ''));
+            return sh_courier_test_result('authentication_failed', $status,
+                'Pathao rejected these credentials (HTTP ' . $status . ').' . ($detail !== '' ? ' ' . $detail : ''),
+                'Re-enter the Client ID, Client Secret, merchant username and password from the Pathao merchant panel (API section), save, then test again.',
+                '/aladdin/api/v1/issue-token', $creds);
+        }
+        return sh_courier_test_http_failure($login, '/aladdin/api/v1/issue-token', $creds, 'Pathao');
     }
     $token = trim((string)($login['body']['access_token'] ?? ''));
     if ($token === '') {
         return sh_courier_test_result('failed', (int)$login['status'],
             'Pathao accepted the request but returned no access token.',
-            'Check that the Client ID and Client Secret belong to the merchant API, then retry.',
-            '/aladdin/api/v1/external/login', $creds);
+            'Check that the credentials belong to the merchant API (not the panel password alone), then retry.',
+            '/aladdin/api/v1/issue-token', $creds);
     }
 
     $stores = sh_courier_http('GET', $base . '/aladdin/api/v1/stores', ['Authorization' => 'Bearer ' . $token], null, 15);
@@ -1090,7 +1118,9 @@ function sh_courier_probe_ecourier(array $courier): array
                     : 'Read the message and correct the merchant settings; nothing was booked.',
                 '/city-list', $creds);
         }
-        $cities = $body['cities'] ?? $body['city_list'] ?? null;
+        // The documented answer is a root JSON array of cities; some accounts
+        // wrap it. Count either shape for the success message.
+        $cities = $body['cities'] ?? $body['city_list'] ?? (array_is_list($body) ? $body : null);
         $count = is_array($cities) ? count($cities) : null;
         return sh_courier_test_result('connected', (int)$http['status'],
             'eCourier accepted the API key, API secret and user ID'
@@ -1115,12 +1145,14 @@ function sh_courier_probe_paperfly(array $courier): array
     $missing = sh_courier_test_missing($courier);
     if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'Paperfly'); }
 
-    // Paperfly publishes no developer documentation and no credential-check
-    // endpoint. Sending a booking or a made-up reference would be dishonest,
+    // Paperfly's merchant API (paperflykey + Basic auth) documents only order
+    // placement, order cancellation and tracking by a real reference — there
+    // is no read-only credential or account endpoint to verify against.
+    // Sending a booking or tracking a made-up reference would be dishonest,
     // so the test stops here and says exactly why.
     return sh_courier_test_result('unsupported', 0,
-        'Paperfly does not publish an official API or a read-only credential check. No request was sent.',
-        'Ask Paperfly for merchant API access (paperflykey + Basic auth) and keep booking parcels manually here until a supported client is added.');
+        'Paperfly has no documented read-only credential check (only order placement, cancellation and tracking by reference). No request was sent.',
+        'Verify the paperflykey, username and password in the Paperfly merchant panel. Booking stays manual here until Paperfly offers a verifiable endpoint.');
 }
 
 function sh_courier_probe_sundarban(array $courier): array
@@ -1137,11 +1169,47 @@ function sh_courier_probe_saparibahan(array $courier): array
         'Contact SA Paribahan for corporate API access. Until then, record tracking numbers manually.');
 }
 
+function sh_redx_base_url(array $creds): string
+{
+    $base = trim((string)($creds['base_url'] ?? ''));
+    return rtrim($base !== '' ? $base : 'https://openapi.redx.com.bd/v1.0.0-beta', '/');
+}
+
 function sh_courier_probe_redx(array $courier): array
 {
-    return sh_courier_test_result('unsupported', 0,
-        'No verified RedX read-only endpoint is implemented in this build. No request was sent.',
-        'RedX credentials remain saved and manual parcels work; keep the token ready for a future client.');
+    $creds = sh_courier_credentials($courier);
+    $missing = sh_courier_test_missing($courier);
+    if ($missing) { return sh_courier_test_incomplete(array_values($missing), 'RedX'); }
+
+    // RedX OpenAPI: every call carries "API-ACCESS-TOKEN: Bearer <token>".
+    // GET /pickup/stores lists this shop's pickup stores — account-specific,
+    // read-only, and the first call every integration needs anyway.
+    $http = sh_courier_http('GET', sh_redx_base_url($creds) . '/pickup/stores',
+        ['API-ACCESS-TOKEN' => 'Bearer ' . trim((string)$creds['api_access_token'])], null, 15);
+    if (!$http['ok']) { return sh_courier_test_http_failure($http, '/pickup/stores', $creds, 'RedX'); }
+    if (isset($http['body']['raw'])) {
+        return sh_courier_test_result('failed', (int)$http['status'],
+            'RedX answered HTTP ' . (int)$http['status'] . ' but not with JSON. The base URL may point at the website instead of the API.',
+            'Use https://openapi.redx.com.bd/v1.0.0-beta, save, then test again.', '/pickup/stores', $creds);
+    }
+    $stores = $http['body']['pickup_stores'] ?? null;
+    if (!is_array($stores)) {
+        return sh_courier_test_result('failed', (int)$http['status'],
+            'RedX answered without the pickup-store list the endpoint documents.',
+            'Check the API base URL; if it is correct, ask RedX whether API access is enabled for this shop.',
+            '/pickup/stores', $creds);
+    }
+    if (!$stores) {
+        return sh_courier_test_result('configuration_incomplete', (int)$http['status'],
+            'RedX accepted the API access token but this shop has no pickup stores.',
+            'Add a pickup store in the RedX merchant dashboard, then test again.',
+            '/pickup/stores', $creds);
+    }
+    $first = is_array($stores[0] ?? null) ? (string)($stores[0]['name'] ?? $stores[0]['store_name'] ?? '') : '';
+    return sh_courier_test_result('connected', (int)$http['status'],
+        'RedX accepted the API access token and listed ' . count($stores) . ' pickup store'
+            . (count($stores) === 1 ? '' : 's') . ($first !== '' ? ' (first: "' . $first . '")' : '') . '.',
+        'Connection verified. A test never creates a parcel.', '/pickup/stores', $creds);
 }
 
 function sh_courier_probe_manual(array $courier): array

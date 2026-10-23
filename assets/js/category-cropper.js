@@ -90,6 +90,7 @@
         initialCropSaved = null;
       }
 
+      modal.style.top = window.scrollY + 'px';
       modal.removeAttribute('hidden');
       document.body.classList.add('sh-modal-open');
 

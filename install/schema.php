@@ -108,7 +108,6 @@ function sh_schema_sql(): array
         short_description VARCHAR(300) DEFAULT NULL,
         description TEXT,
         specifications TEXT,
-        features TEXT,
         image_alt VARCHAR(190) DEFAULT NULL,
         ai_draft_token VARCHAR(64) DEFAULT NULL,
         price DECIMAL(12,2) NOT NULL DEFAULT 0.00,

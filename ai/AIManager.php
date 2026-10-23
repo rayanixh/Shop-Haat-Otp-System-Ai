@@ -195,10 +195,9 @@ function sh_ai_parse_json(string $text): ?array
 function sh_ai_product_context(int $productId): ?array
 {
     $p = sh_one(
-        'SELECT p.*, c.name AS category_name, b.name AS brand_name
+        'SELECT p.*, c.name AS category_name
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
-         LEFT JOIN brands b ON b.id = p.brand_id
          WHERE p.id = ? LIMIT 1', [$productId]
     );
     if ($p === null) { return null; }
@@ -212,7 +211,10 @@ function sh_ai_product_context(int $productId): ?array
         'row'         => $p,
         'name'        => (string)$p['name'],
         'category'    => (string)($p['category_name'] ?? ''),
-        'brand'       => (string)($p['brand_name'] ?? ''),
+        // Kept as an empty substitution so a prompt template an administrator
+        // customised before brands were retired renders blank instead of a
+        // literal "{{brand}}". Nothing reads a brand any more.
+        'brand'       => '',
         'price'       => sh_money($p['price']),
         'type'        => (string)$p['product_type'],
         'description' => trim(strip_tags((string)$p['description'])),
@@ -292,7 +294,7 @@ function sh_ai_draft_image_from_product(int $productId): ?array
  * Generate a complete product draft from a product name.
  *
  * Nothing is written to the database. Every value returned has been normalised
- * against the REAL form: categories and brands must exist, the slug and SKU are
+ * against the REAL form: the category must exist, the slug and SKU are
  * checked against the products table, and price/stock/cost are never requested
  * or accepted. When an image-generation model is configured, the featured photo
  * is produced in the same call — and when it is not, the answer says so instead
@@ -311,7 +313,7 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
 
     $known = is_array($input['known'] ?? null) ? $input['known'] : [];
     $knownLines = [];
-    foreach (['brand' => 'Brand', 'model' => 'Model', 'size' => 'Size', 'material' => 'Material',
+    foreach (['model' => 'Model', 'size' => 'Size', 'material' => 'Material',
               'colour' => 'Colour', 'dimensions' => 'Dimensions'] as $k => $label) {
         $v = trim((string)($known[$k] ?? ''));
         if ($v !== '') { $knownLines[] = $label . ': ' . mb_substr($v, 0, 200); }
@@ -325,10 +327,6 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
         $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
         $catNames = array_map(static fn($c) => '- ' . $c['name'], $cats);
     } catch (Throwable $e) { $cats = []; $catNames = []; }
-    try {
-        $brands = sh_all('SELECT id, name FROM brands ORDER BY name ASC');
-        $brandNames = array_map(static fn($b) => '- ' . $b['name'], $brands);
-    } catch (Throwable $e) { $brands = []; $brandNames = []; }
 
     $field = trim((string)($input['field'] ?? ''));
     $fieldFocus = [
@@ -336,10 +334,8 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
         'short'          => 'Produce only "short_description". Leave every other key empty.',
         'description'    => 'Produce only "description". Leave every other key empty.',
         'specifications' => 'Produce only "specifications". Leave every other key empty.',
-        'features'       => 'Produce only "features". Leave every other key empty.',
         'tags'           => 'Produce only "tags". Leave every other key empty.',
         'category'       => 'Produce only "category". Leave every other key empty.',
-        'brand'          => 'Produce only "brand". Leave every other key empty.',
         'sku'            => 'Produce only "sku". Leave every other key empty.',
         'seo'            => 'Produce only "meta_title", "meta_description", "focus_keyword", "related_phrases" and "keywords". Leave every other key empty.',
         'image_alt'      => 'Produce only "image_alt". Leave every other key empty.',
@@ -382,7 +378,8 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
         'short_description' => trim((string)($input['short_description'] ?? '')),
         'known'             => implode("\n", $knownLines),
         'categories'        => implode("\n", $catNames),
-        'brands'            => implode("\n", $brandNames),
+        // Empty on purpose (see sh_ai_product_context): retired placeholder.
+        'brands'            => '',
         'image_note'        => $imageNote,
         'focus'             => $focusText,
     ];
@@ -446,7 +443,7 @@ function sh_ai_product_draft(array $input, ?int $adminId = null): array
  * Constrain a model's JSON to the fields that really exist on the product form.
  *
  * Unknown keys are dropped (so a hallucinated "price" can never reach the form),
- * categories and brands are matched against the live tables, and length limits
+ * the category is matched against the live table, and length limits
  * match the database columns.
  *
  * @return array<string,mixed>
@@ -478,14 +475,11 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
         // nl2br(e()): HTML saved here would be shown to shoppers as tags.
         'description'       => sh_ai_plain_text((string)($d['description'] ?? ''), 8000),
         'specifications'    => implode("\n", $list($d['specifications'] ?? [], 20, 200)),
-        'features'          => implode("\n", $list($d['features'] ?? [], 12, 240)),
         'tags'              => array_slice($list($d['tags'] ?? [], 12, 60), 0, 12),
         // Filled by the caller with a unique, store-valid slug.
         'slug'              => '',
         'category_id'       => null,
         'category_name'     => '',
-        'brand_id'          => null,
-        'brand_name'        => '',
         'sku'               => '',
         'sku_unique'        => true,
         // SEO copy is not capped: the review form and the TEXT columns accept
@@ -517,21 +511,6 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
         }
     }
 
-    // Brand: same rule. Never creates a brand.
-    $wantBrand = $oneLine($d['brand'] ?? '', 120);
-    if ($wantBrand !== '') {
-        try {
-            foreach (sh_all('SELECT id, name FROM brands ORDER BY name ASC') as $b) {
-                if (mb_strtolower((string)$b['name']) === mb_strtolower($wantBrand)) {
-                    $out['brand_id'] = (int)$b['id'];
-                    $out['brand_name'] = (string)$b['name'];
-                    break;
-                }
-            }
-        } catch (Throwable $e) { /* no brands table: suggestion stays empty */ }
-        if ($out['brand_id'] === null) { $out['brand_name'] = $wantBrand; }
-    }
-
     // SKU: cleaned to the characters the field accepts, and its uniqueness is
     // checked against the real table. The flag is information for the admin,
     // never a claim made without looking.
@@ -550,7 +529,7 @@ function sh_ai_normalise_product_draft(array $d, int $productId = 0): array
 
     // Descriptions must not smuggle a price or a stock figure into the draft.
     // (The prompt forbids it; this keeps a bad answer out of the form as well.)
-    foreach (['title', 'short_description', 'description', 'features'] as $k) {
+    foreach (['title', 'short_description', 'description'] as $k) {
         $txt = $out[$k];
         if (preg_match('/(?:৳|Tk\.?|BDT|\$|€|£)\s?\d|\d+\s?(?:৳|tk|bdt|in stock|pieces? left)/iu', $txt) === 1) {
             $out['notes'][] = 'The draft mentioned a price or stock figure; it was removed. Set prices and stock yourself.';

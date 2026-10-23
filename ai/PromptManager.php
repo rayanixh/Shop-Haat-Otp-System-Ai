@@ -16,7 +16,7 @@ function sh_ai_default_templates(): array
             'system' => 'You are an expert e-commerce copywriter. Reply with the title text only — '
                       . 'no quotes, no markdown, no explanation.',
             'user'   => "Write one customer-friendly product title.\n\n"
-                      . "Current name: {{name}}\nCategory: {{category}}\nBrand: {{brand}}\n"
+                      . "Current name: {{name}}\nCategory: {{category}}\n"
                       . "Price: {{price}}\nKnown details: {{details}}\n\n"
                       . "Rules:\n- Maximum 70 characters.\n- Plain text, no quotation marks.\n"
                       . "- Do not invent specifications that are not listed above.\n{{seo}}{{tone}}{{language}}",
@@ -26,7 +26,7 @@ function sh_ai_default_templates(): array
             'system' => 'You are an expert e-commerce copywriter. Return clean HTML using only '
                       . '<p>, <ul>, <li> and <strong>. No markdown, no <html> or <body> wrapper.',
             'user'   => "Write a complete product description.\n\n"
-                      . "Product: {{name}}\nCategory: {{category}}\nBrand: {{brand}}\n"
+                      . "Product: {{name}}\nCategory: {{category}}\n"
                       . "Price: {{price}}\nType: {{type}}\nExisting description: {{description}}\n"
                       . "Specifications: {{specs}}\n\n"
                       . "Structure:\n- One short opening paragraph.\n- A bulleted list of key benefits.\n"
@@ -46,8 +46,8 @@ function sh_ai_default_templates(): array
             'label'  => 'Product tags',
             'system' => 'You reply with a JSON array of strings and nothing else. Example: ["one","two"]',
             'user'   => "Suggest 5-8 search tags for this product.\n\n"
-                      . "Product: {{name}}\nCategory: {{category}}\nBrand: {{brand}}\nDetails: {{details}}\n\n"
-                      . "Rules:\n- Each tag 1-3 words, lowercase unless a brand name.\n"
+                      . "Product: {{name}}\nCategory: {{category}}\nDetails: {{details}}\n\n"
+                      . "Rules:\n- Each tag 1-3 words, lowercase.\n"
                       . "- No duplicates, no hashtags.\n- Return ONLY a JSON array.{{language}}",
         ],
         'product_category' => [
@@ -65,8 +65,9 @@ function sh_ai_default_templates(): array
             'system' => 'You reply with JSON only, shaped '
                       . '{"meta_title":"...","meta_description":"...","focus_keyword":"...","keywords":["..."]}.',
             'user'   => "Write SEO metadata for this product.\n\n"
-                      . "Product: {{name}}\nCategory: {{category}}\nBrand: {{brand}}\nDetails: {{details}}\n\n"
-                      . "Rules:\n- meta_title max 60 characters.\n- meta_description max 155 characters.\n"
+                      . "Product: {{name}}\nCategory: {{category}}\nDetails: {{details}}\n\n"
+                      . "Rules:\n- meta_title: clear and specific, written for a person scanning results.\n"
+                      . "- meta_description: written for a person deciding whether to click.\n"
                       . "- 4-8 keywords.\n- Return ONLY the JSON object.{{language}}",
         ],
         'category_content' => [
@@ -75,8 +76,8 @@ function sh_ai_default_templates(): array
                       . '{"description":"...","meta_title":"...","meta_description":"...","keywords":["..."]}.',
             'user'   => "Write listing-page content for this shop category.\n\n"
                       . "Category: {{name}}\nExample products: {{products}}\nProduct count: {{count}}\n\n"
-                      . "Rules:\n- description: 40-60 words of plain text.\n- meta_title max 60 characters.\n"
-                      . "- meta_description max 155 characters.\n- 4-8 keywords.\n"
+                      . "Rules:\n- description: 40-60 words of plain text.\n"
+                      . "- meta_title and meta_description: clear and specific, written for a person.\n- 4-8 keywords.\n"
                       . "- Return ONLY the JSON object.{{seo}}{{tone}}{{language}}",
         ],
         'blog_post' => [
@@ -89,8 +90,8 @@ function sh_ai_default_templates(): array
                       . "Topic: {{topic}}\nTarget audience: {{audience}}\nKeywords to include: {{keywords}}\n"
                       . "Approximate length: {{length}} words\n\n"
                       . "Structure: an introduction, 3-5 sections with headings, and a conclusion.\n"
-                      . "Rules:\n- excerpt max 200 characters.\n- meta_title max 60 characters.\n"
-                      . "- meta_description max 155 characters.\n- Return ONLY the JSON object."
+                      . "Rules:\n- excerpt max 200 characters.\n"
+                      . "- meta_title and meta_description: clear and specific, written for a person.\n- Return ONLY the JSON object."
                       . "{{seo}}{{tone}}{{language}}",
         ],
         'product_full' => [
@@ -100,14 +101,13 @@ function sh_ai_default_templates(): array
             'user'   => "Build a reviewable draft for one product listing.\n\n"
                       . "Product name given by the admin: {{name}}\n"
                       . "Short description given by the admin: {{short_description}}\n"
-                      . "Known facts (brand, model, size, material, colour, notes): {{known}}\n"
+                      . "Known facts (model, size, material, colour, notes): {{known}}\n"
                       . "Existing categories:\n{{categories}}\n"
-                      . "Existing brands:\n{{brands}}\n"
                       . "{{image_note}}\n{{focus}}\n\n"
                       . "Return a JSON object with exactly these keys:\n"
                       . "{\"title\":\"...\",\"short_description\":\"...\",\"description\":\"...\","
-                      . "\"specifications\":[\"Label: Value\"],\"features\":[\"Benefit statement\"],"
-                      . "\"tags\":[\"shirt\",\"cotton\"],\"category\":\"\",\"brand\":\"\",\"sku\":\"\","
+                      . "\"specifications\":[\"Label: Value\"],"
+                      . "\"tags\":[\"shirt\",\"cotton\"],\"category\":\"\",\"sku\":\"\","
                       . "\"meta_title\":\"...\",\"meta_description\":\"...\",\"focus_keyword\":\"...\","
                       . "\"related_phrases\":[\"...\"],\"keywords\":[\"...\"],\"image_alt\":\"...\","
                       . "\"notes\":[\"...\"]}\n\n"
@@ -128,18 +128,13 @@ function sh_ai_default_templates(): array
                       . "- specifications: only facts supplied above or clearly visible on the product. One "
                       . "\"Label: Value\" per list item. Empty list when nothing is known. Never invent a "
                       . "dimension, weight, material, certification, warranty or ingredient.\n"
-                      . "- features: 3-6 short benefit statements that follow from the product name, category and "
-                      . "the known facts. They describe what the item does or who it suits. No number, size, "
-                      . "power rating, certification or performance claim unless it was supplied.\n"
                       . "- tags: 3-8 short lowercase catalogue tags a shopper would filter by (product type, "
-                      . "material, use). Never a brand unless it appears in Existing brands, never a price.\n"
+                      . "material, use). Never a price.\n"
                       . "- category: exactly one name from Existing categories, copied character for character. "
                       . "Empty string if none fits. Never invent a category.\n"
-                      . "- brand: exactly one name from Existing brands, or empty string. Never invent a brand "
-                      . "and never read a brand from a logo that is not clearly legible.\n"
                       . "- sku: a short code the admin may accept as a suggestion (letters, digits, dashes). "
                       . "Never claim it is unique.\n"
-                      . "- meta_title: at most 60 characters. meta_description: at most 155 characters. "
+                      . "- meta_title and meta_description: clear and specific, written for a person. "
                       . "focus_keyword: 2-5 words. related_phrases: 2-6 phrases. keywords: 4-8 terms. "
                       . "No keyword stuffing.\n"
                       . "- image_alt: at most 120 characters describing the product itself (what a shopper "

@@ -46,7 +46,7 @@ function sh_ai_subnav(string $current): void
         'dashboard' => ['index.php',      'layout',   'AI Dashboard'],
         'product'   => ['products.php',   'box',      'Product AI'],
         'bulk'      => ['bulk.php',       'list',     'Bulk AI Generator'],
-        'blog'      => ['blog.php',       'file',     'Blog AI'],
+        'blog'      => ['blog.php',       'file-text','Blog AI'],
         'category'  => ['category.php',   'grid',     'Category AI'],
         'seo'       => ['seo.php',        'search',   'SEO AI'],
         'image'     => ['image.php',      'image',    'Image AI'],
@@ -55,11 +55,16 @@ function sh_ai_subnav(string $current): void
         'models'    => ['models.php',     'list',     'Models'],
         'settings'  => ['settings.php',   'settings', 'AI Settings'],
     ];
-    echo '<div class="sh-aisubnav">';
+    // One compact tab bar at every width: a single scrollable row instead of
+    // several wrapped rows, so the navigation never pushes the actual screen
+    // down on a phone. All eleven sections stay one tap away.
+    echo '<nav class="sh-aisubnav" aria-label="AI Auto Work sections">';
     foreach ($items as $key => [$file, $icon, $label]) {
-        $on = $key === $current ? ' sh-aisubnav__link--on' : '';
-        echo '<a class="sh-aisubnav__link' . $on . '" href="' . e(sh_url('admin/ai/' . $file)) . '">'
+        $active = $key === $current;
+        echo '<a class="sh-aisubnav__link' . ($active ? ' sh-aisubnav__link--on' : '') . '"'
+           . ' href="' . e(sh_url('admin/ai/' . $file)) . '"'
+           . ($active ? ' aria-current="page"' : '') . '>'
            . sh_icon($icon, 14) . '<span>' . e($label) . '</span></a>';
     }
-    echo '</div>';
+    echo '</nav>';
 }

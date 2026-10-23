@@ -1782,7 +1782,7 @@ sh_t('the save endpoint and schema back the create flow', function () {
         if (!str_contains($seg, $need)) { return 'save_product does not check ' . $need; }
     }
     $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
-    foreach (['features TEXT', 'image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
+    foreach (['image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
         if (!str_contains($schema, $need)) { return 'install/schema.php is missing ' . $need; }
     }
     $ensure = (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
@@ -2173,7 +2173,9 @@ sh_t('the starter catalogue is idempotent and cannot be re-created by a normal r
     if (!str_contains($src, "SELECT id FROM ' . \$table . ' WHERE ' . \$column . ' = ? LIMIT 1")) {
         return 'the seeder has no by-key lookup helper';
     }
-    foreach (['categories', 'brands', 'products', 'promo_slides'] as $table) {
+    // (Brands are not seeded at all — the store has no brand system; the
+    // DB-backed installer suite asserts the seeded brand count stays zero.)
+    foreach (['categories', 'products', 'promo_slides'] as $table) {
         if (preg_match('~\\$find\\(\\$pdo, \'' . $table . '\'~', $src) !== 1) {
             return 'the seeder never checks ' . $table . ' for an existing row';
         }
@@ -3096,6 +3098,7 @@ sh_t('the test endpoint returns the real outcome instead of a bare failure', fun
 sh_t('the Providers screen never renders a stored key', function () {
     $page = (string)file_get_contents(SH_ROOT . '/admin/ai/providers.php');
     if (!str_contains($page, 'sh_ai_provider_masked_key($editing)')) { return 'the edit form does not show the masked key'; }
+    if (!str_contains($page, 'sh_ai_provider_masked_key($p)')) { return 'the card does not show the masked key'; }
     if (preg_match('/value="<\?=\s*e\(\$[^)]*\[.api_key.\]/', $page)) { return 'a stored key is printed into an input value'; }
     if (!str_contains($page, 'type="password"')) { return 'the key field is not a password input'; }
     if (!str_contains($page, 'data-modal-open="sh-aiprov-add"')) { return 'there is no Add provider action'; }
@@ -3130,6 +3133,71 @@ sh_t('the redesigned provider cards have a responsive grid and no fixed heights'
     if (preg_match('/\.sh-aiprov(?:::?[a-z_-]+)?\s*\{[^}]*height:\s*\d/', $block)) { return 'a provider card has a fixed height'; }
     if (preg_match('/\.sh-aiprov__meta\s*\{[^}]*height:\s*\d/', $block)) { return 'the metadata grid has a fixed height'; }
     if (preg_match('/gradient\(/i', $block)) { return 'the provider styles use a gradient'; }
+    return true;
+});
+
+sh_t('the AI navigation is a wrapping tab bar in page flow and the card test area is flat', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    if (!preg_match('/\.sh-aisubnav\s*\{(?:[^}]*)flex-wrap:\s*wrap/', $css)) {
+        return 'the AI sub-navigation does not wrap in normal page flow';
+    }
+    $at = strpos($css, '.sh-aisubnav {');
+    $rule = $at === false ? '' : substr($css, $at, 160);
+    if (str_contains($rule, 'overflow')) { return 'the AI tab bar scrolls inside its own box again'; }
+    if (str_contains($css, '.sh-aisubnav { display: grid;')) {
+        return 'the old multi-row mobile navigation grid is back';
+    }
+    $start = strpos($css, '.sh-aiprov__test {');
+    $rule = $start === false ? '' : substr($css, $start, 220);
+    if (!str_contains($rule, 'border-top:')) { return 'the provider test area has no flat divider'; }
+    if (str_contains($rule, 'background:')) { return 'the provider test area is a nested card again'; }
+    $nav = (string)file_get_contents(SH_ROOT . '/admin/ai/_ai.php');
+    if (!str_contains($nav, 'aria-current="page"')) { return 'the active AI section is not announced'; }
+    foreach (['index.php', 'products.php', 'bulk.php', 'blog.php', 'category.php', 'seo.php',
+              'image.php', 'history.php', 'providers.php', 'models.php', 'settings.php'] as $file) {
+        if (!str_contains($nav, "'" . $file . "'")) { return 'the AI navigation lost ' . $file; }
+    }
+    return true;
+});
+
+sh_t('no page uses an internal scroll box for ordinary content', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    // The browser page is the only scroller: no declaration in the shared
+    // stylesheet may create a nested scroll region.
+    if (preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $css) === 1) {
+        return 'the stylesheet still declares an internal scroll region';
+    }
+    if (str_contains($css, 'body.sh-modal-open { overflow: hidden; }')) {
+        return 'opening a modal still locks page scrolling';
+    }
+    if (!str_contains($css, '.sh-modal { position: absolute;')) {
+        return 'modals are not placed in normal page flow';
+    }
+    // Generated AI output and diagnostics expand with the page.
+    foreach (['.sh-airesult-box', '.sh-aipre'] as $sel) {
+        $at = strpos($css, $sel . ' {');
+        $rule = $at === false ? '' : substr($css, $at, 300);
+        if (str_contains($rule, 'max-height:')) { return $sel . ' still caps its height'; }
+    }
+    if (preg_match('/\.sh-admin-sidebar \{[^}]*(?<!min-)height:\s*100vh/', $css) === 1) {
+        return 'the admin sidebar is still a fixed-height scroll column';
+    }
+    if (!str_contains($css, 'field-sizing: content')) {
+        return 'textareas do not size to their content';
+    }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (str_contains($js, "document.body.style.overflow = 'hidden'")) {
+        return 'JavaScript still locks page scrolling for an overlay';
+    }
+    if (substr_count($js, 'window.scrollY') < 5 || !str_contains($js, 'shGrowTextarea')) {
+        return 'overlays are not placed at the scroll offset, or textareas do not auto-grow';
+    }
+    foreach (['/admin/email.php', '/admin/logs.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . $rel);
+        if (preg_match('/overflow\s*:\s*(?:auto|scroll)/', $src) === 1) {
+            return $rel . ' still renders an inline scroll box';
+        }
+    }
     return true;
 });
 
@@ -3184,8 +3252,9 @@ sh_t('every required courier has a provider-specific probe', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
     foreach ([
         "sh_courier_probe_steadfast" => "sh_steadfast_base_url(\$creds) . '/get_balance'",
-        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/external/login'",
+        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/issue-token'",
         "sh_courier_probe_ecourier"  => "'/city-list'",
+        "sh_courier_probe_redx"      => "'/pickup/stores'",
     ] as $fn => $needle) {
         $start = strpos($src, 'function ' . $fn . '(');
         $end = $start === false ? false : strpos($src, "\n}\n", $start);
@@ -3198,7 +3267,7 @@ sh_t('every required courier has a provider-specific probe', function () {
 
 sh_t('an HTTP 200 web page is never accepted as a provider answer', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
-    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier'] as $fn) {
+    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier', 'sh_courier_probe_redx'] as $fn) {
         $start = strpos($src, 'function ' . $fn . '(');
         $end = $start === false ? false : strpos($src, "\n}\n", $start);
         if ($start === false || $end === false) { return $fn . '() could not be read'; }
@@ -3218,20 +3287,50 @@ sh_t('an HTTP 200 web page is never accepted as a provider answer', function () 
     return true;
 });
 
-sh_t('a Pathao test uses client credentials and verifies the stored store', function () {
+sh_t('a Pathao test uses the official password-grant token flow and verifies the stored store', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    // The credential form must collect everything the grant needs.
+    foreach (["'client_id' => 'Client ID'", "'client_secret' => 'Client Secret'",
+              "'username' => 'Merchant Username'", "'password' => 'Merchant Password'",
+              "'store_id' => 'Store ID'"] as $field) {
+        if (!str_contains($src, $field)) { return 'the Pathao credential set is missing ' . $field; }
+    }
     $start = strpos($src, 'function sh_courier_probe_pathao(');
     $end = $start === false ? false : strpos($src, "\n}\n", $start);
     if ($start === false || $end === false) { return 'the Pathao probe could not be read'; }
     $fn = substr($src, $start, $end - $start);
-    foreach (['client_id', 'client_secret', 'access_token', '/aladdin/api/v1/stores', 'store_id'] as $needle) {
+    foreach (['client_id', 'client_secret', "'grant_type'", 'username', 'password',
+              'access_token', '/aladdin/api/v1/stores', 'store_id', "'authentication_failed'"] as $needle) {
         if (!str_contains($fn, $needle)) { return 'the Pathao probe is missing ' . $needle; }
     }
-    if (str_contains($fn, 'username') || str_contains($fn, 'password')) {
-        return 'the probe asks for username/password, which the official client_credentials flow does not need';
-    }
+    if (!str_contains($fn, "'password'")) { return 'the probe does not send the password grant'; }
+    if (str_contains($fn, 'external/login')) { return 'the probe still calls the undocumented external/login endpoint'; }
     if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
         return 'a missing or unknown store is not reported as configuration incomplete';
+    }
+    return true;
+});
+
+sh_t('a RedX test validates the access token against the pickup stores', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_probe_redx(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the RedX probe could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['API-ACCESS-TOKEN', 'Bearer ', 'pickup_stores'] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the RedX probe is missing ' . $needle; }
+    }
+    if (!str_contains($src, 'https://openapi.redx.com.bd/v1.0.0-beta')) {
+        return 'the RedX probe does not default to the OpenAPI host';
+    }
+    if (str_contains($fn, "'/parcel'") || str_contains($fn, '/parcel/track')) {
+        return 'the RedX probe goes beyond the read-only store list';
+    }
+    if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
+        return 'a token without pickup stores is not reported as configuration incomplete';
+    }
+    if (!str_contains($src, 'return [\'steadfast\', \'pathao\', \'ecourier\', \'paperfly\', \'redx\'];')) {
+        return 'RedX is not registered as a testable driver';
     }
     return true;
 });
@@ -3369,7 +3468,7 @@ sh_t('the phone verification switch has an explicit Save button', function () {
 });
 
 sh_t('editable forms carry a non-saving unsaved-changes guard', function () {
-    foreach (['admin/product-edit.php', 'admin/category-edit.php'] as $page) {
+    foreach (['admin/product-edit.php', 'admin/category-edit.php', 'admin/ai/products.php'] as $page) {
         $body = (string)file_get_contents(SH_ROOT . '/' . $page);
         if (!str_contains($body, 'data-dirty-guard')) { return $page . ' has no unsaved-changes guard'; }
         if (!str_contains($body, 'data-dirty-note')) { return $page . ' has no unsaved-changes note'; }
@@ -3410,6 +3509,51 @@ sh_t('only read-only filters submit automatically', function () {
     return true;
 });
 
+sh_t('every editable admin form is guarded, and the guard itself never writes', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    // Generic coverage of admin write forms, with an explicit opt-out.
+    if (!str_contains($js, 'data-no-dirty-guard')) { return 'the dirty guard has no opt-out for non-edit forms'; }
+    if (!str_contains($js, "toLowerCase() !== 'post'")) { return 'the guard is not scoped to write (POST) forms'; }
+    // Read-only navigation pickers must not mark a form dirty on their own.
+    if (!str_contains($js, 'NAV_CONTROLS')) { return 'navigation pickers still mark a form dirty on their own'; }
+    if (!str_contains($js, '[data-seo-page-picker]')) { return 'the SEO page picker is not treated as navigation'; }
+    // A script-saved form stands the guard down only after a real save.
+    if (!str_contains($js, 'sh:form-clean')) { return 'script-saved forms cannot clear the guard after saving'; }
+    $client = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    if (!str_contains($client, 'sh:form-clean')) { return 'the AI product review never reports its successful save'; }
+    // The guard block itself must contain no network or submit call at all:
+    // it warns, it never saves.
+    $start = strpos($js, 'Unsaved-changes guard');
+    $end = $start === false ? false : strpos($js, 'Modals', $start);
+    if ($start === false || $end === false) { return 'the dirty guard block was not found'; }
+    $block = substr($js, $start, $end - $start);
+    foreach (['fetch(', '.submit()', 'sendBeacon', 'XMLHttpRequest'] as $bad) {
+        if (str_contains($block, $bad)) { return 'the dirty guard performs a write: ' . $bad; }
+    }
+    return true;
+});
+
+sh_t('no admin button can submit a form by accident', function () {
+    // A <button> without a type attribute IS a submit button. Every admin
+    // button must say what it is, so a script-driven control can never post
+    // its surrounding form when markup moves or a script loads slowly.
+    $bad = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT . '/admin'));
+    foreach ($it as $file) {
+        if (!$file->isFile() || !str_ends_with($file->getFilename(), '.php')) { continue; }
+        $body = (string)file_get_contents($file->getPathname());
+        // Template islands contain their own ">" (their closing tag), so blank them first.
+        $body = preg_replace('~<\?(?:php|=).*?\?>~s', 'PHP', $body) ?? $body;
+        if (preg_match_all('~<button\b[^>]*>~i', $body, $m) === false) { continue; }
+        foreach ($m[0] as $tag) {
+            if (stripos($tag, 'type=') === false) {
+                $bad[] = str_replace(SH_ROOT . '/', '', $file->getPathname()) . ': ' . trim($tag);
+            }
+        }
+    }
+    return sh_assert($bad === [], 'buttons without an explicit type: ' . implode('; ', $bad));
+});
+
 sh_section('Brand and features removed from product management');
 
 sh_t('the brand workflow is gone from the admin', function () {
@@ -3446,6 +3590,40 @@ sh_t('features and benefits are gone from every product form and page', function
     }
     $product = (string)file_get_contents(SH_ROOT . '/product.php');
     if (str_contains($product, "\$product['features']")) { return 'the product page still prints features'; }
+    return true;
+});
+
+sh_t('brand and features are also gone from the AI, catalogue and demo layers', function () {
+    $manager = sh_source_without_comments(SH_ROOT . '/ai/AIManager.php');
+    foreach (['FROM brands', 'brands b', 'brand_id', 'brand_name', "'features'"] as $gone) {
+        if (str_contains($manager, $gone)) { return 'the AI draft layer still references ' . $gone; }
+    }
+    $studio = sh_source_without_comments(SH_ROOT . '/ai/ProductStudio.php');
+    foreach (['FROM brands', 'brand_id', "'brand_id' =>", "'features'", 'has_features'] as $gone) {
+        if (str_contains($studio, $gone)) { return 'the AI save layer still references ' . $gone; }
+    }
+    $api = sh_source_without_comments(SH_ROOT . '/api/ai.php');
+    if (str_contains($api, "'category', 'brand'")) { return 'brand is still a regenerable field'; }
+    $prompts = sh_source_without_comments(SH_ROOT . '/ai/PromptManager.php');
+    foreach (['Existing brands', '\"features\"', 'a real brand', 'at most 60 characters', 'at most 155 characters'] as $gone) {
+        if (str_contains($prompts, $gone)) { return 'a default prompt still mentions ' . $gone; }
+    }
+    $catalog = sh_source_without_comments(SH_ROOT . '/includes/catalog.php');
+    foreach (['sh_brands(', 'brand_ids', 'JOIN brands', 'brand_name'] as $gone) {
+        if (str_contains($catalog, $gone)) { return 'the catalogue helpers still reference ' . $gone; }
+    }
+    $seo = sh_source_without_comments(SH_ROOT . '/includes/seo.php');
+    if (str_contains($seo, "'@type' => 'Brand'")) { return 'the product schema still advertises a brand'; }
+    $demo = sh_source_without_comments(SH_ROOT . '/install/demo-data.php');
+    foreach (['INSERT INTO brands', 'brand_id'] as $gone) {
+        if (str_contains($demo, $gone)) { return 'the demo catalogue still writes ' . $gone; }
+    }
+    // The retired columns stay for compatibility: no DROP anywhere.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php')
+        . (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
+    if (str_contains($schema, 'DROP COLUMN') || str_contains($schema, 'features TEXT')) {
+        return 'the schema either drops a column or still creates features';
+    }
     return true;
 });
 
@@ -3495,6 +3673,45 @@ sh_t('the SEO columns are TEXT and older installs are widened safely', function 
     if (!str_contains($seo, 'information_schema.columns')) { return 'the migration does not inspect the current type'; }
     if (!str_contains($seo, "sh_setting_save('seo_schema_v', '2')")) { return 'the schema version was not advanced'; }
     if (str_contains($seo, 'DROP TABLE')) { return 'the SEO migration drops a table'; }
+    return true;
+});
+
+sh_t('SEO copy an administrator wrote reaches the page unshortened', function () {
+    $longTitle = trim(str_repeat('Kettle ', 20));
+    $longDesc = trim(str_repeat('A stainless steel kettle with a cool-touch handle. ', 8));
+    sh_assert(mb_strlen($longTitle) > 70 && mb_strlen($longDesc) > 160, 'test data is not long enough');
+    $meta = sh_seo_test_meta([
+        'key' => 'home',
+        'entity' => ['name' => 'Kettle', 'meta_title' => $longTitle, 'meta_description' => $longDesc],
+        'fallback_title' => 'Kettle',
+        'fallback_desc' => 'Fallback text.',
+        'canonical' => '/',
+    ]);
+    return sh_assert(
+        str_starts_with((string)$meta['title'], $longTitle)
+        && (string)$meta['description'] === $longDesc,
+        'authored SEO copy was shortened before it reached the page'
+    );
+});
+
+sh_t('only generated SEO copy is excerpted, and the UI counts nothing', function () {
+    $body = trim(str_repeat('word ', 120));
+    $meta = sh_seo_test_meta([
+        'key' => 'home',
+        'fallback_title' => trim(str_repeat('Title ', 30)),
+        'fallback_desc' => $body,
+        'canonical' => '/',
+    ]);
+    sh_assert(mb_strlen((string)$meta['description']) <= 160, 'a body-derived description is no longer excerpted');
+    sh_assert(mb_strlen((string)$meta['title']) <= 70, 'a generated title is no longer excerpted');
+    $manager = sh_source_without_comments(SH_ROOT . '/admin/seo.php');
+    if (str_contains($manager, 'Title length') || str_contains($manager, 'Description length')) {
+        return 'the SEO Manager still shows character counts';
+    }
+    $preview = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (str_contains($preview, 'clip(') || str_contains($preview, 'CharCount')) {
+        return 'the live preview still clips or counts SEO copy';
+    }
     return true;
 });
 

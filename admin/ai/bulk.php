@@ -60,7 +60,7 @@ require dirname(__DIR__) . '/_layout.php';
       Maximum <?= (int)SH_AI_MAX_BATCH ?> jobs per batch (products × tasks).
     </p>
     <div class="sh-aiactions" style="margin-top:12px">
-      <button class="sh-btn" data-ai-bulk-start <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
+      <button type="button" class="sh-btn" data-ai-bulk-start <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
         <?= sh_icon('zap', 15) ?> Generate selected</button>
       <span class="sh-panel__note" data-ai-bulk-count>0 products selected</span>
     </div>
@@ -68,7 +68,7 @@ require dirname(__DIR__) . '/_layout.php';
     <div class="sh-aiprogress" data-ai-progress hidden>
       <div class="sh-aiprogress__bar"><span data-ai-progress-fill style="width:0%"></span></div>
       <p class="sh-panel__note" data-ai-progress-text>Preparing…</p>
-      <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-retry hidden>Retry failed</button>
+      <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-retry hidden>Retry failed</button>
     </div>
   </div>
 </div>

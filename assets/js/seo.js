@@ -25,10 +25,11 @@
     return SH_BASE + v.replace(/^\.?\//, '');
   }
 
-  /** Trim a string to a maximum length the way the server does it. */
-  function clip(text, max) {
-    var t = (text || '').replace(/\s+/g, ' ').trim();
-    return t.length > max ? t.slice(0, max - 1).replace(/[\s,;:.\-]+$/, '') + '…' : t;
+  /** Normalise whitespace for display. The preview shows the administrator's
+   *  words in full: SEO copy has no character limit here, in the form, or in
+   *  the saved output, so nothing in this file shortens it. */
+  function plain(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
   }
 
   function setText(el, text) {
@@ -95,13 +96,13 @@
       var rawTitle = titleInput ? titleInput.value : '';
       var rawDesc = descInput ? descInput.value : '';
       var typed = rawTitle.trim() !== '';
-      var shownTitle = clip(typed ? titleWithSuffix(rawTitle) : autoTitle, 70);
-      var shownDesc = clip(rawDesc.trim() !== '' ? rawDesc : autoDesc, 158);
+      var shownTitle = plain(typed ? titleWithSuffix(rawTitle) : autoTitle);
+      var shownDesc = plain(rawDesc.trim() !== '' ? rawDesc : autoDesc);
 
       setText(preview.title, shownTitle);
       setText(preview.ogTitle, shownTitle);
       setText(preview.description, shownDesc);
-      setText(preview.ogDescription, clip(rawDesc.trim() !== '' ? rawDesc : autoDesc, 120));
+      setText(preview.ogDescription, shownDesc);
 
       // URL line.
       var canonTyped = canonInput ? canonInput.value.trim() : '';

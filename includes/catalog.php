@@ -183,10 +183,9 @@ function sh_category_by_slug(string $slug): ?array
 function sh_product_by_slug(string $slug): ?array
 {
     return sh_one(
-        'SELECT p.*, c.name AS category_name, c.slug AS category_slug, b.name AS brand_name
+        'SELECT p.*, c.name AS category_name, c.slug AS category_slug
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
-         LEFT JOIN brands b ON b.id = p.brand_id
          WHERE p.slug = ? AND p.status = 1 LIMIT 1',
         [$slug]
     );
@@ -194,7 +193,7 @@ function sh_product_by_slug(string $slug): ?array
 
 const SH_PRODUCT_SELECT = 'p.id, p.name, p.slug, p.price, p.compare_price, p.image, p.stock,
     p.rating, p.review_count, p.sold_count, p.product_type, p.is_flash_sale, p.flash_sale_ends_at,
-    p.category_id, p.brand_id';
+    p.category_id';
 
 function sh_products_featured(int $limit = 12): array
 {
@@ -247,16 +246,6 @@ function sh_products_related(int $productId, ?int $categoryId, int $limit = 6): 
         WHERE p.status = 1 AND p.id <> ? ORDER BY p.sold_count DESC LIMIT ' . (int)$limit, [$productId]);
 }
 
-function sh_brands(): array
-{
-    try {
-        return sh_all('SELECT id, name, slug FROM brands WHERE status = 1 ORDER BY name');
-    } catch (Throwable $e) {
-        sh_log_exception($e, 'brands');
-        return [];
-    }
-}
-
 /**
  * Filtered, sorted, paginated product search used by products.php and category.php.
  * @return array{items:array,total:int,page:int,per_page:int}
@@ -274,13 +263,6 @@ function sh_product_search(array $f): array
     if (!empty($f['category_id'])) {
         $where[] = 'p.category_id = ?';
         $params[] = (int)$f['category_id'];
-    }
-    if (!empty($f['brand_ids']) && is_array($f['brand_ids'])) {
-        $ids = array_values(array_filter(array_map('intval', $f['brand_ids'])));
-        if ($ids) {
-            $where[] = 'p.brand_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
-            $params = array_merge($params, $ids);
-        }
     }
     if (isset($f['min_price']) && $f['min_price'] !== '' && is_numeric($f['min_price'])) {
         $where[] = 'p.price >= ?';

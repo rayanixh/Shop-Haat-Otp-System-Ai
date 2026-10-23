@@ -334,22 +334,20 @@
   if (drawer) {
     $$('[data-drawer-open]').forEach(function (b) {
       b.addEventListener('click', function () {
+        drawer.style.top = window.scrollY + 'px';
         drawer.hidden = false;
-        document.body.style.overflow = 'hidden';
         b.setAttribute('aria-expanded', 'true');
       });
     });
     $$('[data-drawer-close]').forEach(function (b) {
       b.addEventListener('click', function () {
         drawer.hidden = true;
-        document.body.style.overflow = '';
         $$('[data-drawer-open]').forEach(function (o) { o.setAttribute('aria-expanded', 'false'); });
       });
     });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape' && !drawer.hidden) {
         drawer.hidden = true;
-        document.body.style.overflow = '';
       }
     });
   }
@@ -554,10 +552,10 @@
   var filters = $('#sh-filters');
   if (filters) {
     $$('[data-filters-open]').forEach(function (b) {
-      b.addEventListener('click', function () { filters.classList.add('sh-filters--open'); document.body.style.overflow = 'hidden'; });
+      b.addEventListener('click', function () { filters.style.top = window.scrollY + 'px'; filters.classList.add('sh-filters--open'); });
     });
     $$('[data-filters-close]').forEach(function (b) {
-      b.addEventListener('click', function () { filters.classList.remove('sh-filters--open'); document.body.style.overflow = ''; });
+      b.addEventListener('click', function () { filters.classList.remove('sh-filters--open'); });
     });
   }
   var sortSelects = $$('[data-sort-select]');
@@ -587,6 +585,7 @@
     $$('[data-admin-burger]').forEach(function (b) {
       b.addEventListener('click', function () {
         aSide.classList.toggle('sh-admin-sidebar--open');
+        if (aSide.classList.contains('sh-admin-sidebar--open')) { aSide.style.top = window.scrollY + 'px'; }
         if (aScrim) { aScrim.hidden = !aSide.classList.contains('sh-admin-sidebar--open'); }
       });
     });
@@ -616,32 +615,113 @@
   });
 
   /* ---------- Unsaved-changes guard (never saves) -----------------------
-     Opt-in per form with data-dirty-guard. It only shows a small note and
-     warns before leaving; it never submits, debounces or stores anything. */
-  document.querySelectorAll('form[data-dirty-guard]').forEach(function (form) {
-    var note = form.querySelector('[data-dirty-note]');
-    var dirty = false;
-    function mark() {
-      if (dirty) { return; }
-      dirty = true;
-      if (note) { note.hidden = false; }
+     Typing, pasting, changing a field or tabbing away must NEVER write to
+     the database: the only thing that saves an admin form is its explicit
+     Save / Create / Update button. This guard is the safety net for that
+     rule. It only shows a small "Unsaved changes" note and warns before
+     leaving; it never submits, debounces, fetches or stores anything.
+
+     Coverage is deliberate and uniform so no edit screen can be missed:
+       - any form carrying data-dirty-guard (including script-handled forms
+         such as the AI product review), plus
+       - inside the admin panel, every POST form that holds at least one
+         editable field. One-click action forms (delete / toggle / refresh:
+         hidden fields only) are not edit forms and stay unguarded, and a
+         form can opt out with data-no-dirty-guard.
+     Read-only navigation controls (page/provider pickers, GET filter
+     selects) never mark a form dirty by themselves; if the administrator
+     has edited other fields first, leaving through them still warns. */
+  (function () {
+    var NAV_CONTROLS = '[data-navigate-on-change],[data-navigate-prefix],'
+      + '[data-seo-page-picker],[data-provider-select],'
+      + '[data-submit-form-on-change],[data-sort-select]';
+    var EDITABLE = 'input:not([type="hidden"]):not([type="submit"])'
+      + ':not([type="button"]):not([type="image"]):not([type="reset"]),select,textarea';
+
+    var candidates = $$('form[data-dirty-guard]');
+    if (document.querySelector('.sh-admin')) {
+      $$('form').forEach(function (form) {
+        if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') { return; }
+        if (form.hasAttribute('data-no-dirty-guard')) { return; }
+        if (!form.querySelector(EDITABLE)) { return; }
+        if (candidates.indexOf(form) === -1) { candidates.push(form); }
+      });
     }
-    form.addEventListener('input', mark);
-    form.addEventListener('change', mark);
-    // Registered on the document after the confirm handler, so a submission
-    // the administrator cancels still counts as unsaved.
-    document.addEventListener('submit', function (ev) {
-      if (ev.target !== form || ev.defaultPrevented) { return; }
-      dirty = false;
-      if (note) { note.hidden = true; }
+
+    candidates.forEach(function (form) {
+      var note = form.querySelector('[data-dirty-note]');
+      if (!note) {
+        // Same pill the product/category editors render server-side, placed
+        // next to the button that actually saves.
+        note = document.createElement('span');
+        note.className = 'sh-dirty';
+        note.setAttribute('data-dirty-note', '');
+        note.hidden = true;
+        note.textContent = 'Unsaved changes';
+        var submit = form.querySelector('[type="submit"]');
+        if (submit && submit.parentNode) {
+          submit.parentNode.insertBefore(note, submit.nextSibling);
+        } else {
+          form.appendChild(note);
+        }
+      }
+      var dirty = false;
+      function mark(ev) {
+        if (dirty) { return; }
+        var target = ev && ev.target;
+        if (target && target.matches && target.matches(NAV_CONTROLS)) { return; }
+        dirty = true;
+        if (note) { note.hidden = false; }
+      }
+      function clean() {
+        dirty = false;
+        if (note) { note.hidden = true; }
+      }
+      form.addEventListener('input', mark);
+      form.addEventListener('change', mark);
+      // Registered on the document after the confirm handler, so a submission
+      // the administrator cancels still counts as unsaved.
+      document.addEventListener('submit', function (ev) {
+        if (ev.target !== form || ev.defaultPrevented) { return; }
+        clean();
+      });
+      // Script-handled forms (the AI product review) preventDefault() their
+      // submit and save over fetch instead; they announce a successful save
+      // (or a discard) with this event so the guard can stand down. A failed
+      // save never fires it, so the entries stay marked unsaved.
+      document.addEventListener('sh:form-clean', function (ev) {
+        if (ev.target === form) { clean(); }
+      });
+      window.addEventListener('beforeunload', function (ev) {
+        if (!dirty) { return; }
+        ev.preventDefault();
+        ev.returnValue = '';
+        return '';
+      });
     });
-    window.addEventListener('beforeunload', function (ev) {
-      if (!dirty) { return; }
-      ev.preventDefault();
-      ev.returnValue = '';
-      return '';
-    });
-  });
+  })();
+
+  /* ---------- Textareas grow with their content --------------------------
+     No field hides text behind an internal scrollbar: textareas are sized to
+     their content (CSS field-sizing does this natively where supported; this
+     is the fallback, and the hook programmatic fills call afterwards). The
+     page scrolls; fields do not. */
+  function growTextarea(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    if (!el.offsetParent && el.getClientRects().length === 0) return;
+    el.style.overflowY = 'hidden';
+    el.style.height = 'auto';
+    var extra = el.offsetHeight - el.clientHeight;
+    el.style.height = (el.scrollHeight + extra) + 'px';
+  }
+  window.shGrowTextarea = growTextarea;
+  function growAllTextareas(root) {
+    $$('textarea', root || document).forEach(growTextarea);
+  }
+  window.shGrowTextareas = growAllTextareas;
+  growAllTextareas();
+  document.addEventListener('input', function (ev) { growTextarea(ev.target); });
+  document.addEventListener('focusin', function (ev) { growTextarea(ev.target); });
 
   /* ---------- Modals ---------------------------------------------------- */
   document.addEventListener('click', function (ev) {
@@ -650,16 +730,18 @@
       ev.preventDefault();
       var m = document.getElementById(open.getAttribute('data-modal-open'));
       if (m) {
+        m.style.top = window.scrollY + 'px';
         m.hidden = false;
         Object.keys(open.dataset).forEach(function (k) {
           if (k.indexOf('fill') === 0) {
             var target = m.querySelector('[data-fill-' + k.slice(4).toLowerCase() + ']');
             if (target) {
-              if ('value' in target) { target.value = open.dataset[k]; }
+              if ('value' in target) { target.value = open.dataset[k]; growTextarea(target); }
               else { target.textContent = open.dataset[k]; }
             }
           }
         });
+        growAllTextareas(m);
       }
     }
     var close = ev.target.closest('[data-modal-close]');
@@ -686,7 +768,11 @@
   var burger = shell.querySelector('[data-admin-burger]');
   var scrim = shell.querySelector('.sh-admin-scrim');
   function close() { shell.classList.remove('is-nav-open'); if (scrim) scrim.hidden = true; }
-  function open() { shell.classList.add('is-nav-open'); if (scrim) scrim.hidden = false; }
+  function open() {
+    var sb = shell.querySelector('.sh-admin-sidebar');
+    if (sb) sb.style.top = window.scrollY + 'px';
+    shell.classList.add('is-nav-open'); if (scrim) scrim.hidden = false;
+  }
   if (burger) burger.addEventListener('click', function () {
     shell.classList.contains('is-nav-open') ? close() : open();
   });
@@ -922,11 +1008,14 @@
   function busy(btn, on, label) {
     if (!btn) return;
     if (on) {
-      btn.dataset.prev = btn.innerHTML;
+      // Store the idle label once. A second busy() call must never record the
+      // "Testing…" label as the thing to restore — that is how a button ends
+      // up stuck showing it forever.
+      if (!btn.dataset.prev) btn.dataset.prev = btn.innerHTML;
       btn.innerHTML = label || 'Generating…';
       btn.disabled = true;
     } else {
-      if (btn.dataset.prev) btn.innerHTML = btn.dataset.prev;
+      if (btn.dataset.prev) { btn.innerHTML = btn.dataset.prev; delete btn.dataset.prev; }
       btn.disabled = false;
     }
   }
@@ -935,9 +1024,10 @@
      One button, one card, one explicit state. The request is aborted after
      45 seconds so the label can never stay on "Testing…"; every path (ok,
      provider failure, network failure, timeout) writes a visible result and
-     re-enables the button. The server-side probes use 15-20 second timeouts
-     each, so a normal two-call probe (model check + chat) still finishes
-     before the browser gives up and the stored result matches what is shown. */
+     re-enables the button. The server-side probes allow 12-15 seconds per
+     call, so even a two-step probe (read-only check + one tiny reply) stays
+     well inside a typical PHP time limit and finishes before the browser
+     gives up — the stored result then matches what is shown. */
   function testToneClass(tone) {
     return tone === 'ok' ? 'is-ok' : (tone === 'bad' ? 'is-bad' : 'is-warn');
   }
@@ -979,6 +1069,14 @@
     }, 45000);
 
     busy(btn, true, 'Testing…');
+    // Say what is happening inside the card as well, so a slow provider reads
+    // as "in progress" instead of looking stuck.
+    var live = card ? card.querySelector('[data-ai-test-result]') : null;
+    if (live) {
+      live.hidden = false;
+      live.className = 'sh-aiprov__live is-warn';
+      live.textContent = 'Testing — one or two read-only requests. This usually takes a few seconds.';
+    }
     api({ action: 'test_connection', provider_id: pid }, ctrl ? { signal: ctrl.signal } : null)
       .then(function (j) {
         showTestResult(card, j);
@@ -998,6 +1096,22 @@
       });
   }
   window.shAiTestProvider = runProviderTest;
+
+  /* A page restored from the browser's back/forward cache keeps the DOM
+     exactly as it was frozen — including a button that was disabled in the
+     middle of a test. Nothing runs on restore, so without this the card
+     would sit on "Testing…" forever. Stand any such button down; the stored
+     result from the server is what the card already shows. */
+  window.addEventListener('pageshow', function (ev) {
+    if (!ev.persisted) { return; }
+    document.querySelectorAll('[data-ai-test][data-testing]').forEach(function (b) {
+      b.removeAttribute('data-testing');
+      busy(b, false);
+      var c = b.closest('[data-ai-card]');
+      var l = c ? c.querySelector('[data-ai-test-result]') : null;
+      if (l) { l.hidden = true; l.textContent = ''; }
+    });
+  });
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -1201,7 +1315,7 @@
           var wrap = document.querySelector('[data-ai-image-output]');
           if (img) img.src = j.url;
           if (wrap) wrap.hidden = false;
-          if (pf2 && !pf2.value.trim() && j.data.prompt) pf2.value = j.data.prompt;
+          if (pf2 && !pf2.value.trim() && j.data.prompt) { pf2.value = j.data.prompt; growTextarea(pf2); }
           var viaMsg = j.via && j.via.provider ? ' (' + j.via.provider + ' · ' + j.via.model + (j.via.fallback ? ', fallback' : '') + ')' : '';
           if (window.shToast) window.shToast('Image generated' + viaMsg + '. It is not attached until you confirm.', 'success');
         })
@@ -1360,6 +1474,7 @@
     var countdownTimer = null;
 
     function openModal() {
+      otpModal.style.top = window.scrollY + 'px';
       otpModal.removeAttribute('hidden');
       document.body.classList.add('sh-modal-open');
       if (boxes[0]) { boxes[0].focus(); }

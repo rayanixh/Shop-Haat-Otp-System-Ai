@@ -132,7 +132,7 @@ try {
             // Only fields the panel really offers, each a bounded string.
             $field = sh_post('field');
             $allowedFields = ['', 'title', 'short', 'description', 'specifications',
-                              'category', 'brand', 'sku', 'seo', 'image_alt'];
+                              'category', 'sku', 'seo', 'image_alt'];
             if (!in_array($field, $allowedFields, true)) {
                 sh_json(['success' => false, 'error' => 'Unknown field to regenerate.'], 400);
             }
@@ -140,7 +140,7 @@ try {
             $knownIn = json_decode((string)($_POST['known'] ?? ''), true);
             $known = [];
             if (is_array($knownIn)) {
-                foreach (['brand', 'model', 'size', 'material', 'colour', 'dimensions', 'notes', 'specs'] as $k) {
+                foreach (['model', 'size', 'material', 'colour', 'dimensions', 'notes', 'specs'] as $k) {
                     if (!isset($knownIn[$k]) || !is_scalar($knownIn[$k])) { continue; }
                     $known[$k] = mb_substr(trim((string)$knownIn[$k]), 0, $k === 'specs' ? 2000 : 600);
                 }

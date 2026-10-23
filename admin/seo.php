@@ -591,8 +591,7 @@ $counts = $audit['counts'];
       <div style="font-size:13px;line-height:1.5;color:#4d5156"><?= e((string)$previewMeta['description']) ?></div>
     </div>
     <p class="sh-panel__note" style="margin-top:8px">
-      Title length <?= (int)mb_strlen((string)$previewMeta['title']) ?> · description length
-      <?= (int)mb_strlen((string)$previewMeta['description']) ?> · robots <code><?= e((string)$previewMeta['robots']) ?></code>
+      Robots <code><?= e((string)$previewMeta['robots']) ?></code>
       <?php if ($previewMeta['image'] !== ''): ?> · sharing image <code><?= e((string)$previewMeta['image']) ?></code><?php endif; ?>
     </p>
   </div>

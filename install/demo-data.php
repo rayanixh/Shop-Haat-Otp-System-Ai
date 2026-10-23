@@ -71,10 +71,10 @@ function sh_demo_manifest(): array
         ['Sports & Outdoor', 'trending-up', 'Fitness gear and outdoor equipment'],
     ];
 
-    // [name, slug]
-        $brands = ['Voltaro', 'Nordane', 'Kitchmate', 'Urbanfit', 'Puradaily', 'Lumira', 'Trekpoint', 'Papermill'];
-
-    // [name, category, brand, price, compare, stock, type, featured, flash, sold, rating, reviews, short]
+    // [name, category, maker, price, compare, stock, type, featured, flash, sold, rating, reviews, short]
+    // The maker word is already part of each product's display name. It is kept
+    // in the rows for readability only — the store has no brand system, so it is
+    // never stored as data of its own.
     $rows = [
         ['Voltaro Pulse 60 Wireless Headphones', 'Electronics', 'Voltaro', 3450, 4900, 42, 'physical', 1, 1, 318, 4.6, 128, 'Over-ear Bluetooth 5.3 headphones with 40-hour battery and hybrid noise reduction.'],
         ['Voltaro Beat Buds Pro', 'Electronics', 'Voltaro', 1890, 2790, 88, 'physical', 1, 1, 512, 4.4, 214, 'Compact true wireless earbuds with charging case and low-latency game mode.'],
@@ -160,7 +160,6 @@ function sh_demo_manifest(): array
             'rocket' => '018000000001',
         ],
         'categories' => $cats,
-        'brands'     => $brands,
         'products'   => $rows,
         'review_pool' => ['texts' => $texts, 'names' => $names],
         'coupons'    => $coupons,
@@ -207,7 +206,7 @@ function sh_install_demo_data(PDO $pdo, bool $explicitRequest = false): array
     $m = sh_demo_manifest();
     $report = [
         'installed' => false, 'reason' => '',
-        'categories' => 0, 'brands' => 0, 'products' => 0, 'reviews' => 0,
+        'categories' => 0, 'products' => 0, 'reviews' => 0,
         'coupons' => 0, 'slides' => 0, 'cards' => 0,
     ];
 
@@ -244,29 +243,17 @@ function sh_install_demo_data(PDO $pdo, bool $explicitRequest = false): array
         $catIds[$c[0]] = $id;
     }
 
-    $brandIds = [];
-    foreach ($m['brands'] as $b) {
-        $slug = sh_slug($b);
-        $id = $find($pdo, 'brands', 'slug', $slug);
-        if ($id === 0) {
-            $pdo->prepare('INSERT INTO brands (name, slug, status) VALUES (?,?,1)')->execute([$b, $slug]);
-            $id = (int)$pdo->lastInsertId();
-            $report['brands']++;
-        }
-        $brandIds[$b] = $id;
-    }
-
     $insertProduct = $pdo->prepare(
-        'INSERT INTO products (category_id, brand_id, name, slug, sku, short_description, description, specifications,
+        'INSERT INTO products (category_id, name, slug, sku, short_description, description, specifications,
             price, compare_price, stock, product_type, image, rating, review_count, sold_count, view_count,
             is_featured, is_flash_sale, flash_sale_ends_at, status, meta_title, meta_description)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)'
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)'
     );
     $flashEnd = date('Y-m-d H:i:s', time() + 86400 * 2 + 3600 * 5);
     $productIds = [];
     $palette = $m['palette'];
     foreach ($m['products'] as $i => $r) {
-        [$name, $cat, $brand, $price, $compare, $stock, $type, $feat, $flash, $sold, $rating, $reviews, $short] = $r;
+        [$name, $cat, $maker, $price, $compare, $stock, $type, $feat, $flash, $sold, $rating, $reviews, $short] = $r;
         $slug = sh_slug($name);
         $id = $find($pdo, 'products', 'slug', $slug);
         if ($id === 0) {
@@ -276,16 +263,15 @@ function sh_install_demo_data(PDO $pdo, bool $explicitRequest = false): array
                 . "Every item sold on our marketplace is sourced from verified suppliers and checked before dispatch. "
                 . "Orders placed before 4:00 PM are usually handed to the courier the same working day.\n\n"
                 . "The product ships in its original manufacturer packaging with all standard accessories included. A seven-day replacement window applies to manufacturing defects.";
-            $specs = "Brand: " . ($brand ?? 'ShopHaat') . "\nWarranty: 7-day replacement, 6-month service\nCountry of origin: As per manufacturer\nPackage contents: Product, manual, warranty card\nDelivery: 1-3 working days inside Dhaka";
+            $specs = "Warranty: 7-day replacement, 6-month service\nCountry of origin: As per manufacturer\nPackage contents: Product, manual, warranty card\nDelivery: 1-3 working days inside Dhaka";
             $insertProduct->execute([
                 $catIds[$cat] ?? null,
-                $brand !== null ? ($brandIds[$brand] ?? null) : null,
                 $name, $slug, 'SH-' . str_pad((string)($i + 1001), 5, '0', STR_PAD_LEFT),
                 $short, $desc, $specs,
                 $price, $compare, $stock, $type, $img, $rating, $reviews, $sold, $sold * 3 + 40,
                 $feat, $flash, $flash ? $flashEnd : null,
-                mb_substr($name . ' | Buy online at the best price', 0, 185),
-                mb_substr($short, 0, 290),
+                $name . ' | Buy online at the best price',
+                $short,
             ]);
             $id = (int)$pdo->lastInsertId();
             $report['products']++;

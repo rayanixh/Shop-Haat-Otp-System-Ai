@@ -215,7 +215,7 @@ if ($seoPreviewImage === '') { $seoPreviewImage = $seoDefaultImage; }
             <?= e($seoTitle !== '' ? $seoTitle : $autoTitle) ?>
           </div>
           <div style="font-size:12.5px;color:var(--sh-ink-2)" data-seo-preview="og-description">
-            <?= e(sh_seo_clip($seoDesc !== '' ? $seoDesc : $autoDesc, 120)) ?>
+            <?= e($seoDesc !== '' ? $seoDesc : sh_seo_clip($autoDesc, 158)) ?>
           </div>
         </div>
       </div>

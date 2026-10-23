@@ -62,7 +62,7 @@ require dirname(__DIR__) . '/_layout.php';
           </div>
           <div class="sh-aiactions" style="margin-top:12px"
                data-ai-<?= $type === 'product' ? 'product' : 'category' ?>="<?= (int)$item['id'] ?>">
-            <button class="sh-btn" data-ai-generate="<?= $type === 'product' ? 'seo' : 'category_content' ?>"
+            <button type="button" class="sh-btn" data-ai-generate="<?= $type === 'product' ? 'seo' : 'category_content' ?>"
                     <?= $aiConfig['has_key'] ? '' : 'disabled' ?>><?= sh_icon('zap', 15) ?> Generate SEO</button>
           </div>
         <?php endif; ?>
@@ -74,9 +74,9 @@ require dirname(__DIR__) . '/_layout.php';
         <div class="sh-panel__head">
           <h2 class="sh-panel__title"><?= sh_icon('cpu', 17) ?> Generated SEO</h2>
           <div class="sh-panel__actions">
-            <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-regenerate="<?= $type === 'product' ? 'seo' : 'category_content' ?>">Regenerate</button>
-            <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-copy>Copy</button>
-            <button class="sh-btn sh-btn--sm" data-ai-save="<?= $type === 'product' ? 'seo' : 'category_content' ?>">Save</button>
+            <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-regenerate="<?= $type === 'product' ? 'seo' : 'category_content' ?>">Regenerate</button>
+            <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-copy>Copy</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-save="<?= $type === 'product' ? 'seo' : 'category_content' ?>">Save</button>
           </div>
         </div>
         <div class="sh-panel__body"><div class="sh-airesult-box" data-ai-output>—</div></div>

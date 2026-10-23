@@ -718,7 +718,7 @@ require __DIR__ . '/_layout.php';
               The certificate could not be read: <?= e((string)($cert['error'] ?? 'unknown reason')) ?>
             </div>
             <?php if (!empty($cert['openssl_errors'])): ?>
-              <pre style="max-height:120px;overflow:auto;font-size:11px;margin-top:6px"><?= e(implode("\n", (array)$cert['openssl_errors'])) ?></pre>
+              <pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin-top:6px"><?= e(implode("\n", (array)$cert['openssl_errors'])) ?></pre>
             <?php endif; ?>
           <?php endif; ?>
         </div>
@@ -728,7 +728,7 @@ require __DIR__ . '/_layout.php';
   <?php if (!empty($connTestResult['transcript'])): ?>
     <details style="margin-bottom:16px">
       <summary class="sh-panel__note" style="cursor:pointer;font-weight:600">View <?= $isApiTest ? 'HTTPS API' : 'SMTP handshake' ?> transcript (redacted)</summary>
-      <pre style="max-height:220px;overflow:auto;font-size:11.5px;line-height:1.5;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;margin-top:6px"><?= e($connTestResult['transcript']) ?></pre>
+      <pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.5;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;margin-top:6px"><?= e($connTestResult['transcript']) ?></pre>
     </details>
   <?php endif; ?>
 <?php endif; ?>
@@ -781,7 +781,7 @@ require __DIR__ . '/_layout.php';
   <?php if (!empty($testResult['transcript'])): ?>
     <details style="margin-bottom:16px">
       <summary class="sh-panel__note" style="cursor:pointer;font-weight:600">View <?= (string)($testResult['transport'] ?? '') === 'brevo_api' ? 'HTTPS API response' : 'SMTP handshake' ?> transcript (redacted)</summary>
-      <pre style="max-height:220px;overflow:auto;font-size:11.5px;line-height:1.5;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;margin-top:6px"><?= e((string)$testResult['transcript']) ?></pre>
+      <pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.5;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;margin-top:6px"><?= e((string)$testResult['transcript']) ?></pre>
     </details>
   <?php endif; ?>
 <?php endif; ?>

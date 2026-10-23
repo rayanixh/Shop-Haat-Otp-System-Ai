@@ -157,7 +157,7 @@ class GeminiProvider extends AbstractAIProvider
         }
         $model = self::cleanId(trim($this->model([])));
 
-        $list = AIHttpClient::get($this->baseUrl() . '/models?pageSize=200', $this->headers(), 20);
+        $list = AIHttpClient::get($this->baseUrl() . '/models?pageSize=200', $this->headers(), 12);
         if (!$list['ok']) { return $this->testHttpFailure($list, $model, 'Google Gemini'); }
         $known = [];
         foreach (($list['json']['models'] ?? []) as $m) {
@@ -186,7 +186,7 @@ class GeminiProvider extends AbstractAIProvider
             'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 256],
         ];
         $res = AIHttpClient::post($this->baseUrl() . '/models/' . rawurlencode($model) . ':generateContent',
-            $this->headers(), $payload, 20);
+            $this->headers(), $payload, 15);
         if (!$res['ok']) { return $this->testHttpFailure($res, $model, 'Google Gemini'); }
 
         $j = $res['json'];

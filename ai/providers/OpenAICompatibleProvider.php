@@ -197,7 +197,7 @@ class OpenAICompatibleProvider extends AbstractAIProvider
             $this->maxTokenField($model) => 64,
         ];
         $res = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(),
-            $this->decorateChatPayload($payload), 20);
+            $this->decorateChatPayload($payload), 15);
         if (!$res['ok']) { return $this->testHttpFailure($res, $model, $this->name()); }
 
         $j = $res['json'];

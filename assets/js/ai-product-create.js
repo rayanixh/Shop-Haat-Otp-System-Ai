@@ -112,11 +112,12 @@
       if (!el) { return; }
       var v = d[k];
       el.value = v == null ? '' : String(v);
+      if (window.shGrowTextarea) { window.shGrowTextarea(el); }
       el.classList.remove('sh-input--error');
     });
 
     var tagsEl = field('tags');
-    if (tagsEl) { tagsEl.value = (d.tags || []).join(', '); }
+    if (tagsEl) { tagsEl.value = (d.tags || []).join(', '); if (window.shGrowTextarea) { window.shGrowTextarea(tagsEl); } }
 
     // The catalogue's own rules: the AI only ever matched an EXISTING category.
     if (catNote) {
@@ -375,6 +376,9 @@
       // if the picture were part of it.
       var hasImage = !!(j.verify && j.verify.image);
       draft = null;
+      // The save really happened, so the unsaved-changes guard can stand
+      // down. (On failure this never runs: the entries stay marked unsaved.)
+      reviewForm.dispatchEvent(new Event('sh:form-clean', { bubbles: true }));
       setStatus(saveStatus, '', '');
       if (window.shToast) {
         window.shToast(hasImage
@@ -410,6 +414,9 @@
     if (saving) { return; }
     draft = null;
     uploadedFile = null;
+    // Discarding is an explicit choice to abandon the entries, so the
+    // unsaved-changes guard stands down instead of warning on the way out.
+    reviewForm.dispatchEvent(new Event('sh:form-clean', { bubbles: true }));
     reviewForm.reset();
     reviewForm.hidden = true;
     savedPanel.hidden = true;
