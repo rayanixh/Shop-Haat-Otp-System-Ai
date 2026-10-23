@@ -70,7 +70,7 @@ require __DIR__ . '/_layout.php';
       <p class="sh-panel__note">No entries. That is a good sign.</p>
     <?php else: ?>
       <p class="sh-panel__note" style="margin-bottom:9px">Showing the <?= count($lines) ?> most recent entries, newest first.</p>
-      <div style="max-height:620px;overflow:auto;background:#151b2b;border-radius:8px;padding:12px">
+      <div style="background:#151b2b;border-radius:8px;padding:12px">
         <?php foreach ($lines as $line):
           $bad = stripos($line, '[uncaught]') !== false || stripos($line, '[sql]') !== false || stripos($line, 'fatal') !== false;
           $sec = stripos($line, '[security]') !== false; ?>

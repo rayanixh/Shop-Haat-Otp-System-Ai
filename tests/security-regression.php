@@ -3136,11 +3136,14 @@ sh_t('the redesigned provider cards have a responsive grid and no fixed heights'
     return true;
 });
 
-sh_t('the AI navigation is one compact tab bar and the card test area is flat', function () {
+sh_t('the AI navigation is a wrapping tab bar in page flow and the card test area is flat', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
-    if (!preg_match('/\.sh-aisubnav\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/', $css)) {
-        return 'the AI sub-navigation is not a single scrollable tab bar';
+    if (!preg_match('/\.sh-aisubnav\s*\{(?:[^}]*)flex-wrap:\s*wrap/', $css)) {
+        return 'the AI sub-navigation does not wrap in normal page flow';
     }
+    $at = strpos($css, '.sh-aisubnav {');
+    $rule = $at === false ? '' : substr($css, $at, 160);
+    if (str_contains($rule, 'overflow')) { return 'the AI tab bar scrolls inside its own box again'; }
     if (str_contains($css, '.sh-aisubnav { display: grid;')) {
         return 'the old multi-row mobile navigation grid is back';
     }
@@ -3153,6 +3156,47 @@ sh_t('the AI navigation is one compact tab bar and the card test area is flat', 
     foreach (['index.php', 'products.php', 'bulk.php', 'blog.php', 'category.php', 'seo.php',
               'image.php', 'history.php', 'providers.php', 'models.php', 'settings.php'] as $file) {
         if (!str_contains($nav, "'" . $file . "'")) { return 'the AI navigation lost ' . $file; }
+    }
+    return true;
+});
+
+sh_t('no page uses an internal scroll box for ordinary content', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    // The browser page is the only scroller: no declaration in the shared
+    // stylesheet may create a nested scroll region.
+    if (preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $css) === 1) {
+        return 'the stylesheet still declares an internal scroll region';
+    }
+    if (str_contains($css, 'body.sh-modal-open { overflow: hidden; }')) {
+        return 'opening a modal still locks page scrolling';
+    }
+    if (!str_contains($css, '.sh-modal { position: absolute;')) {
+        return 'modals are not placed in normal page flow';
+    }
+    // Generated AI output and diagnostics expand with the page.
+    foreach (['.sh-airesult-box', '.sh-aipre'] as $sel) {
+        $at = strpos($css, $sel . ' {');
+        $rule = $at === false ? '' : substr($css, $at, 300);
+        if (str_contains($rule, 'max-height:')) { return $sel . ' still caps its height'; }
+    }
+    if (preg_match('/\.sh-admin-sidebar \{[^}]*(?<!min-)height:\s*100vh/', $css) === 1) {
+        return 'the admin sidebar is still a fixed-height scroll column';
+    }
+    if (!str_contains($css, 'field-sizing: content')) {
+        return 'textareas do not size to their content';
+    }
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    if (str_contains($js, "document.body.style.overflow = 'hidden'")) {
+        return 'JavaScript still locks page scrolling for an overlay';
+    }
+    if (substr_count($js, 'window.scrollY') < 5 || !str_contains($js, 'shGrowTextarea')) {
+        return 'overlays are not placed at the scroll offset, or textareas do not auto-grow';
+    }
+    foreach (['/admin/email.php', '/admin/logs.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . $rel);
+        if (preg_match('/overflow\s*:\s*(?:auto|scroll)/', $src) === 1) {
+            return $rel . ' still renders an inline scroll box';
+        }
     }
     return true;
 });

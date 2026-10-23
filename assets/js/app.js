@@ -334,22 +334,20 @@
   if (drawer) {
     $$('[data-drawer-open]').forEach(function (b) {
       b.addEventListener('click', function () {
+        drawer.style.top = window.scrollY + 'px';
         drawer.hidden = false;
-        document.body.style.overflow = 'hidden';
         b.setAttribute('aria-expanded', 'true');
       });
     });
     $$('[data-drawer-close]').forEach(function (b) {
       b.addEventListener('click', function () {
         drawer.hidden = true;
-        document.body.style.overflow = '';
         $$('[data-drawer-open]').forEach(function (o) { o.setAttribute('aria-expanded', 'false'); });
       });
     });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape' && !drawer.hidden) {
         drawer.hidden = true;
-        document.body.style.overflow = '';
       }
     });
   }
@@ -554,10 +552,10 @@
   var filters = $('#sh-filters');
   if (filters) {
     $$('[data-filters-open]').forEach(function (b) {
-      b.addEventListener('click', function () { filters.classList.add('sh-filters--open'); document.body.style.overflow = 'hidden'; });
+      b.addEventListener('click', function () { filters.style.top = window.scrollY + 'px'; filters.classList.add('sh-filters--open'); });
     });
     $$('[data-filters-close]').forEach(function (b) {
-      b.addEventListener('click', function () { filters.classList.remove('sh-filters--open'); document.body.style.overflow = ''; });
+      b.addEventListener('click', function () { filters.classList.remove('sh-filters--open'); });
     });
   }
   var sortSelects = $$('[data-sort-select]');
@@ -587,6 +585,7 @@
     $$('[data-admin-burger]').forEach(function (b) {
       b.addEventListener('click', function () {
         aSide.classList.toggle('sh-admin-sidebar--open');
+        if (aSide.classList.contains('sh-admin-sidebar--open')) { aSide.style.top = window.scrollY + 'px'; }
         if (aScrim) { aScrim.hidden = !aSide.classList.contains('sh-admin-sidebar--open'); }
       });
     });
@@ -702,6 +701,28 @@
     });
   })();
 
+  /* ---------- Textareas grow with their content --------------------------
+     No field hides text behind an internal scrollbar: textareas are sized to
+     their content (CSS field-sizing does this natively where supported; this
+     is the fallback, and the hook programmatic fills call afterwards). The
+     page scrolls; fields do not. */
+  function growTextarea(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    if (!el.offsetParent && el.getClientRects().length === 0) return;
+    el.style.overflowY = 'hidden';
+    el.style.height = 'auto';
+    var extra = el.offsetHeight - el.clientHeight;
+    el.style.height = (el.scrollHeight + extra) + 'px';
+  }
+  window.shGrowTextarea = growTextarea;
+  function growAllTextareas(root) {
+    $$('textarea', root || document).forEach(growTextarea);
+  }
+  window.shGrowTextareas = growAllTextareas;
+  growAllTextareas();
+  document.addEventListener('input', function (ev) { growTextarea(ev.target); });
+  document.addEventListener('focusin', function (ev) { growTextarea(ev.target); });
+
   /* ---------- Modals ---------------------------------------------------- */
   document.addEventListener('click', function (ev) {
     var open = ev.target.closest('[data-modal-open]');
@@ -709,16 +730,18 @@
       ev.preventDefault();
       var m = document.getElementById(open.getAttribute('data-modal-open'));
       if (m) {
+        m.style.top = window.scrollY + 'px';
         m.hidden = false;
         Object.keys(open.dataset).forEach(function (k) {
           if (k.indexOf('fill') === 0) {
             var target = m.querySelector('[data-fill-' + k.slice(4).toLowerCase() + ']');
             if (target) {
-              if ('value' in target) { target.value = open.dataset[k]; }
+              if ('value' in target) { target.value = open.dataset[k]; growTextarea(target); }
               else { target.textContent = open.dataset[k]; }
             }
           }
         });
+        growAllTextareas(m);
       }
     }
     var close = ev.target.closest('[data-modal-close]');
@@ -745,7 +768,11 @@
   var burger = shell.querySelector('[data-admin-burger]');
   var scrim = shell.querySelector('.sh-admin-scrim');
   function close() { shell.classList.remove('is-nav-open'); if (scrim) scrim.hidden = true; }
-  function open() { shell.classList.add('is-nav-open'); if (scrim) scrim.hidden = false; }
+  function open() {
+    var sb = shell.querySelector('.sh-admin-sidebar');
+    if (sb) sb.style.top = window.scrollY + 'px';
+    shell.classList.add('is-nav-open'); if (scrim) scrim.hidden = false;
+  }
   if (burger) burger.addEventListener('click', function () {
     shell.classList.contains('is-nav-open') ? close() : open();
   });
@@ -1288,7 +1315,7 @@
           var wrap = document.querySelector('[data-ai-image-output]');
           if (img) img.src = j.url;
           if (wrap) wrap.hidden = false;
-          if (pf2 && !pf2.value.trim() && j.data.prompt) pf2.value = j.data.prompt;
+          if (pf2 && !pf2.value.trim() && j.data.prompt) { pf2.value = j.data.prompt; growTextarea(pf2); }
           var viaMsg = j.via && j.via.provider ? ' (' + j.via.provider + ' · ' + j.via.model + (j.via.fallback ? ', fallback' : '') + ')' : '';
           if (window.shToast) window.shToast('Image generated' + viaMsg + '. It is not attached until you confirm.', 'success');
         })
@@ -1447,6 +1474,7 @@
     var countdownTimer = null;
 
     function openModal() {
+      otpModal.style.top = window.scrollY + 'px';
       otpModal.removeAttribute('hidden');
       document.body.classList.add('sh-modal-open');
       if (boxes[0]) { boxes[0].focus(); }

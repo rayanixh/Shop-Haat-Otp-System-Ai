@@ -112,11 +112,12 @@
       if (!el) { return; }
       var v = d[k];
       el.value = v == null ? '' : String(v);
+      if (window.shGrowTextarea) { window.shGrowTextarea(el); }
       el.classList.remove('sh-input--error');
     });
 
     var tagsEl = field('tags');
-    if (tagsEl) { tagsEl.value = (d.tags || []).join(', '); }
+    if (tagsEl) { tagsEl.value = (d.tags || []).join(', '); if (window.shGrowTextarea) { window.shGrowTextarea(tagsEl); } }
 
     // The catalogue's own rules: the AI only ever matched an EXISTING category.
     if (catNote) {
