@@ -375,6 +375,9 @@
       // if the picture were part of it.
       var hasImage = !!(j.verify && j.verify.image);
       draft = null;
+      // The save really happened, so the unsaved-changes guard can stand
+      // down. (On failure this never runs: the entries stay marked unsaved.)
+      reviewForm.dispatchEvent(new Event('sh:form-clean', { bubbles: true }));
       setStatus(saveStatus, '', '');
       if (window.shToast) {
         window.shToast(hasImage
@@ -410,6 +413,9 @@
     if (saving) { return; }
     draft = null;
     uploadedFile = null;
+    // Discarding is an explicit choice to abandon the entries, so the
+    // unsaved-changes guard stands down instead of warning on the way out.
+    reviewForm.dispatchEvent(new Event('sh:form-clean', { bubbles: true }));
     reviewForm.reset();
     reviewForm.hidden = true;
     savedPanel.hidden = true;

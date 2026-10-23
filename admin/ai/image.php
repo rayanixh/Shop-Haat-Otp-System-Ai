@@ -73,9 +73,9 @@ require dirname(__DIR__) . '/_layout.php';
                         placeholder="Leave blank and press “Suggest prompt” to build one from the product data."></textarea>
             </div>
             <div class="sh-aiactions">
-              <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-generate="image_prompt"
+              <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-generate="image_prompt"
                       <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Suggest prompt</button>
-              <button class="sh-btn" data-ai-image-generate <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
+              <button type="button" class="sh-btn" data-ai-image-generate <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
                 <?= sh_icon('image', 15) ?> Generate image</button>
             </div>
             <p class="sh-panel__note" style="margin-top:8px">
@@ -92,8 +92,8 @@ require dirname(__DIR__) . '/_layout.php';
               <p class="sh-field__label">Generated image</p>
               <img class="sh-aiimage" data-ai-image-preview src="" alt="Generated product image">
               <div class="sh-aiactions" style="margin-top:10px">
-                <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-image-generate>Regenerate</button>
-                <button class="sh-btn sh-btn--sm" data-ai-image-use>Use this image</button>
+                <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-image-generate>Regenerate</button>
+                <button type="button" class="sh-btn sh-btn--sm" data-ai-image-use>Use this image</button>
               </div>
             </div>
           </div>

@@ -222,9 +222,11 @@ try {
         'slider'     => installer_count('promo_slides', "placement = 'slider'"),
         'cards'      => installer_count('promo_slides', "placement = 'card'"),
     ];
-    foreach (['products', 'categories', 'brands', 'coupons', 'reviews', 'slider', 'cards'] as $k) {
+    foreach (['products', 'categories', 'coupons', 'reviews', 'slider', 'cards'] as $k) {
         installer_assert($seeded[$k] > 0, 'A demo-ON install must create ' . $k);
     }
+    // The store has no brand system: the demo catalogue must not seed brands.
+    installer_assert_same(0, $seeded['brands'], 'A demo-ON install still seeds the retired brands');
     installer_assert_same(2, $seeded['slider'], 'Exactly the two starter slides are installed');
     installer_assert_same(3, $seeded['cards'], 'Exactly the three starter feature cards are installed');
     installer_assert_same('installed', (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'demo_data_state'", [], ''), 'The completed catalogue must be recorded');
@@ -248,7 +250,7 @@ try {
     ];
     installer_assert_same($seeded['products'], $after['products'], 'A repeated run must not duplicate products');
     installer_assert_same($seeded['categories'], $after['categories'], 'A repeated run must not duplicate categories');
-    installer_assert_same($seeded['brands'], $after['brands'], 'A repeated run must not duplicate brands');
+    installer_assert_same($seeded['brands'], $after['brands'], 'A repeated run must not create brands');
     installer_assert_same($seeded['coupons'], $after['coupons'], 'A repeated run must not duplicate coupons');
     installer_assert_same($seeded['reviews'], $after['reviews'], 'A repeated run must not duplicate reviews');
     installer_assert_same($seeded['slider'] + $seeded['cards'], $after['promos'], 'A repeated run must not duplicate slides');

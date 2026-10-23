@@ -44,16 +44,16 @@ require dirname(__DIR__) . '/_layout.php';
         <input class="sh-input" id="bl-kw" data-ai-blog="keywords" placeholder="summer fashion, cotton shirt">
         <span class="sh-field__hint">Comma separated. Language and tone come from AI Settings.</span>
       </div>
-      <button class="sh-btn sh-btn--block" data-ai-blog-generate <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
+      <button type="button" class="sh-btn sh-btn--block" data-ai-blog-generate <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>
         <?= sh_icon('zap', 15) ?> Generate blog post</button>
 
       <div class="sh-aiblogout" data-ai-blog-output hidden>
         <p class="sh-field__label" style="margin-top:14px">Preview</p>
         <div class="sh-airesult-box" data-ai-blog-preview></div>
         <div class="sh-aiactions" style="margin-top:10px">
-          <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-blog-generate>Regenerate</button>
-          <button class="sh-btn sh-btn--sm" data-ai-blog-save="draft">Save as draft</button>
-          <button class="sh-btn sh-btn--sm" data-ai-blog-save="publish">Publish</button>
+          <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-blog-generate>Regenerate</button>
+          <button type="button" class="sh-btn sh-btn--sm" data-ai-blog-save="draft">Save as draft</button>
+          <button type="button" class="sh-btn sh-btn--sm" data-ai-blog-save="publish">Publish</button>
         </div>
         <p class="sh-panel__note" style="margin-top:8px">
           <?= $aiConfig['auto_publish']

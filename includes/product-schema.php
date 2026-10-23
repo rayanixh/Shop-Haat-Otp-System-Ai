@@ -2,16 +2,16 @@
 /**
  * Product columns added after the original catalogue schema.
  *
- *   1. `features`        — the "Features and benefits" list, one item per line.
- *                          Kept separate from `specifications` (which is a
- *                          label/value table) so the product page can render
- *                          both without guesswork.
- *   2. `image_alt`       — the alt text for the featured image. Empty means the
+ *   1. `image_alt`       — the alt text for the featured image. Empty means the
  *                          product name is used, which is the old behaviour.
- *   3. `ai_draft_token`  — an idempotency key for AI Auto Work. One generated
+ *   2. `ai_draft_token`  — an idempotency key for AI Auto Work. One generated
  *                          draft can only ever create one product, even when the
  *                          administrator double-clicks Save or a request is
  *                          retried after a timeout.
+ *
+ * The retired `features` column ("Features and benefits") is deliberately NOT
+ * added any more and NOT dropped either: installs that already have it keep
+ * the column and its old values untouched, and nothing reads or writes it.
  *
  * The migration is additive and idempotent: on a fresh install the columns come
  * from install/schema.php, and on an existing store they are added once, the
@@ -39,7 +39,6 @@ function sh_product_schema_ensure(): void
         if ($pdo->inTransaction()) { return; }
 
         $cols = [
-            'features'       => 'TEXT DEFAULT NULL',
             'image_alt'      => 'VARCHAR(190) DEFAULT NULL',
             'ai_draft_token' => 'VARCHAR(64) DEFAULT NULL',
         ];

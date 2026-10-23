@@ -520,19 +520,29 @@ function sh_seo_meta(array $ctx = []): array
     // suffix rule is applied once, at the end, so a custom title and a
     // generated one follow exactly the same rule instead of drifting apart.
     $rawTitle = trim((string)($ctx['fallback_title'] ?? ''));
-    $entityTitle = trim(sh_seo_plain((string)($entity['meta_title'] ?? '')));
+    $entityMetaTitle = trim(sh_seo_plain((string)($entity['meta_title'] ?? '')));
+    $entityTitle = $entityMetaTitle;
     if ($entityTitle === '' && $entity !== []) {
         $entityTitle = trim(sh_seo_plain((string)($entity['name'] ?? '')));
     }
     $overrideTitle = trim((string)($pageRow['meta_title'] ?? ''));
     $titleCandidate = $overrideTitle !== '' ? $overrideTitle : ($entityTitle !== '' ? $entityTitle : $rawTitle);
+    // A title the administrator actually wrote (page override or the entity's
+    // own SEO title) is output in full below; only a generated one is excerpted.
+    $titleAuthored = $overrideTitle !== '' || $entityMetaTitle !== '';
 
     $title = $titleCandidate;
     $titleSource = $overrideTitle !== '' ? 'override' : ($entityTitle !== '' ? 'entity' : ($rawTitle !== '' ? 'page' : 'none'));
 
     // ---- description ----------------------------------------------------
     $desc = trim((string)($ctx['fallback_desc'] ?? ''));
-    if ($desc === '') { $desc = sh_seo_get('seo_default_description', (string)sh_setting('site_description', '')); }
+    $descAuthored = false;
+    if ($desc === '') {
+        // The site-wide default description is administrator-written SEO
+        // copy, so it is output in full like any other authored value.
+        $desc = sh_seo_get('seo_default_description', (string)sh_setting('site_description', ''));
+        $descAuthored = $desc !== '';
+    }
 
     // ---- robots ---------------------------------------------------------
     $robots = trim((string)($ctx['robots'] ?? ''));
@@ -572,6 +582,7 @@ function sh_seo_meta(array $ctx = []): array
     if ($pageRow !== []) {
         if (trim((string)($pageRow['meta_description'] ?? '')) !== '') {
             $out['description'] = trim((string)$pageRow['meta_description']);
+            $descAuthored = true;
         }
         if (trim((string)($pageRow['meta_keywords'] ?? '')) !== '') {
             $out['keywords'] = sh_seo_keyword_list((string)$pageRow['meta_keywords']);
@@ -591,7 +602,7 @@ function sh_seo_meta(array $ctx = []): array
     // ---- the entity's own columns win over everything --------------------
     if ($entity !== []) {
         $eDesc = sh_seo_plain((string)($entity['meta_description'] ?? ''));
-        if ($eDesc !== '') { $out['description'] = $eDesc; }
+        if ($eDesc !== '') { $out['description'] = $eDesc; $descAuthored = true; }
 
         $eKeywords = sh_seo_keyword_list((string)($entity['meta_keywords'] ?? ''));
         if ($eKeywords === [] && isset($entity['seo_focus_keyword'])) {
@@ -628,11 +639,19 @@ function sh_seo_meta(array $ctx = []): array
         && !str_contains(mb_strtolower($out['title']), mb_strtolower($siteName))) {
         $out['title'] .= $suffix;
     }
-    // 70 characters is the point past which a search result truncates almost
-    // everything; the suffix is allowed to be trimmed off in preference to the
-    // page's own words.
-    $out['title']       = sh_seo_clip($out['title'], 70, '');
-    $out['description'] = sh_seo_clip(sh_seo_plain($out['description']), 158);
+    // Authored SEO copy is never shortened. An administrator may write a
+    // title or a meta description of any length — the columns are TEXT and
+    // what a search engine displays is its own decision — so the saved text
+    // reaches the page exactly as written. Only text the engine generated
+    // itself (a page/entity name, or body copy offered as a fallback
+    // description) is excerpted, so a product without its own meta
+    // description does not publish its whole description as one.
+    if (!$titleAuthored) {
+        $out['title'] = sh_seo_clip($out['title'], 70, '');
+    }
+    $out['description'] = $descAuthored
+        ? sh_seo_plain($out['description'])
+        : sh_seo_clip(sh_seo_plain($out['description']), 158);
     $out['robots']      = sh_seo_normalise_robots($out['robots']);
 
     // A paginated listing keeps its own canonical but must not look like a
@@ -802,7 +821,7 @@ function sh_seo_category_image(array $category): string
 /**
  * Product JSON-LD built from the row the page already loaded.
  *
- * @param array $product products row (plus brand_name when joined)
+ * @param array $product products row
  * @param array $meta    the resolved metadata, for the canonical URL
  * @param array $images  optional extra image URLs
  */
@@ -836,10 +855,6 @@ function sh_seo_product_schema(array $product, array $meta, array $images = []):
         if ($abs !== '') { $imageList[] = $abs; }
     }
     if ($imageList !== []) { $node['image'] = array_values(array_unique($imageList)); }
-
-    if (trim((string)($product['brand_name'] ?? '')) !== '') {
-        $node['brand'] = ['@type' => 'Brand', 'name' => sh_seo_plain((string)$product['brand_name'])];
-    }
 
     // An Offer is only truthful when the store has a real price for the item.
     $price = (float)($product['price'] ?? 0);

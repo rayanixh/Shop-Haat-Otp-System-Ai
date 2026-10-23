@@ -8,7 +8,8 @@
  *
  * It covers:
  *   1. every generated field is stored in its real column (including the plain
- *      text description, specifications, features, SEO columns and alt text);
+ *      text description, specifications, SEO columns and alt text) — and that
+ *      the retired brand/features inputs are ignored rather than stored;
  *   2. the category relationship, the tags and the gallery rows are written;
  *   3. the same draft token can never create a second product;
  *   4. a failed INSERT is rolled back completely (no product, no tags, no
@@ -78,7 +79,9 @@ try {
     sh_seed_essential_starters($pdo);
     sh_ai_migrate();
     ai_assert(sh_table_exists('product_tags'), 'product_tags was not created by the AI migration');
-    ai_assert(sh_table_has_column('products', 'features'), 'products.features is missing from the schema');
+    // The "Features and benefits" section was removed: a fresh schema must not
+    // create the column, and the save below must not need it.
+    ai_assert(!sh_table_has_column('products', 'features'), 'a fresh schema still creates the retired features column');
     ai_assert(sh_table_has_column('products', 'image_alt'), 'products.image_alt is missing from the schema');
     ai_assert(sh_table_has_column('products', 'ai_draft_token'), 'products.ai_draft_token is missing');
     ai_assert(sh_table_has_column('categories', 'card_size'), 'categories.card_size is missing');
@@ -104,8 +107,6 @@ try {
         'name' => 'Home & Living', 'slug' => 'home-living', 'icon' => 'home',
         'card_size' => 'large', 'status' => 1, 'sort_order' => 2,
     ]);
-    $brandId = (int)sh_insert('brands', ['name' => 'HaatHome', 'slug' => 'haathome', 'status' => 1]);
-
     // ---------------------------------------------- 0. what the model may set
     ai_step('A model answer keeps only fields the product form really has');
     $model = [
@@ -131,19 +132,20 @@ try {
         'ingredients' => ['steel'], 'dimensions' => '10x10x10',
     ];
     $norm = sh_ai_normalise_product_draft($model);
+    // 'brand' and 'features' above are retired fields: a model (or a stale
+    // client) still sending them must not resurrect either one.
     foreach (['price', 'compare_price', 'stock', 'status', 'low_stock_threshold',
-              'certifications', 'warranty', 'ingredients', 'dimensions'] as $forbidden) {
+              'certifications', 'warranty', 'ingredients', 'dimensions',
+              'brand', 'brand_id', 'brand_name', 'features'] as $forbidden) {
         ai_assert(!array_key_exists($forbidden, $norm),
             'the draft exposes a field the model must not control: ' . $forbidden);
     }
     ai_assert_same($catSmall, (int)$norm['category_id'], 'an exact category name was not matched to the real row');
-    ai_assert_same($brandId, (int)$norm['brand_id'], 'an exact brand name was not matched to the real row');
     ai_assert_same('KET-18L', (string)$norm['sku'], 'the generated SKU was not cleaned');
     ai_assert_same(2, count($norm['tags']), 'the generated tags were lost');
     ai_assert(str_contains((string)$norm['description'], 'Boils water'), 'the generated description was lost');
     ai_assert(!str_contains((string)$norm['description'], '<p>'), 'the generated description kept HTML');
     ai_assert(str_contains((string)$norm['specifications'], 'Capacity: 1.8 L'), 'the generated specifications were lost');
-    ai_assert(str_contains((string)$norm['features'], 'Cool-touch handle'), 'the generated features were lost');
     ai_assert(str_contains((string)$norm['image_alt'], 'kitchen counter'), 'the generated alt text was lost');
 
     // A category the model invented stays a visible suggestion, never an id.
@@ -160,7 +162,8 @@ try {
         'slug'              => 'stainless-steel-electric-kettle-1-8l',
         'sku'               => 'KET-18L',
         'category_id'       => $catSmall,
-        'brand_id'          => $brandId,
+        // Retired input: must be ignored, not validated and not stored.
+        'brand_id'          => 999999,
         'price'             => '2490.00',
         'compare_price'     => '2990',
         'stock'             => '12',
@@ -200,7 +203,7 @@ try {
     ai_assert_same('stainless-steel-electric-kettle-1-8l', (string)$row['slug'], 'slug was not stored');
     ai_assert_same('KET-18L', (string)$row['sku'], 'sku was not stored');
     ai_assert_same($catSmall, (int)$row['category_id'], 'category relationship was not stored');
-    ai_assert_same($brandId, (int)$row['brand_id'], 'brand relationship was not stored');
+    ai_assert(empty($row['brand_id']), 'a brand was stored even though product management has no brand field');
     ai_assert_same('2490.00', number_format((float)$row['price'], 2, '.', ''), 'price was not stored');
     ai_assert_same('2990.00', number_format((float)$row['compare_price'], 2, '.', ''), 'compare-at price was not stored');
     ai_assert_same(12, (int)$row['stock'], 'stock was not stored');
@@ -210,7 +213,7 @@ try {
     ai_assert(str_contains((string)$row['description'], 'Boils water'), 'the description was not stored');
     ai_assert(!str_contains((string)$row['description'], '<p'), 'the description kept HTML tags');
     ai_assert(str_contains((string)$row['specifications'], 'Capacity: 1.8 L'), 'specifications were not stored');
-    ai_assert(str_contains((string)$row['features'], 'Cool-touch handle'), 'features were not stored');
+    ai_assert(empty($row['features'] ?? null), 'features text was stored even though the section was removed');
     ai_assert_same('Stainless Steel Electric Kettle 1.8L', (string)$row['meta_title'], 'SEO title was not stored');
     ai_assert(str_contains((string)$row['meta_description'], 'cool-touch handle'), 'SEO description was not stored');
     ai_assert_same('electric kettle', (string)$row['seo_focus_keyword'], 'focus keyword was not stored');

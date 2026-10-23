@@ -52,16 +52,21 @@ jobs:
       #     admin panel, one-shot marker, no stuck overlay, no bfcache replay;
       #   - the homepage slider: crossfade layering, autoplay interval, pause on
       #     a hidden tab / off-screen carousel, reduced motion, image warm-up,
-      #     a missing image and the button-free markup.
+      #     a missing image and the button-free markup;
+      #   - the no-autosave rule: typing, pasting, blurring and waiting never
+      #     write, the unsaved-changes guard only warns, and the SEO preview
+      #     shows long copy in full instead of clipping it.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition and slider)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
+          SH_NA_REQUIRE_JSDOM: '1'
         run: |
           npm install --no-save --no-package-lock jsdom@26.1.0
           node tests/page-transition-behavior.mjs
           node tests/slider-behavior.mjs
+          node tests/no-autosave-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then

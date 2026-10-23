@@ -107,7 +107,7 @@ require dirname(__DIR__) . '/_layout.php';
     </form>
 
     <!-- Review form. Hidden until a draft arrives. -->
-    <form class="sh-aicreate__review" data-ai-create-review hidden novalidate>
+    <form class="sh-aicreate__review" data-ai-create-review hidden novalidate data-dirty-guard>
       <?= sh_csrf_field() ?>
 
       <div class="sh-aicreate__notice" data-ai-create-notice hidden></div>
@@ -211,6 +211,7 @@ require dirname(__DIR__) . '/_layout.php';
       <div class="sh-formcard__foot">
         <button class="sh-btn" type="submit" data-ai-save-product><?= sh_icon('check-circle', 15) ?> Save Product</button>
         <button class="sh-btn sh-btn--ghost" type="button" data-ai-discard>Discard draft</button>
+        <span class="sh-dirty" data-dirty-note hidden><?= sh_icon('info', 13) ?> Unsaved changes</span>
         <span class="sh-aicreate__status" data-ai-save-status role="status" aria-live="polite"></span>
       </div>
     </form>
@@ -283,13 +284,13 @@ require dirname(__DIR__) . '/_layout.php';
           </div>
 
           <div class="sh-aiactions">
-            <button class="sh-btn sh-btn--sm" data-ai-generate="title" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate title</button>
-            <button class="sh-btn sh-btn--sm" data-ai-generate="description" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate description</button>
-            <button class="sh-btn sh-btn--sm" data-ai-generate="short" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Short description</button>
-            <button class="sh-btn sh-btn--sm" data-ai-generate="tags" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate tags</button>
-            <button class="sh-btn sh-btn--sm" data-ai-generate="seo" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate SEO</button>
-            <button class="sh-btn sh-btn--sm" data-ai-generate="category" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Suggest category</button>
-            <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-generate-all <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate all</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="title" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate title</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="description" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate description</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="short" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Short description</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="tags" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate tags</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="seo" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate SEO</button>
+            <button type="button" class="sh-btn sh-btn--sm" data-ai-generate="category" <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Suggest category</button>
+            <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-generate-all <?= $aiConfig['has_key'] ? '' : 'disabled' ?>>Generate all</button>
           </div>
         </div>
       </div>
@@ -308,9 +309,9 @@ require dirname(__DIR__) . '/_layout.php';
           <div class="sh-panel__head">
             <h2 class="sh-panel__title"><?= sh_icon('cpu', 17) ?> <?= e($label) ?></h2>
             <div class="sh-panel__actions">
-              <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-regenerate="<?= e($key) ?>">Regenerate</button>
-              <button class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-copy>Copy</button>
-              <button class="sh-btn sh-btn--sm" data-ai-save="<?= e($key) ?>">Save</button>
+              <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-regenerate="<?= e($key) ?>">Regenerate</button>
+              <button type="button" class="sh-btn sh-btn--sm sh-btn--ghost" data-ai-copy>Copy</button>
+              <button type="button" class="sh-btn sh-btn--sm" data-ai-save="<?= e($key) ?>">Save</button>
             </div>
           </div>
           <div class="sh-panel__body">

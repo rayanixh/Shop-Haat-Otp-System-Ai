@@ -9,8 +9,8 @@ require_once SH_ROOT . '/includes/catalog.php';
 // The SEO helpers are used while this page builds its metadata, before
 // includes/header.php is loaded, so the engine must be required here.
 require_once SH_ROOT . '/includes/seo.php';
-// Features and alt text are additive columns; ensure they exist before the row
-// is read with SELECT * so the page can render them.
+// The alt-text column is additive; ensure it exists before the row
+// is read with SELECT * so the page can render it.
 require_once SH_ROOT . '/includes/product-schema.php';
 sh_product_schema_ensure();
 

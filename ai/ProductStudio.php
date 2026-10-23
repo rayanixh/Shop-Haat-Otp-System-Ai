@@ -214,11 +214,6 @@ function sh_ai_full_product_input(array $in, ?int $adminId = null): array
         $fields['category_id'] = 'That category no longer exists. Choose another one.';
     }
 
-    $brandId = (int)($in['brand_id'] ?? 0);
-    if ($brandId > 0 && sh_one('SELECT id FROM brands WHERE id = ? LIMIT 1', [$brandId]) === null) {
-        $fields['brand_id'] = 'That brand no longer exists.';
-    }
-
     $title = trim((string)($in['slug'] ?? '')) !== '' ? (string)$in['slug'] : $name;
     $slug = sh_slug($title);
     if ($slug === '') { $fields['slug'] = 'Could not build a URL slug from that name.'; }
@@ -239,7 +234,6 @@ function sh_ai_full_product_input(array $in, ?int $adminId = null): array
     $description = sh_ai_plain_text((string)($in['description'] ?? ''), 8000);
     $short = sh_ai_plain_text((string)($in['short_description'] ?? ''), 300);
     $specs = sh_ai_line_list($in['specifications'] ?? [], 30, 200);
-    $features = sh_ai_line_list($in['features'] ?? [], 15, 240);
     $tags = sh_ai_line_list($in['tags'] ?? [], 15, 60);
 
     $token = strtolower(trim((string)($in['token'] ?? '')));
@@ -252,11 +246,9 @@ function sh_ai_full_product_input(array $in, ?int $adminId = null): array
             'slug'              => $slug,
             'sku'               => $sku !== '' ? $sku : null,
             'category_id'       => (int)$category['id'],
-            'brand_id'          => $brandId > 0 ? $brandId : null,
             'short_description' => $short !== '' ? $short : null,
             'description'       => $description !== '' ? $description : null,
             'specifications'    => $specs ? implode("\n", $specs) : null,
-            'features'          => $features ? implode("\n", $features) : null,
             'image_alt'         => mb_substr(trim(sh_ai_plain_text((string)($in['image_alt'] ?? ''), 190)), 0, 190) ?: null,
             'price'             => (float)$priceRaw,
             'compare_price'     => $compareRaw !== '' ? (float)$compareRaw : 0.0,
@@ -483,7 +475,6 @@ function sh_ai_save_full_product(array $in, ?int $adminId = null, ?array $files 
             'status'            => (int)$data['status'],
             'has_description'   => $data['description'] !== null,
             'has_specifications'=> $data['specifications'] !== null,
-            'has_features'      => $data['features'] !== null,
             'image'             => $imageFile,
             'tag_count'         => count($savedTags),
             'gallery_count'     => count($savedGallery),

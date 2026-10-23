@@ -616,32 +616,91 @@
   });
 
   /* ---------- Unsaved-changes guard (never saves) -----------------------
-     Opt-in per form with data-dirty-guard. It only shows a small note and
-     warns before leaving; it never submits, debounces or stores anything. */
-  document.querySelectorAll('form[data-dirty-guard]').forEach(function (form) {
-    var note = form.querySelector('[data-dirty-note]');
-    var dirty = false;
-    function mark() {
-      if (dirty) { return; }
-      dirty = true;
-      if (note) { note.hidden = false; }
+     Typing, pasting, changing a field or tabbing away must NEVER write to
+     the database: the only thing that saves an admin form is its explicit
+     Save / Create / Update button. This guard is the safety net for that
+     rule. It only shows a small "Unsaved changes" note and warns before
+     leaving; it never submits, debounces, fetches or stores anything.
+
+     Coverage is deliberate and uniform so no edit screen can be missed:
+       - any form carrying data-dirty-guard (including script-handled forms
+         such as the AI product review), plus
+       - inside the admin panel, every POST form that holds at least one
+         editable field. One-click action forms (delete / toggle / refresh:
+         hidden fields only) are not edit forms and stay unguarded, and a
+         form can opt out with data-no-dirty-guard.
+     Read-only navigation controls (page/provider pickers, GET filter
+     selects) never mark a form dirty by themselves; if the administrator
+     has edited other fields first, leaving through them still warns. */
+  (function () {
+    var NAV_CONTROLS = '[data-navigate-on-change],[data-navigate-prefix],'
+      + '[data-seo-page-picker],[data-provider-select],'
+      + '[data-submit-form-on-change],[data-sort-select]';
+    var EDITABLE = 'input:not([type="hidden"]):not([type="submit"])'
+      + ':not([type="button"]):not([type="image"]):not([type="reset"]),select,textarea';
+
+    var candidates = $$('form[data-dirty-guard]');
+    if (document.querySelector('.sh-admin')) {
+      $$('form').forEach(function (form) {
+        if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') { return; }
+        if (form.hasAttribute('data-no-dirty-guard')) { return; }
+        if (!form.querySelector(EDITABLE)) { return; }
+        if (candidates.indexOf(form) === -1) { candidates.push(form); }
+      });
     }
-    form.addEventListener('input', mark);
-    form.addEventListener('change', mark);
-    // Registered on the document after the confirm handler, so a submission
-    // the administrator cancels still counts as unsaved.
-    document.addEventListener('submit', function (ev) {
-      if (ev.target !== form || ev.defaultPrevented) { return; }
-      dirty = false;
-      if (note) { note.hidden = true; }
+
+    candidates.forEach(function (form) {
+      var note = form.querySelector('[data-dirty-note]');
+      if (!note) {
+        // Same pill the product/category editors render server-side, placed
+        // next to the button that actually saves.
+        note = document.createElement('span');
+        note.className = 'sh-dirty';
+        note.setAttribute('data-dirty-note', '');
+        note.hidden = true;
+        note.textContent = 'Unsaved changes';
+        var submit = form.querySelector('[type="submit"]');
+        if (submit && submit.parentNode) {
+          submit.parentNode.insertBefore(note, submit.nextSibling);
+        } else {
+          form.appendChild(note);
+        }
+      }
+      var dirty = false;
+      function mark(ev) {
+        if (dirty) { return; }
+        var target = ev && ev.target;
+        if (target && target.matches && target.matches(NAV_CONTROLS)) { return; }
+        dirty = true;
+        if (note) { note.hidden = false; }
+      }
+      function clean() {
+        dirty = false;
+        if (note) { note.hidden = true; }
+      }
+      form.addEventListener('input', mark);
+      form.addEventListener('change', mark);
+      // Registered on the document after the confirm handler, so a submission
+      // the administrator cancels still counts as unsaved.
+      document.addEventListener('submit', function (ev) {
+        if (ev.target !== form || ev.defaultPrevented) { return; }
+        clean();
+      });
+      // Script-handled forms (the AI product review) preventDefault() their
+      // submit and save over fetch instead; they announce a successful save
+      // (or a discard) with this event so the guard can stand down. A failed
+      // save never fires it, so the entries stay marked unsaved.
+      document.addEventListener('sh:form-clean', function (ev) {
+        if (ev.target === form) { clean(); }
+      });
+      window.addEventListener('beforeunload', function (ev) {
+        if (!dirty) { return; }
+        ev.preventDefault();
+        ev.returnValue = '';
+        return '';
+      });
     });
-    window.addEventListener('beforeunload', function (ev) {
-      if (!dirty) { return; }
-      ev.preventDefault();
-      ev.returnValue = '';
-      return '';
-    });
-  });
+  })();
 
   /* ---------- Modals ---------------------------------------------------- */
   document.addEventListener('click', function (ev) {

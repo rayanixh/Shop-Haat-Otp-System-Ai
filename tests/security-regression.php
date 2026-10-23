@@ -1782,7 +1782,7 @@ sh_t('the save endpoint and schema back the create flow', function () {
         if (!str_contains($seg, $need)) { return 'save_product does not check ' . $need; }
     }
     $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php');
-    foreach (['features TEXT', 'image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
+    foreach (['image_alt VARCHAR(190)', 'ai_draft_token VARCHAR(64)', 'uq_products_draft_token'] as $need) {
         if (!str_contains($schema, $need)) { return 'install/schema.php is missing ' . $need; }
     }
     $ensure = (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
@@ -3369,7 +3369,7 @@ sh_t('the phone verification switch has an explicit Save button', function () {
 });
 
 sh_t('editable forms carry a non-saving unsaved-changes guard', function () {
-    foreach (['admin/product-edit.php', 'admin/category-edit.php'] as $page) {
+    foreach (['admin/product-edit.php', 'admin/category-edit.php', 'admin/ai/products.php'] as $page) {
         $body = (string)file_get_contents(SH_ROOT . '/' . $page);
         if (!str_contains($body, 'data-dirty-guard')) { return $page . ' has no unsaved-changes guard'; }
         if (!str_contains($body, 'data-dirty-note')) { return $page . ' has no unsaved-changes note'; }
@@ -3410,6 +3410,51 @@ sh_t('only read-only filters submit automatically', function () {
     return true;
 });
 
+sh_t('every editable admin form is guarded, and the guard itself never writes', function () {
+    $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
+    // Generic coverage of admin write forms, with an explicit opt-out.
+    if (!str_contains($js, 'data-no-dirty-guard')) { return 'the dirty guard has no opt-out for non-edit forms'; }
+    if (!str_contains($js, "toLowerCase() !== 'post'")) { return 'the guard is not scoped to write (POST) forms'; }
+    // Read-only navigation pickers must not mark a form dirty on their own.
+    if (!str_contains($js, 'NAV_CONTROLS')) { return 'navigation pickers still mark a form dirty on their own'; }
+    if (!str_contains($js, '[data-seo-page-picker]')) { return 'the SEO page picker is not treated as navigation'; }
+    // A script-saved form stands the guard down only after a real save.
+    if (!str_contains($js, 'sh:form-clean')) { return 'script-saved forms cannot clear the guard after saving'; }
+    $client = (string)file_get_contents(SH_ROOT . '/assets/js/ai-product-create.js');
+    if (!str_contains($client, 'sh:form-clean')) { return 'the AI product review never reports its successful save'; }
+    // The guard block itself must contain no network or submit call at all:
+    // it warns, it never saves.
+    $start = strpos($js, 'Unsaved-changes guard');
+    $end = $start === false ? false : strpos($js, 'Modals', $start);
+    if ($start === false || $end === false) { return 'the dirty guard block was not found'; }
+    $block = substr($js, $start, $end - $start);
+    foreach (['fetch(', '.submit()', 'sendBeacon', 'XMLHttpRequest'] as $bad) {
+        if (str_contains($block, $bad)) { return 'the dirty guard performs a write: ' . $bad; }
+    }
+    return true;
+});
+
+sh_t('no admin button can submit a form by accident', function () {
+    // A <button> without a type attribute IS a submit button. Every admin
+    // button must say what it is, so a script-driven control can never post
+    // its surrounding form when markup moves or a script loads slowly.
+    $bad = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT . '/admin'));
+    foreach ($it as $file) {
+        if (!$file->isFile() || !str_ends_with($file->getFilename(), '.php')) { continue; }
+        $body = (string)file_get_contents($file->getPathname());
+        // Template islands contain their own ">" (their closing tag), so blank them first.
+        $body = preg_replace('~<\?(?:php|=).*?\?>~s', 'PHP', $body) ?? $body;
+        if (preg_match_all('~<button\b[^>]*>~i', $body, $m) === false) { continue; }
+        foreach ($m[0] as $tag) {
+            if (stripos($tag, 'type=') === false) {
+                $bad[] = str_replace(SH_ROOT . '/', '', $file->getPathname()) . ': ' . trim($tag);
+            }
+        }
+    }
+    return sh_assert($bad === [], 'buttons without an explicit type: ' . implode('; ', $bad));
+});
+
 sh_section('Brand and features removed from product management');
 
 sh_t('the brand workflow is gone from the admin', function () {
@@ -3446,6 +3491,40 @@ sh_t('features and benefits are gone from every product form and page', function
     }
     $product = (string)file_get_contents(SH_ROOT . '/product.php');
     if (str_contains($product, "\$product['features']")) { return 'the product page still prints features'; }
+    return true;
+});
+
+sh_t('brand and features are also gone from the AI, catalogue and demo layers', function () {
+    $manager = sh_source_without_comments(SH_ROOT . '/ai/AIManager.php');
+    foreach (['FROM brands', 'brands b', 'brand_id', 'brand_name', "'features'"] as $gone) {
+        if (str_contains($manager, $gone)) { return 'the AI draft layer still references ' . $gone; }
+    }
+    $studio = sh_source_without_comments(SH_ROOT . '/ai/ProductStudio.php');
+    foreach (['FROM brands', 'brand_id', "'brand_id' =>", "'features'", 'has_features'] as $gone) {
+        if (str_contains($studio, $gone)) { return 'the AI save layer still references ' . $gone; }
+    }
+    $api = sh_source_without_comments(SH_ROOT . '/api/ai.php');
+    if (str_contains($api, "'category', 'brand'")) { return 'brand is still a regenerable field'; }
+    $prompts = sh_source_without_comments(SH_ROOT . '/ai/PromptManager.php');
+    foreach (['Existing brands', '\"features\"', 'a real brand', 'at most 60 characters', 'at most 155 characters'] as $gone) {
+        if (str_contains($prompts, $gone)) { return 'a default prompt still mentions ' . $gone; }
+    }
+    $catalog = sh_source_without_comments(SH_ROOT . '/includes/catalog.php');
+    foreach (['sh_brands(', 'brand_ids', 'JOIN brands', 'brand_name'] as $gone) {
+        if (str_contains($catalog, $gone)) { return 'the catalogue helpers still reference ' . $gone; }
+    }
+    $seo = sh_source_without_comments(SH_ROOT . '/includes/seo.php');
+    if (str_contains($seo, "'@type' => 'Brand'")) { return 'the product schema still advertises a brand'; }
+    $demo = sh_source_without_comments(SH_ROOT . '/install/demo-data.php');
+    foreach (['INSERT INTO brands', 'brand_id'] as $gone) {
+        if (str_contains($demo, $gone)) { return 'the demo catalogue still writes ' . $gone; }
+    }
+    // The retired columns stay for compatibility: no DROP anywhere.
+    $schema = (string)file_get_contents(SH_ROOT . '/install/schema.php')
+        . (string)file_get_contents(SH_ROOT . '/includes/product-schema.php');
+    if (str_contains($schema, 'DROP COLUMN') || str_contains($schema, 'features TEXT')) {
+        return 'the schema either drops a column or still creates features';
+    }
     return true;
 });
 
@@ -3495,6 +3574,45 @@ sh_t('the SEO columns are TEXT and older installs are widened safely', function 
     if (!str_contains($seo, 'information_schema.columns')) { return 'the migration does not inspect the current type'; }
     if (!str_contains($seo, "sh_setting_save('seo_schema_v', '2')")) { return 'the schema version was not advanced'; }
     if (str_contains($seo, 'DROP TABLE')) { return 'the SEO migration drops a table'; }
+    return true;
+});
+
+sh_t('SEO copy an administrator wrote reaches the page unshortened', function () {
+    $longTitle = trim(str_repeat('Kettle ', 20));
+    $longDesc = trim(str_repeat('A stainless steel kettle with a cool-touch handle. ', 8));
+    sh_assert(mb_strlen($longTitle) > 70 && mb_strlen($longDesc) > 160, 'test data is not long enough');
+    $meta = sh_seo_test_meta([
+        'key' => 'home',
+        'entity' => ['name' => 'Kettle', 'meta_title' => $longTitle, 'meta_description' => $longDesc],
+        'fallback_title' => 'Kettle',
+        'fallback_desc' => 'Fallback text.',
+        'canonical' => '/',
+    ]);
+    return sh_assert(
+        str_starts_with((string)$meta['title'], $longTitle)
+        && (string)$meta['description'] === $longDesc,
+        'authored SEO copy was shortened before it reached the page'
+    );
+});
+
+sh_t('only generated SEO copy is excerpted, and the UI counts nothing', function () {
+    $body = trim(str_repeat('word ', 120));
+    $meta = sh_seo_test_meta([
+        'key' => 'home',
+        'fallback_title' => trim(str_repeat('Title ', 30)),
+        'fallback_desc' => $body,
+        'canonical' => '/',
+    ]);
+    sh_assert(mb_strlen((string)$meta['description']) <= 160, 'a body-derived description is no longer excerpted');
+    sh_assert(mb_strlen((string)$meta['title']) <= 70, 'a generated title is no longer excerpted');
+    $manager = sh_source_without_comments(SH_ROOT . '/admin/seo.php');
+    if (str_contains($manager, 'Title length') || str_contains($manager, 'Description length')) {
+        return 'the SEO Manager still shows character counts';
+    }
+    $preview = (string)file_get_contents(SH_ROOT . '/assets/js/seo.js');
+    if (str_contains($preview, 'clip(') || str_contains($preview, 'CharCount')) {
+        return 'the live preview still clips or counts SEO copy';
+    }
     return true;
 });
 
