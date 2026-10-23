@@ -69,6 +69,7 @@ function sh_ai_tasks(): array
         'blog_post'           => ['label' => 'Blog post',            'group' => 'Blog',     'kind' => 'text'],
         'image_prompt'        => ['label' => 'Image prompt',         'group' => 'Images',   'kind' => 'text'],
         'product_image'       => ['label' => 'Product image',        'group' => 'Images',   'kind' => 'image'],
+        'support_chat'        => ['label' => 'Customer support chat', 'group' => 'Support', 'kind' => 'text'],
     ];
 }
 

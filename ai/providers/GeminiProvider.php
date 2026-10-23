@@ -64,7 +64,8 @@ class GeminiProvider extends AbstractAIProvider
         ];
         if ($system !== '') { $payload['system_instruction'] = ['parts' => [['text' => $system]]]; }
 
-        $res = $this->call($model, 'generateContent', $payload);
+        $timeout = max(5, min(300, (int)($options['timeout'] ?? 120)));
+        $res = $this->call($model, 'generateContent', $payload, $timeout);
         if (!$res['ok']) { return $res; }
         $j = $res['json'];
         $cand = $j['candidates'][0] ?? null;

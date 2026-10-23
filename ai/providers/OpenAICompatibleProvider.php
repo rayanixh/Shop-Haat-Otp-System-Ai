@@ -95,7 +95,8 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         ];
         if (!empty($options['json'])) { $payload['response_format'] = ['type' => 'json_object']; }
 
-        $res = $this->chat($payload);
+        $timeout = max(5, min(300, (int)($options['timeout'] ?? 120)));
+        $res = $this->chat($payload, $timeout);
         if (!$res['ok']) { return $res; }
         $j = $res['json'];
         $content = $j['choices'][0]['message']['content'] ?? '';

@@ -29,6 +29,8 @@ try {
 require_once SH_ROOT . '/includes/admin-perms.php';
 $badgeReturned = 0;
 try { $badgeReturned = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status = 'returned' AND updated_at >= ?", [date('Y-m-d H:i:s', time() - 7 * 86400)], 0); } catch (Throwable $e) {}
+$badgeSupport = 0;
+try { $badgeSupport = (int)sh_val("SELECT COALESCE(SUM(unread_admin),0) FROM support_conversations WHERE status IN ('open','pending')", [], 0); } catch (Throwable $e) {}
 // [key, href, icon, label, badge, permission]
 $nav = [
     'Dashboard' => [
@@ -61,6 +63,10 @@ $nav = [
     'Customers' => [
         ['customers',    'customers.php',    'users',  'Customers', 0, 'customers.view'],
         ['verification', 'verification.php', 'shield', 'Verification Providers', 0, 'integrations.manage'],
+    ],
+    'Support' => [
+        ['support',          'support.php',          'message',  'Support Inbox', $badgeSupport, 'support.view'],
+        ['support-settings', 'support-settings.php', 'settings', 'Support Settings', 0, 'support.manage'],
     ],
     'Reports' => [
         ['reports:sales',     'reports.php?tab=sales',     'trending-up', 'Sales Reports', 0, 'reports.view'],
