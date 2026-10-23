@@ -336,11 +336,20 @@ function sh_support_rate_hit(string $bucket, int $windowSec, int $max): bool
 
 function sh_support_usage_bump(string $field, int $by = 1): void
 {
-    $allowed = ['customer_messages', 'ai_requests', 'ai_errors', 'fallback_replies', 'admin_replies', 'handoffs', 'rate_limited'];
-    if (!in_array($field, $allowed, true)) { return; }
+    $allowed = [
+        'customer_messages' => 'customer_messages',
+        'ai_requests' => 'ai_requests',
+        'ai_errors' => 'ai_errors',
+        'fallback_replies' => 'fallback_replies',
+        'admin_replies' => 'admin_replies',
+        'handoffs' => 'handoffs',
+        'rate_limited' => 'rate_limited',
+    ];
+    if (!isset($allowed[$field])) { return; }
+    $column = $allowed[$field] ?? $allowed['customer_messages'];
     try {
-        sh_query("INSERT INTO support_usage_daily (day, {$field}) VALUES (CURRENT_DATE, ?)
-                  ON DUPLICATE KEY UPDATE {$field} = {$field} + VALUES({$field})", [$by]);
+        sh_query("INSERT INTO support_usage_daily (day, {$column}) VALUES (CURRENT_DATE, ?)
+                  ON DUPLICATE KEY UPDATE {$column} = {$column} + VALUES({$column})", [$by]);
     } catch (Throwable $e) { /* counters are best-effort */ }
 }
 
@@ -493,8 +502,10 @@ function sh_support_tool_products(string $query, int $limit = 5): array
         if ($rows === []) {
             $tokens = array_values(array_filter(explode(' ', $query), static fn($w) => mb_strlen($w) >= 2));
             if (count($tokens) > 1) {
-                $where = implode(' AND ', array_fill(0, count($tokens), 'name LIKE ?'));
-                $rows = sh_all("SELECT {$cols} FROM products WHERE status = 1 AND {$where} ORDER BY sold_count DESC LIMIT " . (int)$limit,
+                $namePieces = [];
+                foreach ($tokens as $token) { $namePieces[] = 'name LIKE ?'; }
+                $nameWhere = implode(' AND ', $namePieces);
+                $rows = sh_all("SELECT {$cols} FROM products WHERE status = 1 AND {$nameWhere} ORDER BY sold_count DESC LIMIT " . (int)$limit,
                     array_map(static fn($w) => '%' . $w . '%', $tokens));
             }
             if ($rows === [] && $tokens !== []) {
@@ -1240,8 +1251,10 @@ function sh_support_handle_customer_message(array $identity, int $convId, string
         if ($now === null || !empty($now['ai_paused'])) { return false; }
         sh_support_insert_message($convId, $sender, $replyText, ['lang' => $lang, 'facts' => $facts]);
         foreach ($r['context_updates'] as $k => $v) {
-            if (in_array($k, ['last_product_id', 'last_order_number'], true)) {
-                sh_query("UPDATE support_conversations SET {$k} = ? WHERE id = ?", [$v, $convId]);
+            if ($k === 'last_product_id') {
+                sh_query('UPDATE support_conversations SET last_product_id = ? WHERE id = ?', [$v, $convId]);
+            } elseif ($k === 'last_order_number') {
+                sh_query('UPDATE support_conversations SET last_order_number = ? WHERE id = ?', [$v, $convId]);
             }
         }
         return true;
@@ -1354,9 +1367,9 @@ function sh_support_inbox(array $f, int $page = 1, int $per = 20): array
         $where[] = '(c.customer_name LIKE ? OR c.customer_email LIKE ? OR c.customer_phone LIKE ? OR c.last_order_number LIKE ? OR EXISTS (SELECT 1 FROM support_messages m WHERE m.conversation_id = c.id AND m.body LIKE ?))';
         array_push($params, $like, $like, $like, $like, $like);
     }
-    $w = 'WHERE ' . implode(' AND ', $where);
+    $whereSql = implode(' AND ', $where);
     $total = 0;
-    try { $total = (int)sh_val("SELECT COUNT(*) FROM support_conversations c {$w}", $params); } catch (Throwable $e) { /* fresh */ }
+    try { $total = (int)sh_val("SELECT COUNT(*) FROM support_conversations c WHERE {$whereSql}", $params); } catch (Throwable $e) { /* fresh */ }
     $page = max(1, $page); $per = max(5, min(100, $per)); $off = ($page - 1) * $per;
     $rows = [];
     try {
@@ -1364,7 +1377,7 @@ function sh_support_inbox(array $f, int $page = 1, int $per = 20): array
             (SELECT m.body FROM support_messages m WHERE m.conversation_id = c.id AND m.visibility = 'public' ORDER BY m.id DESC LIMIT 1) AS last_body,
             (SELECT m.sender FROM support_messages m WHERE m.conversation_id = c.id AND m.visibility = 'public' ORDER BY m.id DESC LIMIT 1) AS last_sender
             FROM support_conversations c LEFT JOIN admins a ON a.id = c.assigned_admin_id
-            {$w} ORDER BY c.unread_admin DESC, c.last_message_at DESC LIMIT {$per} OFFSET {$off}", $params);
+            WHERE {$whereSql} ORDER BY c.unread_admin DESC, c.last_message_at DESC LIMIT " . (int)$per . " OFFSET " . (int)$off, $params);
     } catch (Throwable $e) { /* fresh install */ }
     return ['rows' => $rows, 'total' => $total, 'page' => $page, 'per' => $per];
 }

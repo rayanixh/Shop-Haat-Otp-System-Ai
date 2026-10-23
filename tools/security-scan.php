@@ -550,6 +550,7 @@ $publicEndpoints = [
     'logout.php' => 'ends the session', 'image.php' => 'public image proxy',
     'api/otp.php' => 'sign-in one-time code', 'api/search.php' => 'public search suggestions',
     'api/cart.php' => 'guest cart operations', 'api/notifications.php' => 'public notification feed',
+    'api/support.php' => 'customer and guest support chat: POST-only + CSRF, with signed-in account or anonymous browser-session ownership checked for every conversation',
     'api/csp-report.php' => 'browser CSP reports',
     'api/email-events.php' => 'provider delivery webhook: no session exists, and every request is refused unless it carries the shared secret or a valid HMAC signature',
 ];
