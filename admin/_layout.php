@@ -150,10 +150,14 @@ $adminFlash = sh_flash_pull();
 <body<?= sh_transition_body_attrs($shTransition) ?>>
 <?= sh_transition_overlay($shTransition) ?>
 <div class="sh-admin">
-  <aside class="sh-admin-sidebar">
-    <a class="sh-admin-sidebar__brand" href="<?= e(sh_url('admin/dashboard.php')) ?>">
-      <span class="sh-brand__mark sh-brand__mark--sm">SH</span> <?= e(sh_setting('site_name', 'ShopHaat')) ?>
-    </a>
+  <aside class="sh-admin-sidebar" id="sh-admin-sidebar">
+    <div class="sh-admin-sidebar__head">
+      <a class="sh-admin-sidebar__brand" href="<?= e(sh_url('admin/dashboard.php')) ?>">
+        <span class="sh-brand__mark sh-brand__mark--sm">SH</span> <?= e(sh_setting('site_name', 'ShopHaat')) ?>
+      </a>
+      <button class="sh-admin-sidebar__close" type="button" data-admin-nav-close aria-label="Close admin navigation"><?= sh_icon('x', 19) ?></button>
+    </div>
+    <nav class="sh-admin-sidebar__nav" aria-label="Admin navigation" tabindex="0">
     <?php foreach ($nav as $group => $links): ?>
       <p class="sh-admin-sidebar__group"><?= e($group) ?></p>
       <?php foreach ($links as [$key, $href, $icon, $label, $badge]): ?>
@@ -170,12 +174,13 @@ $adminFlash = sh_flash_pull();
     <a class="sh-admin-sidebar__link" href="<?= e(sh_url('admin/logout.php')) ?>">
       <?= sh_icon('log-out', 17) ?><span>Sign out</span></a>
     <div style="height:24px"></div>
+    </nav>
   </aside>
-  <button class="sh-admin-scrim" type="button" hidden aria-label="Close menu"></button>
+  <button class="sh-admin-scrim" type="button" hidden aria-label="Close admin navigation"></button>
 
   <div class="sh-admin-main">
     <header class="sh-admin-top">
-      <button class="sh-admin-burger" type="button" data-admin-burger aria-label="Toggle menu"><?= sh_icon('menu', 21) ?></button>
+      <button class="sh-admin-burger" type="button" data-admin-burger aria-controls="sh-admin-sidebar" aria-expanded="false" aria-label="Open admin navigation"><?= sh_icon('menu', 21) ?></button>
       <h1 class="sh-admin-top__title"><?= e($adminTitle) ?></h1>
       <form class="sh-admin-search" method="get" action="<?= e(sh_url('admin/search.php')) ?>" role="search">
         <?= sh_icon('search', 15) ?>

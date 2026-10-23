@@ -40,6 +40,71 @@ function sh_ai_driver_label(string $driver): string
     return $cls ? $cls::defaultLabel() : ucfirst($driver);
 }
 
+/**
+ * Return trusted, local identity artwork for a registered provider driver.
+ * Matching uses only the normalized driver ID; configured names and endpoint
+ * URLs are deliberately never used to infer a vendor logo.
+ *
+ * @return array{asset:?string,alt:string,fallback:string,wide:bool,width:int,height:int}
+ */
+function sh_ai_provider_identity(string $driver): array
+{
+    static $identities = [
+        'openai' => [
+            'asset' => 'assets/images/ai-providers/openai.svg',
+            'alt' => 'OpenAI logo',
+            'fallback' => 'OpenAI',
+            'wide' => false,
+            'width' => 716,
+            'height' => 716,
+        ],
+        'openrouter' => [
+            'asset' => 'assets/images/ai-providers/openrouter.svg',
+            'alt' => 'OpenRouter logo',
+            'fallback' => 'OpenRouter',
+            'wide' => true,
+            'width' => 1608,
+            'height' => 294,
+        ],
+        'gemini' => [
+            'asset' => 'assets/images/ai-providers/gemini.png',
+            'alt' => 'Google Gemini logo',
+            'fallback' => 'Gemini',
+            'wide' => false,
+            'width' => 512,
+            'height' => 512,
+        ],
+        'anthropic' => [
+            'asset' => 'assets/images/ai-providers/anthropic.svg',
+            'alt' => 'Anthropic logo',
+            'fallback' => 'Anthropic',
+            'wide' => false,
+            'width' => 248,
+            'height' => 248,
+        ],
+        // This driver can point to many unrelated services. There is no
+        // single verified brand mark, so keep the identity explicit in text.
+        'openai_compatible' => [
+            'asset' => null,
+            'alt' => '',
+            'fallback' => 'Custom',
+            'wide' => false,
+            'width' => 0,
+            'height' => 0,
+        ],
+    ];
+
+    $key = strtolower(trim($driver));
+    return $identities[$key] ?? [
+        'asset' => null,
+        'alt' => '',
+        'fallback' => 'Custom',
+        'wide' => false,
+        'width' => 0,
+        'height' => 0,
+    ];
+}
+
 /** Build an adapter from a provider row. Null when the driver is unknown. */
 function sh_ai_adapter(array $row): ?AIProviderInterface
 {

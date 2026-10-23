@@ -166,7 +166,7 @@ $shTransition = sh_transition_config();
   <!-- Mobile header -->
   <div class="sh-mheader">
     <div class="sh-mheader__row">
-      <button class="sh-mheader__btn" type="button" data-drawer-open aria-label="Open menu" aria-expanded="false"><?= sh_icon('menu', 22) ?></button>
+      <button class="sh-mheader__btn" type="button" data-drawer-open aria-controls="sh-drawer" aria-label="Open menu" aria-expanded="false"><?= sh_icon('menu', 22) ?></button>
       <a class="sh-mheader__brand" href="<?= e(sh_url('index.php')) ?>">
         <?php if ($shLogo !== ''): ?>
           <img src="<?= e($shLogo) ?>" alt="<?= e($shSiteName) ?>" height="30">
@@ -224,7 +224,7 @@ $shTransition = sh_transition_config();
       <span><?= e($shSiteName) ?></span>
       <button type="button" data-drawer-close aria-label="Close menu"><?= sh_icon('x', 20) ?></button>
     </div>
-    <div class="sh-drawer__body">
+    <div class="sh-drawer__body" tabindex="0" aria-label="Menu links">
       <?php if ($shCategories): ?>
       <p class="sh-drawer__title">Shop by category</p>
       <ul class="sh-drawer__list">

@@ -3160,15 +3160,31 @@ sh_t('the AI navigation is a wrapping tab bar in page flow and the card test are
     return true;
 });
 
-sh_t('no page uses an internal scroll box for ordinary content', function () {
+sh_t('only navigation drawers own internal scroll containers; AI content stays in page flow', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
-    // The browser page is the only scroller: no declaration in the shared
-    // stylesheet may create a nested scroll region.
-    if (preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $css) === 1) {
-        return 'the stylesheet still declares an internal scroll region';
+    // Nested scrolling is allowed only inside the navigation menus and the
+    // mobile filter drawer. AI Auto Work output and ordinary page content keep
+    // the document as their scroller.
+    preg_match_all('/([^{}]+)\{([^{}]*\boverflow(?:-[xy])?\s*:\s*(?:auto|scroll)\b[^{}]*)\}/i', $css, $scrollRules, PREG_SET_ORDER);
+    foreach ($scrollRules as $rule) {
+        $selector = trim($rule[1]);
+        if (!str_contains($selector, '.sh-drawer__body')
+            && !str_contains($selector, '.sh-admin-sidebar__nav')
+            && !str_contains($selector, '.sh-filters__scroll')) {
+            return 'an ordinary content selector creates an internal scroll region: ' . $selector;
+        }
+    }
+    foreach (['.sh-drawer__body', '.sh-admin-sidebar__nav', '.sh-filters__scroll'] as $selector) {
+        if (!preg_match_all('/' . preg_quote($selector, '/') . '\\s*\\{([^}]*)\\}/', $css, $matches) || !$matches[1]) {
+            return $selector . ' has no style rule';
+        }
+        $rule = end($matches[1]);
+        if (!preg_match('/overflow-y:\\s*auto/i', $rule)) { return $selector . ' is not the menu scroll container'; }
+        if (!preg_match('/overscroll-behavior:\\s*contain/i', $rule)) { return $selector . ' does not contain scroll chaining'; }
+        if (!str_contains($rule, '-webkit-overflow-scrolling: touch')) { return $selector . ' lacks native touch momentum scrolling'; }
     }
     if (str_contains($css, 'body.sh-modal-open { overflow: hidden; }')) {
-        return 'opening a modal still locks page scrolling';
+        return 'opening a modal still changes the page scroll lifecycle';
     }
     if (!str_contains($css, '.sh-modal { position: absolute;')) {
         return 'modals are not placed in normal page flow';
@@ -3179,22 +3195,44 @@ sh_t('no page uses an internal scroll box for ordinary content', function () {
         $rule = $at === false ? '' : substr($css, $at, 300);
         if (str_contains($rule, 'max-height:')) { return $sel . ' still caps its height'; }
     }
-    if (preg_match('/\.sh-admin-sidebar \{[^}]*(?<!min-)height:\s*100vh/', $css) === 1) {
-        return 'the admin sidebar is still a fixed-height scroll column';
-    }
     if (!str_contains($css, 'field-sizing: content')) {
         return 'textareas do not size to their content';
     }
     $js = (string)file_get_contents(SH_ROOT . '/assets/js/app.js');
     if (str_contains($js, "document.body.style.overflow = 'hidden'")) {
-        return 'JavaScript still locks page scrolling for an overlay';
+        return 'JavaScript still uses a body overflow shortcut instead of the shared lock lifecycle';
     }
-    if (substr_count($js, 'window.scrollY') < 5 || !str_contains($js, 'shGrowTextarea')) {
-        return 'overlays are not placed at the scroll offset, or textareas do not auto-grow';
+    foreach (["root.style.setProperty('overflow', 'hidden', 'important')", "body.style.setProperty('position', 'fixed', 'important')",
+              'restoreStyleAttribute(saved.body, saved.bodyStyle)', 'window.scrollTo(saved.x, saved.y)',
+              'openNavigationMenus', 'navigationRemovalObserver', "window.addEventListener('pagehide'"] as $needle) {
+        if (!str_contains($js, $needle)) { return 'the shared drawer lifecycle is missing ' . $needle; }
+    }
+    if (str_contains($js, "addEventListener('touchmove'") || str_contains($js, 'addEventListener("touchmove"')) {
+        return 'the shared script globally prevents native touch scrolling';
+    }
+    if (!str_contains($js, 'shGrowTextarea')) { return 'textareas do not auto-grow with page content'; }
+    $storefront = (string)file_get_contents(SH_ROOT . '/includes/header.php');
+    if (!str_contains($storefront, 'class="sh-drawer__body" tabindex="0"')
+        || !str_contains($storefront, 'data-drawer-close')) {
+        return 'the storefront drawer has no focusable menu scroller or accessible close control';
+    }
+    $admin = (string)file_get_contents(SH_ROOT . '/admin/_layout.php');
+    if (!str_contains($admin, 'class="sh-admin-sidebar__nav" aria-label="Admin navigation" tabindex="0"')
+        || !str_contains($admin, 'data-admin-nav-close')
+        || !str_contains($admin, 'aria-expanded="false"')) {
+        return 'the admin drawer has no focusable menu scroller, close control or expanded state';
+    }
+    foreach (['/products.php', '/category.php'] as $rel) {
+        $src = (string)file_get_contents(SH_ROOT . $rel);
+        if (!str_contains($src, 'class="sh-filters__scroll" tabindex="0"')
+            || !str_contains($src, 'aria-controls="sh-filters" aria-expanded="false"')
+            || !str_contains($src, 'data-filters-close hidden')) {
+            return $rel . ' has no keyboard-focusable, contained mobile filter drawer';
+        }
     }
     foreach (['/admin/email.php', '/admin/logs.php'] as $rel) {
         $src = (string)file_get_contents(SH_ROOT . $rel);
-        if (preg_match('/overflow\s*:\s*(?:auto|scroll)/', $src) === 1) {
+        if (preg_match('/overflow\\s*:\\s*(?:auto|scroll)/', $src) === 1) {
             return $rel . ' still renders an inline scroll box';
         }
     }

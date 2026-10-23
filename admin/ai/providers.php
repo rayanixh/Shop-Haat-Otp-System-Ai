@@ -96,8 +96,26 @@ $val = static function (string $k, string $d = '') use ($editing): string {
     return (string)($editing[$k] ?? $d);
 };
 
-$driverIcons = ['openai' => 'cpu', 'openrouter' => 'link', 'gemini' => 'grid', 'anthropic' => 'shield', 'openai_compatible' => 'database'];
-$driverIcon = static fn(string $d): string => $driverIcons[$d] ?? 'cpu';
+$providerMark = static function (string $driver): string {
+    $identity = sh_ai_provider_identity($driver);
+    $driverKey = strtolower(trim($driver));
+    $classes = 'sh-aiprov__mark';
+    if ($identity['wide']) { $classes .= ' sh-aiprov__mark--wide'; }
+    if ($identity['asset'] === null) { $classes .= ' sh-aiprov__mark--fallback'; }
+
+    $html = '<span class="' . e($classes) . '" data-driver="' . e($driverKey) . '">';
+    if ($identity['asset'] !== null) {
+        $html .= '<img src="' . e(sh_asset($identity['asset'])) . '" alt="' . e($identity['alt']) . '"'
+            . ' width="' . (int)$identity['width'] . '" height="' . (int)$identity['height'] . '"'
+            . ' loading="eager" decoding="async" data-ai-provider-logo>'
+            . '<span class="sh-aiprov__mark-fallback" role="img" aria-label="' . e($identity['fallback']) . '" hidden>'
+            . e($identity['fallback']) . '</span>';
+    } else {
+        $html .= '<span class="sh-aiprov__mark-text" role="img" aria-label="' . e($identity['fallback']) . '">'
+            . e($identity['fallback']) . '</span>';
+    }
+    return $html . '</span>';
+};
 $driverPitch = [
     'openai' => 'GPT text models and image generation. Paste a key that starts with sk-.',
     'openrouter' => 'One key for many vendors. Model IDs look like openai/gpt-4o-mini.',
@@ -328,7 +346,7 @@ require dirname(__DIR__) . '/_layout.php';
   ?>
   <article class="sh-aiprov" id="provider-<?= (int)$p['id'] ?>" data-ai-providers data-ai-card="<?= (int)$p['id'] ?>">
     <header class="sh-aiprov__head">
-      <span class="sh-aiprov__mark" data-driver="<?= e($driver) ?>"><?= sh_icon($driverIcon($driver), 19) ?></span>
+      <?= $providerMark($driver) ?>
       <div class="sh-aiprov__id">
         <h2 class="sh-aiprov__name"><?= e((string)$p['name']) ?></h2>
         <p class="sh-aiprov__type"><?= e(sh_ai_driver_label($driver)) ?><?= !$hasKey ? ' · no key' : '' ?></p>
@@ -400,7 +418,7 @@ require dirname(__DIR__) . '/_layout.php';
 $pick = '';
 foreach ($drivers as $key => $c) {
     $pick .= '<a class="sh-aiprov-pick" href="' . e(sh_url('admin/ai/providers.php?new=' . $key)) . '#edit">'
-        . '<span class="sh-aiprov__mark" data-driver="' . e($key) . '">' . sh_icon($driverIcon($key), 18) . '</span>'
+        . $providerMark($key)
         . '<span class="sh-aiprov-pick__text"><strong>' . e($c::defaultLabel()) . '</strong>'
         . '<small>' . e($driverPitch[$key] ?? $c::helpText()) . '</small></span>'
         . '<span class="sh-aiprov-pick__go">' . sh_icon('chevron-right', 15) . '</span></a>';
