@@ -62,6 +62,9 @@ $nav = [
         ['customers',    'customers.php',    'users',  'Customers', 0, 'customers.view'],
         ['verification', 'verification.php', 'shield', 'Verification Providers', 0, 'integrations.manage'],
     ],
+    'Customer Support' => [
+        ['support', 'support.php', 'message', 'Support Inbox', 0, 'support.manage'],
+    ],
     'Reports' => [
         ['reports:sales',     'reports.php?tab=sales',     'trending-up', 'Sales Reports', 0, 'reports.view'],
         ['reports:orders',    'reports.php?tab=orders',    'package',     'Order Reports', 0, 'reports.view'],
@@ -138,6 +141,9 @@ $adminFlash = sh_flash_pull();
 <title><?= e($adminTitle) ?> — Admin | <?= e(sh_setting('site_name', 'ShopHaat')) ?></title>
 <link rel="icon" href="data:image/svg+xml,<?= rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#151b2b"/><text x="16" y="22" font-family="Arial" font-size="14" font-weight="bold" fill="#e8501b" text-anchor="middle">A</text></svg>') ?>">
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
+<?php foreach (($adminStyles ?? []) as $src): ?>
+<link rel="stylesheet" href="<?= e(sh_asset((string)$src)) ?>">
+<?php endforeach; ?>
 <script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
 <?php require_once SH_ROOT . '/includes/transition.php'; $shTransition = sh_transition_config(); echo sh_transition_head($shTransition); ?>
 </head>
@@ -151,7 +157,7 @@ $adminFlash = sh_flash_pull();
     <?php foreach ($nav as $group => $links): ?>
       <p class="sh-admin-sidebar__group"><?= e($group) ?></p>
       <?php foreach ($links as [$key, $href, $icon, $label, $badge]): ?>
-        <a class="sh-admin-sidebar__link <?= $adminPage === $key || ($key === 'health:system' && $adminPage === 'health') ? 'sh-admin-sidebar__link--on' : '' ?>"
+        <a class="sh-admin-sidebar__link <?= $adminPage === $key || ($key === 'health:system' && $adminPage === 'health') || ($key === 'support' && $adminPage === 'support_settings') ? 'sh-admin-sidebar__link--on' : '' ?>"
            href="<?= e(sh_url('admin/' . $href)) ?>">
           <?= sh_icon($icon, 17) ?><span><?= e($label) ?></span>
           <?php if ($badge > 0): ?><em><?= (int)$badge ?></em><?php endif; ?>

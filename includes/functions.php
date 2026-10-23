@@ -238,7 +238,11 @@ function sh_setting_save(string $key, string $value): void
     // Audit trail for admin-made settings changes (secrets are masked, never stored).
     static $skip = ['admin_tools_schema_v', 'admin_roles_schema_v', 'health_cache', 'backup_last_auto', 'backup_cron_token', 'otp_schema_v', 'fb_schema_v', 'verify_schema_v'];
     $old = (string)sh_setting($key, '');
+    // Support policies/instructions/contact fields are audited by their owner
+    // page using changed field names only; avoid copying their contents into the
+    // general audit log where accidental customer data could persist.
     $audit = $old !== $value && !in_array($key, $skip, true) && !str_ends_with($key, '_schema_v')
+        && !str_starts_with($key, 'support_chat_')
         && function_exists('sh_admin') && PHP_SAPI !== 'cli' && sh_admin() !== null;
     sh_query(
         'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)

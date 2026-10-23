@@ -211,6 +211,12 @@ Key guarantees:
 
 ---
 
+## AI Customer Support
+
+The customer chat, authorized order/catalogue assistance, human-support inbox, multilingual FAQ/policy settings and provider safeguards are integrated into the existing PHP/MySQL application. They require no worker or frontend build step. Deployment, backup, staging checks, provider testing, migration and rollback instructions are in [`docs/AI-CUSTOMER-SUPPORT.md`](docs/AI-CUSTOMER-SUPPORT.md).
+
+---
+
 ## Security
 
 - All queries use PDO prepared statements.
@@ -237,17 +243,14 @@ account.php orders.php order-details.php addresses.php wishlist.php
 password.php track.php support.php help.php page.php
 otp.php     phone-verification entry page (register/login/account/checkout)
 
-admin/      dashboard, products, categories, brands, coupons,
-            orders, payments, payment-methods, payment-gateways, customers,
-            telegram, whatsapp, messenger, email, notifications, settings, logs,
-            security (phone verification), otp-logs, security-logs
-api/        cart, search, checkout, orders, payment, notifications, otp
-config/     config.php, database.php (generated), mail.php
-includes/   header, footer, auth, admin-auth, functions, csrf, validation,
-            db, errors, cart, catalog, payment, notifications, partials
-assets/     css/app.css   ← the only stylesheet
-            js/app.js     ← the only script
-install/    the web installer
+admin/      dashboard, products, orders, payments, customers, settings,
+            notifications, AI Auto Work, support inbox and support settings
+api/        cart, search, checkout, orders, payment, notifications, otp, support
+ai/         existing provider adapters plus support-owned schema
+includes/   shared auth, roles/permissions, PDO, CSRF, validation, support services
+assets/     css/app.css plus page-specific support styles
+            js/app.js plus page-specific customer/admin support clients
+install/    web installer, additive support migration and rollback SQL
 ```
 
 ---

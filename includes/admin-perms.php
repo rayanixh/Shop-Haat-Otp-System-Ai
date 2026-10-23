@@ -23,6 +23,7 @@ function sh_perms_catalog(): array
         'Payments' => ['payments.view' => 'View payments', 'payments.verify' => 'Verify payments', 'payments.reject' => 'Reject payments', 'payments.refund' => 'Mark refunds (where supported)'],
         'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories & coupons'],
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
+        'Customer Support' => ['support.manage' => 'Manage customer-support inbox, replies, FAQs and policies'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],
         'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications', 'seo.manage' => 'SEO Manager: titles, descriptions, sitemap & search-engine settings'],
@@ -54,6 +55,10 @@ function sh_perms_default_roles(): array
             'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'payments.verify', 'payments.reject', 'payments.refund', 'customers.view', 'customers.details', 'reports.view', 'system.notifications']],
         ['slug' => 'product_manager', 'name' => 'Product Manager', 'description' => 'Manages the catalogue and inventory.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'products.view', 'products.create', 'products.edit', 'products.delete', 'products.stock', 'catalog.manage', 'reports.view', 'system.notifications', 'ai.use']],
+        ['slug' => 'support_agent', 'name' => 'Support Agent', 'description' => 'Handles customer-support conversations and handoff without access to AI provider credentials or store operations.', 'is_system' => 0,
+            'permissions' => ['dashboard.view', 'support.manage', 'system.notifications']],
+        // Existing support_staff roles are intentionally not elevated automatically.
+        // An owner can grant support.manage explicitly in Roles & Permissions.
         ['slug' => 'support_staff', 'name' => 'Support Staff', 'description' => 'Read-only access to orders, payments and customers.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'customers.view', 'customers.details', 'customers.orders', 'system.notifications']],
     ];
@@ -65,7 +70,24 @@ function sh_perms_schema_ensure(): void
     if ($done) { return; }
     $done = true;
     try {
-        if (sh_setting('admin_roles_schema_v', '') === '1') { return; }
+        if (sh_setting('admin_roles_schema_v', '') === '1') {
+            // Install the new least-privilege support role on older stores that
+            // already completed the general roles migration. Never rewrite an
+            // existing support_staff or owner-defined role.
+            $exists = sh_one("SELECT id FROM admin_roles WHERE slug = 'support_agent' LIMIT 1");
+            if ($exists === null) {
+                foreach (sh_perms_default_roles() as $role) {
+                    if ($role['slug'] !== 'support_agent') { continue; }
+                    sh_insert('admin_roles', [
+                        'slug' => $role['slug'], 'name' => $role['name'],
+                        'description' => $role['description'], 'is_system' => $role['is_system'],
+                        'permissions' => json_encode($role['permissions']),
+                    ]);
+                    break;
+                }
+            }
+            return;
+        }
         $pdo = sh_db();
         $pdo->exec("CREATE TABLE IF NOT EXISTS admin_roles (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -4,6 +4,8 @@
  * All InnoDB + utf8mb4 for shared-hosting compatibility.
  */
 
+require_once dirname(__DIR__) . '/ai/support-schema.php';
+
 function sh_schema_tables(): array
 {
     return [
@@ -16,6 +18,8 @@ function sh_schema_tables(): array
         'couriers', 'shipments', 'shipment_events', 'courier_test_results',
         'otp_verifications', 'security_logs', 'password_resets',
         'email_challenges', 'email_log',
+        'support_conversations', 'support_messages', 'support_handoff_events',
+        'support_faqs', 'support_ai_usage', 'support_rate_limits',
     ];
 }
 
@@ -529,7 +533,7 @@ function sh_schema_sql(): array
         KEY idx_applogs_created (created_at)
     ) $E";
 
-    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql());
+    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql(), sh_support_schema_sql());
 }
 
 /**

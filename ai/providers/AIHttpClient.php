@@ -8,6 +8,25 @@
  */
 final class AIHttpClient
 {
+    /** Optional per-request caps used by the support chat. */
+    private static ?array $requestLimits = null;
+
+    /** Temporarily bound a provider call without changing ordinary AI requests. */
+    public static function configureLimits(int $timeoutSeconds = 15, int $responseBytes = 65536): ?array
+    {
+        $previous = self::$requestLimits;
+        self::$requestLimits = [
+            'timeout' => max(1, min(60, $timeoutSeconds)),
+            'response_bytes' => max(1024, min(1048576, $responseBytes)),
+        ];
+        return $previous;
+    }
+
+    public static function restoreLimits(?array $previous): void
+    {
+        self::$requestLimits = $previous;
+    }
+
     /**
      * @param array<int,string> $headers  "Name: value" strings
      * @return array{ok:bool,status:int,json:?array,raw:string,error:string,retryable:bool}
@@ -17,47 +36,74 @@ final class AIHttpClient
         if (!preg_match('#^https?://#i', $url)) {
             return self::fail(0, 'The provider base URL is invalid.', false);
         }
+        $limits = self::$requestLimits;
+        if ($limits !== null) { $timeout = min($timeout, (int)$limits['timeout']); }
+        $maxResponseBytes = $limits['response_bytes'] ?? null;
         $body = $payload === null ? null : json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($payload !== null && $body === false) {
+            return self::fail(0, 'The AI request could not be encoded.', false);
+        }
         if ($payload !== null && $body !== null) { $headers[] = 'Content-Type: application/json'; }
         $headers[] = 'Accept: application/json';
         $headers[] = 'User-Agent: ShopHaat-AI/1.0';
 
-        $raw = ''; $status = 0; $netErr = ''; $timedOut = false;
+        $raw = ''; $status = 0; $timedOut = false; $tooLarge = false;
 
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
+            $options = [
+                CURLOPT_RETURNTRANSFER => $maxResponseBytes === null,
                 CURLOPT_CUSTOMREQUEST  => $method,
                 CURLOPT_HTTPHEADER     => $headers,
-                CURLOPT_TIMEOUT        => $timeout,
-                CURLOPT_CONNECTTIMEOUT => 15,
+                CURLOPT_TIMEOUT        => max(1, $timeout),
+                CURLOPT_CONNECTTIMEOUT => max(1, min(15, $timeout)),
                 CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_SSL_VERIFYHOST => 2,
                 CURLOPT_FOLLOWLOCATION => false,
-            ]);
+            ];
+            if ($maxResponseBytes !== null) {
+                $options[CURLOPT_WRITEFUNCTION] = static function ($handle, string $chunk) use (&$raw, &$tooLarge, $maxResponseBytes): int {
+                    $length = strlen($chunk);
+                    if (strlen($raw) + $length > $maxResponseBytes) { $tooLarge = true; return 0; }
+                    $raw .= $chunk;
+                    return $length;
+                };
+            }
+            curl_setopt_array($ch, $options);
             if ($body !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, $body); }
             $out = curl_exec($ch);
             $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $errno = curl_errno($ch);
-            $netErr = (string)curl_error($ch);
-            $timedOut = $errno === CURLE_OPERATION_TIMEOUTED;
+            $timedOut = defined('CURLE_OPERATION_TIMEOUTED') && $errno === CURLE_OPERATION_TIMEOUTED;
             curl_close($ch);
-            $raw = $out === false ? '' : (string)$out;
+            if ($maxResponseBytes === null) { $raw = $out === false ? '' : (string)$out; }
         } else {
             $ctx = stream_context_create(['http' => [
                 'method' => $method, 'header' => implode("\r\n", $headers),
-                'content' => $body ?? '', 'timeout' => $timeout, 'ignore_errors' => true,
+                'content' => $body ?? '', 'timeout' => max(1, $timeout), 'ignore_errors' => true,
+                'follow_location' => 0, 'max_redirects' => 0,
             ]]);
             set_error_handler(static fn(): bool => true);
-            try { $out = file_get_contents($url, false, $ctx); } finally { restore_error_handler(); }
-            $raw = $out === false ? '' : (string)$out;
+            try {
+                if ($maxResponseBytes === null) {
+                    $out = file_get_contents($url, false, $ctx);
+                    $raw = $out === false ? '' : (string)$out;
+                } else {
+                    $stream = fopen($url, 'rb', false, $ctx);
+                    $out = $stream === false ? false : stream_get_contents($stream, $maxResponseBytes + 1);
+                    if (is_resource($stream)) { fclose($stream); }
+                    $raw = $out === false ? '' : (string)$out;
+                    if (strlen($raw) > $maxResponseBytes) { $tooLarge = true; $raw = ''; }
+                }
+            } finally { restore_error_handler(); }
             if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
                 $status = (int)$m[1];
             }
-            if ($out === false) { $netErr = 'network'; }
         }
 
+        if ($tooLarge) {
+            return self::fail($status, 'The AI provider response exceeded the configured safety limit.', false);
+        }
         if ($status === 0) {
             return self::fail(0, $timedOut ? 'The AI provider timed out.' : 'Could not reach the AI provider.', true);
         }

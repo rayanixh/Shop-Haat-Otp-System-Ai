@@ -110,5 +110,8 @@ $fCats = $shCategories ?? sh_categories();
 
 <div class="sh-toasts" id="sh-toasts" aria-live="polite" aria-atomic="true"></div>
 <script src="<?= e(sh_asset('assets/js/app.js')) ?>" defer></script>
+<?php foreach (($pageScripts ?? []) as $src): ?>
+<script src="<?= e(sh_asset((string)$src)) ?>" defer></script>
+<?php endforeach; ?>
 </body>
 </html>

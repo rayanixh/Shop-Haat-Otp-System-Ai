@@ -12,6 +12,26 @@ $faqs = [
     ['Is my payment information safe?', 'We never ask for your PIN or OTP and we do not store card details. Only the transaction ID is recorded so that we can verify your payment.'],
 ];
 
+// When the support migration is installed, its enabled FAQs are also the Help
+// Centre source of truth. Keep the existing published copy as a safe fallback
+// so a partially upgraded store still renders without requiring support tables.
+try {
+    $supportFaqTableExists = (int)sh_val(
+        'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+        ['support_faqs'], 0
+    ) > 0;
+    if ($supportFaqTableExists) {
+        $configuredFaqs = sh_all('SELECT question_en, answer_en FROM support_faqs WHERE status = 1 ORDER BY sort_order ASC, id ASC');
+        $faqSeedMarker = (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'ai_support_faq_seeded_v' LIMIT 1", [], '');
+        if ($configuredFaqs || $faqSeedMarker === '1') {
+            $faqs = array_map(static fn(array $faq): array => [(string)$faq['question_en'], (string)$faq['answer_en']], $configuredFaqs);
+        }
+    }
+} catch (Throwable $e) {
+    // The legacy Help Centre copy remains visible when the optional FAQ table cannot be read.
+}
+
+
 // SEO: an owner-overridable page key, a real canonical and a breadcrumb.
 $pageSeoKey = 'help';
 $pageTitle = 'Help Centre';
@@ -25,6 +45,7 @@ require_once SH_ROOT . '/includes/header.php';
   <nav class="sh-breadcrumb"><a href="<?= e(sh_url('index.php')) ?>">Home</a> <?= sh_icon('chevron-right', 13) ?> <span aria-current="page">Help Centre</span></nav>
   <div class="sh-section" style="max-width:860px;margin:0 auto">
     <div class="sh-section__head"><h1 class="sh-section__title"><?= sh_icon('help', 18) ?> Help Centre</h1></div>
+    <?php if (!$faqs): ?><p style="font-size:13.5px;color:var(--sh-ink-2);line-height:1.75">There are no published help articles right now. Contact support if you need assistance.</p><?php endif; ?>
     <?php foreach ($faqs as $i => $f): ?>
       <details style="border-bottom:1px solid var(--sh-line-2);padding:12px 0" <?= $i === 0 ? 'open' : '' ?>>
         <summary style="font-weight:700;font-size:14px;cursor:pointer"><?= e($f[0]) ?></summary>

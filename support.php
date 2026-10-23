@@ -3,8 +3,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/notifications.php';
+require_once SH_ROOT . '/includes/ai-support.php';
 
 sh_session_start();
+$supportGuestToken = sh_support_guest_token();
+$pageStyles = ['assets/css/support.css'];
+$pageScripts = ['assets/js/support.js'];
 $sent = false;
 $errors = [];
 $user = null;
@@ -22,7 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       ->required('message', 'Message')->minLen('message', 10, 'Message')->maxLen('message', 2000, 'Message');
     $errors = $v->errors();
     if (!$errors) {
-        $to = (string)sh_setting('contact_email', '');
+        $to = trim(sh_support_setting('contact_email', ''));
+        if ($to === '') { $to = trim((string)sh_setting('contact_email', '')); }
         $body = "SUPPORT REQUEST\n" . str_repeat('-', 28) . "\n"
             . 'From: ' . $form['name'] . ' <' . $form['email'] . ">\n"
             . 'Subject: ' . $form['subject'] . "\n\n" . $form['message'];
@@ -33,8 +38,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sh_notify_log(null, 'email', 'support_request', 'sent', $to, null);
         } else {
             sh_notify_log(null, 'email', 'support_request', 'failed', $to, $res['error'] ?? 'Email not configured.');
+            $supportPhone = trim(sh_support_setting('contact_phone', ''));
+            if ($supportPhone === '') { $supportPhone = trim((string)sh_setting('contact_phone', '')); }
             $errors['general'] = 'We could not send your message automatically. Please email us directly at '
-                . ($to !== '' ? $to : 'our contact address') . ' or call ' . sh_setting('contact_phone', '') . '.';
+                . ($to !== '' ? $to : 'our contact address')
+                . ($supportPhone !== '' ? ' or call ' . $supportPhone : '') . '.';
         }
     }
 }
@@ -50,12 +58,67 @@ require_once SH_ROOT . '/includes/header.php';
 ?>
 <div class="sh-wrap">
   <nav class="sh-breadcrumb"><a href="<?= e(sh_url('index.php')) ?>">Home</a> <?= sh_icon('chevron-right', 13) ?> <span aria-current="page">Customer Support</span></nav>
+
+  <section class="sh-support-chat" data-support-chat
+           data-api="<?= e(sh_url('api/support.php')) ?>"
+           data-csrf="<?= e(sh_csrf_token()) ?>"
+           aria-labelledby="sh-support-chat-title">
+    <div class="sh-support-chat__heading">
+      <div>
+        <p class="sh-support-chat__eyebrow">Private customer support</p>
+        <h1 id="sh-support-chat-title">Chat with ShopHaat Support</h1>
+        <p class="sh-support-chat__intro">Messages are saved to this browser session or your signed-in account. Never send an OTP, PIN, password or full card details.</p>
+      </div>
+      <p class="sh-support-chat__status" data-chat-status role="status" aria-live="polite">Loading support status…</p>
+    </div>
+
+    <div class="sh-support-chat__controls">
+      <p class="sh-support-chat__ai-note" data-ai-note></p>
+      <label class="sh-support-chat__language" for="sh-support-language">Language
+        <select class="sh-select" id="sh-support-language" data-language>
+          <option value="en">English</option>
+          <option value="bn">বাংলা</option>
+          <option value="banglish">Banglish</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="sh-support-chat__alert" data-chat-error role="alert" hidden></div>
+    <div class="sh-support-chat__empty" data-chat-empty hidden>
+      <p data-empty-copy>Start a private conversation to ask about verified products, saved help articles or an order linked to your account/browser session.</p>
+      <button class="sh-btn" type="button" data-chat-open><?= sh_icon('message', 16) ?> Start a chat</button>
+    </div>
+
+    <div class="sh-support-chat__history" data-chat-history hidden>
+      <div class="sh-support-chat__thread-head">
+        <div><strong data-thread-title>Conversation</strong><span data-thread-state></span></div>
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-chat-new hidden>Start a new conversation</button>
+      </div>
+      <button class="sh-btn sh-btn--sm sh-btn--ghost sh-support-chat__older" type="button" data-load-older hidden>Load older messages</button>
+      <ol class="sh-support-chat__messages" data-chat-messages aria-live="polite" aria-relevant="additions text"></ol>
+      <div class="sh-support-chat__actions" data-chat-actions>
+        <p class="sh-support-chat__handoff-note" data-handoff-note></p>
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-handoff>Request human support</button>
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-chat-delete hidden>Delete resolved conversation</button>
+      </div>
+      <form class="sh-support-chat__compose" data-chat-form>
+        <label class="sh-support-chat__message-label" for="sh-support-message">Your message</label>
+        <textarea class="sh-textarea" id="sh-support-message" data-chat-input rows="2" maxlength="2000" placeholder="Write a message…" required></textarea>
+        <div class="sh-support-chat__compose-foot">
+          <span class="sh-support-chat__counter" data-char-count>0 / 2,000</span>
+          <button class="sh-btn" type="submit" data-chat-send><?= sh_icon('send', 15) ?> Send</button>
+        </div>
+      </form>
+      <div class="sh-support-chat__disabled" data-chat-disabled hidden></div>
+    </div>
+  </section>
+
   <div class="sh-cartlayout">
     <div class="sh-section">
-      <div class="sh-section__head"><h1 class="sh-section__title"><?= sh_icon('headphones', 18) ?> Contact Support</h1></div>
+      <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('headphones', 18) ?> Contact Support</h2></div>
       <?php if ($sent): ?>
         <div class="sh-alert sh-alert--success"><?= sh_icon('check-circle', 16) ?>
-          <span>Thank you — your message has been sent. Our team usually replies within one working day.</span></div>
+          <span>Thank you — the store’s configured email system accepted your message. This page does not promise a response time.</span></div>
       <?php endif; ?>
       <?php if ($errors): ?>
         <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?>
@@ -78,12 +141,21 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
     <aside class="sh-summary">
       <h2 class="sh-summary__title">Other ways to reach us</h2>
-      <p style="font-size:13.3px;line-height:2;color:var(--sh-ink-2)">
-        <?= sh_icon('phone', 14) ?> <?= e(sh_setting('contact_phone', '')) ?><br>
-        <?= sh_icon('mail', 14) ?> <?= e(sh_setting('contact_email', '')) ?><br>
-        <?= sh_icon('map-pin', 14) ?> <?= e(sh_setting('contact_address', '')) ?>
-      </p>
-      <p style="font-size:12.5px;color:var(--sh-muted);margin-top:10px">Support hours: Saturday to Thursday, 9:00 AM – 8:00 PM.</p>
+      <?php $supportPhone = trim(sh_support_setting('contact_phone', ''));
+      if ($supportPhone === '') { $supportPhone = trim((string)sh_setting('contact_phone', '')); }
+      $supportEmail = trim(sh_support_setting('contact_email', ''));
+      if ($supportEmail === '') { $supportEmail = trim((string)sh_setting('contact_email', '')); }
+      $supportContacts = array_filter([
+          'phone' => $supportPhone,
+          'mail' => $supportEmail,
+          'map-pin' => trim((string)sh_setting('contact_address', '')),
+      ], static fn(string $value): bool => $value !== ''); ?>
+      <?php if ($supportContacts): ?><ul class="sh-support-contact-list">
+        <?php foreach ($supportContacts as $icon => $value): ?><li><?= sh_icon($icon, 14) ?><span><?= e($value) ?></span></li><?php endforeach; ?>
+      </ul><?php else: ?><p class="sh-support-muted">The store has not published phone, email or address details here.</p><?php endif; ?>
+      <?php $supportHours = trim(sh_support_setting('hours', '')); ?>
+      <?php if ($supportHours !== ''): ?><p class="sh-support-muted"><strong>Support hours:</strong> <?= e($supportHours) ?></p>
+      <?php else: ?><p class="sh-support-muted">No support hours are configured. Chat does not indicate live staff availability or promise a response time.</p><?php endif; ?>
     </aside>
   </div>
 </div>
