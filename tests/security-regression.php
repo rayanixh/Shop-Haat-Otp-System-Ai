@@ -2173,7 +2173,9 @@ sh_t('the starter catalogue is idempotent and cannot be re-created by a normal r
     if (!str_contains($src, "SELECT id FROM ' . \$table . ' WHERE ' . \$column . ' = ? LIMIT 1")) {
         return 'the seeder has no by-key lookup helper';
     }
-    foreach (['categories', 'brands', 'products', 'promo_slides'] as $table) {
+    // (Brands are not seeded at all — the store has no brand system; the
+    // DB-backed installer suite asserts the seeded brand count stays zero.)
+    foreach (['categories', 'products', 'promo_slides'] as $table) {
         if (preg_match('~\\$find\\(\\$pdo, \'' . $table . '\'~', $src) !== 1) {
             return 'the seeder never checks ' . $table . ' for an existing row';
         }
