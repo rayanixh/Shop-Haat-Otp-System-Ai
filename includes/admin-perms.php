@@ -23,6 +23,7 @@ function sh_perms_catalog(): array
         'Payments' => ['payments.view' => 'View payments', 'payments.verify' => 'Verify payments', 'payments.reject' => 'Reject payments', 'payments.refund' => 'Mark refunds (where supported)'],
         'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories & coupons'],
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
+        'Customer Support' => ['support.view' => 'View support inbox and conversations', 'support.reply' => 'Reply, take over, assign, and update conversations', 'support.manage' => 'Manage support settings, FAQs, AI test, and retention'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],
         'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications', 'seo.manage' => 'SEO Manager: titles, descriptions, sitemap & search-engine settings'],
@@ -49,13 +50,13 @@ function sh_perms_default_roles(): array
     return [
         ['slug' => 'super_admin', 'name' => 'Super Admin', 'description' => 'Full access to every module, including admins, roles and backups.', 'is_system' => 1, 'permissions' => sh_perms_all()],
         ['slug' => 'order_manager', 'name' => 'Order Manager', 'description' => 'Handles orders, shipping and customer verification.', 'is_system' => 0,
-            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'orders.update_status', 'orders.cancel', 'customers.view', 'customers.details', 'customers.orders', 'verification.courier', 'verification.ip', 'verification.location', 'reports.view', 'system.notifications']],
+            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'orders.update_status', 'orders.cancel', 'customers.view', 'customers.details', 'customers.orders', 'verification.courier', 'verification.ip', 'verification.location', 'reports.view', 'system.notifications', 'support.view', 'support.reply']],
         ['slug' => 'payment_manager', 'name' => 'Payment Manager', 'description' => 'Verifies and rejects payments.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'payments.verify', 'payments.reject', 'payments.refund', 'customers.view', 'customers.details', 'reports.view', 'system.notifications']],
         ['slug' => 'product_manager', 'name' => 'Product Manager', 'description' => 'Manages the catalogue and inventory.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'products.view', 'products.create', 'products.edit', 'products.delete', 'products.stock', 'catalog.manage', 'reports.view', 'system.notifications', 'ai.use']],
-        ['slug' => 'support_staff', 'name' => 'Support Staff', 'description' => 'Read-only access to orders, payments and customers.', 'is_system' => 0,
-            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'customers.view', 'customers.details', 'customers.orders', 'system.notifications']],
+        ['slug' => 'support_staff', 'name' => 'Support Staff', 'description' => 'Handles customer conversations with read-only access to orders, payments and customers.', 'is_system' => 0,
+            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'customers.view', 'customers.details', 'customers.orders', 'system.notifications', 'support.view', 'support.reply']],
     ];
 }
 

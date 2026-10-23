@@ -108,7 +108,10 @@ $fCats = $shCategories ?? sh_categories();
   <a href="<?= e(sh_url('account.php')) ?>"><?= sh_icon('user', 20) ?><span>Account</span></a>
 </nav>
 
+<?php if (function_exists('sh_setting') && sh_setting('support_enabled', '1') === '1') { include __DIR__ . '/support-widget.php'; } ?>
+
 <div class="sh-toasts" id="sh-toasts" aria-live="polite" aria-atomic="true"></div>
 <script src="<?= e(sh_asset('assets/js/app.js')) ?>" defer></script>
+<?php if (function_exists('sh_setting') && sh_setting('support_enabled', '1') === '1'): ?><script src="<?= e(sh_asset('assets/js/support-chat.js')) ?>" defer></script><?php endif; ?>
 </body>
 </html>

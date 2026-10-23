@@ -2959,3 +2959,93 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-aicreate__side { order: -1; }
   .sh-aicreate__image { max-width: 260px; }
 }
+
+/* ==========================================================================
+   38. SUPPORT CHAT (storefront widget)
+   The launcher is fixed, but the panel itself is absolutely positioned in
+   the page flow (JS pins it to the current scroll offset) and grows with
+   the conversation — the page scrolls, never an inner box.
+   ========================================================================== */
+.sh-schat-fab {
+  position: fixed; right: 16px; bottom: 16px; z-index: 180;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--sh-brand); color: #fff; border: 0; border-radius: 999px;
+  padding: 11px 18px; font: inherit; font-weight: 600; font-size: 14px;
+  box-shadow: 0 8px 24px rgba(20, 26, 40, .25); cursor: pointer;
+}
+.sh-schat-fab:hover, .sh-schat-fab:focus-visible { background: var(--sh-brand-dark); }
+.sh-schat-fab:focus-visible { outline: 2px solid var(--sh-accent); outline-offset: 2px; }
+.sh-schat-badge {
+  background: #fff; color: var(--sh-brand-dark); border-radius: 999px;
+  min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+}
+.sh-schat-sheet {
+  position: absolute; right: 16px; z-index: 190; width: min(400px, calc(100vw - 24px));
+  background: var(--sh-surface); border: 1px solid var(--sh-line); border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(20, 26, 40, .28); padding: 14px;
+}
+.sh-schat-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.sh-schat-headmain { flex: 1 1 auto; min-width: 0; }
+.sh-schat-headmain h2 { display: flex; align-items: center; gap: 7px; font-size: 17px; margin: 0 0 3px; color: var(--sh-heading); }
+.sh-schat-sub { margin: 0; font-size: 12.5px; color: var(--sh-muted); line-height: 1.45; }
+.sh-schat-headactions { display: flex; gap: 6px; }
+.sh-schat-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  background: var(--sh-bg-2); border: 1px solid var(--sh-line); border-radius: 9px; color: var(--sh-ink-2); cursor: pointer;
+}
+.sh-schat-iconbtn:hover, .sh-schat-iconbtn:focus-visible { background: var(--sh-line-2); }
+.sh-schat-messages { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 10px; }
+.sh-schat-msg { max-width: 88%; }
+.sh-schat-msg.is-customer { align-self: flex-end; }
+.sh-schat-msg.is-assistant, .sh-schat-msg.is-agent { align-self: flex-start; }
+.sh-schat-meta { display: flex; gap: 7px; align-items: baseline; font-size: 11.5px; color: var(--sh-muted); margin: 0 4px 3px; }
+.sh-schat-msg.is-customer .sh-schat-meta { flex-direction: row-reverse; }
+.sh-schat-who { font-weight: 600; }
+.sh-schat-bubble {
+  background: var(--sh-bg-2); border: 1px solid var(--sh-line-2); border-radius: 12px;
+  padding: 9px 12px; font-size: 14px; line-height: 1.55; color: var(--sh-ink);
+  overflow-wrap: anywhere; white-space: normal;
+}
+.sh-schat-msg.is-customer .sh-schat-bubble { background: var(--sh-brand-soft); border-color: #f6d9cd; }
+.sh-schat-msg.is-agent .sh-schat-bubble { background: var(--sh-accent-soft); border-color: #d5e1f2; }
+.sh-schat-msg.is-pending .sh-schat-bubble { opacity: .65; }
+.sh-schat-msg.is-failed .sh-schat-bubble { border-color: var(--sh-bad); }
+.sh-schat-link { color: var(--sh-brand-dark); font-weight: 600; text-decoration: underline; }
+.sh-schat-retry {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--sh-brand-dark);
+  background: #fff; border: 1px solid var(--sh-brand-dark); border-radius: 7px; padding: 3px 12px; margin-top: 6px; cursor: pointer;
+}
+.sh-schat-notice {
+  align-self: center; text-align: center; font-size: 12.5px; color: var(--sh-ink-2);
+  background: var(--sh-warn-soft); border: 1px solid #f0dfba; border-radius: 10px; padding: 8px 12px; max-width: 95%;
+}
+.sh-schat-dots { letter-spacing: 3px; font-weight: 700; color: var(--sh-muted); }
+.sh-schat-suggest { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.sh-schat-chip {
+  font: inherit; font-size: 13px; background: #fff; color: var(--sh-accent);
+  border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 13px; cursor: pointer;
+}
+.sh-schat-chip:hover, .sh-schat-chip:focus-visible { border-color: var(--sh-accent); background: var(--sh-accent-soft); }
+.sh-schat-form { display: flex; gap: 8px; align-items: stretch; }
+.sh-schat-input {
+  flex: 1 1 auto; min-width: 0; font: inherit; font-size: 14px; color: var(--sh-ink);
+  border: 1px solid var(--sh-line); border-radius: 10px; padding: 9px 11px; background: #fff; resize: vertical;
+}
+.sh-schat-input:focus { border-color: var(--sh-brand); outline: 2px solid var(--sh-brand-soft); }
+.sh-schat-send { flex: 0 0 auto; align-self: stretch; display: inline-flex; align-items: center; gap: 6px; }
+.sh-schat-status { min-height: 18px; margin: 7px 2px 0; font-size: 12.5px; color: var(--sh-muted); }
+.sh-schat-status.is-error { color: var(--sh-bad); }
+.sh-schat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.sh-schat-handoff {
+  display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--sh-accent); background: var(--sh-accent-soft); border: 1px solid #d5e1f2;
+  border-radius: 999px; padding: 6px 13px; cursor: pointer;
+}
+.sh-schat-handoff:hover, .sh-schat-handoff:focus-visible { border-color: var(--sh-accent); }
+.sh-schat-avail { font-size: 12.5px; color: var(--sh-muted); }
+@media (max-width: 900px) {
+  /* Clear the mobile bottom navigation bar. */
+  .sh-schat-fab { bottom: 74px; right: 12px; padding: 10px 15px; }
+  .sh-schat-sheet { right: 8px; left: 8px; width: auto; }
+}

@@ -605,6 +605,113 @@ function sh_courier_schema_sql(): array
         ) $E",
 
         sh_courier_test_results_sql(),
+        ...sh_support_schema_sql(),
+    ];
+}
+
+/**
+ * AI Customer Support tables (conversations, messages, events, FAQs, rate
+ * buckets, daily usage counters).
+ *
+ * Additive only. Created by CREATE TABLE IF NOT EXISTS from both the
+ * installer and the lazy schema ensure in includes/support.php, so an
+ * existing store gains them without touching customers, orders or products.
+ * Rollback (see docs/ai-support.md): remove the six support_ tables in
+ * reverse dependency order (usage, rate, faqs, events, messages,
+ * conversations). No other table references them.
+ */
+function sh_support_schema_sql(): array
+{
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return [
+        "CREATE TABLE IF NOT EXISTS support_conversations (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            user_id INT UNSIGNED DEFAULT NULL,
+            guest_token_hash CHAR(64) DEFAULT NULL,
+            customer_name VARCHAR(120) NOT NULL DEFAULT '',
+            customer_email VARCHAR(190) NOT NULL DEFAULT '',
+            customer_phone VARCHAR(30) NOT NULL DEFAULT '',
+            status ENUM('open','pending','resolved','closed') NOT NULL DEFAULT 'open',
+            assigned_admin_id INT UNSIGNED DEFAULT NULL,
+            ai_paused TINYINT(1) NOT NULL DEFAULT 0,
+            lang VARCHAR(10) NOT NULL DEFAULT 'en',
+            last_product_id INT UNSIGNED DEFAULT NULL,
+            last_order_number VARCHAR(30) DEFAULT NULL,
+            context_summary TEXT NULL,
+            unread_admin INT UNSIGNED NOT NULL DEFAULT 0,
+            unread_customer INT UNSIGNED NOT NULL DEFAULT 0,
+            last_message_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_supconv_user (user_id, last_message_at),
+            KEY idx_supconv_guest (guest_token_hash),
+            KEY idx_supconv_status (status, last_message_at),
+            KEY idx_supconv_assigned (assigned_admin_id, status),
+            CONSTRAINT fk_supconv_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+            CONSTRAINT fk_supconv_admin FOREIGN KEY (assigned_admin_id) REFERENCES admins (id) ON DELETE SET NULL,
+            CONSTRAINT fk_supconv_product FOREIGN KEY (last_product_id) REFERENCES products (id) ON DELETE SET NULL
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS support_messages (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            conversation_id BIGINT UNSIGNED NOT NULL,
+            sender ENUM('customer','ai','admin','system') NOT NULL,
+            admin_id INT UNSIGNED DEFAULT NULL,
+            visibility ENUM('public','internal') NOT NULL DEFAULT 'public',
+            body TEXT NOT NULL,
+            lang VARCHAR(10) NOT NULL DEFAULT '',
+            client_msg_id VARCHAR(64) DEFAULT NULL,
+            facts_json TEXT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_supmsg_client (conversation_id, client_msg_id),
+            KEY idx_supmsg_conv (conversation_id, id),
+            CONSTRAINT fk_supmsg_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE CASCADE,
+            CONSTRAINT fk_supmsg_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS support_events (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            conversation_id BIGINT UNSIGNED NOT NULL,
+            admin_id INT UNSIGNED DEFAULT NULL,
+            event VARCHAR(40) NOT NULL,
+            detail VARCHAR(255) DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_supevt_conv (conversation_id, id),
+            CONSTRAINT fk_supevt_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE CASCADE,
+            CONSTRAINT fk_supevt_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS support_faqs (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            title VARCHAR(160) NOT NULL,
+            keywords VARCHAR(500) NOT NULL DEFAULT '',
+            answer_bn TEXT NULL,
+            answer_banglish TEXT NULL,
+            answer_en TEXT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            status TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_supfaq_status (status, sort_order)
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS support_rate (
+            bucket VARCHAR(160) NOT NULL,
+            window_start INT UNSIGNED NOT NULL DEFAULT 0,
+            hits INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (bucket)
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS support_usage_daily (
+            day DATE NOT NULL,
+            customer_messages INT UNSIGNED NOT NULL DEFAULT 0,
+            ai_requests INT UNSIGNED NOT NULL DEFAULT 0,
+            ai_errors INT UNSIGNED NOT NULL DEFAULT 0,
+            fallback_replies INT UNSIGNED NOT NULL DEFAULT 0,
+            admin_replies INT UNSIGNED NOT NULL DEFAULT 0,
+            handoffs INT UNSIGNED NOT NULL DEFAULT 0,
+            rate_limited INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (day)
+        ) $E",
     ];
 }
 
