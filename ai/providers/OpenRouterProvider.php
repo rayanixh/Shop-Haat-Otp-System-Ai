@@ -115,7 +115,7 @@ class OpenRouterProvider extends OpenAICompatibleProvider
             return $this->testIncomplete('No API key is saved for ' . $this->name() . '.',
                 'Paste the OpenRouter key, save it, then test again.');
         }
-        $res = AIHttpClient::get($this->baseUrl() . '/auth/key', $this->headers(), 20);
+        $res = AIHttpClient::get($this->baseUrl() . '/auth/key', $this->headers(), 12);
         if (!$res['ok']) { return $this->testHttpFailure($res, '', 'OpenRouter'); }
 
         $d = $res['json']['data'] ?? [];
@@ -143,7 +143,7 @@ class OpenRouterProvider extends OpenAICompatibleProvider
             'max_tokens' => 64,
         ];
         $chat = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(),
-            $this->decorateChatPayload($payload), 20);
+            $this->decorateChatPayload($payload), 15);
         if (!$chat['ok']) { return $this->testHttpFailure($chat, $model, 'OpenRouter'); }
         $j = $chat['json'];
         $choice = $j['choices'][0] ?? [];

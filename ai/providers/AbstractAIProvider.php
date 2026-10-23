@@ -161,6 +161,9 @@ abstract class AbstractAIProvider implements AIProviderInterface
         $code   = AIHttpClient::classify($status);
         $what   = $what !== '' ? $what : $this->name();
         $detail = trim((string)($http['error'] ?? ''));
+        // Status 0 means "no HTTP response"; a curl timeout is still a timeout,
+        // not a generic network failure, and the admin hint differs.
+        if ($status === 0 && stripos($detail, 'timed out') !== false) { $code = 'timeout'; }
 
         [$msg, $next] = match ($code) {
             'network_error' => ['Could not reach ' . $what . '. No HTTP response was received.',

@@ -103,7 +103,7 @@ class AnthropicProvider extends AbstractAIProvider
             'messages'   => [['role' => 'user', 'content' => 'Reply with the single word: ready']],
             'temperature' => 0,
         ];
-        $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, 20);
+        $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, 15);
         if (!$res['ok']) { return $this->testHttpFailure($res, $model, 'Anthropic Claude'); }
 
         $j = $res['json'];

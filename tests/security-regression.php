@@ -3096,6 +3096,7 @@ sh_t('the test endpoint returns the real outcome instead of a bare failure', fun
 sh_t('the Providers screen never renders a stored key', function () {
     $page = (string)file_get_contents(SH_ROOT . '/admin/ai/providers.php');
     if (!str_contains($page, 'sh_ai_provider_masked_key($editing)')) { return 'the edit form does not show the masked key'; }
+    if (!str_contains($page, 'sh_ai_provider_masked_key($p)')) { return 'the card does not show the masked key'; }
     if (preg_match('/value="<\?=\s*e\(\$[^)]*\[.api_key.\]/', $page)) { return 'a stored key is printed into an input value'; }
     if (!str_contains($page, 'type="password"')) { return 'the key field is not a password input'; }
     if (!str_contains($page, 'data-modal-open="sh-aiprov-add"')) { return 'there is no Add provider action'; }
@@ -3130,6 +3131,27 @@ sh_t('the redesigned provider cards have a responsive grid and no fixed heights'
     if (preg_match('/\.sh-aiprov(?:::?[a-z_-]+)?\s*\{[^}]*height:\s*\d/', $block)) { return 'a provider card has a fixed height'; }
     if (preg_match('/\.sh-aiprov__meta\s*\{[^}]*height:\s*\d/', $block)) { return 'the metadata grid has a fixed height'; }
     if (preg_match('/gradient\(/i', $block)) { return 'the provider styles use a gradient'; }
+    return true;
+});
+
+sh_t('the AI navigation is one compact tab bar and the card test area is flat', function () {
+    $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
+    if (!preg_match('/\.sh-aisubnav\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/', $css)) {
+        return 'the AI sub-navigation is not a single scrollable tab bar';
+    }
+    if (str_contains($css, '.sh-aisubnav { display: grid;')) {
+        return 'the old multi-row mobile navigation grid is back';
+    }
+    $start = strpos($css, '.sh-aiprov__test {');
+    $rule = $start === false ? '' : substr($css, $start, 220);
+    if (!str_contains($rule, 'border-top:')) { return 'the provider test area has no flat divider'; }
+    if (str_contains($rule, 'background:')) { return 'the provider test area is a nested card again'; }
+    $nav = (string)file_get_contents(SH_ROOT . '/admin/ai/_ai.php');
+    if (!str_contains($nav, 'aria-current="page"')) { return 'the active AI section is not announced'; }
+    foreach (['index.php', 'products.php', 'bulk.php', 'blog.php', 'category.php', 'seo.php',
+              'image.php', 'history.php', 'providers.php', 'models.php', 'settings.php'] as $file) {
+        if (!str_contains($nav, "'" . $file . "'")) { return 'the AI navigation lost ' . $file; }
+    }
     return true;
 });
 
@@ -3184,8 +3206,9 @@ sh_t('every required courier has a provider-specific probe', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
     foreach ([
         "sh_courier_probe_steadfast" => "sh_steadfast_base_url(\$creds) . '/get_balance'",
-        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/external/login'",
+        "sh_courier_probe_pathao"    => "'/aladdin/api/v1/issue-token'",
         "sh_courier_probe_ecourier"  => "'/city-list'",
+        "sh_courier_probe_redx"      => "'/pickup/stores'",
     ] as $fn => $needle) {
         $start = strpos($src, 'function ' . $fn . '(');
         $end = $start === false ? false : strpos($src, "\n}\n", $start);
@@ -3198,7 +3221,7 @@ sh_t('every required courier has a provider-specific probe', function () {
 
 sh_t('an HTTP 200 web page is never accepted as a provider answer', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
-    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier'] as $fn) {
+    foreach (['sh_courier_probe_steadfast', 'sh_courier_probe_pathao', 'sh_courier_probe_ecourier', 'sh_courier_probe_redx'] as $fn) {
         $start = strpos($src, 'function ' . $fn . '(');
         $end = $start === false ? false : strpos($src, "\n}\n", $start);
         if ($start === false || $end === false) { return $fn . '() could not be read'; }
@@ -3218,20 +3241,50 @@ sh_t('an HTTP 200 web page is never accepted as a provider answer', function () 
     return true;
 });
 
-sh_t('a Pathao test uses client credentials and verifies the stored store', function () {
+sh_t('a Pathao test uses the official password-grant token flow and verifies the stored store', function () {
     $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    // The credential form must collect everything the grant needs.
+    foreach (["'client_id' => 'Client ID'", "'client_secret' => 'Client Secret'",
+              "'username' => 'Merchant Username'", "'password' => 'Merchant Password'",
+              "'store_id' => 'Store ID'"] as $field) {
+        if (!str_contains($src, $field)) { return 'the Pathao credential set is missing ' . $field; }
+    }
     $start = strpos($src, 'function sh_courier_probe_pathao(');
     $end = $start === false ? false : strpos($src, "\n}\n", $start);
     if ($start === false || $end === false) { return 'the Pathao probe could not be read'; }
     $fn = substr($src, $start, $end - $start);
-    foreach (['client_id', 'client_secret', 'access_token', '/aladdin/api/v1/stores', 'store_id'] as $needle) {
+    foreach (['client_id', 'client_secret', "'grant_type'", 'username', 'password',
+              'access_token', '/aladdin/api/v1/stores', 'store_id', "'authentication_failed'"] as $needle) {
         if (!str_contains($fn, $needle)) { return 'the Pathao probe is missing ' . $needle; }
     }
-    if (str_contains($fn, 'username') || str_contains($fn, 'password')) {
-        return 'the probe asks for username/password, which the official client_credentials flow does not need';
-    }
+    if (!str_contains($fn, "'password'")) { return 'the probe does not send the password grant'; }
+    if (str_contains($fn, 'external/login')) { return 'the probe still calls the undocumented external/login endpoint'; }
     if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
         return 'a missing or unknown store is not reported as configuration incomplete';
+    }
+    return true;
+});
+
+sh_t('a RedX test validates the access token against the pickup stores', function () {
+    $src = (string)file_get_contents(SH_ROOT . '/includes/courier.php');
+    $start = strpos($src, 'function sh_courier_probe_redx(');
+    $end = $start === false ? false : strpos($src, "\n}\n", $start);
+    if ($start === false || $end === false) { return 'the RedX probe could not be read'; }
+    $fn = substr($src, $start, $end - $start);
+    foreach (['API-ACCESS-TOKEN', 'Bearer ', 'pickup_stores'] as $needle) {
+        if (!str_contains($fn, $needle)) { return 'the RedX probe is missing ' . $needle; }
+    }
+    if (!str_contains($src, 'https://openapi.redx.com.bd/v1.0.0-beta')) {
+        return 'the RedX probe does not default to the OpenAPI host';
+    }
+    if (str_contains($fn, "'/parcel'") || str_contains($fn, '/parcel/track')) {
+        return 'the RedX probe goes beyond the read-only store list';
+    }
+    if (!str_contains($fn, "'configuration_incomplete'") && !str_contains($fn, 'sh_courier_test_incomplete')) {
+        return 'a token without pickup stores is not reported as configuration incomplete';
+    }
+    if (!str_contains($src, 'return [\'steadfast\', \'pathao\', \'ecourier\', \'paperfly\', \'redx\'];')) {
+        return 'RedX is not registered as a testable driver';
     }
     return true;
 });

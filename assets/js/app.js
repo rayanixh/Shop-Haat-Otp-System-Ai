@@ -981,11 +981,14 @@
   function busy(btn, on, label) {
     if (!btn) return;
     if (on) {
-      btn.dataset.prev = btn.innerHTML;
+      // Store the idle label once. A second busy() call must never record the
+      // "Testing…" label as the thing to restore — that is how a button ends
+      // up stuck showing it forever.
+      if (!btn.dataset.prev) btn.dataset.prev = btn.innerHTML;
       btn.innerHTML = label || 'Generating…';
       btn.disabled = true;
     } else {
-      if (btn.dataset.prev) btn.innerHTML = btn.dataset.prev;
+      if (btn.dataset.prev) { btn.innerHTML = btn.dataset.prev; delete btn.dataset.prev; }
       btn.disabled = false;
     }
   }
@@ -994,9 +997,10 @@
      One button, one card, one explicit state. The request is aborted after
      45 seconds so the label can never stay on "Testing…"; every path (ok,
      provider failure, network failure, timeout) writes a visible result and
-     re-enables the button. The server-side probes use 15-20 second timeouts
-     each, so a normal two-call probe (model check + chat) still finishes
-     before the browser gives up and the stored result matches what is shown. */
+     re-enables the button. The server-side probes allow 12-15 seconds per
+     call, so even a two-step probe (read-only check + one tiny reply) stays
+     well inside a typical PHP time limit and finishes before the browser
+     gives up — the stored result then matches what is shown. */
   function testToneClass(tone) {
     return tone === 'ok' ? 'is-ok' : (tone === 'bad' ? 'is-bad' : 'is-warn');
   }
@@ -1038,6 +1042,14 @@
     }, 45000);
 
     busy(btn, true, 'Testing…');
+    // Say what is happening inside the card as well, so a slow provider reads
+    // as "in progress" instead of looking stuck.
+    var live = card ? card.querySelector('[data-ai-test-result]') : null;
+    if (live) {
+      live.hidden = false;
+      live.className = 'sh-aiprov__live is-warn';
+      live.textContent = 'Testing — one or two read-only requests. This usually takes a few seconds.';
+    }
     api({ action: 'test_connection', provider_id: pid }, ctrl ? { signal: ctrl.signal } : null)
       .then(function (j) {
         showTestResult(card, j);
@@ -1057,6 +1069,22 @@
       });
   }
   window.shAiTestProvider = runProviderTest;
+
+  /* A page restored from the browser's back/forward cache keeps the DOM
+     exactly as it was frozen — including a button that was disabled in the
+     middle of a test. Nothing runs on restore, so without this the card
+     would sit on "Testing…" forever. Stand any such button down; the stored
+     result from the server is what the card already shows. */
+  window.addEventListener('pageshow', function (ev) {
+    if (!ev.persisted) { return; }
+    document.querySelectorAll('[data-ai-test][data-testing]').forEach(function (b) {
+      b.removeAttribute('data-testing');
+      busy(b, false);
+      var c = b.closest('[data-ai-card]');
+      var l = c ? c.querySelector('[data-ai-test-result]') : null;
+      if (l) { l.hidden = true; l.textContent = ''; }
+    });
+  });
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {

@@ -39,7 +39,7 @@ class OpenAIProvider extends OpenAICompatibleProvider
         $model = trim($this->model([]));
         if ($model === '') { return parent::testConnection(); }
 
-        $check = AIHttpClient::get($this->baseUrl() . '/models/' . rawurlencode($model), $this->headers(), 15);
+        $check = AIHttpClient::get($this->baseUrl() . '/models/' . rawurlencode($model), $this->headers(), 12);
         if (!$check['ok']) {
             if ((int)($check['status'] ?? 0) === 404) {
                 return $this->testResult(false, 'model_not_found',
