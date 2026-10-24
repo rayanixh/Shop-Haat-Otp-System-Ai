@@ -140,9 +140,7 @@ $owner = sh_support_owner_context(
 if ($method === 'POST') { sh_csrf_require(); }
 
 if ($method === 'GET' && $action === 'state') {
-    $language = (string)($_GET['language'] ?? 'en');
-    if (!in_array($language, ['en', 'bn', 'banglish'], true)) { $language = 'en'; }
-    sh_json(sh_support_customer_state($owner, $language));
+    sh_json(sh_support_customer_state($owner));
 }
 
 if ($method === 'POST' && $action === 'open') {

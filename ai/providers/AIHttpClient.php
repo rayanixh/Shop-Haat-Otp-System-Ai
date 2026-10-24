@@ -11,6 +11,12 @@ final class AIHttpClient
     /** Optional per-request caps used by the support chat. */
     private static ?array $requestLimits = null;
 
+    /** Identify the actual PHP transport selected for provider calls. */
+    public static function transportName(): string
+    {
+        return function_exists('curl_init') ? 'cURL' : 'PHP HTTP streams';
+    }
+
     /** Temporarily bound a provider call without changing ordinary AI requests. */
     public static function configureLimits(int $timeoutSeconds = 15, int $responseBytes = 65536): ?array
     {
@@ -47,7 +53,7 @@ final class AIHttpClient
         $headers[] = 'Accept: application/json';
         $headers[] = 'User-Agent: ShopHaat-AI/1.0';
 
-        $raw = ''; $status = 0; $timedOut = false; $tooLarge = false; $streamError = '';
+        $raw = ''; $status = 0; $timedOut = false; $tooLarge = false; $streamError = ''; $curlErrno = 0;
 
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
@@ -73,12 +79,12 @@ final class AIHttpClient
             if ($body !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, $body); }
             $out = curl_exec($ch);
             $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $errno = curl_errno($ch);
+            $curlErrno = curl_errno($ch);
             $timeoutErrnos = [];
             foreach (['CURLE_OPERATION_TIMEDOUT', 'CURLE_OPERATION_TIMEOUTED'] as $constant) {
                 if (defined($constant)) { $timeoutErrnos[] = (int)constant($constant); }
             }
-            $timedOut = $timeoutErrnos !== [] && in_array($errno, $timeoutErrnos, true);
+            $timedOut = $timeoutErrnos !== [] && in_array($curlErrno, $timeoutErrnos, true);
             curl_close($ch);
             if ($maxResponseBytes === null) { $raw = $out === false ? '' : (string)$out; }
         } else {
@@ -113,8 +119,17 @@ final class AIHttpClient
             return self::fail($status, 'The AI provider response exceeded the configured safety limit.', false, null, '', 'invalid_response');
         }
         if ($status === 0) {
-            $error = $timedOut ? 'The AI provider timed out.' : 'Could not reach the AI provider.';
-            return self::fail(0, $error, true, null, '', $timedOut ? 'timeout' : 'network_error');
+            $failureCode = self::transportFailureCode($curlErrno, $streamError, $timedOut);
+            $error = match ($failureCode) {
+                'timeout' => 'The AI provider timed out.',
+                'dns_error' => 'The server could not resolve the AI provider host.',
+                'tls_error' => 'The HTTPS connection to the AI provider failed TLS verification.',
+                'connection_refused' => 'The AI provider endpoint refused the connection.',
+                'connection_failed' => 'The server could not connect to the AI provider endpoint.',
+                'transport_unavailable' => 'No usable PHP HTTPS transport is available; enable cURL or PHP URL streams.',
+                default => 'Could not reach the AI provider.',
+            };
+            return self::fail(0, $error, true, null, '', $failureCode);
         }
 
         $json = json_decode($raw, true);
@@ -174,6 +189,32 @@ final class AIHttpClient
         $bin = base64_decode(preg_replace('/\s+/', '', $data) ?? '', true);
         if ($bin === false || $bin === '') { return null; }
         return ['binary' => $bin, 'mime' => $mime];
+    }
+
+    /** Classify status-zero failures without retaining or exposing raw transport errors. */
+    private static function transportFailureCode(int $curlErrno, string $streamError, bool $timedOut): string
+    {
+        if ($timedOut || preg_match('/timed?\\s*out|timeout/i', $streamError) === 1) { return 'timeout'; }
+        if ($curlErrno > 0 && self::curlErrnoMatches($curlErrno, ['CURLE_COULDNT_RESOLVE_HOST'])) { return 'dns_error'; }
+        if ($curlErrno > 0 && self::curlErrnoMatches($curlErrno, [
+            'CURLE_SSL_CONNECT_ERROR', 'CURLE_PEER_FAILED_VERIFICATION', 'CURLE_SSL_CERTPROBLEM',
+            'CURLE_SSL_CACERT', 'CURLE_SSL_ISSUER_ERROR', 'CURLE_SSL_CACERT_BADFILE',
+        ])) { return 'tls_error'; }
+        if ($curlErrno > 0 && self::curlErrnoMatches($curlErrno, ['CURLE_COULDNT_CONNECT'])) { return 'connection_failed'; }
+        if (preg_match('/https?:\\/\\/\\s*wrapper is disabled|https? wrapper is disabled|url file-access is disabled|allow_url_fopen|wrapper is unavailable/i', $streamError) === 1) { return 'transport_unavailable'; }
+        if (preg_match('/getaddrinfo|name or service not known|php_network_getaddresses|no address associated|temporary failure in name resolution/i', $streamError) === 1) { return 'dns_error'; }
+        if (preg_match('/ssl|certificate|tls|crypto|handshake/i', $streamError) === 1) { return 'tls_error'; }
+        if (preg_match('/connection refused|actively refused/i', $streamError) === 1) { return 'connection_refused'; }
+        return 'network_error';
+    }
+
+    /** @param array<int,string> $names */
+    private static function curlErrnoMatches(int $errno, array $names): bool
+    {
+        foreach ($names as $name) {
+            if (defined($name) && $errno === (int)constant($name)) { return true; }
+        }
+        return false;
     }
 
     private static function fail(int $status, string $error, bool $retryable, ?array $json = null, string $raw = '', ?string $code = null): array

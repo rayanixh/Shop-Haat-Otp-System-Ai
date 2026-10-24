@@ -710,90 +710,39 @@ function sh_support_order_fallback(array $order, string $language): string
     return $text;
 }
 
-function sh_support_faq_answer(array $faq, string $language): string
-{
-    $field = match ($language) { 'bn' => 'answer_bn', 'banglish' => 'answer_banglish', default => 'answer_en' };
-    $answer = trim((string)($faq[$field] ?? ''));
-    if ($answer !== '') { return $answer; }
-    $english = trim((string)($faq['answer_en'] ?? ''));
-    if ($english === '') { return ''; }
-    if ($language === 'bn') { return 'বাংলায় যাচাইকৃত উত্তরটি এখনো যোগ করা হয়নি। অফিসিয়াল উত্তর: ' . $english; }
-    if ($language === 'banglish') { return 'Bangla/Banglish translation ekhono add kora hoyni. Official answer: ' . $english; }
-    return $english;
-}
-
-function sh_support_fallback_text(string $body, string $language, array $products, array $orderLookup, array $faqRows, bool $handoffUnavailable = false): array
+function sh_support_fallback_text(string $language, array $orderLookup, bool $handoffUnavailable = false): array
 {
     if ($handoffUnavailable) {
-        $msg = sh_support_localized($language,
-            'Human handoff is not enabled right now. You can still reach the store through the Contact Support page or the contact details shown there.',
-            'এই মুহূর্তে মানব-সাপোর্টে পাঠানোর ব্যবস্থা চালু নেই। Contact Support পেজে দেওয়া তথ্য দিয়ে স্টোরের সঙ্গে যোগাযোগ করতে পারেন।',
-            'Ekhon human handoff enabled nei. Contact Support page-er details diye store-er sathe jogajog korte paren.');
-        return ['text' => $msg, 'complete' => true, 'product_ids' => []];
+        return ['text' => sh_support_localized($language,
+            'Human support is unavailable right now. Please use the contact form below.',
+            'এই মুহূর্তে মানব-সাপোর্ট চালু নেই। অনুগ্রহ করে নিচের যোগাযোগ ফর্মটি ব্যবহার করুন।',
+            'Ekhon human support available nei. Please nicher contact form use korun.'),
+            'complete' => true, 'product_ids' => []];
     }
     if (!empty($orderLookup['intent'])) {
         if (!empty($orderLookup['found']) && is_array($orderLookup['order'])) {
             return ['text' => sh_support_order_fallback($orderLookup['order'], $language), 'complete' => true, 'product_ids' => []];
         }
-        $msg = sh_support_localized($language,
-            'I could not verify an order for this account or this browser session. Sign in to view account orders, or reopen chat in the same browser session used for a guest checkout. I cannot verify an order from an order number or phone number alone.',
-            'এই অ্যাকাউন্ট বা ব্রাউজার সেশনের সঙ্গে মেলা কোনো অর্ডার যাচাই করতে পারিনি। অ্যাকাউন্টের অর্ডার দেখতে সাইন ইন করুন, অথবা গেস্ট চেকআউটের একই ব্রাউজার সেশন থেকে চ্যাট খুলুন। শুধু অর্ডার নম্বর বা ফোন নম্বর দিয়ে অর্ডার যাচাই করা যাবে না।',
-            'Ei account ba browser session-er sathe mile emon order verify korte parini. Account order dekhte sign in korun, ba guest checkout-er eki browser session theke chat open korun. Shudhu order number ba phone number diye order verify kora jabe na.');
-        return ['text' => $msg, 'complete' => true, 'product_ids' => []];
+        return ['text' => sh_support_localized($language,
+            'I could not verify an order for this account or browser session. Sign in or use the same browser session used for guest checkout.',
+            'এই অ্যাকাউন্ট বা ব্রাউজার সেশনের কোনো অর্ডার যাচাই করতে পারিনি। সাইন ইন করুন অথবা গেস্ট চেকআউটের একই ব্রাউজার সেশন ব্যবহার করুন।',
+            'Ei account ba browser session-er kono order verify korte parini. Sign in korun ba guest checkout-er eki browser session use korun.'),
+            'complete' => true, 'product_ids' => []];
     }
-    // Explicitly configured policies take precedence over older seeded FAQ text.
-    $policyKind = sh_support_policy_kind($body);
-    if ($policyKind !== '') {
-        $key = 'policy_' . $policyKind . '_' . ($language === 'bn' ? 'bn' : ($language === 'banglish' ? 'banglish' : 'en'));
-        $policy = trim(sh_support_setting($key, ''));
-        if ($policy !== '') { return ['text' => $policy, 'complete' => true, 'product_ids' => []]; }
-    }
-    if ($faqRows) {
-        $answer = sh_support_faq_answer($faqRows[0], $language);
-        if ($answer !== '') { return ['text' => $answer, 'complete' => true, 'product_ids' => []]; }
-    }
-    if (sh_support_product_intent($body)) {
-        if ($products) {
-            return [
-                'text' => sh_support_localized($language,
-                    'I found active catalogue matches. The product cards below show the current listed price and stock; availability can change before checkout.',
-                    'সক্রিয় ক্যাটালগে মিলে এমন পণ্য পেয়েছি। নিচের কার্ডে বর্তমান তালিকাভুক্ত দাম ও স্টক দেখানো হয়েছে; চেকআউটের আগে স্টক বদলাতে পারে।',
-                    'Active catalog-e matching product peyechi. Nicher card-e current listed price o stock dekhano hoyeche; checkout-er age stock change hote pare.'),
-                'complete' => true,
-                'product_ids' => array_map(static fn($p) => (int)$p['id'], $products),
-            ];
-        }
-        if (sh_support_product_search_terms($body, 6)) {
-            return [
-                'text' => sh_support_localized($language,
-                    'I could not find a matching active product in the catalogue. Try another product name or category.',
-                    'সক্রিয় ক্যাটালগে মিলে এমন পণ্য খুঁজে পাইনি। অন্য কোনো পণ্যের নাম বা ক্যাটাগরি দিয়ে চেষ্টা করবেন?',
-                    'Active catalog-e matching product pelam na. Onno product-er naam ba category diye try korben?'),
-                'complete' => true, 'product_ids' => [],
-            ];
-        }
-    }
-    $contact = trim(sh_support_setting('contact_email', ''));
-    if ($contact === '') { $contact = trim((string)sh_setting('contact_email', '')); }
-    if ($contact === '') { $contact = trim(sh_support_setting('contact_phone', '')); }
-    if ($contact === '') { $contact = trim((string)sh_setting('contact_phone', '')); }
-    $msg = sh_support_localized($language,
-        'AI replies are unavailable and I could not find a verified answer in the saved FAQs or current store data. Please retry later or contact the store through the Contact Support page.',
-        'AI উত্তর এখন পাওয়া যাচ্ছে না এবং সংরক্ষিত FAQ বা বর্তমান স্টোরের তথ্যেও যাচাইকৃত উত্তর পাইনি। পরে আবার চেষ্টা করুন অথবা Contact Support পেজ দিয়ে যোগাযোগ করুন।',
-        'AI reply ekhon available nei, ar saved FAQ ba current store data-te verified answer pelam na. Pore abar try korun ba Contact Support page diye jogajog korun.');
-    if ($contact !== '') {
-        $msg .= $language === 'bn' ? ' যোগাযোগ: ' . $contact : ' Contact: ' . $contact;
-    }
-    return ['text' => $msg, 'complete' => false, 'product_ids' => []];
+    return ['text' => sh_support_localized($language,
+        'Sorry, I could not reply right now. Please try again.',
+        'দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। অনুগ্রহ করে আবার চেষ্টা করুন।',
+        'Sorry, ekhon reply dite parchi na. Please abar try korun.'),
+        'complete' => false, 'product_ids' => []];
 }
 
 /** Conversation messages are retrieved only for the already-authorized thread. */
 function sh_support_context_messages(int $conversationId, int $latestId, int $limit): array
 {
     $limit = max(1, min(16, $limit));
-    $rows = sh_all('SELECT sender, body FROM support_messages
+    $rows = sh_all('SELECT sender, source, body FROM support_messages
                     WHERE conversation_id = ? AND id < ? AND is_internal = 0
-                      AND sender IN (\'customer\',\'assistant\',\'admin\')
+                      AND sender IN (\'customer\',\'assistant\',\'admin\',\'system\')
                     ORDER BY id DESC LIMIT ' . $limit, [$conversationId, $latestId]);
     return array_reverse($rows);
 }
@@ -825,7 +774,7 @@ function sh_support_build_ai_user_prompt(int $conversationId, int $currentMessag
     $historyData = [];
     foreach ($history as $row) {
         $historyData[] = [
-            'speaker' => (string)$row['sender'],
+            'speaker' => (string)($row['sender'] === 'assistant' && $row['source'] === 'fallback' ? 'system' : $row['sender']),
             'text' => mb_substr((string)$row['body'], 0, 1000),
         ];
     }
@@ -895,8 +844,18 @@ function sh_support_provider_pair(): array
     }
     $pid = (int)sh_ai_setting('support_chat_provider_id', '0');
     $provider = $pid > 0 ? sh_ai_provider_row($pid) : sh_ai_default_provider_row();
-    if ($provider === null || (int)($provider['status'] ?? 0) !== 1 || trim(sh_ai_decrypt((string)($provider['api_key'] ?? ''))) === '') {
-        return ['ok' => false, 'reason' => 'provider_unavailable', 'provider' => $provider, 'model' => '', 'fingerprint' => ''];
+    if ($provider === null) {
+        return ['ok' => false, 'reason' => $pid > 0 ? 'provider_missing' : 'default_provider_missing', 'provider' => null, 'model' => '', 'fingerprint' => ''];
+    }
+    if ((int)($provider['status'] ?? 0) !== 1) {
+        return ['ok' => false, 'reason' => 'provider_disabled', 'provider' => $provider, 'model' => '', 'fingerprint' => ''];
+    }
+    $storedKey = trim((string)($provider['api_key'] ?? ''));
+    if ($storedKey === '') {
+        return ['ok' => false, 'reason' => 'missing_key', 'provider' => $provider, 'model' => '', 'fingerprint' => ''];
+    }
+    if (trim(sh_ai_decrypt($storedKey)) === '') {
+        return ['ok' => false, 'reason' => 'credential_decryption_failed', 'provider' => $provider, 'model' => '', 'fingerprint' => ''];
     }
     if (!sh_support_provider_endpoint_secure($provider)) {
         return ['ok' => false, 'reason' => 'https_required', 'provider' => $provider, 'model' => '', 'fingerprint' => ''];
@@ -937,26 +896,12 @@ function sh_support_ai_state(): array
     }
 }
 
-function sh_support_public_state(string $language = 'en'): array
+function sh_support_public_state(): array
 {
-    $ai = sh_support_ai_state();
-    $aiMessage = $ai['available']
-        ? sh_support_localized($language, 'AI replies are enabled with the selected provider and model. A live request can still fail; if it does, the message is preserved and the store fallback is shown.', 'নির্বাচিত প্রদানকারী ও মডেল দিয়ে AI উত্তর চালু আছে। সরাসরি অনুরোধ ব্যর্থ হতে পারে; হলে আপনার বার্তাটি সংরক্ষিত থাকবে এবং স্টোরের বিকল্প উত্তর দেখানো হবে।', 'Selected provider o model diye AI reply on ache. Live request fail korte pare; korle apnar message save thakbe ar store fallback dekhano hobe.')
-        : sh_support_localized($language, 'AI generation is unavailable. Saved FAQs, verified catalogue lookup and authorized order lookup may still help; you can also contact support.', 'AI উত্তর তৈরি করা যাচ্ছে না। সংরক্ষিত FAQ, যাচাইকৃত ক্যাটালগ ও অনুমোদিত অর্ডার-তথ্য পাওয়া যেতে পারে; চাইলে সাপোর্টে যোগাযোগ করুন।', 'AI reply generate kora jacche na. Saved FAQ, verified catalog o authorized order lookup ekhono help korte pare; support-eo jogajog korte paren.');
-    $contactPhone = trim(sh_support_setting('contact_phone', ''));
-    if ($contactPhone === '') { $contactPhone = trim((string)sh_setting('contact_phone', '')); }
-    $contactEmail = trim(sh_support_setting('contact_email', ''));
-    if ($contactEmail === '') { $contactEmail = trim((string)sh_setting('contact_email', '')); }
     return [
         'enabled' => sh_support_chat_enabled(),
-        'ai_available' => (bool)$ai['available'],
-        'ai_message' => $aiMessage,
         'handoff_enabled' => sh_support_handoff_enabled(),
-        'hours' => sh_support_setting('hours', ''),
-        'contact_phone' => $contactPhone,
-        'contact_email' => $contactEmail,
         'message_max' => SH_SUPPORT_MESSAGE_MAX,
-        'language' => $language,
     ];
 }
 
@@ -965,10 +910,13 @@ function sh_support_provider_test(int $providerId, string $model): array
     if (!function_exists('sh_ai_installed')) { require_once SH_ROOT . '/ai/AIManager.php'; }
     if (!sh_ai_installed()) { return ['ok' => false, 'code' => 'ai_module_missing', 'message' => 'Run the existing AI Auto Work installer first.']; }
     $provider = sh_ai_provider_row($providerId);
-    if ($provider === null || (int)$provider['status'] !== 1) { return ['ok' => false, 'code' => 'provider_disabled', 'message' => 'Choose an enabled provider.']; }
+    if ($provider === null) { return ['ok' => false, 'code' => 'provider_missing', 'message' => 'The selected provider no longer exists.']; }
+    if ((int)$provider['status'] !== 1) { return ['ok' => false, 'code' => 'provider_disabled', 'message' => 'Enable the selected provider before testing.']; }
     $model = mb_substr(trim($model), 0, 120);
     if ($model === '' || !sh_ai_model_supports($providerId, $model, 'text')) { return ['ok' => false, 'code' => 'model_unavailable', 'message' => 'Choose an enabled text-capable model.']; }
-    if (trim(sh_ai_decrypt((string)($provider['api_key'] ?? ''))) === '') { return ['ok' => false, 'code' => 'missing_key', 'message' => 'No saved API key is available for this provider.']; }
+    $storedKey = trim((string)($provider['api_key'] ?? ''));
+    if ($storedKey === '') { return ['ok' => false, 'code' => 'missing_key', 'message' => 'No saved API key is available for this provider.']; }
+    if (trim(sh_ai_decrypt($storedKey)) === '') { return ['ok' => false, 'code' => 'credential_decryption_failed', 'message' => 'The saved API key cannot be decrypted with the current server configuration. Re-save the provider key and test again.']; }
     if (!sh_support_provider_endpoint_secure($provider)) { return ['ok' => false, 'code' => 'https_required', 'message' => 'Customer-support provider testing requires an HTTPS endpoint.']; }
 
     $adapter = sh_ai_adapter($provider);
@@ -998,9 +946,10 @@ function sh_support_provider_test(int $providerId, string $model): array
     $providerStatus = max(0, min(599, (int)($result['provider_status'] ?? 0)));
     $rawText = !empty($result['ok']) ? trim((string)($result['text'] ?? '')) : '';
     $code = (string)($result['code'] ?? 'provider_error');
+    $transport = AIHttpClient::transportName();
     if (!empty($result['ok']) && $rawText !== '') {
         $code = 'connected';
-        $message = 'Selected model returned usable text (' . mb_strlen($rawText, 'UTF-8') . ' characters).';
+        $message = 'Selected model returned usable text (' . mb_strlen($rawText, 'UTF-8') . ' characters) via ' . $transport . '.';
         $next = '';
         $ok = true;
     } else {
@@ -1008,7 +957,7 @@ function sh_support_provider_test(int $providerId, string $model): array
         $code = preg_replace('/[^a-z0-9_-]/i', '', $code) ?: 'provider_error';
         $detail = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The selected model did not return usable text.'), $provider, [$testUser, $testSystem]);
         $label = function_exists('sh_ai_test_state_label') ? sh_ai_test_state_label($code) : ucwords(str_replace('_', ' ', $code));
-        $message = 'Selected model inference failed (' . $label . ')';
+        $message = 'Selected model inference failed (' . $label . ') via ' . $transport;
         if ($status > 0) { $message .= ' (HTTP ' . $status . ($providerStatus > 0 && $providerStatus !== $status ? '; provider code ' . $providerStatus : '') . ')'; }
         if ($detail !== '') { $message .= ': ' . $detail; }
         $message .= '.';
@@ -1018,7 +967,12 @@ function sh_support_provider_test(int $providerId, string $model): array
             'model_not_found', 'model_unavailable' => 'Choose a text model supported by this provider and key.',
             'quota_exceeded', 'billing' => 'Check provider quota and billing.',
             'rate_limited' => 'Wait briefly and run the inference test again.',
-            'timeout', 'network_error' => 'Check the HTTPS endpoint and outbound network access; then retry.',
+            'timeout' => 'Check the provider response time and server outbound network access; then retry.',
+            'dns_error' => 'Check the provider hostname and server DNS resolution.',
+            'tls_error' => 'Check the server CA certificates, TLS configuration and provider certificate.',
+            'connection_refused', 'connection_failed' => 'Check the provider endpoint, firewall and outbound port access.',
+            'transport_unavailable' => 'Enable the PHP cURL extension or allow_url_fopen for HTTPS streams.',
+            'network_error' => 'Check the HTTPS endpoint and server outbound network access; then retry.',
             'request_rejected' => 'Check the provider message for an unsupported request field or model setting.',
             'output_limit' => 'Raise the configured output-token budget and test again.',
             'empty_response', 'invalid_response' => 'Check that the selected model and endpoint return normal text.',
@@ -1240,11 +1194,12 @@ function sh_support_product_context_for_message(string $body, int $conversationI
     return [];
 }
 
-/** Persist one public assistant/fallback reply without holding a DB transaction over network I/O. */
+/** Persist a real model reply or a deterministic system message, without holding a transaction over network I/O. */
 function sh_support_save_reply(int $conversationId, int $customerMessageId, string $body, string $source, bool $complete, array $productIds = []): array
 {
     $body = sh_support_clean_text($body, SH_SUPPORT_AI_RESPONSE_MAX);
-    if ($body === '') { $body = 'I could not prepare a response. Please retry or contact support.'; $complete = false; }
+    if ($body === '') { return sh_support_mark_reply_failed($conversationId, $customerMessageId); }
+    $sender = $source === 'ai' ? 'assistant' : 'system';
     $extra = json_encode(['product_ids' => array_slice(array_values(array_unique(array_filter(array_map('intval', $productIds)))), 0, 5)], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $pdo = sh_db();
     try {
@@ -1258,7 +1213,7 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
             $pdo->commit();
             return ['saved' => false, 'paused' => true];
         }
-        $existing = sh_one('SELECT id FROM support_messages WHERE conversation_id = ? AND reply_to_message_id = ? AND sender = \'assistant\' ORDER BY id DESC LIMIT 1 FOR UPDATE', [$conversationId, $customerMessageId]);
+        $existing = sh_one('SELECT id FROM support_messages WHERE conversation_id = ? AND reply_to_message_id = ? AND sender = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', [$conversationId, $customerMessageId, $sender]);
         if ($existing !== null) {
             sh_update('support_messages', [
                 'body' => $body, 'source' => $source, 'extra_json' => $extra,
@@ -1270,7 +1225,7 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
                 'conversation_id' => $conversationId,
                 'reply_to_message_id' => $customerMessageId,
                 'client_message_id' => null,
-                'sender' => 'assistant',
+                'sender' => $sender,
                 'source' => $source,
                 'body' => $body,
                 'extra_json' => $extra,
@@ -1291,35 +1246,81 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
     }
 }
 
+function sh_support_mark_reply_failed(int $conversationId, int $customerMessageId): array
+{
+    $pdo = sh_db();
+    try {
+        $pdo->beginTransaction();
+        $conversation = sh_one('SELECT * FROM support_conversations WHERE id = ? FOR UPDATE', [$conversationId]);
+        $incoming = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? FOR UPDATE', [$customerMessageId, $conversationId]);
+        if ($conversation === null || $incoming === null) {
+            $pdo->rollBack();
+            return ['saved' => false, 'paused' => false];
+        }
+        if ((string)$incoming['reply_status'] !== 'pending') {
+            $pdo->commit();
+            return ['saved' => false, 'paused' => (string)$incoming['reply_status'] === 'paused'];
+        }
+
+        // A takeover during the provider request wins. Never publish an AI error
+        // or a stale fallback after a human has paused the thread.
+        $paused = (int)$conversation['ai_paused'] === 1
+            || (int)$conversation['assigned_admin_id'] > 0
+            || (string)$conversation['status'] === 'resolved';
+        sh_query("DELETE FROM support_messages
+                  WHERE conversation_id = ? AND reply_to_message_id = ?
+                    AND sender = 'assistant' AND source = 'fallback'", [$conversationId, $customerMessageId]);
+        sh_query('UPDATE support_messages SET reply_status = ?, reply_started_at = NULL WHERE id = ?',
+            [$paused ? 'paused' : 'failed', $customerMessageId]);
+        sh_query('UPDATE support_conversations SET last_message_at = (SELECT MAX(created_at) FROM support_messages WHERE conversation_id = ?), updated_at = UTC_TIMESTAMP() WHERE id = ?', [$conversationId, $conversationId]);
+        $pdo->commit();
+        return ['saved' => !$paused, 'paused' => $paused];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        sh_log_exception($e, 'ai-support-reply-failure');
+        return ['saved' => false, 'paused' => false];
+    }
+}
+
 function sh_support_process_customer_message(int $conversationId, int $customerMessageId, string $body, array $owner, bool $handoffUnavailable = false): array
 {
     $language = sh_support_language($body);
     $products = $handoffUnavailable ? [] : sh_support_product_context_for_message($body, $conversationId, $customerMessageId);
     $orderLookup = $handoffUnavailable ? ['intent' => false, 'found' => false, 'order' => null] : sh_support_find_authorized_order($body, $owner, $conversationId, $customerMessageId);
     $faqs = $handoffUnavailable ? [] : sh_support_faq_matches($body);
-    $fallback = sh_support_fallback_text($body, $language, $products, $orderLookup, $faqs, $handoffUnavailable);
 
-    // Order requests are always answered deterministically if ownership/session verification fails.
+    // Order access is checked before the provider call. An unverified order is
+    // never sent to the model as if it were a verified account/session record.
     if (!empty($orderLookup['intent']) && empty($orderLookup['found'])) {
+        $fallback = sh_support_fallback_text($language, $orderLookup, false);
         sh_support_record_usage($conversationId, $owner, null, 'fallback', 0, [], 'order_not_authorized');
-        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', true, []);
+        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'system', true, []);
+    }
+
+    // A disabled handoff is an explicit action result, not an AI turn.
+    if ($handoffUnavailable) {
+        $fallback = sh_support_fallback_text($language, $orderLookup, true);
+        sh_support_record_usage($conversationId, $owner, null, 'fallback', 0, [], 'handoff_unavailable');
+        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'system', true, []);
     }
 
     $aiState = sh_support_ai_state();
-    if (!sh_support_chat_enabled() || empty($aiState['available']) || $handoffUnavailable) {
-        $fallbackReason = !sh_support_chat_enabled() ? 'chat_disabled' : ($handoffUnavailable ? 'handoff_unavailable' : 'ai_unavailable');
-        sh_support_record_usage($conversationId, $owner, null, 'fallback', 0, [], $fallbackReason);
-        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', (bool)$fallback['complete'], (array)$fallback['product_ids']);
+    if (!sh_support_chat_enabled() || empty($aiState['available'])) {
+        $reason = !sh_support_chat_enabled() ? 'chat_disabled' : (string)($aiState['reason'] ?? 'ai_unavailable');
+        sh_support_record_usage($conversationId, $owner, null, 'fallback', 0, [], $reason);
+        // Do not disguise disabled/missing configuration with a saved FAQ.
+        return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
 
     $pair = sh_support_provider_pair();
     if (empty($pair['ok'])) {
-        sh_support_record_usage($conversationId, $owner, null, 'fallback', 0, [], 'configuration_unavailable');
-        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', (bool)$fallback['complete'], (array)$fallback['product_ids']);
+        $reason = (string)($pair['reason'] ?? 'configuration_unavailable');
+        sh_support_record_usage($conversationId, $owner, $pair, 'fallback', 0, [], $reason);
+        return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
     if (!sh_support_ai_daily_allowed((int)($owner['user_id'] ?? 0), (string)($owner['guest_hash'] ?? ''))) {
         sh_support_record_usage($conversationId, $owner, $pair, 'limited', 0, [], 'daily_limit');
-        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', (bool)$fallback['complete'], (array)$fallback['product_ids']);
+        return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
 
     // Do not send a prompt if a human took over while the request was queued.
@@ -1327,9 +1328,12 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
     $incoming = sh_one('SELECT reply_status FROM support_messages WHERE id = ? AND conversation_id = ?', [$customerMessageId, $conversationId]);
     if ($current === null || $incoming === null || (string)$incoming['reply_status'] !== 'pending'
         || (int)$current['ai_paused'] === 1 || (int)$current['assigned_admin_id'] > 0 || (string)$current['status'] === 'resolved') {
-        return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', false, []);
+        return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
 
+    // FAQ rows, catalog results, verified order data, and authorized recent
+    // conversation history are prompt context only. None can short-circuit a
+    // configured model inference for an ordinary customer message.
     $aiUser = sh_support_build_ai_user_prompt($conversationId, $customerMessageId, $body, $products, $orderLookup, $faqs, $language);
     $result = sh_support_ai_generate(sh_support_system_prompt(), $aiUser, $pair, $body);
     if (!empty($result['ok'])) {
@@ -1345,11 +1349,13 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
     $providerStatus = max(0, min(599, (int)($result['provider_status'] ?? 0)));
     $detail = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The AI provider request failed.'), $pair['provider']);
     $statusText = $status > 0 ? ' (HTTP ' . $status . ($providerStatus > 0 && $providerStatus !== $status ? '; provider code ' . $providerStatus : '') . ')' : '';
-    $diagnostic = $code . $statusText . ': ' . $detail;
+    $providerLabel = sh_support_clean_text((string)($pair['provider']['name'] ?? 'Configured provider'), 32);
+    $modelLabel = sh_support_clean_text((string)($pair['model'] ?? ''), 60);
+    $diagnostic = 'provider=' . $providerLabel . ' model=' . $modelLabel . ' · ' . $code . $statusText . ': ' . mb_substr($detail, 0, 120, 'UTF-8');
     sh_support_record_usage($conversationId, $owner, $pair, 'failed', (int)($result['duration_ms'] ?? 0), [], $code);
     sh_support_update_diagnostic($diagnostic);
-    sh_log_line('ai-support', 'Provider inference failed; stored a safe fallback. code=' . $code);
-    return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', (bool)$fallback['complete'], (array)$fallback['product_ids']);
+    sh_log_line('ai-support', 'Selected-model inference failed; customer message remains retryable. code=' . $code);
+    return sh_support_mark_reply_failed($conversationId, $customerMessageId);
 }
 
 function sh_support_handoff_public_message(string $language): string
@@ -1395,6 +1401,7 @@ function sh_support_public_message_row(array $row): array
         'client_message_id' => (string)($row['client_message_id'] ?? ''),
         'created_at' => (string)$row['created_at'],
         'reply_status' => (string)$row['reply_status'],
+        'reply_started_at' => !empty($row['reply_started_at']) ? (string)$row['reply_started_at'] : null,
         'products' => $products,
     ];
 }
@@ -1432,16 +1439,13 @@ function sh_support_customer_snapshot(int $conversationId, array $owner): array
     try { sh_query('UPDATE support_conversations SET unread_for_customer = 0 WHERE id = ?', [$conversationId]); } catch (Throwable $e) {}
     $conversation['unread_for_customer'] = 0;
     $page = sh_support_customer_messages($conversationId, 0, SH_SUPPORT_HISTORY_BATCH);
-    $language = 'en';
-    $lastCustomer = sh_one('SELECT body FROM support_messages WHERE conversation_id = ? AND sender = \'customer\' ORDER BY id DESC LIMIT 1', [$conversationId]);
-    if ($lastCustomer) { $language = sh_support_language((string)$lastCustomer['body']); }
     return [
         'ok' => true,
         'conversation' => sh_support_public_conversation($conversation),
         'messages' => $page['messages'],
         'has_more' => $page['has_more'],
         'older_cursor' => $page['older_cursor'],
-        'support' => sh_support_public_state($language),
+        'support' => sh_support_public_state(),
     ];
 }
 
@@ -1512,9 +1516,9 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
                 'conversation_id' => $conversationId, 'reply_to_message_id' => $messageId, 'client_message_id' => null,
                 'sender' => 'system', 'source' => 'system',
                 'body' => sh_support_localized($language,
-                    'AI is paused for this conversation. Your message is in the support inbox; no live response time is shown.',
-                    'এই কথোপকথনে AI বন্ধ রাখা হয়েছে। আপনার বার্তাটি সাপোর্ট ইনবক্সে আছে; তাৎক্ষণিক উত্তর নিশ্চিত করা যাচ্ছে না।',
-                    'Ei conversation-e AI pause kora ache. Apnar message support inbox-e ache; immediate reply time confirm kora jacche na.'),
+                    'Your message has been saved for support.',
+                    'আপনার বার্তাটি সাপোর্টের জন্য সংরক্ষণ করা হয়েছে।',
+                    'Apnar message support-er jonno save kora hoyeche.'),
                 'extra_json' => null, 'reply_status' => 'none', 'reply_started_at' => null,
                 'is_internal' => 0, 'created_at' => gmdate('Y-m-d H:i:s'),
             ]);
@@ -1543,7 +1547,7 @@ function sh_support_customer_retry(int $conversationId, int $messageId, array $o
         $conversation = sh_support_conversation_for_owner($conversationId, $owner, true);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
         if ((int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0 || (string)$conversation['status'] === 'resolved') {
-            $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'AI is paused for this conversation.'];
+            $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is paused for support.'];
         }
         $message = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? AND sender = \'customer\' FOR UPDATE', [$messageId, $conversationId]);
         if ($message === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Message not found.']; }
@@ -1613,13 +1617,12 @@ function sh_support_customer_delete(int $conversationId, array $owner): array
     }
 }
 
-function sh_support_customer_state(array $owner, string $language = 'en'): array
+function sh_support_customer_state(array $owner): array
 {
-    if (!in_array($language, ['en', 'bn', 'banglish'], true)) { $language = 'en'; }
     $conversation = sh_support_latest_conversation($owner);
     if ($conversation === null) {
         return ['ok' => true, 'conversation' => null, 'messages' => [], 'has_more' => false, 'older_cursor' => 0,
-                'support' => sh_support_public_state($language)];
+                'support' => sh_support_public_state()];
     }
     return sh_support_customer_snapshot((int)$conversation['id'], $owner);
 }

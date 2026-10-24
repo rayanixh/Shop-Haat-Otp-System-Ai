@@ -219,14 +219,18 @@ $selectedProviderId = $selectedProvider !== null ? (int)$selectedProvider['id'] 
 $savedModel = sh_ai_setting('support_chat_model', '');
 $aiState = sh_support_ai_state();
 $aiStateMessage = !empty($aiState['available'])
-    ? 'AI is enabled with the selected provider/model. Customer messages attempt that exact pair; live failures use a store fallback.'
+    ? 'AI is enabled. Customer messages attempt ' . (string)$aiState['provider'] . ' / ' . (string)$aiState['model'] . '. Run the selected-model text test to verify actual inference.'
     : match ((string)($aiState['reason'] ?? '')) {
-        'disabled' => 'AI replies are disabled in settings; the store fallback remains available.',
+        'disabled' => 'AI replies are disabled. Customer messages are not sent to a model until this is enabled and saved.',
         'ai_module_missing' => 'AI Auto Work is not installed; install it before configuring a provider.',
-        'provider_unavailable' => 'The selected provider is missing, disabled or has no saved API key. No other provider is selected automatically.',
-        'https_required' => 'The selected provider endpoint must use HTTPS for customer-support inference.',
-        'model_unavailable' => 'The selected model is missing, disabled or not marked as text-capable.',
-        default => 'AI is currently unavailable; verified FAQ, catalogue and authorized order fallback remains active when chat is enabled.',
+        'provider_missing' => 'The configured provider ID no longer exists. Select an enabled provider.',
+        'default_provider_missing' => 'No enabled default provider with a saved API key is available.',
+        'provider_disabled' => 'The selected provider is disabled. Enable it in AI Providers before using support AI.',
+        'missing_key' => 'No API key is saved for the selected provider.',
+        'credential_decryption_failed' => 'The API key is saved but cannot be decrypted. Check server encryption prerequisites and re-save the key.',
+        'https_required' => 'The selected provider endpoint must use HTTPS. No inference request was sent.',
+        'model_unavailable' => 'The selected model is missing, disabled or not marked as text-capable. No inference request was sent.',
+        default => 'Support AI configuration could not be read. Check the server log and run the selected-model text test after correcting the configuration.',
     };
 $testCode = !empty($aiState['test_current']) ? (string)($aiState['test_code'] ?? '') : '';
 $testTone = $testCode !== '' ? sh_ai_test_state_tone($testCode) : 'muted';
@@ -292,12 +296,12 @@ require __DIR__ . '/_layout.php';
         <div class="sh-support-settings__ai" id="ai">
           <h4 class="sh-support-settings__subhead">Existing AI provider and usage limits</h4>
           <?php if (!$aiInstalled): ?>
-            <div class="sh-alert sh-alert--info"><span>AI Auto Work is not installed. Customer chat and deterministic support remain usable without AI. Install the existing AI module before configuring a provider.</span></div>
+            <div class="sh-alert sh-alert--info"><span>AI Auto Work is not installed. Customer messages can be saved, but ordinary replies require a configured model. The contact form remains available; install the existing AI module to configure support AI.</span></div>
           <?php elseif (!$canConfigureAi): ?>
             <div class="sh-alert sh-alert--info"><span>Your role can manage conversations and FAQs but does not have the AI tools permission. Ask the store owner to configure and test the provider.</span></div>
           <?php else: ?>
             <input type="hidden" name="ai_enabled" value="0">
-            <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>Customer messages attempt the chosen provider/model when enabled. The manual text test is optional diagnostics, not a runtime gate; live failures use a store fallback.</small></span></label>
+            <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>When enabled, each ordinary customer message is sent to this exact provider/model. FAQs are context only; a failed inference leaves the message saved and offers a retry.</small></span></label>
             <div class="sh-grid2">
               <div class="sh-field"><label class="sh-field__label" for="support-provider">Configured provider</label>
                 <select class="sh-select" id="support-provider" name="provider_id" data-provider-select data-default-provider-id="<?= (int)($defaultProvider['id'] ?? 0) ?>">

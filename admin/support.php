@@ -54,7 +54,7 @@ require __DIR__ . '/_layout.php';
     <div><strong data-stat-conversations><?= (int)$initialStats['conversations'] ?></strong><span>Conversations</span></div>
     <div><strong data-stat-unread><?= (int)$initialStats['unread'] ?></strong><span>Unread for support</span></div>
     <div><strong data-stat-ai><?= e((string)($initialStats['today']['succeeded'] ?? 0)) ?></strong><span>AI replies today</span></div>
-    <div><strong data-stat-fallback><?= e((string)($initialStats['today']['fallback'] ?? 0)) ?></strong><span>Fallbacks today</span></div>
+    <div><strong data-stat-fallback><?= e((string)($initialStats['today']['fallback'] ?? 0)) ?></strong><span>Messages not sent to model today</span></div>
   </div>
 
   <form class="sh-support-admin__filters" data-support-filter method="get" action="<?= e(sh_url('admin/support.php')) ?>">

@@ -65,27 +65,14 @@ require_once SH_ROOT . '/includes/header.php';
            aria-labelledby="sh-support-chat-title">
     <div class="sh-support-chat__heading">
       <div>
-        <p class="sh-support-chat__eyebrow">Private customer support</p>
+        <p class="sh-support-chat__eyebrow">Customer Support</p>
         <h1 id="sh-support-chat-title">Chat with ShopHaat Support</h1>
-        <p class="sh-support-chat__intro">Messages are saved to this browser session or your signed-in account. Never send an OTP, PIN, password or full card details.</p>
       </div>
-      <p class="sh-support-chat__status" data-chat-status role="status" aria-live="polite">Loading support status…</p>
-    </div>
-
-    <div class="sh-support-chat__controls">
-      <p class="sh-support-chat__ai-note" data-ai-note></p>
-      <label class="sh-support-chat__language" for="sh-support-language">Language
-        <select class="sh-select" id="sh-support-language" data-language>
-          <option value="en">English</option>
-          <option value="bn">বাংলা</option>
-          <option value="banglish">Banglish</option>
-        </select>
-      </label>
     </div>
 
     <div class="sh-support-chat__alert" data-chat-error role="alert" hidden></div>
     <div class="sh-support-chat__empty" data-chat-empty hidden>
-      <p data-empty-copy>Start a private conversation to ask about verified products, saved help articles or an order linked to your account/browser session.</p>
+      <p class="sh-support-chat__unavailable" data-chat-unavailable hidden>Chat is temporarily unavailable.</p>
       <button class="sh-btn" type="button" data-chat-open><?= sh_icon('message', 16) ?> Start a chat</button>
     </div>
 
@@ -97,7 +84,6 @@ require_once SH_ROOT . '/includes/header.php';
       <button class="sh-btn sh-btn--sm sh-btn--ghost sh-support-chat__older" type="button" data-load-older hidden>Load older messages</button>
       <ol class="sh-support-chat__messages" data-chat-messages aria-live="polite" aria-relevant="additions text"></ol>
       <div class="sh-support-chat__actions" data-chat-actions>
-        <p class="sh-support-chat__handoff-note" data-handoff-note></p>
         <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-handoff>Request human support</button>
         <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-chat-delete hidden>Delete resolved conversation</button>
       </div>

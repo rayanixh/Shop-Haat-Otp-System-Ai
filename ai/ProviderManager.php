@@ -592,6 +592,10 @@ function sh_ai_test_state_labels(): array
         'connected'           => 'Connected',
         'token_limit'         => 'Connected — token limit',
         'config_incomplete'   => 'Configuration incomplete',
+        'provider_missing'    => 'Provider missing',
+        'provider_disabled'   => 'Provider disabled',
+        'missing_key'         => 'API key missing',
+        'credential_decryption_failed' => 'Saved key unavailable',
         'auth_failed'         => 'Authentication failed',
         'permission_denied'   => 'Permission denied',
         'model_not_found'     => 'Model not available',
@@ -603,6 +607,11 @@ function sh_ai_test_state_labels(): array
         'quota_exceeded'      => 'Quota or billing limit',
         'billing'             => 'Billing problem',
         'timeout'             => 'Timed out',
+        'dns_error'           => 'DNS lookup failed',
+        'tls_error'           => 'TLS verification failed',
+        'connection_refused'  => 'Connection refused',
+        'connection_failed'   => 'Connection failed',
+        'transport_unavailable' => 'HTTP transport unavailable',
         'network_error'       => 'Network error',
         'provider_error'      => 'Provider error',
         'failed'              => 'Test failed',
@@ -615,13 +624,13 @@ function sh_ai_test_state_label(string $code): string
 }
 
 /**
- * Badge tone for a test code: ok / warn / bad. A token limit and a missing
- * configuration are warnings, never evidence of a bad key.
+ * Badge tone for a test code: ok / warn / bad. A token limit, missing
+ * configuration or unreachable transport is a warning, not evidence of a bad key.
  */
 function sh_ai_test_state_tone(string $code): string
 {
     if ($code === 'connected') { return 'ok'; }
-    if (in_array($code, ['token_limit', 'config_incomplete', 'model_not_found', 'model_unavailable', 'request_rejected', 'rate_limited', 'quota_exceeded', 'timeout', 'network_error'], true)) {
+    if (in_array($code, ['token_limit', 'config_incomplete', 'provider_missing', 'provider_disabled', 'missing_key', 'credential_decryption_failed', 'model_not_found', 'model_unavailable', 'request_rejected', 'rate_limited', 'quota_exceeded', 'timeout', 'dns_error', 'tls_error', 'connection_refused', 'connection_failed', 'transport_unavailable', 'network_error'], true)) {
         return 'warn';
     }
     return 'bad';
