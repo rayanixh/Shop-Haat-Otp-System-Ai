@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($oldAiState !== $newAiState) { sh_audit('settings_changed', 'settings', null, 'customer_support_ai_configuration', $oldAiState, $newAiState); }
         }
         if (!empty($result['ok'])) {
-            sh_flash('success', $configureAi ? 'Customer-support AI settings saved. Run a provider test before expecting AI replies.' : 'Customer-support settings saved.');
+            sh_flash('success', $configureAi ? 'Customer-support AI settings saved. Live messages will attempt the selected provider/model; the manual text test is optional.' : 'Customer-support settings saved.');
         } else { sh_flash('error', (string)($result['error'] ?? 'The support settings could not be saved.')); }
         sh_redirect('admin/support-settings.php' . ($configureAi ? '#ai' : '#settings'));
     }
@@ -218,9 +218,21 @@ $selectedProvider = $savedProviderId > 0 ? sh_ai_provider_row($savedProviderId) 
 $selectedProviderId = $selectedProvider !== null ? (int)$selectedProvider['id'] : 0;
 $savedModel = sh_ai_setting('support_chat_model', '');
 $aiState = sh_support_ai_state();
-$testCode = $aiInstalled ? sh_ai_setting('support_chat_test_code', '') : '';
-$testAt = $aiInstalled ? sh_ai_setting('support_chat_test_at', '') : '';
-$testMessage = $aiInstalled ? sh_ai_setting('support_chat_test_message', '') : '';
+$aiStateMessage = !empty($aiState['available'])
+    ? 'AI is enabled with the selected provider/model. Customer messages attempt that exact pair; live failures use a store fallback.'
+    : match ((string)($aiState['reason'] ?? '')) {
+        'disabled' => 'AI replies are disabled in settings; the store fallback remains available.',
+        'ai_module_missing' => 'AI Auto Work is not installed; install it before configuring a provider.',
+        'provider_unavailable' => 'The selected provider is missing, disabled or has no saved API key. No other provider is selected automatically.',
+        'https_required' => 'The selected provider endpoint must use HTTPS for customer-support inference.',
+        'model_unavailable' => 'The selected model is missing, disabled or not marked as text-capable.',
+        default => 'AI is currently unavailable; verified FAQ, catalogue and authorized order fallback remains active when chat is enabled.',
+    };
+$testCode = !empty($aiState['test_current']) ? (string)($aiState['test_code'] ?? '') : '';
+$testTone = $testCode !== '' ? sh_ai_test_state_tone($testCode) : 'muted';
+$testAt = $testCode !== '' ? sh_ai_setting('support_chat_test_at', '') : '';
+$testMessage = $testCode !== '' ? sh_ai_setting('support_chat_test_message', '') : '';
+$lastLiveDiagnostic = $aiInstalled ? sh_support_setting('last_diagnostic', '') : '';
 $faqRows = sh_all('SELECT * FROM support_faqs ORDER BY status DESC, sort_order ASC, id ASC');
 $editFaqId = max(0, sh_int($_GET['faq'] ?? 0));
 $editFaq = $editFaqId > 0 ? sh_support_faq_get($editFaqId) : null;
@@ -237,14 +249,14 @@ require __DIR__ . '/_layout.php';
     <div>
       <p class="sh-support-admin__eyebrow">Customer support configuration</p>
       <h2>Settings, AI guardrails &amp; FAQs</h2>
-      <p>Keep contact and policy answers aligned with the live store. AI uses an existing supported provider only after a real inference test; all message and order data remains read-only.</p>
+      <p>Keep contact and policy answers aligned with the live store. AI attempts only the configured existing provider/model; manual tests are diagnostic, and messages/orders remain read-only.</p>
     </div>
     <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support.php')) ?>"><?= sh_icon('message', 14) ?> Open inbox</a>
   </div>
 
   <div class="sh-support-settings__alert <?= $settings['enabled'] === '1' ? 'is-on' : 'is-off' ?>">
     <strong><?= $settings['enabled'] === '1' ? 'Customer chat is enabled.' : 'Customer chat is disabled.' ?></strong>
-    <span><?= !empty($aiState['available']) ? 'The selected provider/model passed a real text-response test.' : 'AI is currently unavailable; verified FAQ, catalogue and authorized order fallback remains active when chat is enabled.' ?></span>
+    <span><?= e($aiStateMessage) ?></span>
   </div>
 
   <section class="sh-panel" id="settings">
@@ -285,7 +297,7 @@ require __DIR__ . '/_layout.php';
             <div class="sh-alert sh-alert--info"><span>Your role can manage conversations and FAQs but does not have the AI tools permission. Ask the store owner to configure and test the provider.</span></div>
           <?php else: ?>
             <input type="hidden" name="ai_enabled" value="0">
-            <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>AI stays unavailable until the chosen provider/model returns actual text in the test below.</small></span></label>
+            <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>Customer messages attempt the chosen provider/model when enabled. The manual text test is optional diagnostics, not a runtime gate; live failures use a store fallback.</small></span></label>
             <div class="sh-grid2">
               <div class="sh-field"><label class="sh-field__label" for="support-provider">Configured provider</label>
                 <select class="sh-select" id="support-provider" name="provider_id" data-provider-select data-default-provider-id="<?= (int)($defaultProvider['id'] ?? 0) ?>">
@@ -321,14 +333,15 @@ require __DIR__ . '/_layout.php';
               <div class="sh-field"><label class="sh-field__label" for="support-context">Recent conversation turns (1–12)</label><input class="sh-input" id="support-context" name="context_limit" type="number" min="1" max="12" value="<?= (int)$settings['context_limit'] ?>"></div>
             </div>
             <div class="sh-support-settings__test">
-              <div><strong>Provider test status:</strong>
-                <?php if (!empty($aiState['available'])): ?><span class="sh-support-settings__state is-good">Last real text-response test passed; live calls may still fail</span>
-                <?php elseif ($testCode !== ''): ?><span class="sh-support-settings__state is-bad"><?= e(ucwords(str_replace('_', ' ', $testCode))) ?></span>
-                <?php else: ?><span class="sh-support-settings__state">Not tested for this configuration</span><?php endif; ?>
+              <div><strong>Selected-model text test status:</strong>
+                <?php if (!empty($aiState['test_ok'])): ?><span class="sh-support-settings__state is-good">Selected model returned text in the latest test; live calls may still fail</span>
+                <?php elseif ($testCode !== ''): ?><span class="sh-support-settings__state <?= $testTone === 'warn' ? 'is-warn' : 'is-bad' ?>"><?= e(sh_ai_test_state_label($testCode)) ?></span>
+                <?php else: ?><span class="sh-support-settings__state">Not tested for this exact configuration (test is optional)</span><?php endif; ?>
                 <?php if ($testMessage !== ''): ?><p><?= e($testMessage) ?></p><?php endif; ?>
                 <?php if ($testAt !== ''): ?><small>Last test: <?= e($testAt) ?> UTC</small><?php endif; ?>
+                <?php if ($lastLiveDiagnostic !== ''): ?><p class="sh-formcard__note"><strong>Last live inference diagnostic (redacted):</strong><br><?= e($lastLiveDiagnostic) ?></p><?php endif; ?>
               </div>
-              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="form" value="test_provider" formaction="<?= e(sh_url('admin/support-settings.php#ai')) ?>"><?= sh_icon('activity', 14) ?> Save settings &amp; test provider</button>
+              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="form" value="test_provider" formaction="<?= e(sh_url('admin/support-settings.php#ai')) ?>"><?= sh_icon('activity', 14) ?> Save settings &amp; test selected model</button>
             </div>
           <?php endif; ?>
         </div>

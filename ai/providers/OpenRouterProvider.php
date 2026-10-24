@@ -142,8 +142,7 @@ class OpenRouterProvider extends OpenAICompatibleProvider
             'messages' => [['role' => 'user', 'content' => 'Reply with the single word: ready']],
             'max_tokens' => 64,
         ];
-        $chat = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(),
-            $this->decorateChatPayload($payload), 15);
+        $chat = $this->chat($payload, 15);
         if (!$chat['ok']) { return $this->testHttpFailure($chat, $model, 'OpenRouter'); }
         $j = $chat['json'];
         $choice = $j['choices'][0] ?? [];

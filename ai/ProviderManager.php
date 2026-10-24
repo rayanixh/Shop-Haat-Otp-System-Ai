@@ -595,7 +595,12 @@ function sh_ai_test_state_labels(): array
         'auth_failed'         => 'Authentication failed',
         'permission_denied'   => 'Permission denied',
         'model_not_found'     => 'Model not available',
+        'model_unavailable'   => 'Model not available',
+        'request_rejected'    => 'Request rejected',
+        'empty_response'      => 'Empty model response',
+        'invalid_response'    => 'Invalid provider response',
         'rate_limited'        => 'Rate limited',
+        'quota_exceeded'      => 'Quota or billing limit',
         'billing'             => 'Billing problem',
         'timeout'             => 'Timed out',
         'network_error'       => 'Network error',
@@ -616,10 +621,32 @@ function sh_ai_test_state_label(string $code): string
 function sh_ai_test_state_tone(string $code): string
 {
     if ($code === 'connected') { return 'ok'; }
-    if (in_array($code, ['token_limit', 'config_incomplete', 'model_not_found', 'rate_limited', 'timeout', 'network_error'], true)) {
+    if (in_array($code, ['token_limit', 'config_incomplete', 'model_not_found', 'model_unavailable', 'request_rejected', 'rate_limited', 'quota_exceeded', 'timeout', 'network_error'], true)) {
         return 'warn';
     }
     return 'bad';
+}
+
+/** Redact provider secrets, configured extra-header values and inline credentials from test diagnostics. */
+function sh_ai_redact_provider_test_text(string $text, array $provider): string
+{
+    $secrets = [];
+    if (function_exists('sh_ai_decrypt')) {
+        $key = sh_ai_decrypt((string)($provider['api_key'] ?? ''));
+        if ($key !== '') { $secrets[] = $key; }
+    }
+    $auth = trim((string)($provider['auth_header'] ?? ''));
+    if ($auth !== '') { $secrets[] = $auth; }
+    $extra = json_decode((string)($provider['extra_headers'] ?? ''), true);
+    if (is_array($extra)) {
+        foreach ($extra as $value) { if (is_scalar($value)) { $secrets[] = (string)$value; } }
+    }
+    foreach ($secrets as $secret) {
+        if (strlen($secret) >= 6) { $text = str_replace($secret, '[redacted]', $text); }
+    }
+    $text = preg_replace('/\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,}|Bearer\s+[A-Za-z0-9._~+\/-]{10,})\b/i', '[redacted]', $text) ?? $text;
+    $text = preg_replace('/\b[A-Za-z0-9_.-]*(?:api[_ -]?key|secret|token|password|authorization)[A-Za-z0-9_.-]*\s*[:=]\s*[^\s,;]+/i', '[credential]=[redacted]', $text) ?? $text;
+    return mb_substr(trim(preg_replace('/\s+/', ' ', $text) ?? $text), 0, 255);
 }
 
 /** Test one configured provider and remember the real outcome. */
@@ -633,14 +660,16 @@ function sh_ai_provider_test(int $providerId): array
                 'tested_at' => date('Y-m-d H:i:s'), 'error' => 'This provider type is unknown.'];
     }
 
-    $res = $adapter->testConnection();
-    // A provider can echo part of the request in an error. Never store or
-    // return the decrypted key, even if the vendor repeats it back.
-    $plainKey = function_exists('sh_ai_decrypt') ? sh_ai_decrypt((string)($row['api_key'] ?? '')) : '';
-    if ($plainKey !== '' && strlen($plainKey) >= 8) {
-        foreach (['message', 'error', 'detail', 'next'] as $k) {
-            if (isset($res[$k])) { $res[$k] = str_replace($plainKey, '••••', (string)$res[$k]); }
-        }
+    try {
+        $res = $adapter->testConnection();
+    } catch (Throwable $e) {
+        sh_log_line('ai-provider-test', 'Provider adapter test threw an exception; details omitted.');
+        $res = ['ok' => false, 'code' => 'provider_error', 'status' => 0,
+                'message' => 'The provider test could not be completed due to an internal error.',
+                'next' => 'Check the provider configuration and server logs, then test again.'];
+    }
+    foreach (['message', 'error', 'detail', 'next'] as $k) {
+        if (isset($res[$k])) { $res[$k] = sh_ai_redact_provider_test_text((string)$res[$k], $row); }
     }
     if (!isset($res['code']) || $res['code'] === '') {
         $res['code'] = !empty($res['ok']) ? 'connected' : 'failed';

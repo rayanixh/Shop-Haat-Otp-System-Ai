@@ -39,8 +39,10 @@ class GeminiProvider extends AbstractAIProvider
         if (!$this->hasKey()) { return $this->noKey(); }
         $url = $this->baseUrl() . '/models/' . rawurlencode(self::cleanId($model)) . ':' . $method;
         $res = AIHttpClient::post($url, $this->headers(), $payload, $timeout);
-        if (!$res['ok']) { return ['ok' => false, 'error' => $res['error'], 'retryable' => $res['retryable']]; }
-        return ['ok' => true, 'json' => $res['json']];
+        if (!$res['ok']) { return $this->httpFailure($res); }
+        $envelope = $this->responseEnvelopeFailure((array)$res['json'], (int)($res['status'] ?? 200));
+        if ($envelope !== null) { return $envelope; }
+        return ['ok' => true, 'json' => $res['json'], 'status' => (int)($res['status'] ?? 200)];
     }
 
     private function generate(string $system, string $user, array $options, bool $json): array
@@ -68,21 +70,28 @@ class GeminiProvider extends AbstractAIProvider
         if (!$res['ok']) { return $res; }
         $j = $res['json'];
         $cand = $j['candidates'][0] ?? null;
-        if ($cand === null) {
+        if (!is_array($cand)) {
             $why = (string)($j['promptFeedback']['blockReason'] ?? '');
-            return ['ok' => false, 'retryable' => false,
-                    'error' => $why !== '' ? 'Gemini blocked the request (' . $why . ').' : 'Gemini returned no candidates.'];
+            return ['ok' => false, 'code' => $why !== '' ? 'request_rejected' : 'invalid_response',
+                    'status' => (int)($res['status'] ?? 200), 'retryable' => false,
+                    'error' => $why !== '' ? 'Gemini blocked the request (' . $why . ').' : 'Gemini returned no candidate in its successful response.'];
+        }
+        $parts = $cand['content']['parts'] ?? [];
+        if (!is_array($parts)) {
+            return ['ok' => false, 'code' => 'invalid_response', 'status' => (int)($res['status'] ?? 200),
+                    'retryable' => false, 'error' => 'Gemini returned an invalid content structure.'];
         }
         $text = '';
-        foreach (($cand['content']['parts'] ?? []) as $p) { $text .= (string)($p['text'] ?? ''); }
+        foreach ($parts as $p) { if (is_array($p)) { $text .= (string)($p['text'] ?? ''); } }
         $text = trim($text);
         if ($text === '') {
             $fin = (string)($cand['finishReason'] ?? '');
-            return ['ok' => false, 'retryable' => $fin === 'MAX_TOKENS',
-                    'error' => $fin === 'MAX_TOKENS' ? 'Gemini hit the token limit before producing text. Raise max tokens.' : 'Gemini returned an empty response' . ($fin !== '' ? ' (' . $fin . ')' : '') . '.'];
+            $code = $fin === 'MAX_TOKENS' ? 'output_limit' : 'empty_response';
+            return ['ok' => false, 'code' => $code, 'status' => (int)($res['status'] ?? 200), 'retryable' => $code === 'output_limit',
+                    'error' => $code === 'output_limit' ? 'Gemini reached the output-token limit before producing text.' : 'Gemini returned an empty response' . ($fin !== '' ? ' (' . $fin . ')' : '') . '.'];
         }
         $u = $j['usageMetadata'] ?? [];
-        return ['ok' => true, 'text' => $text, 'model' => self::cleanId($model),
+        return ['ok' => true, 'text' => $text, 'model' => self::cleanId($model), 'status' => (int)($res['status'] ?? 200),
                 'usage' => self::usage((int)($u['promptTokenCount'] ?? 0), (int)($u['candidatesTokenCount'] ?? 0), isset($u['totalTokenCount']) ? (int)$u['totalTokenCount'] : null)];
     }
 
@@ -159,6 +168,8 @@ class GeminiProvider extends AbstractAIProvider
 
         $list = AIHttpClient::get($this->baseUrl() . '/models?pageSize=200', $this->headers(), 12);
         if (!$list['ok']) { return $this->testHttpFailure($list, $model, 'Google Gemini'); }
+        $listError = $this->responseEnvelopeFailure((array)$list['json'], (int)($list['status'] ?? 200));
+        if ($listError !== null) { return $this->testHttpFailure($listError, $model, 'Google Gemini'); }
         $known = [];
         foreach (($list['json']['models'] ?? []) as $m) {
             $id = self::cleanId((string)($m['name'] ?? ''));
@@ -191,15 +202,17 @@ class GeminiProvider extends AbstractAIProvider
 
         $j = $res['json'];
         $cand = $j['candidates'][0] ?? null;
-        if ($cand === null) {
+        if (!is_array($cand)) {
             $why = (string)($j['promptFeedback']['blockReason'] ?? '');
-            return $this->testResult(false, 'provider_error',
+            return $this->testResult(false, $why !== '' ? 'request_rejected' : 'invalid_response',
                 'Google returned no candidate' . ($why !== '' ? ' (blocked: ' . $why . ')' : '') . '.',
                 ['status' => 200, 'model' => $model,
                  'next' => 'Try a different text model. A safety block is not an authentication failure.']);
         }
         $text = '';
-        foreach (($cand['content']['parts'] ?? []) as $part) { $text .= (string)($part['text'] ?? ''); }
+        $parts = $cand['content']['parts'] ?? [];
+        if (!is_array($parts)) { $parts = []; }
+        foreach ($parts as $part) { if (is_array($part)) { $text .= (string)($part['text'] ?? ''); } }
         $text = trim($text);
         $finish = (string)($cand['finishReason'] ?? '');
         if ($text === '') {
@@ -209,7 +222,7 @@ class GeminiProvider extends AbstractAIProvider
                     ['status' => 200, 'model' => $model,
                      'next' => 'Raise the token budget for generations, or choose a model with less thinking overhead.']);
             }
-            return $this->testResult(false, 'provider_error',
+            return $this->testResult(false, 'empty_response',
                 'Google accepted the request but returned no text' . ($finish !== '' ? ' (' . $finish . ')' : '') . '.',
                 ['status' => 200, 'model' => $model, 'next' => 'Choose a text-capable model and test again.']);
         }

@@ -123,6 +123,7 @@
 .sh-support-settings__state { display: inline-flex; margin-left: 4px; color: var(--sh-muted, #667085); font-size: 12px; font-weight: 650; }
 .sh-support-settings__state.is-good { color: #167447; }
 .sh-support-settings__state.is-bad { color: #a1332c; }
+.sh-support-settings__state.is-warn { color: #8a5b0a; }
 .sh-support-settings__save { display: flex; flex-wrap: wrap; gap: 9px; padding-top: 5px; }
 .sh-support-settings__count { display: inline-flex; align-items: center; justify-content: center; min-width: 23px; height: 23px; margin-left: 5px; border-radius: 999px; color: #475467; background: #f2f4f7; font-size: 11px; }
 .sh-support-settings__faq-list { display: grid; gap: 9px; }

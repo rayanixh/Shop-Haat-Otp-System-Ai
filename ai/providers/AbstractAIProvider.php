@@ -109,12 +109,46 @@ abstract class AbstractAIProvider implements AIProviderInterface
 
     protected function noKey(): array
     {
-        return ['ok' => false, 'error' => 'No API key is saved for ' . $this->name() . '.', 'retryable' => false];
+        return ['ok' => false, 'error' => 'No API key is saved for ' . $this->name() . '.', 'retryable' => false, 'code' => 'auth_failed', 'status' => 0];
     }
 
     protected function noModel(): array
     {
-        return ['ok' => false, 'error' => 'No model is selected for ' . $this->name() . '.', 'retryable' => false];
+        return ['ok' => false, 'error' => 'No model is selected for ' . $this->name() . '.', 'retryable' => false, 'code' => 'model_unavailable', 'status' => 0];
+    }
+
+    /** Preserve a safe provider failure category and HTTP status through adapters. */
+    protected function httpFailure(array $response): array
+    {
+        $status = (int)($response['status'] ?? 0);
+        $error = (string)($response['error'] ?? 'The provider request failed.');
+        return [
+            'ok' => false,
+            'error' => $error,
+            'retryable' => (bool)($response['retryable'] ?? false),
+            'status' => $status,
+            'code' => (string)($response['code'] ?? AIHttpClient::diagnosticCode($status, $error)),
+        ];
+    }
+
+    /** Normalize a JSON error envelope even when a gateway incorrectly returns HTTP 200. */
+    protected function responseEnvelopeFailure(array $json, int $httpStatus): ?array
+    {
+        if (!array_key_exists('error', $json)) { return null; }
+        $error = is_array($json['error']) ? $json['error'] : ['message' => (string)$json['error']];
+        $message = (string)($error['message'] ?? $error['error'] ?? $error['type'] ?? 'The provider returned an error.');
+        $embedded = $error['status'] ?? $error['code'] ?? 400;
+        $providerStatus = is_numeric($embedded) ? (int)$embedded : 400;
+        $errorType = (string)($error['type'] ?? (is_string($error['code'] ?? null) ? $error['code'] : ''));
+        $code = AIHttpClient::diagnosticCode($providerStatus, $errorType . ' ' . $message);
+        return [
+            'ok' => false,
+            'error' => $message,
+            'retryable' => in_array($code, ['timeout', 'rate_limited', 'provider_error', 'network_error'], true),
+            'status' => $httpStatus,
+            'provider_status' => $providerStatus,
+            'code' => $code,
+        ];
     }
 
     /* ------------------------------------------------------------------ *
@@ -158,7 +192,7 @@ abstract class AbstractAIProvider implements AIProviderInterface
     protected function testHttpFailure(array $http, string $model = '', string $what = ''): array
     {
         $status = (int)($http['status'] ?? 0);
-        $code   = AIHttpClient::classify($status);
+        $code   = (string)($http['code'] ?? AIHttpClient::classify($status));
         $what   = $what !== '' ? $what : $this->name();
         $detail = trim((string)($http['error'] ?? ''));
         // Status 0 means "no HTTP response"; a curl timeout is still a timeout,
@@ -178,8 +212,16 @@ abstract class AbstractAIProvider implements AIProviderInterface
                                 'Pick a model the account can use (Models tab) and test again.'],
             'rate_limited'  => [$what . ' rate-limited the test request.',
                                 'Wait a minute and run the test again.'],
+            'quota_exceeded'=> [$what . ' reports a quota or billing limit.',
+                                'Check provider quota and billing, then run the inference test again.'],
             'billing'       => [$what . ' reports a billing or credit problem.',
                                 'Add credit or fix billing in the provider dashboard.'],
+            'request_rejected' => [$what . ' rejected the request (HTTP ' . $status . ').',
+                                   'Review the provider message below. If it names an unsupported parameter, choose a compatible model or endpoint.'],
+            'empty_response' => [$what . ' accepted the request but returned no assistant text.',
+                                 'Choose a text-capable model that can return a normal text response.'],
+            'invalid_response' => [$what . ' returned an invalid response (HTTP ' . $status . ').',
+                                   'Check that the endpoint and model use the selected provider API format.'],
             'provider_error'=> [$what . ' returned a server error (HTTP ' . $status . ').',
                                 'Retry later. A server-side error does not necessarily mean the key is wrong.'],
             default         => ['The test request was rejected by ' . $what . ' (HTTP ' . $status . ').',

@@ -54,20 +54,28 @@ class AnthropicProvider extends AbstractAIProvider
         }
 
         $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, 120);
-        if (!$res['ok']) { return ['ok' => false, 'error' => $res['error'], 'retryable' => $res['retryable']]; }
+        if (!$res['ok']) { return $this->httpFailure($res); }
         $j = $res['json'];
+        $envelope = $this->responseEnvelopeFailure((array)$j, (int)($res['status'] ?? 200));
+        if ($envelope !== null) { return $envelope; }
+        $blocks = $j['content'] ?? null;
+        if (!is_array($blocks)) {
+            return ['ok' => false, 'code' => 'invalid_response', 'status' => (int)($res['status'] ?? 200),
+                    'retryable' => false, 'error' => 'Anthropic returned an invalid Messages response.'];
+        }
         $text = '';
-        foreach (($j['content'] ?? []) as $block) {
-            if (($block['type'] ?? '') === 'text') { $text .= (string)($block['text'] ?? ''); }
+        foreach ($blocks as $block) {
+            if (is_array($block) && ($block['type'] ?? '') === 'text') { $text .= (string)($block['text'] ?? ''); }
         }
         $text = trim($text);
         if ($text === '') {
             $stop = (string)($j['stop_reason'] ?? '');
-            return ['ok' => false, 'retryable' => $stop === 'max_tokens',
-                    'error' => $stop === 'max_tokens' ? 'Claude hit the token limit before producing text. Raise max tokens.' : 'Claude returned an empty response.'];
+            $code = $stop === 'max_tokens' ? 'output_limit' : 'empty_response';
+            return ['ok' => false, 'code' => $code, 'status' => (int)($res['status'] ?? 200), 'retryable' => $code === 'output_limit',
+                    'error' => $code === 'output_limit' ? 'Claude reached the output-token limit before producing text.' : 'Claude returned an empty response.'];
         }
         $u = $j['usage'] ?? [];
-        return ['ok' => true, 'text' => $text, 'model' => (string)($j['model'] ?? $model),
+        return ['ok' => true, 'text' => $text, 'model' => (string)($j['model'] ?? $model), 'status' => (int)($res['status'] ?? 200),
                 'usage' => self::usage((int)($u['input_tokens'] ?? 0), (int)($u['output_tokens'] ?? 0))];
     }
 
@@ -107,9 +115,13 @@ class AnthropicProvider extends AbstractAIProvider
         if (!$res['ok']) { return $this->testHttpFailure($res, $model, 'Anthropic Claude'); }
 
         $j = $res['json'];
+        $envelope = $this->responseEnvelopeFailure((array)$j, (int)($res['status'] ?? 200));
+        if ($envelope !== null) { return $this->testHttpFailure($envelope, $model, 'Anthropic Claude'); }
         $text = '';
-        foreach (($j['content'] ?? []) as $block) {
-            if (($block['type'] ?? '') === 'text') { $text .= (string)($block['text'] ?? ''); }
+        $blocks = $j['content'] ?? [];
+        if (!is_array($blocks)) { $blocks = []; }
+        foreach ($blocks as $block) {
+            if (is_array($block) && ($block['type'] ?? '') === 'text') { $text .= (string)($block['text'] ?? ''); }
         }
         $text = trim($text);
         $stop = (string)($j['stop_reason'] ?? '');
@@ -120,7 +132,7 @@ class AnthropicProvider extends AbstractAIProvider
                  'next' => 'Raise max tokens for generations; the key itself is valid.']);
         }
         if ($text === '') {
-            return $this->testResult(false, 'provider_error',
+            return $this->testResult(false, 'empty_response',
                 'Anthropic accepted the request but returned no text' . ($stop !== '' ? ' (' . $stop . ')' : '') . '.',
                 ['status' => 200, 'model' => $model, 'next' => 'Choose a Claude model and test again.']);
         }

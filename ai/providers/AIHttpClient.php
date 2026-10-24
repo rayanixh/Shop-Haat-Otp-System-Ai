@@ -34,7 +34,7 @@ final class AIHttpClient
     public static function request(string $method, string $url, array $headers, ?array $payload = null, int $timeout = 90): array
     {
         if (!preg_match('#^https?://#i', $url)) {
-            return self::fail(0, 'The provider base URL is invalid.', false);
+            return self::fail(0, 'The provider base URL is invalid.', false, null, '', 'invalid_endpoint');
         }
         $limits = self::$requestLimits;
         if ($limits !== null) { $timeout = min($timeout, (int)$limits['timeout']); }
@@ -47,7 +47,7 @@ final class AIHttpClient
         $headers[] = 'Accept: application/json';
         $headers[] = 'User-Agent: ShopHaat-AI/1.0';
 
-        $raw = ''; $status = 0; $timedOut = false; $tooLarge = false;
+        $raw = ''; $status = 0; $timedOut = false; $tooLarge = false; $streamError = '';
 
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
@@ -74,7 +74,11 @@ final class AIHttpClient
             $out = curl_exec($ch);
             $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $errno = curl_errno($ch);
-            $timedOut = defined('CURLE_OPERATION_TIMEOUTED') && $errno === CURLE_OPERATION_TIMEOUTED;
+            $timeoutErrnos = [];
+            foreach (['CURLE_OPERATION_TIMEDOUT', 'CURLE_OPERATION_TIMEOUTED'] as $constant) {
+                if (defined($constant)) { $timeoutErrnos[] = (int)constant($constant); }
+            }
+            $timedOut = $timeoutErrnos !== [] && in_array($errno, $timeoutErrnos, true);
             curl_close($ch);
             if ($maxResponseBytes === null) { $raw = $out === false ? '' : (string)$out; }
         } else {
@@ -83,6 +87,7 @@ final class AIHttpClient
                 'content' => $body ?? '', 'timeout' => max(1, $timeout), 'ignore_errors' => true,
                 'follow_location' => 0, 'max_redirects' => 0,
             ]]);
+            if (function_exists('error_clear_last')) { error_clear_last(); }
             set_error_handler(static fn(): bool => true);
             try {
                 if ($maxResponseBytes === null) {
@@ -95,6 +100,9 @@ final class AIHttpClient
                     $raw = $out === false ? '' : (string)$out;
                     if (strlen($raw) > $maxResponseBytes) { $tooLarge = true; $raw = ''; }
                 }
+                $lastError = error_get_last();
+                $streamError = is_array($lastError) ? (string)($lastError['message'] ?? '') : '';
+                $timedOut = preg_match('/timed?\s*out|timeout/i', $streamError) === 1;
             } finally { restore_error_handler(); }
             if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
                 $status = (int)$m[1];
@@ -102,10 +110,11 @@ final class AIHttpClient
         }
 
         if ($tooLarge) {
-            return self::fail($status, 'The AI provider response exceeded the configured safety limit.', false);
+            return self::fail($status, 'The AI provider response exceeded the configured safety limit.', false, null, '', 'invalid_response');
         }
         if ($status === 0) {
-            return self::fail(0, $timedOut ? 'The AI provider timed out.' : 'Could not reach the AI provider.', true);
+            $error = $timedOut ? 'The AI provider timed out.' : 'Could not reach the AI provider.';
+            return self::fail(0, $error, true, null, '', $timedOut ? 'timeout' : 'network_error');
         }
 
         $json = json_decode($raw, true);
@@ -115,12 +124,14 @@ final class AIHttpClient
                 $msg = (string)($json['error']['message'] ?? $json['error']['error']['message'] ?? $json['message'] ?? $json['error'] ?? '');
                 if (is_array($json['error'] ?? null) && $msg === '') { $msg = (string)($json['error']['type'] ?? ''); }
             }
-            return self::fail($status, self::friendly($status, $msg), in_array($status, [408, 409, 425, 429], true) || $status >= 500, is_array($json) ? $json : null, $raw);
+            $friendly = self::friendly($status, $msg);
+            return self::fail($status, $friendly, in_array($status, [408, 409, 425, 429], true) || $status >= 500,
+                is_array($json) ? $json : null, $raw, self::diagnosticCode($status, $friendly));
         }
         if (!is_array($json)) {
-            return self::fail($status, 'The AI provider returned an unreadable response.', true, null, $raw);
+            return self::fail($status, 'The AI provider returned an unreadable response.', false, null, '', 'invalid_response');
         }
-        return ['ok' => true, 'status' => $status, 'json' => $json, 'raw' => $raw, 'error' => '', 'retryable' => false];
+        return ['ok' => true, 'status' => $status, 'json' => $json, 'raw' => $raw, 'error' => '', 'retryable' => false, 'code' => 'connected'];
     }
 
     public static function get(string $url, array $headers, int $timeout = 30): array
@@ -165,9 +176,10 @@ final class AIHttpClient
         return ['binary' => $bin, 'mime' => $mime];
     }
 
-    private static function fail(int $status, string $error, bool $retryable, ?array $json = null, string $raw = ''): array
+    private static function fail(int $status, string $error, bool $retryable, ?array $json = null, string $raw = '', ?string $code = null): array
     {
-        return ['ok' => false, 'status' => $status, 'json' => $json, 'raw' => $raw, 'error' => $error, 'retryable' => $retryable];
+        return ['ok' => false, 'status' => $status, 'json' => $json, 'raw' => $raw, 'error' => $error,
+                'retryable' => $retryable, 'code' => $code ?? self::diagnosticCode($status, $error)];
     }
 
     /**
@@ -192,6 +204,37 @@ final class AIHttpClient
             $status >= 400  => 'failed',
             default         => 'connected',
         };
+    }
+
+    /**
+     * A more specific inference diagnostic than the legacy UI status bucket.
+     * Provider text is inspected only to classify the failure; callers decide
+     * separately whether any detail is safe to retain or display.
+     */
+    public static function diagnosticCode(int $status, string $message = ''): string
+    {
+        $text = strtolower($message);
+        $normalized = preg_replace('/[_-]+/', ' ', $text) ?? $text;
+        if (preg_match('/timed?\s*out|timeout/i', $message) === 1) { return 'timeout'; }
+        if ($status === 0) { return 'network_error'; }
+        if ($status === 401 || preg_match('/unauthori[sz]ed|authentication (?:error|failed)|auth(?:entication)? (?:error|failed)|invalid (?:api )?key|invalid bearer|expired (?:api )?key|invalid token/i', $normalized) === 1) { return 'auth_failed'; }
+        if (preg_match('/quota|billing|insufficient credit|credit balance/i', $normalized) === 1 || $status === 402) { return 'quota_exceeded'; }
+        if ($status === 403 || preg_match('/permission (?:denied|error)|forbidden|not permitted|not allowed to use|access denied/i', $normalized) === 1) { return 'permission_denied'; }
+        if (preg_match('/rate limit|too many requests|throttl/i', $normalized) === 1 || $status === 429) { return 'rate_limited'; }
+        if ($status === 404) {
+            return preg_match('/endpoint|route|path/i', $normalized) === 1 && preg_match('/model/i', $normalized) !== 1
+                ? 'request_rejected' : 'model_not_found';
+        }
+        if ($status === 408) { return 'timeout'; }
+        if ($status >= 500) { return 'provider_error'; }
+        if (in_array($status, [400, 422], true)) {
+            if (preg_match('/(?:model|deployment|engine).{0,80}(?:not found|unsupported|unavailable|invalid|does not exist|not supported)|(?:not found|unsupported|unavailable|invalid|does not exist|not supported).{0,80}(?:model|deployment|engine)/i', $normalized) === 1) {
+                return 'model_not_found';
+            }
+            return 'request_rejected';
+        }
+        if ($status >= 400) { return 'request_rejected'; }
+        return 'provider_error';
     }
 
     /** Turn a provider error into something an admin can act on. */

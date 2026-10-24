@@ -360,7 +360,35 @@ function sh_support_localized(string $language, string $en, string $bn, string $
 
 function sh_support_order_intent(string $text): bool
 {
-    return preg_match('/\b(order|orders|purchase|shipment|tracking|track|my last|where is my|order status|payment status)\b|অর্ডার|ট্র্যাক|কোথায়.*অর্ডার|আমার অর্ডার/iu', $text) === 1;
+    // Only route questions about an existing order to the private order lookup.
+    // A purchase intent such as "I want to place an order" must go to the model.
+    return preg_match('/\b(?:my|amar)\s+(?:(?:last|latest|recent|previous)\s+)?(?:order|shipment|parcel)\b/i', $text) === 1
+        || preg_match('/\b(?:where(?:\s+is|\'s)|track(?:ing)?|check|status\s+of|update\s+on)\b.{0,60}\b(?:my|the)?\s*(?:order|shipment|parcel)\b/i', $text) === 1
+        || preg_match('/\b(?:order|shipment|payment)\s+(?:status|tracking|update)\b/i', $text) === 1
+        || preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:SH|ORD|SHP)?[- ]?[A-Z0-9]{3,24}\b/i', $text) === 1
+        || preg_match('/\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text) === 1
+        || preg_match('/আমার\s+(?:সর্বশেষ\s+|আগের\s+)?(?:অর্ডার|শিপমেন্ট|পার্সেল)|(?:অর্ডার|শিপমেন্ট).{0,50}(?:অবস্থা|স্ট্যাটাস|ট্র্যাক|কোথায়|কবে|পৌঁছ|ডেলিভারি)/u', $text) === 1
+        || preg_match('/\b(?:amar|amar last|amar latest)\s+(?:order|shipment|parcel)\b.{0,60}\b(?:kothay|kobe|status|track|pabo|asbe|pouchhabe)\b/i', $text) === 1;
+}
+
+function sh_support_order_followup_intent(string $text): bool
+{
+    return preg_match('/\b(?:where|when|how long|arrive|delivered|delivery|shipment|tracking|track|status|reach)\b|কবে|কোথায়|পৌঁছ|ডেলিভারি|আসবে|পাব|ট্র্যাক/iu', $text) === 1
+        || preg_match('/\b(?:kobe|kothay|ashbe|asbe|pabo|pouchhabe|delivery koto|track)\b/i', $text) === 1;
+}
+
+function sh_support_previous_customer_asked_about_order(int $conversationId, int $currentMessageId): bool
+{
+    if ($conversationId <= 0 || $currentMessageId <= 0) { return false; }
+    try {
+        $previous = sh_one("SELECT body FROM support_messages WHERE conversation_id = ? AND id < ?
+                           AND sender = 'customer' AND is_internal = 0 ORDER BY id DESC LIMIT 1",
+            [$conversationId, $currentMessageId]);
+        return $previous !== null && sh_support_order_intent((string)$previous['body']);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-support-order-context');
+        return false;
+    }
 }
 
 function sh_support_handoff_intent(string $text): bool
@@ -370,7 +398,7 @@ function sh_support_handoff_intent(string $text): bool
 
 function sh_support_product_intent(string $text): bool
 {
-    return preg_match('/\b(?:product|products|item|items|buy|purchase|shop|looking for|recommend|suggest|show me|find me|price|cost|stock|available|size|colour|color|specification|specs|catalog|catalogue)\b|পণ্য|দাম|স্টক|আছে কি|দেখান|সাইজ|রঙ|ক্যাটালগ/iu', $text) === 1;
+    return preg_match('/\b(?:product|products|item|items|buy|purchase|shop|looking for|recommend|suggest|show me|find me|price|cost|how much|price of|cost of|in stock|do you have|available|availability|size|colour|color|specification|specs|catalog|catalogue)\b|পণ্য|দাম|স্টক|আছে|পাওয়া|পাব|দেখান|সাইজ|রঙ|ক্যাটালগ|\b(?:ache|ase|pabo|pawa|koto|dam|available|stock)\b/iu', $text) === 1;
 }
 
 function sh_support_policy_kind(string $text): string
@@ -396,19 +424,36 @@ function sh_support_token_terms(string $text, int $limit = 6): array
     return array_values($terms);
 }
 
-/** Search only public catalogue fields. The actual catalog has no variants table. */
+function sh_support_product_search_terms(string $text, int $limit = 6): array
+{
+    $generic = [
+        'product','products','item','items','buy','purchase','shop','looking','recommend','suggest','show','find',
+        'price','cost','much','stock','available','availability','size','colour','color','specification','specifications',
+        'specs','catalog','catalogue','ache','ase','pabo','pawa','koto','dam','dorkar','chai','lagbe',
+        'please','bhai','vai','bro','eta','ei','ta','ki','ache','ase','available','ami','amar','apni','apnar','apnader','kache','for','do','you','have','want','need',
+        'পণ্য','দাম','স্টক','আছে','পাওয়া','পাব','দেখান','সাইজ','রঙ','ক্যাটালগ','কত','কি','এই','এটা','একটা','আমার','চাই',
+    ];
+    $terms = [];
+    foreach (sh_support_token_terms($text, 12) as $term) {
+        $key = mb_strtolower((string)$term, 'UTF-8');
+        $normalized = preg_replace('/(?:টা|টি|গুলো|গুলি)$/u', '', $key) ?? $key;
+        if (mb_strlen($normalized, 'UTF-8') < 2 || in_array($normalized, $generic, true)) { continue; }
+        $terms[$normalized] = $normalized;
+    }
+    return array_slice(array_values($terms), 0, max(1, min(10, $limit)));
+}
+
+/** Search only public catalogue fields and only when a real product term exists. */
 function sh_support_lookup_products(string $query, int $limit = 5): array
 {
     $query = sh_support_clean_text($query, 120);
-    $query = trim(preg_replace('/[%_\\\\]/u', ' ', $query) ?? $query);
-    if (mb_strlen($query, 'UTF-8') < 2) { return []; }
-    $terms = sh_support_token_terms($query, 5);
-    if (!$terms) { $terms = [$query]; }
-
+    $terms = sh_support_product_search_terms($query, 6);
+    if (!$terms) { return []; }
+    $searchQuery = implode(' ', $terms);
     $fields = ['p.name', 'p.short_description', 'p.description', 'p.specifications', 'c.name'];
     $whereParts = [];
     $params = [];
-    $phrase = '%' . $query . '%';
+    $phrase = '%' . $searchQuery . '%';
     foreach ($fields as $field) { $whereParts[] = $field . ' LIKE ?'; $params[] = $phrase; }
     foreach ($terms as $term) {
         $like = '%' . $term . '%';
@@ -547,12 +592,16 @@ function sh_support_order_status_label(string $status, string $language = 'en'):
     return match ($language) { 'bn' => $row[1], 'banglish' => $row[2], default => $row[0] };
 }
 
-function sh_support_find_authorized_order(string $text, array $owner): array
+function sh_support_find_authorized_order(string $text, array $owner, int $conversationId = 0, int $currentMessageId = 0): array
 {
-    if (!sh_support_order_intent($text)) { return ['intent' => false, 'found' => false, 'order' => null]; }
+    $isOrderIntent = sh_support_order_intent($text)
+        || (sh_support_order_followup_intent($text) && sh_support_previous_customer_asked_about_order($conversationId, $currentMessageId));
+    if (!$isOrderIntent) { return ['intent' => false, 'found' => false, 'order' => null]; }
     $uid = (int)($owner['user_id'] ?? 0);
     $number = '';
-    if (preg_match('/\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text, $m) === 1) {
+    if (preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:is\s+|:)?((?:[A-Z]{2}\d{8,18}|(?:SH|ORD|SHP)[-]?[A-Z0-9]{3,24}|\d{4,20}))\b/i', $text, $m) === 1) {
+        $number = strtoupper($m[1]);
+    } elseif (preg_match('/\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text, $m) === 1) {
         $number = strtoupper($m[0]);
     } elseif (preg_match('/(?<![\p{L}\p{N}])\d{6,20}(?![\p{L}\p{N}])/u', $text, $m) === 1) {
         $number = $m[0];
@@ -714,13 +763,15 @@ function sh_support_fallback_text(string $body, string $language, array $product
                 'product_ids' => array_map(static fn($p) => (int)$p['id'], $products),
             ];
         }
-        return [
-            'text' => sh_support_localized($language,
-                'I could not find a matching active product in the catalogue. Try another product name or category.',
-                'সক্রিয় ক্যাটালগে মিলে এমন পণ্য খুঁজে পাইনি। অন্য কোনো পণ্যের নাম বা ক্যাটাগরি দিয়ে চেষ্টা করবেন?',
-                'Active catalog-e matching product pelam na. Onno product-er naam ba category diye try korben?'),
-            'complete' => true, 'product_ids' => [],
-        ];
+        if (sh_support_product_search_terms($body, 6)) {
+            return [
+                'text' => sh_support_localized($language,
+                    'I could not find a matching active product in the catalogue. Try another product name or category.',
+                    'সক্রিয় ক্যাটালগে মিলে এমন পণ্য খুঁজে পাইনি। অন্য কোনো পণ্যের নাম বা ক্যাটাগরি দিয়ে চেষ্টা করবেন?',
+                    'Active catalog-e matching product pelam na. Onno product-er naam ba category diye try korben?'),
+                'complete' => true, 'product_ids' => [],
+            ];
+        }
     }
     $contact = trim(sh_support_setting('contact_email', ''));
     if ($contact === '') { $contact = trim((string)sh_setting('contact_email', '')); }
@@ -741,7 +792,7 @@ function sh_support_context_messages(int $conversationId, int $latestId, int $li
 {
     $limit = max(1, min(16, $limit));
     $rows = sh_all('SELECT sender, body FROM support_messages
-                    WHERE conversation_id = ? AND id <= ? AND is_internal = 0
+                    WHERE conversation_id = ? AND id < ? AND is_internal = 0
                       AND sender IN (\'customer\',\'assistant\',\'admin\')
                     ORDER BY id DESC LIMIT ' . $limit, [$conversationId, $latestId]);
     return array_reverse($rows);
@@ -859,26 +910,30 @@ function sh_support_provider_pair(): array
     return ['ok' => true, 'reason' => '', 'provider' => $provider, 'model' => $model, 'fingerprint' => $fingerprint];
 }
 
-/** AI is available only after an actual successful inference test of this exact provider/model pair. */
+/** AI availability depends on configuration, not on a previous manual test. */
 function sh_support_ai_state(): array
 {
-    if (sh_support_setting('ai_enabled', '0') !== '1') {
-        return ['available' => false, 'reason' => 'disabled', 'provider' => '', 'model' => ''];
-    }
     try {
         $pair = sh_support_provider_pair();
         if (empty($pair['ok'])) {
-            return ['available' => false, 'reason' => (string)$pair['reason'], 'provider' => '', 'model' => ''];
+            return ['available' => false, 'reason' => (string)$pair['reason'], 'provider' => '', 'model' => '', 'test_current' => false, 'test_ok' => false, 'test_code' => ''];
         }
         $testedFingerprint = sh_ai_setting('support_chat_test_fingerprint', '');
-        $testedOk = sh_ai_setting('support_chat_test_ok', '0') === '1';
-        if (!$testedOk || $testedFingerprint === '' || !hash_equals((string)$pair['fingerprint'], $testedFingerprint)) {
-            return ['available' => false, 'reason' => 'test_required', 'provider' => (string)$pair['provider']['name'], 'model' => (string)$pair['model']];
-        }
-        return ['available' => true, 'reason' => '', 'provider' => (string)$pair['provider']['name'], 'model' => (string)$pair['model']];
+        $testCurrent = $testedFingerprint !== '' && hash_equals((string)$pair['fingerprint'], $testedFingerprint);
+        $testOk = $testCurrent && sh_ai_setting('support_chat_test_ok', '0') === '1';
+        $enabled = sh_support_setting('ai_enabled', '0') === '1';
+        return [
+            'available' => $enabled,
+            'reason' => $enabled ? '' : 'disabled',
+            'provider' => (string)$pair['provider']['name'],
+            'model' => (string)$pair['model'],
+            'test_current' => $testCurrent,
+            'test_ok' => $testOk,
+            'test_code' => $testCurrent ? sh_ai_setting('support_chat_test_code', '') : '',
+        ];
     } catch (Throwable $e) {
         sh_log_exception($e, 'ai-support-state');
-        return ['available' => false, 'reason' => 'configuration_error', 'provider' => '', 'model' => ''];
+        return ['available' => false, 'reason' => 'configuration_error', 'provider' => '', 'model' => '', 'test_current' => false, 'test_ok' => false, 'test_code' => ''];
     }
 }
 
@@ -886,7 +941,7 @@ function sh_support_public_state(string $language = 'en'): array
 {
     $ai = sh_support_ai_state();
     $aiMessage = $ai['available']
-        ? sh_support_localized($language, 'The selected AI provider and model passed a real text-response test. A live-call failure falls back to verified store data.', 'নির্বাচিত AI প্রদানকারী ও মডেল থেকে বাস্তব টেক্সট উত্তর পরীক্ষা করা হয়েছে। সরাসরি অনুরোধ ব্যর্থ হলে যাচাইকৃত স্টোর-তথ্য ব্যবহার করা হবে।', 'Selected AI provider o model theke real text reply test kora hoyeche. Live request fail korle verified store data fallback hobe.')
+        ? sh_support_localized($language, 'AI replies are enabled with the selected provider and model. A live request can still fail; if it does, the message is preserved and the store fallback is shown.', 'নির্বাচিত প্রদানকারী ও মডেল দিয়ে AI উত্তর চালু আছে। সরাসরি অনুরোধ ব্যর্থ হতে পারে; হলে আপনার বার্তাটি সংরক্ষিত থাকবে এবং স্টোরের বিকল্প উত্তর দেখানো হবে।', 'Selected provider o model diye AI reply on ache. Live request fail korte pare; korle apnar message save thakbe ar store fallback dekhano hobe.')
         : sh_support_localized($language, 'AI generation is unavailable. Saved FAQs, verified catalogue lookup and authorized order lookup may still help; you can also contact support.', 'AI উত্তর তৈরি করা যাচ্ছে না। সংরক্ষিত FAQ, যাচাইকৃত ক্যাটালগ ও অনুমোদিত অর্ডার-তথ্য পাওয়া যেতে পারে; চাইলে সাপোর্টে যোগাযোগ করুন।', 'AI reply generate kora jacche na. Saved FAQ, verified catalog o authorized order lookup ekhono help korte pare; support-eo jogajog korte paren.');
     $contactPhone = trim(sh_support_setting('contact_phone', ''));
     if ($contactPhone === '') { $contactPhone = trim((string)sh_setting('contact_phone', '')); }
@@ -916,24 +971,62 @@ function sh_support_provider_test(int $providerId, string $model): array
     if (trim(sh_ai_decrypt((string)($provider['api_key'] ?? ''))) === '') { return ['ok' => false, 'code' => 'missing_key', 'message' => 'No saved API key is available for this provider.']; }
     if (!sh_support_provider_endpoint_secure($provider)) { return ['ok' => false, 'code' => 'https_required', 'message' => 'Customer-support provider testing requires an HTTPS endpoint.']; }
 
-    $testRow = $provider;
-    $testRow['default_model'] = $model;
-    $adapter = sh_ai_adapter($testRow);
+    $adapter = sh_ai_adapter($provider);
     if ($adapter === null) { return ['ok' => false, 'code' => 'unsupported_driver', 'message' => 'The provider driver is not supported.']; }
 
-    $oldLimits = AIHttpClient::configureLimits(15, 65536);
+    // Exercise the same selected-model generation method and support options as
+    // a live turn. This is an actual short text inference, not a ping or model
+    // catalogue lookup, and it does not depend on saved FAQs or customer data.
+    $testSystem = sh_support_system_prompt();
+    $testUser = 'This is a configuration test with no customer or order data. In one short English sentence, say that you are ready to help a customer.';
+    $limits = sh_support_ai_limits();
+    $oldLimits = AIHttpClient::configureLimits($limits['timeout'], 65536);
     try {
-        $result = $adapter->testConnection();
+        $result = $adapter->generateText($testSystem, $testUser, [
+            'model' => $model,
+            'temperature' => 0.25,
+            'max_tokens' => $limits['output_tokens'],
+        ]);
     } catch (Throwable $e) {
-        sh_log_exception($e, 'ai-support-provider-test');
-        $result = ['ok' => false, 'code' => 'inference_error', 'message' => 'The connection test could not be completed.'];
+        sh_log_line('ai-support-provider-test', 'Selected-model inference probe threw an exception; details omitted.');
+        $result = ['ok' => false, 'code' => 'provider_error', 'status' => 0, 'error' => 'The selected model test could not be completed.'];
     } finally {
         AIHttpClient::restoreLimits($oldLimits);
     }
-    $message = sh_support_sanitize_diagnostic((string)($result['message'] ?? $result['error'] ?? 'Provider test failed.'), $provider);
-    $code = mb_substr((string)($result['code'] ?? 'failed'), 0, 40);
-    // An API-key/token-limit acknowledgement is not enough: the selected model must return actual text.
-    $ok = !empty($result['ok']) && $code === 'connected';
+
+    $status = max(0, min(599, (int)($result['status'] ?? 0)));
+    $providerStatus = max(0, min(599, (int)($result['provider_status'] ?? 0)));
+    $rawText = !empty($result['ok']) ? trim((string)($result['text'] ?? '')) : '';
+    $code = (string)($result['code'] ?? 'provider_error');
+    if (!empty($result['ok']) && $rawText !== '') {
+        $code = 'connected';
+        $message = 'Selected model returned usable text (' . mb_strlen($rawText, 'UTF-8') . ' characters).';
+        $next = '';
+        $ok = true;
+    } else {
+        if (!empty($result['ok'])) { $code = 'empty_response'; }
+        $code = preg_replace('/[^a-z0-9_-]/i', '', $code) ?: 'provider_error';
+        $detail = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The selected model did not return usable text.'), $provider, [$testUser, $testSystem]);
+        $label = function_exists('sh_ai_test_state_label') ? sh_ai_test_state_label($code) : ucwords(str_replace('_', ' ', $code));
+        $message = 'Selected model inference failed (' . $label . ')';
+        if ($status > 0) { $message .= ' (HTTP ' . $status . ($providerStatus > 0 && $providerStatus !== $status ? '; provider code ' . $providerStatus : '') . ')'; }
+        if ($detail !== '') { $message .= ': ' . $detail; }
+        $message .= '.';
+        $next = match ($code) {
+            'auth_failed' => 'Check the saved API key and provider account.',
+            'permission_denied' => 'Confirm the selected model is enabled for this key.',
+            'model_not_found', 'model_unavailable' => 'Choose a text model supported by this provider and key.',
+            'quota_exceeded', 'billing' => 'Check provider quota and billing.',
+            'rate_limited' => 'Wait briefly and run the inference test again.',
+            'timeout', 'network_error' => 'Check the HTTPS endpoint and outbound network access; then retry.',
+            'request_rejected' => 'Check the provider message for an unsupported request field or model setting.',
+            'output_limit' => 'Raise the configured output-token budget and test again.',
+            'empty_response', 'invalid_response' => 'Check that the selected model and endpoint return normal text.',
+            default => 'Review the selected provider/model configuration and retry.',
+        };
+        $ok = false;
+    }
+    $code = mb_substr($code, 0, 40);
     $fingerprint = sh_support_provider_fingerprint($provider, $model);
     sh_ai_setting_save('support_chat_test_ok', $ok ? '1' : '0');
     sh_ai_setting_save('support_chat_test_fingerprint', $fingerprint);
@@ -944,19 +1037,33 @@ function sh_support_provider_test(int $providerId, string $model): array
         'ok' => $ok,
         'code' => $code,
         'message' => $message,
-        'status' => (int)($result['status'] ?? 0),
+        'status' => $status,
+        'provider_status' => $providerStatus,
         'model' => $model,
-        'next' => sh_support_sanitize_diagnostic((string)($result['next'] ?? ''), $provider),
+        'next' => sh_support_sanitize_diagnostic($next, $provider),
         'tested_at' => gmdate('Y-m-d H:i:s'),
     ];
 }
 
-function sh_support_sanitize_diagnostic(string $text, ?array $provider = null): string
+function sh_support_sanitize_diagnostic(string $text, ?array $provider = null, array $sensitiveText = []): string
 {
     $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
     if ($provider !== null && function_exists('sh_ai_decrypt')) {
         $key = sh_ai_decrypt((string)($provider['api_key'] ?? ''));
         if ($key !== '' && strlen($key) >= 6) { $text = str_replace($key, '[redacted]', $text); }
+        $headers = json_decode((string)($provider['extra_headers'] ?? ''), true);
+        if (is_array($headers)) {
+            foreach ($headers as $headerValue) {
+                $headerValue = trim((string)$headerValue);
+                if (strlen($headerValue) >= 6) { $text = str_replace($headerValue, '[redacted]', $text); }
+            }
+        }
+        $authSetting = trim((string)($provider['auth_header'] ?? ''));
+        if (strlen($authSetting) >= 8) { $text = str_replace($authSetting, '[redacted]', $text); }
+    }
+    foreach ($sensitiveText as $sensitive) {
+        $sensitive = trim((string)$sensitive);
+        if (mb_strlen($sensitive, 'UTF-8') >= 4) { $text = str_ireplace($sensitive, '[request text redacted]', $text); }
     }
     $text = preg_replace('/\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,}|Bearer\s+[A-Za-z0-9._~+\/-]{10,})\b/i', '[redacted]', $text) ?? $text;
     $text = preg_replace('/(?:api[_ -]?key|secret|token|password)\s*[:=]\s*[^ ,;]+/i', '[credential]=[redacted]', $text) ?? $text;
@@ -1014,18 +1121,21 @@ function sh_support_record_usage(int $conversationId, array $owner, ?array $pair
 
 function sh_support_update_diagnostic(string $diagnostic): void
 {
+    $diagnostic = trim($diagnostic);
+    $stored = $diagnostic === '' ? '' : gmdate('Y-m-d H:i:s') . ' UTC · ' . mb_substr($diagnostic, 0, 320);
     try {
         sh_query("INSERT INTO settings (setting_key, setting_value) VALUES ('support_chat_last_diagnostic', ?)
-                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)", [mb_substr($diagnostic, 0, 240)]);
+                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)", [mb_substr($stored, 0, 420)]);
         sh_settings(true);
     } catch (Throwable $e) { sh_log_exception($e, 'ai-support-diagnostic'); }
 }
 
-function sh_support_ai_generate(string $system, string $user, array $pair): array
+function sh_support_ai_generate(string $system, string $user, array $pair, string $customerMessage = ''): array
 {
     if (!function_exists('sh_ai_adapter')) { require_once SH_ROOT . '/ai/AIManager.php'; }
-    $adapter = sh_ai_adapter((array)$pair['provider']);
-    if ($adapter === null) { return ['ok' => false, 'code' => 'unsupported_driver', 'error' => 'The selected provider is not supported.']; }
+    $provider = (array)($pair['provider'] ?? []);
+    $adapter = sh_ai_adapter($provider);
+    if ($adapter === null) { return ['ok' => false, 'code' => 'unsupported_driver', 'status' => 0, 'error' => 'The selected provider is not supported.']; }
     $limits = sh_support_ai_limits();
     $oldLimits = AIHttpClient::configureLimits($limits['timeout'], 262144);
     $started = microtime(true);
@@ -1037,28 +1147,97 @@ function sh_support_ai_generate(string $system, string $user, array $pair): arra
         ]);
         $duration = (int)round((microtime(true) - $started) * 1000);
         if (empty($result['ok'])) {
-            // A provider may echo parts of a request in its error body. Keep
-            // only a generic diagnostic so customer text is never persisted.
-            return ['ok' => false, 'code' => 'provider_error', 'error' => 'The configured AI provider request failed.', 'duration_ms' => $duration];
+            // Preserve the machine category and status, but never store provider
+            // request echoes, customer text, credentials, headers or raw bodies.
+            $code = preg_replace('/[^a-z0-9_-]/i', '', (string)($result['code'] ?? 'provider_error')) ?: 'provider_error';
+            $status = max(0, min(599, (int)($result['status'] ?? 0)));
+            $detail = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The configured AI provider request failed.'), $provider, [$customerMessage, $user]);
+            if ($detail === '') { $detail = 'The configured AI provider request failed.'; }
+            return ['ok' => false, 'code' => mb_substr($code, 0, 40), 'status' => $status,
+                'provider_status' => max(0, min(599, (int)($result['provider_status'] ?? 0))),
+                'error' => $detail, 'duration_ms' => $duration];
         }
         $text = sh_support_clean_text((string)($result['text'] ?? ''), SH_SUPPORT_AI_RESPONSE_MAX);
-        if ($text === '') { return ['ok' => false, 'code' => 'empty_response', 'error' => 'The provider returned an empty response.', 'duration_ms' => $duration]; }
-        return ['ok' => true, 'text' => $text, 'usage' => (array)($result['usage'] ?? []), 'duration_ms' => $duration, 'model' => (string)($result['model'] ?? $pair['model'])];
+        if ($text === '') { return ['ok' => false, 'code' => 'empty_response', 'status' => (int)($result['status'] ?? 0), 'error' => 'The provider returned an empty response.', 'duration_ms' => $duration]; }
+        return ['ok' => true, 'text' => $text, 'usage' => (array)($result['usage'] ?? []), 'duration_ms' => $duration,
+            'model' => (string)($result['model'] ?? $pair['model']), 'status' => (int)($result['status'] ?? 0)];
     } catch (Throwable $e) {
         // Do not log exception messages from the inference path: adapters or
         // providers can include parts of the customer request in diagnostics.
         sh_log_line('ai-support-inference', 'Provider adapter exception; customer content was not recorded.');
         $duration = (int)round((microtime(true) - $started) * 1000);
-        return ['ok' => false, 'code' => 'inference_exception', 'error' => 'The AI provider request could not be completed.', 'duration_ms' => $duration];
+        return ['ok' => false, 'code' => 'inference_exception', 'status' => 0,
+            'error' => 'The AI provider request could not be completed.', 'duration_ms' => $duration];
     } finally {
         AIHttpClient::restoreLimits($oldLimits);
     }
 }
 
-function sh_support_product_context_for_message(string $body): array
+function sh_support_catalog_products_by_ids(array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($id) => $id > 0)));
+    $ids = array_slice($ids, 0, 5);
+    if (!$ids) { return []; }
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $params = array_merge($ids, $ids);
+    try {
+        return sh_all('SELECT p.id, p.name, p.slug, p.short_description, p.description, p.specifications,
+                              p.price, p.compare_price, p.stock, p.product_type, p.image, c.name AS category_name
+                       FROM products p LEFT JOIN categories c ON c.id = p.category_id
+                       WHERE p.status = 1 AND p.id IN (' . $ph . ')
+                       ORDER BY FIELD(p.id, ' . implode(',', array_fill(0, count($ids), '?')) . ')', $params);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-support-product-context');
+        return [];
+    }
+}
+
+function sh_support_recent_product_ids(int $conversationId, int $beforeMessageId): array
+{
+    if ($conversationId <= 0 || $beforeMessageId <= 0) { return []; }
+    try {
+        $rows = sh_all("SELECT extra_json FROM support_messages
+                        WHERE conversation_id = ? AND id < ? AND sender = 'assistant' AND is_internal = 0
+                        ORDER BY id DESC LIMIT 8", [$conversationId, $beforeMessageId]);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-support-product-history');
+        return [];
+    }
+    foreach ($rows as $row) {
+        $extra = json_decode((string)($row['extra_json'] ?? ''), true);
+        $ids = is_array($extra) ? (array)($extra['product_ids'] ?? []) : [];
+        if ($ids) { return array_slice($ids, 0, 5); }
+    }
+    return [];
+}
+
+function sh_support_product_context_for_message(string $body, int $conversationId = 0, int $currentMessageId = 0): array
 {
     if (!sh_support_product_intent($body)) { return []; }
-    return sh_support_lookup_products($body, 5);
+    $terms = sh_support_product_search_terms($body, 6);
+    if ($terms) { return sh_support_lookup_products($body, 5); }
+
+    // Short follow-ups such as "is it available?" inherit only previously
+    // surfaced public catalogue cards from this same authorized conversation.
+    $previousIds = sh_support_recent_product_ids($conversationId, $currentMessageId);
+    if ($previousIds) {
+        $rows = sh_support_catalog_products_by_ids($previousIds);
+        if ($rows) { return $rows; }
+    }
+    try {
+        $previous = sh_all("SELECT body FROM support_messages
+                            WHERE conversation_id = ? AND id < ? AND sender = 'customer' AND is_internal = 0
+                            ORDER BY id DESC LIMIT 6", [$conversationId, $currentMessageId]);
+        foreach ($previous as $row) {
+            $previousBody = (string)$row['body'];
+            if (!sh_support_product_intent($previousBody) || !sh_support_product_search_terms($previousBody, 6)) { continue; }
+            $rows = sh_support_lookup_products($previousBody, 5);
+            if ($rows) { return $rows; }
+        }
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-support-product-followup');
+    }
+    return [];
 }
 
 /** Persist one public assistant/fallback reply without holding a DB transaction over network I/O. */
@@ -1115,8 +1294,8 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
 function sh_support_process_customer_message(int $conversationId, int $customerMessageId, string $body, array $owner, bool $handoffUnavailable = false): array
 {
     $language = sh_support_language($body);
-    $products = $handoffUnavailable ? [] : sh_support_product_context_for_message($body);
-    $orderLookup = $handoffUnavailable ? ['intent' => false, 'found' => false, 'order' => null] : sh_support_find_authorized_order($body, $owner);
+    $products = $handoffUnavailable ? [] : sh_support_product_context_for_message($body, $conversationId, $customerMessageId);
+    $orderLookup = $handoffUnavailable ? ['intent' => false, 'found' => false, 'order' => null] : sh_support_find_authorized_order($body, $owner, $conversationId, $customerMessageId);
     $faqs = $handoffUnavailable ? [] : sh_support_faq_matches($body);
     $fallback = sh_support_fallback_text($body, $language, $products, $orderLookup, $faqs, $handoffUnavailable);
 
@@ -1152,7 +1331,7 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
     }
 
     $aiUser = sh_support_build_ai_user_prompt($conversationId, $customerMessageId, $body, $products, $orderLookup, $faqs, $language);
-    $result = sh_support_ai_generate(sh_support_system_prompt(), $aiUser, $pair);
+    $result = sh_support_ai_generate(sh_support_system_prompt(), $aiUser, $pair, $body);
     if (!empty($result['ok'])) {
         sh_support_record_usage($conversationId, $owner, $pair, 'success', (int)$result['duration_ms'], (array)$result['usage'], '');
         sh_support_update_diagnostic('');
@@ -1161,10 +1340,15 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
         return sh_support_save_reply($conversationId, $customerMessageId, (string)$result['text'], 'ai', true, $productIds);
     }
 
-    $diagnostic = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The AI provider request failed.'), $pair['provider']);
-    sh_support_record_usage($conversationId, $owner, $pair, 'failed', (int)($result['duration_ms'] ?? 0), [], (string)($result['code'] ?? 'provider_error'));
+    $code = preg_replace('/[^a-z0-9_-]/i', '', (string)($result['code'] ?? 'provider_error')) ?: 'provider_error';
+    $status = max(0, min(599, (int)($result['status'] ?? 0)));
+    $providerStatus = max(0, min(599, (int)($result['provider_status'] ?? 0)));
+    $detail = sh_support_sanitize_diagnostic((string)($result['error'] ?? 'The AI provider request failed.'), $pair['provider']);
+    $statusText = $status > 0 ? ' (HTTP ' . $status . ($providerStatus > 0 && $providerStatus !== $status ? '; provider code ' . $providerStatus : '') . ')' : '';
+    $diagnostic = $code . $statusText . ': ' . $detail;
+    sh_support_record_usage($conversationId, $owner, $pair, 'failed', (int)($result['duration_ms'] ?? 0), [], $code);
     sh_support_update_diagnostic($diagnostic);
-    sh_log_line('ai-support', 'Provider inference failed; stored a safe fallback. code=' . preg_replace('/[^a-z0-9_-]/i', '', (string)($result['code'] ?? 'provider_error')));
+    sh_log_line('ai-support', 'Provider inference failed; stored a safe fallback. code=' . $code);
     return sh_support_save_reply($conversationId, $customerMessageId, $fallback['text'], 'fallback', (bool)$fallback['complete'], (array)$fallback['product_ids']);
 }
 
@@ -1208,6 +1392,7 @@ function sh_support_public_message_row(array $row): array
         'sender' => (string)$row['sender'],
         'body' => (string)$row['body'],
         'source' => (string)$row['source'],
+        'client_message_id' => (string)($row['client_message_id'] ?? ''),
         'created_at' => (string)$row['created_at'],
         'reply_status' => (string)$row['reply_status'],
         'products' => $products,

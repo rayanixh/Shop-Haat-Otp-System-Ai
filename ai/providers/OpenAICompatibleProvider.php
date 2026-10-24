@@ -41,19 +41,80 @@ class OpenAICompatibleProvider extends AbstractAIProvider
     /** Hook for drivers that add request-level fields (e.g. OpenRouter usage accounting). */
     protected function decorateChatPayload(array $payload): array { return $payload; }
 
+    /**
+     * Make one OpenAI-style chat request. If the endpoint explicitly rejects a
+     * single parameter name, make at most one narrow compatibility retry; no
+     * provider/model switching or unbounded retry loop is permitted here.
+     */
     protected function chat(array $payload, int $timeout = 120): array
     {
         if (!$this->hasKey()) { return $this->noKey(); }
+        $usedCompatibilityRetry = false;
         $res = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(), $this->decorateChatPayload($payload), $timeout);
-        if (!$res['ok']) { return ['ok' => false, 'error' => $res['error'], 'retryable' => $res['retryable']]; }
-        $j = $res['json'];
-        // Some gateways answer 200 with an error envelope.
-        if (isset($j['error']) && !isset($j['choices'])) {
-            $msg = is_array($j['error']) ? (string)($j['error']['message'] ?? 'Provider error') : (string)$j['error'];
-            $code = (int)(is_array($j['error']) ? ($j['error']['code'] ?? 0) : 0);
-            return ['ok' => false, 'error' => AIHttpClient::friendly($code, $msg), 'retryable' => $code === 429 || $code >= 500];
+        if (!$res['ok']) {
+            $retryPayload = $this->compatibilityRetryPayload($payload, $res);
+            if ($retryPayload !== null) {
+                $usedCompatibilityRetry = true;
+                $res = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(), $this->decorateChatPayload($retryPayload), $timeout);
+            }
         }
-        return ['ok' => true, 'json' => $j];
+        if (!$res['ok']) { return $this->httpFailure($res); }
+
+        $j = $res['json'];
+        // A few gateways return an error envelope with HTTP 200. Treat it as a
+        // failed inference, while allowing the same one bounded parameter fix.
+        if (isset($j['error']) && !isset($j['choices']) && !$usedCompatibilityRetry) {
+            $envelope = is_array($j['error']) ? $j['error'] : ['message' => (string)$j['error']];
+            $errorMessage = (string)($envelope['message'] ?? $envelope['error'] ?? 'Provider error');
+            $embeddedStatus = $envelope['status'] ?? $envelope['code'] ?? 400;
+            $embeddedStatus = is_numeric($embeddedStatus) ? (int)$embeddedStatus : 400;
+            $retryPayload = $this->compatibilityRetryPayload($payload, ['status' => $embeddedStatus, 'error' => $errorMessage]);
+            if ($retryPayload !== null) {
+                $usedCompatibilityRetry = true;
+                $res = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(), $this->decorateChatPayload($retryPayload), $timeout);
+                if (!$res['ok']) { return $this->httpFailure($res); }
+                $j = $res['json'];
+            }
+        }
+
+        if (isset($j['error']) && !isset($j['choices'])) {
+            $error = is_array($j['error']) ? $j['error'] : ['message' => (string)$j['error']];
+            $msg = (string)($error['message'] ?? $error['error'] ?? 'Provider error');
+            $errorType = (string)($error['type'] ?? (is_string($error['code'] ?? null) ? $error['code'] : ''));
+            $providerStatus = $error['status'] ?? $error['code'] ?? 400;
+            $providerStatus = is_numeric($providerStatus) ? (int)$providerStatus : 400;
+            $code = AIHttpClient::diagnosticCode($providerStatus, $errorType . ' ' . $msg);
+            return ['ok' => false, 'error' => $msg !== '' ? $msg : 'Provider error', 'status' => (int)($res['status'] ?? 200),
+                'provider_status' => $providerStatus, 'code' => $code,
+                'retryable' => in_array($code, ['timeout', 'rate_limited', 'provider_error', 'network_error'], true)];
+        }
+        return ['ok' => true, 'json' => $j, 'status' => (int)($res['status'] ?? 200)];
+    }
+
+    /**
+     * @return array|null A single adjusted payload, or null when the provider
+     *                    did not explicitly reject a known optional parameter.
+     */
+    protected function compatibilityRetryPayload(array $payload, array $failure): ?array
+    {
+        if (!in_array((int)($failure['status'] ?? 0), [400, 422], true)) { return null; }
+        $error = (string)($failure['error'] ?? '');
+        $unsupported = preg_match('/unsupported|unrecognized|unknown parameter|unknown field|unexpected parameter|not supported|not allowed|not accepted|invalid parameter|invalid field/i', $error) === 1;
+        if (!$unsupported) { return null; }
+
+        foreach (['max_tokens', 'max_completion_tokens'] as $field) {
+            if (array_key_exists($field, $payload) && preg_match('/\b' . preg_quote($field, '/') . '\b/i', $error) === 1) {
+                $alternative = $field === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens';
+                $payload[$alternative] = $payload[$field];
+                unset($payload[$field]);
+                return $payload;
+            }
+        }
+        if (array_key_exists('temperature', $payload) && preg_match('/\btemperature\b/i', $error) === 1) {
+            unset($payload['temperature']);
+            return $payload;
+        }
+        return null;
     }
 
     protected function messages(string $system, string $user, array $options = []): array
@@ -88,28 +149,45 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         $model = $this->model($options);
         if ($model === '') { return $this->noModel(); }
         $payload = [
-            'model'       => $model,
-            'messages'    => $this->messages($system, $user, $options),
-            'temperature' => (float)($options['temperature'] ?? 0.7),
-            'max_tokens'  => (int)($options['max_tokens'] ?? 1200),
+            'model' => $model,
+            'messages' => $this->messages($system, $user, $options),
+            $this->maxTokenField($model) => max(1, (int)($options['max_tokens'] ?? 1200)),
         ];
+        if ($this->supportsTemperature($model) && array_key_exists('temperature', $options)) {
+            $payload['temperature'] = (float)$options['temperature'];
+        } elseif ($this->supportsTemperature($model) && !array_key_exists('temperature', $options)) {
+            $payload['temperature'] = 0.7;
+        }
         if (!empty($options['json'])) { $payload['response_format'] = ['type' => 'json_object']; }
 
         $res = $this->chat($payload);
-        if (!$res['ok']) { return $res; }
+        if (empty($res['ok'])) { return $res; }
         $j = $res['json'];
-        $content = $j['choices'][0]['message']['content'] ?? '';
-        if (is_array($content)) {                       // multi-part content
-            $content = implode('', array_map(static fn($p) => (string)($p['text'] ?? ''), $content));
+        $choice = $j['choices'][0] ?? null;
+        if (!is_array($choice) || !isset($choice['message']) || !is_array($choice['message'])) {
+            return ['ok' => false, 'code' => 'invalid_response', 'status' => (int)($res['status'] ?? 200),
+                    'retryable' => false, 'error' => 'The provider returned a successful response without a usable chat choice.'];
         }
-        $text = trim((string)$content);
+        $content = $choice['message']['content'] ?? '';
+        if (is_array($content)) {
+            $content = implode('', array_map(static fn($part) => is_array($part) ? (string)($part['text'] ?? '') : '', $content));
+        }
+        $text = trim(is_string($content) || is_numeric($content) ? (string)$content : '');
         if ($text === '') {
-            $finish = (string)($j['choices'][0]['finish_reason'] ?? '');
-            return ['ok' => false, 'retryable' => true,
-                    'error' => $finish === 'length' ? 'The model hit the token limit before producing text. Raise max tokens.' : 'The model returned an empty response.'];
+            $finish = strtolower((string)($choice['finish_reason'] ?? ''));
+            $code = in_array($finish, ['length', 'max_tokens'], true) ? 'output_limit' : 'empty_response';
+            return ['ok' => false, 'code' => $code, 'status' => (int)($res['status'] ?? 200), 'retryable' => true,
+                    'error' => $code === 'output_limit' ? 'The model reached its output-token limit before producing text.' : 'The model returned an empty response.'];
         }
-        return ['ok' => true, 'text' => $text, 'usage' => $this->extractUsage($j), 'model' => (string)($j['model'] ?? $model)];
+        return ['ok' => true, 'text' => $text, 'usage' => $this->extractUsage($j),
+                'model' => (string)($j['model'] ?? $model), 'status' => (int)($res['status'] ?? 200)];
     }
+
+    /** OpenAI-compatible APIs use max_tokens unless a concrete driver overrides it. */
+    protected function maxTokenField(string $model): string { return 'max_tokens'; }
+
+    /** Most compatible APIs accept temperature; concrete model drivers may omit it. */
+    protected function supportsTemperature(string $model): bool { return true; }
 
     public function generateStructuredContent(string $system, string $user, array $options = []): array
     {
@@ -143,7 +221,7 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         if (!str_starts_with(strtolower($model), 'gpt-image')) { $payload['response_format'] = 'b64_json'; }
 
         $res = AIHttpClient::post($this->baseUrl() . '/images/generations', $this->headers(), $payload, 180);
-        if (!$res['ok']) { return ['ok' => false, 'error' => $res['error'], 'retryable' => $res['retryable']]; }
+        if (!$res['ok']) { return $this->httpFailure($res); }
 
         $item = $res['json']['data'][0] ?? [];
         $usage = [];
@@ -162,12 +240,6 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         $bin = AIHttpClient::download($url);
         if ($bin === null) { return ['ok' => false, 'retryable' => true, 'error' => 'The generated image could not be downloaded.']; }
         return ['ok' => true, 'binary' => $bin, 'mime' => 'image/png', 'usage' => $usage, 'model' => $model];
-    }
-
-    /** Token-budget field this model family accepts. o-series and GPT-5 reject max_tokens. */
-    protected function maxTokenField(string $model): string
-    {
-        return preg_match('/^(o[1-9]|gpt-5)/i', $model) ? 'max_completion_tokens' : 'max_tokens';
     }
 
     /**
@@ -191,46 +263,42 @@ class OpenAICompatibleProvider extends AbstractAIProvider
                 'Choose a default text model and save, then test again.');
         }
 
-        $payload = [
-            'model'    => $model,
+        $res = $this->chat([
+            'model' => $model,
             'messages' => [['role' => 'user', 'content' => 'Reply with the single word: ready']],
             $this->maxTokenField($model) => 64,
-        ];
-        $res = AIHttpClient::post($this->baseUrl() . '/chat/completions', $this->headers(),
-            $this->decorateChatPayload($payload), 15);
-        if (!$res['ok']) { return $this->testHttpFailure($res, $model, $this->name()); }
+        ], 15);
+        if (empty($res['ok'])) { return $this->testHttpFailure($res, $model, $this->name()); }
 
         $j = $res['json'];
-        // Some gateways answer 200 with an error envelope.
-        if (isset($j['error']) && !isset($j['choices'])) {
-            $msg = is_array($j['error']) ? (string)($j['error']['message'] ?? 'Provider error') : (string)$j['error'];
-            $type = is_array($j['error']) ? strtolower((string)($j['error']['type'] ?? '')) : '';
-            $code = str_contains($type, 'auth') ? 'auth_failed'
-                : (str_contains($type, 'rate') ? 'rate_limited'
-                : (str_contains($type, 'permission') ? 'permission_denied' : 'provider_error'));
-            return $this->testResult(false, $code, $this->name() . ' returned an error: ' . $msg,
-                ['status' => (int)$res['status'], 'model' => $model,
-                 'next' => $code === 'auth_failed' ? 'Paste a current key and save it again.' : 'Adjust the provider settings and test again.']);
+        $choice = $j['choices'][0] ?? null;
+        if (!is_array($choice) || !is_array($choice['message'] ?? null)) {
+            return $this->testResult(false, 'invalid_response',
+                $this->name() . ' returned HTTP 200 without a usable chat choice.',
+                ['status' => (int)($res['status'] ?? 200), 'model' => $model,
+                 'next' => 'Check that this endpoint implements the OpenAI chat-completions response format.']);
         }
-
-        $choice = $j['choices'][0] ?? [];
-        $text = trim((string)($choice['message']['content'] ?? ''));
-        $finish = (string)($choice['finish_reason'] ?? '');
-        if ($text === '' && $finish === 'length') {
+        $content = $choice['message']['content'] ?? '';
+        if (is_array($content)) {
+            $content = implode('', array_map(static fn($part) => is_array($part) ? (string)($part['text'] ?? '') : '', $content));
+        }
+        $text = trim(is_string($content) || is_numeric($content) ? (string)$content : '');
+        $finish = strtolower((string)($choice['finish_reason'] ?? ''));
+        if ($text === '' && in_array($finish, ['length', 'max_tokens'], true)) {
             return $this->testResult(true, 'token_limit',
-                'Connected to ' . $this->name() . '. ' . $model . ' reached its output-token limit on the probe before replying.',
-                ['status' => (int)$res['status'], 'model' => $model,
+                'Connected to ' . $this->name() . '. ' . $model . ' reached its output-token limit before replying.',
+                ['status' => (int)($res['status'] ?? 200), 'model' => $model,
                  'next' => 'Raise the token budget for generations; the key itself is valid.']);
         }
         if ($text === '') {
-            return $this->testResult(false, 'provider_error',
-                $this->name() . ' accepted the request but returned an empty reply' . ($finish !== '' ? ' (' . $finish . ')' : '') . '.',
-                ['status' => (int)$res['status'], 'model' => $model,
-                 'next' => 'Pick a text-capable model and test again.']);
+            return $this->testResult(false, 'empty_response',
+                $this->name() . ' accepted the request but returned no assistant text' . ($finish !== '' ? ' (' . $finish . ')' : '') . '.',
+                ['status' => (int)($res['status'] ?? 200), 'model' => $model,
+                 'next' => 'Choose a text-capable model and test again.']);
         }
         return $this->testResult(true, 'connected',
             'Connected to ' . $this->name() . '. ' . $model . ' replied: ' . mb_substr($text, 0, 40),
-            ['status' => (int)$res['status'], 'model' => $model, 'next' => '']);
+            ['status' => (int)($res['status'] ?? 200), 'model' => $model, 'next' => '']);
     }
 
     public function listModels(): array

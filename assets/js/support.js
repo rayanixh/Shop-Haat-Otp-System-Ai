@@ -27,13 +27,14 @@
   const disabledNode = $('[data-chat-disabled]');
   const handoffNote = $('[data-handoff-note]');
   const messageMap = new Map();
+  const optimisticSends = new Map();
 
   const text = {
     en: {
       loading: 'Checking support status…', active: 'Conversation is open', pending: 'Human support was requested. The inbox is not a live-availability indicator.', assigned: 'A support agent has taken over this conversation.', resolved: 'This conversation is resolved.',
       start: 'Start a private conversation to ask about verified products, saved help articles or an order linked to your account/browser session.',
       unavailable: 'Customer chat is currently unavailable. You can still use the contact form below.', disabled: 'Chat is disabled. You can read this saved transcript, but cannot send new messages.',
-      sending: 'Sending…', send: 'Send', preparing: 'Preparing a reply…', failed: 'A reply could not be prepared.', retry: 'Retry reply', paused: 'AI is paused for this conversation.',
+      sending: 'Sending…', send: 'Send', preparing: 'Preparing a reply…', failed: 'A reply could not be prepared.', retrySend: 'Retry send', sendUnconfirmed: 'Delivery is unconfirmed. Retry safely to check whether this message was saved.', retry: 'Retry reply', paused: 'AI is paused for this conversation.',
       empty: 'No messages yet. Send a message when you are ready.', you: 'You', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
       open: 'Open', newChat: 'Start a new conversation', delete: 'Delete resolved conversation', deleteConfirm: 'Permanently delete this resolved support conversation and its messages?',
       deleted: 'The conversation was deleted.', handoff: 'Request human support', handoffSent: 'Your request has been recorded. This does not show whether staff are online or promise a reply time.',
@@ -43,14 +44,14 @@
       requestError: 'The request could not be completed. Check your connection and retry.',
       tooLong: 'Messages may contain at most 2,000 characters.', messagePlaceholder: 'Write a message…', language: 'Language',
       status: 'Support chat', timestamp: 'ShopHaat Support', price: 'Price', stock: 'In stock', outOfStock: 'Out of stock',
-      aiAvailable: 'AI replies have been tested for the configured provider and model. Replies still use verified store data.',
+      aiAvailable: 'AI replies are enabled with the selected provider and model. A live request can fail; the message is preserved and a store fallback is shown.',
       noAI: 'AI generation is unavailable. Saved FAQs, verified catalogue lookup and authorized order lookup may still help.',
     },
     bn: {
       loading: 'সাপোর্টের অবস্থা দেখা হচ্ছে…', active: 'কথোপকথন চালু আছে', pending: 'মানব-সাপোর্টের অনুরোধ করা হয়েছে। ইনবক্সে স্টাফ অনলাইনে আছেন কি না তা দেখা যায় না।', assigned: 'একজন সাপোর্ট এজেন্ট কথোপকথনটি নিয়েছেন।', resolved: 'এই কথোপকথনটি সমাধান করা হয়েছে।',
       start: 'যাচাইকৃত পণ্য, সংরক্ষিত সহায়তা-তথ্য বা আপনার অ্যাকাউন্ট/ব্রাউজার সেশনের অর্ডার নিয়ে ব্যক্তিগতভাবে লিখুন।',
       unavailable: 'এই মুহূর্তে কাস্টমার চ্যাট চালু নেই। নিচের যোগাযোগ ফর্ম ব্যবহার করতে পারেন।', disabled: 'চ্যাট বন্ধ আছে। সংরক্ষিত বার্তা দেখা যাবে, তবে নতুন বার্তা পাঠানো যাবে না।',
-      sending: 'পাঠানো হচ্ছে…', send: 'পাঠান', preparing: 'উত্তর তৈরি হচ্ছে…', failed: 'উত্তর তৈরি করা যায়নি।', retry: 'আবার চেষ্টা', paused: 'এই কথোপকথনে AI বন্ধ আছে।',
+      sending: 'পাঠানো হচ্ছে…', send: 'পাঠান', preparing: 'উত্তর তৈরি হচ্ছে…', failed: 'উত্তর তৈরি করা যায়নি।', retrySend: 'আবার পাঠান', sendUnconfirmed: 'বার্তাটি পৌঁছেছে কি না নিশ্চিত নয়। একই পরিচয়ে নিরাপদে আবার চেষ্টা করে যাচাই করুন।', retry: 'আবার চেষ্টা', paused: 'এই কথোপকথনে AI বন্ধ আছে।',
       empty: 'এখনো কোনো বার্তা নেই। প্রস্তুত হলে বার্তা পাঠান।', you: 'আপনি', assistant: 'ShopHaat সহকারী', agent: 'সাপোর্ট এজেন্ট', system: 'সাপোর্ট আপডেট',
       open: 'চ্যাট শুরু করুন', newChat: 'নতুন কথোপকথন শুরু করুন', delete: 'সমাধান হওয়া কথোপকথন মুছুন', deleteConfirm: 'এই সমাধান হওয়া সাপোর্ট কথোপকথন ও বার্তাগুলো স্থায়ীভাবে মুছবেন?',
       deleted: 'কথোপকথনটি মুছে ফেলা হয়েছে।', handoff: 'মানব-সাপোর্টের অনুরোধ', handoffSent: 'আপনার অনুরোধটি সংরক্ষণ করা হয়েছে। স্টাফ অনলাইনে আছেন কি না বা উত্তর দেওয়ার সময় এটি জানায় না।',
@@ -60,14 +61,14 @@
       requestError: 'অনুরোধটি সম্পন্ন হয়নি। সংযোগ দেখে আবার চেষ্টা করুন।',
       tooLong: 'বার্তায় সর্বোচ্চ ২,০০০ অক্ষর লেখা যাবে।', messagePlaceholder: 'বার্তা লিখুন…', language: 'ভাষা',
       status: 'সাপোর্ট চ্যাট', timestamp: 'ShopHaat Support', price: 'দাম', stock: 'স্টকে আছে', outOfStock: 'স্টকে নেই',
-      aiAvailable: 'কনফিগার করা AI প্রদানকারী ও মডেলের উত্তর পরীক্ষা করা হয়েছে। উত্তর স্টোরের যাচাইকৃত তথ্য ব্যবহার করবে।',
+      aiAvailable: 'নির্বাচিত AI প্রদানকারী ও মডেল দিয়ে উত্তর চালু আছে। সরাসরি অনুরোধ ব্যর্থ হতে পারে; বার্তা সংরক্ষিত থাকবে এবং স্টোরের বিকল্প উত্তর দেখানো হবে।',
       noAI: 'AI উত্তর তৈরি করা যাচ্ছে না। সংরক্ষিত FAQ, যাচাইকৃত পণ্য ও অনুমোদিত অর্ডারের তথ্য পাওয়া যেতে পারে।',
     },
     banglish: {
       loading: 'Support status check hocche…', active: 'Conversation open ache', pending: 'Human support request record hoyeche. Inbox staff online kina seta dekhay na.', assigned: 'Ekjon support agent ei conversation niyechen.', resolved: 'Ei conversation resolve kora hoyeche.',
       start: 'Verified product, saved help information, ba apnar account/browser session-er order niye private message korun.',
       unavailable: 'Ekhon customer chat available nei. Nicher contact form use korte paren.', disabled: 'Chat bondho. Saved message dekhte parben, kintu notun message pathate parben na.',
-      sending: 'Pathano hocche…', send: 'Send korun', preparing: 'Reply prepare hocche…', failed: 'Reply prepare kora jayni.', retry: 'Abar try korun', paused: 'Ei conversation-e AI pause kora ache.',
+      sending: 'Pathano hocche…', send: 'Send korun', preparing: 'Reply prepare hocche…', failed: 'Reply prepare kora jayni.', retrySend: 'Abar pathan', sendUnconfirmed: 'Message save hoyeche kina confirm hoyni. Safe vabe abar try kore check korun.', retry: 'Abar try korun', paused: 'Ei conversation-e AI pause kora ache.',
       empty: 'Ekhono kono message nei. Ready hole message pathan.', you: 'Apni', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
       open: 'Chat shuru korun', newChat: 'Notun conversation shuru korun', delete: 'Resolved conversation delete korun', deleteConfirm: 'Ei resolved support conversation ebong message-gulo permanently delete korben?',
       deleted: 'Conversation delete kora hoyeche.', handoff: 'Human support request korun', handoffSent: 'Apnar request save hoyeche. Eta staff online kina ba reply time promise kore na.',
@@ -76,7 +77,7 @@
       chars: 'character', older: 'Purono message load korun', loaded: 'Purono message load hoyeche.',
       requestError: 'Request complete hoyni. Connection check kore abar try korun.', tooLong: 'Message-e shorboccho 2,000 character thakte parbe.',
       messagePlaceholder: 'Message likhun…', language: 'Language', status: 'Support chat', timestamp: 'ShopHaat Support', price: 'Price', stock: 'Stock ache', outOfStock: 'Stock nei',
-      aiAvailable: 'Configured AI provider o model-er reply test kora hoyeche. Reply verified store data use korbe.',
+      aiAvailable: 'Selected provider o model diye AI reply on ache. Live request fail korte pare; message save thakbe ar store fallback dekhano hobe.',
       noAI: 'AI reply generate hocche na. Saved FAQ, verified catalog, authorized order information help korte pare.',
     },
   };
@@ -186,7 +187,11 @@
   }
 
   function renderMessages() {
-    const list = Array.from(messageMap.values()).sort((a, b) => Number(a.id) - Number(b.id));
+    const list = Array.from(messageMap.values()).sort((a, b) => {
+      if (Boolean(a.optimistic) !== Boolean(b.optimistic)) return a.optimistic ? 1 : -1;
+      if (a.optimistic && b.optimistic) return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      return Number(a.id) - Number(b.id);
+    });
     const fragment = document.createDocumentFragment();
     if (list.length === 0) {
       const empty = document.createElement('li');
@@ -207,7 +212,7 @@
       meta.append(sender);
       if (message.source === 'fallback' && message.sender === 'assistant') {
         const source = document.createElement('span');
-        source.textContent = language === 'bn' ? 'যাচাইকৃত সহায়তা' : language === 'banglish' ? 'Verified help' : 'Verified help';
+        source.textContent = language === 'bn' ? 'স্টোরের বিকল্প উত্তর' : language === 'banglish' ? 'Store fallback' : 'Store fallback';
         meta.append(source);
       }
       const time = document.createElement('time');
@@ -220,7 +225,23 @@
       body.textContent = String(message.body || '');
       item.append(body);
       appendProducts(item, message.products);
-      if (message.sender === 'customer' && message.reply_status === 'pending') {
+      if (message.sender === 'customer' && message.optimistic && message.reply_status === 'send_failed') {
+        const state = document.createElement('p');
+        state.className = 'sh-support-chat__message-state';
+        state.textContent = tr('sendUnconfirmed');
+        item.append(state);
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'sh-btn sh-btn--sm sh-btn--ghost';
+        retry.textContent = tr('retrySend');
+        retry.addEventListener('click', () => retryOptimisticSend(String(message.client_message_id || ''), retry));
+        item.append(retry);
+      } else if (message.sender === 'customer' && message.optimistic) {
+        const state = document.createElement('p');
+        state.className = 'sh-support-chat__message-state';
+        state.textContent = tr('sending');
+        item.append(state);
+      } else if (message.sender === 'customer' && message.reply_status === 'pending') {
         const state = document.createElement('p');
         state.className = 'sh-support-chat__message-state';
         state.textContent = tr('preparing');
@@ -326,12 +347,26 @@
       hasMore = false;
       olderCursor = 0;
       pendingSend = null;
+      optimisticSends.clear();
     }
     conversation = nextConversation;
-    (snapshot.messages || []).forEach((message) => messageMap.set(Number(message.id), message));
+    (snapshot.messages || []).forEach((message) => {
+      messageMap.set(String(message.id), message);
+      const clientId = String(message.client_message_id || '');
+      if (message.sender === 'customer' && clientId && optimisticSends.has(clientId)) {
+        const pending = optimisticSends.get(clientId);
+        messageMap.delete(pending.tempKey);
+        optimisticSends.delete(clientId);
+        if (pendingSend && pendingSend.id === clientId) pendingSend = null;
+      }
+    });
     if (!options.keepCursor) olderCursor = Number(snapshot.older_cursor || 0);
     hasMore = Boolean(snapshot.has_more || (options.keepCursor && hasMore));
-    if (nextConversation === null) messageMap.clear();
+    if (nextConversation === null) {
+      messageMap.clear();
+      optimisticSends.clear();
+      pendingSend = null;
+    }
     clearError();
     updateView();
   }
@@ -356,31 +391,82 @@
     finally { busy = false; openButton.disabled = false; newButton.disabled = false; updateView(); }
   }
 
+  function renderOptimisticSend(send, state = 'sending') {
+    messageMap.set(send.tempKey, {
+      id: send.tempKey,
+      optimistic: true,
+      sender: 'customer',
+      source: 'manual',
+      body: send.body,
+      client_message_id: send.id,
+      reply_status: state,
+      created_at: send.createdAt,
+      products: [],
+    });
+    renderMessages();
+    const last = messageList.lastElementChild;
+    if (last && typeof last.scrollIntoView === 'function') last.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }
+
+  async function transmitOptimisticSend(send) {
+    if (busy || !conversation || !send) return;
+    busy = true;
+    renderOptimisticSend(send, 'sending');
+    clearError();
+    updateView();
+    try {
+      const payload = await request('send', {
+        method: 'POST',
+        data: { id: Number(conversation.id), body: send.body, client_id: send.id },
+      });
+      const snapshot = payload.snapshot || payload;
+      const confirmed = Array.isArray(snapshot.messages)
+        && snapshot.messages.some((message) => String(message.client_message_id || '') === send.id);
+      acceptSnapshot(snapshot);
+      if (confirmed) {
+        if (chatInput.value.trim() === send.body) {
+          chatInput.value = '';
+          updateCharCount();
+        }
+        const last = messageList.lastElementChild;
+        if (last && typeof last.scrollIntoView === 'function') last.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      } else {
+        renderOptimisticSend(send, 'send_failed');
+        showError(tr('requestError'));
+      }
+    } catch (error) {
+      renderOptimisticSend(send, 'send_failed');
+      showError(error.message || tr('requestError'));
+    } finally {
+      busy = false;
+      updateView();
+    }
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     if (busy || !conversation) return;
     const body = chatInput.value.trim();
     if (!body) return;
     if (Array.from(body).length > 2000) { showError(tr('tooLong')); return; }
-    if (!pendingSend || pendingSend.body !== body) pendingSend = { id: uuid(), body };
-    busy = true;
-    clearError();
-    updateView();
-    try {
-      const payload = await request('send', { method: 'POST', data: { id: Number(conversation.id), body, client_id: pendingSend.id } });
-      chatInput.value = '';
-      pendingSend = null;
-      updateCharCount();
-      acceptSnapshot(payload.snapshot || payload);
-      const last = messageList.lastElementChild;
-      if (last) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
-    } catch (error) {
-      showError(error.message || tr('requestError'));
-      if (pendingSend && pendingSend.body !== chatInput.value.trim()) pendingSend = null;
-    } finally {
-      busy = false;
-      updateView();
+    if (!pendingSend || pendingSend.body !== body) {
+      const id = uuid();
+      pendingSend = {
+        id,
+        body,
+        tempKey: `optimistic:${id}`,
+        createdAt: new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
+      };
+      optimisticSends.set(id, pendingSend);
     }
+    await transmitOptimisticSend(pendingSend);
+  }
+
+  async function retryOptimisticSend(clientId, button) {
+    const send = optimisticSends.get(String(clientId || ''));
+    if (!send || busy || !conversation) return;
+    if (button) button.disabled = true;
+    await transmitOptimisticSend(send);
   }
 
   async function retryMessage(messageId, button) {
@@ -432,7 +518,7 @@
     const oldHeight = document.documentElement.scrollHeight;
     try {
       const payload = await request('messages', { params: { id: Number(conversation.id), before_id: olderCursor } });
-      (payload.messages || []).forEach((message) => messageMap.set(Number(message.id), message));
+      (payload.messages || []).forEach((message) => messageMap.set(String(message.id), message));
       hasMore = Boolean(payload.has_more);
       olderCursor = Number(payload.older_cursor || 0);
       updateView();
