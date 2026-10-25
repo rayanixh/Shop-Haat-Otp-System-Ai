@@ -1208,7 +1208,8 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
         $incoming = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? FOR UPDATE', [$customerMessageId, $conversationId]);
         if ($conversation === null || $incoming === null) { $pdo->rollBack(); return ['saved' => false, 'paused' => true]; }
         if ((string)$incoming['reply_status'] !== 'pending') { $pdo->commit(); return ['saved' => false, 'paused' => (string)$incoming['reply_status'] === 'paused']; }
-        if ((int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0 || (string)$conversation['status'] === 'resolved') {
+        if ((int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0
+            || in_array((string)$conversation['status'], ['pending','assigned','resolved'], true)) {
             sh_query("UPDATE support_messages SET reply_status = 'paused', reply_started_at = NULL WHERE id = ?", [$customerMessageId]);
             $pdo->commit();
             return ['saved' => false, 'paused' => true];
@@ -1266,7 +1267,7 @@ function sh_support_mark_reply_failed(int $conversationId, int $customerMessageI
         // or a stale fallback after a human has paused the thread.
         $paused = (int)$conversation['ai_paused'] === 1
             || (int)$conversation['assigned_admin_id'] > 0
-            || (string)$conversation['status'] === 'resolved';
+            || in_array((string)$conversation['status'], ['pending','assigned','resolved'], true);
         sh_query("DELETE FROM support_messages
                   WHERE conversation_id = ? AND reply_to_message_id = ?
                     AND sender = 'assistant' AND source = 'fallback'", [$conversationId, $customerMessageId]);
@@ -1327,7 +1328,8 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
     $current = sh_one('SELECT status, assigned_admin_id, ai_paused FROM support_conversations WHERE id = ?', [$conversationId]);
     $incoming = sh_one('SELECT reply_status FROM support_messages WHERE id = ? AND conversation_id = ?', [$customerMessageId, $conversationId]);
     if ($current === null || $incoming === null || (string)$incoming['reply_status'] !== 'pending'
-        || (int)$current['ai_paused'] === 1 || (int)$current['assigned_admin_id'] > 0 || (string)$current['status'] === 'resolved') {
+        || (int)$current['ai_paused'] === 1 || (int)$current['assigned_admin_id'] > 0
+        || in_array((string)$current['status'], ['pending','assigned','resolved'], true)) {
         return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
 
@@ -1449,6 +1451,48 @@ function sh_support_customer_snapshot(int $conversationId, array $owner): array
     ];
 }
 
+/** Return an acknowledgement only after the customer row has been committed. */
+function sh_support_customer_send_success(int $conversationId, array $owner, array $message, bool $duplicate = false): array
+{
+    $messageId = (int)($message['id'] ?? 0);
+    $clientId = (string)($message['client_message_id'] ?? '');
+    try {
+        if (sh_support_conversation_for_owner($conversationId, $owner) === null) {
+            return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.'];
+        }
+        // Confirm the exact committed customer row before issuing the success
+        // acknowledgement. A read failure remains safely retryable by client ID.
+        $persisted = sh_one("SELECT * FROM support_messages
+                             WHERE id = ? AND conversation_id = ? AND sender = 'customer'
+                               AND is_internal = 0 AND client_message_id = ? LIMIT 1",
+                             [$messageId, $conversationId, $clientId]);
+    } catch (Throwable $e) {
+        sh_log_line('ai-support-customer-confirm', 'Committed send could not be confirmed; details omitted.');
+        return ['ok' => false, 'http_status' => 503, 'error' => 'The send could not be confirmed. Retry safely.'];
+    }
+    if ($persisted === null) {
+        return ['ok' => false, 'http_status' => 500, 'error' => 'The send could not be confirmed. Retry safely.'];
+    }
+
+    $result = [
+        'ok' => true,
+        'message_saved' => true,
+        'duplicate' => $duplicate,
+        'pending' => (string)$persisted['reply_status'] === 'pending',
+        'message' => sh_support_public_message_row($persisted),
+    ];
+    try {
+        $snapshot = sh_support_customer_snapshot($conversationId, $owner);
+        if (!empty($snapshot['ok'])) { $result['snapshot'] = $snapshot; }
+        else { sh_log_line('ai-support-customer-snapshot', 'Committed customer message; snapshot unavailable.'); }
+    } catch (Throwable $e) {
+        // The exact committed row is already confirmed. Polling can restore the
+        // rest of the transcript without turning this successful send into a failure.
+        sh_log_line('ai-support-customer-snapshot', 'Committed customer message; snapshot read failed.');
+    }
+    return $result;
+}
+
 /** Customer message insert + state transition is transactional; provider work happens after commit. */
 function sh_support_customer_send(int $conversationId, array $owner, string $body, string $clientId): array
 {
@@ -1469,17 +1513,34 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
         $pdo->beginTransaction();
         $conversation = sh_support_conversation_for_owner($conversationId, $owner, true);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
-        if ((string)$conversation['status'] === 'resolved') { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved. Start a new conversation to continue.']; }
         $duplicate = sh_one('SELECT * FROM support_messages WHERE conversation_id = ? AND client_message_id = ? LIMIT 1 FOR UPDATE', [$conversationId, $clientId]);
         if ($duplicate !== null) {
+            if ((string)$duplicate['sender'] !== 'customer' || (int)$duplicate['is_internal'] !== 0) {
+                $pdo->rollBack();
+                return ['ok' => false, 'http_status' => 409, 'error' => 'This send key was already used. Refresh the page and try again.'];
+            }
+            if (!hash_equals((string)$duplicate['body'], $body)) {
+                $pdo->rollBack();
+                return ['ok' => false, 'http_status' => 409, 'error' => 'This send key belongs to a different message. Start a new send and try again.'];
+            }
             $pdo->commit();
-            return ['ok' => true, 'duplicate' => true, 'pending' => (string)$duplicate['reply_status'] === 'pending', 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
+            return sh_support_customer_send_success($conversationId, $owner, $duplicate, true);
+        }
+        if ((string)$conversation['status'] === 'resolved') {
+            $pdo->rollBack();
+            return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved. Start a new conversation to continue.'];
         }
 
         $language = sh_support_language($body);
         $handoffRequest = sh_support_handoff_intent($body);
-        $paused = (int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0;
-        $replyStatus = $paused ? 'paused' : 'pending';
+        $humanControlled = (int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0
+            || in_array((string)$conversation['status'], ['pending','assigned'], true);
+        // No AI reply is queued while support controls the conversation. Use
+        // the established 'none' state; the conversation's ai_paused/assignee
+        // fields carry the handoff state, without requiring a newer ENUM value.
+        $replyStatus = $humanControlled ? 'none' : 'pending';
+        $createdAt = gmdate('Y-m-d H:i:s');
+        $replyStartedAt = $replyStatus === 'pending' ? $createdAt : null;
         $messageId = sh_insert('support_messages', [
             'conversation_id' => $conversationId,
             'reply_to_message_id' => null,
@@ -1489,29 +1550,25 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
             'body' => $body,
             'extra_json' => null,
             'reply_status' => $replyStatus,
-            'reply_started_at' => $replyStatus === 'pending' ? gmdate('Y-m-d H:i:s') : null,
+            'reply_started_at' => $replyStartedAt,
             'is_internal' => 0,
-            'created_at' => gmdate('Y-m-d H:i:s'),
+            'created_at' => $createdAt,
         ]);
+        $message = [
+            'id' => $messageId, 'conversation_id' => $conversationId,
+            'sender' => 'customer', 'source' => 'manual', 'client_message_id' => $clientId,
+            'body' => $body, 'extra_json' => null, 'reply_status' => $replyStatus,
+            'reply_started_at' => $replyStartedAt, 'is_internal' => 0, 'created_at' => $createdAt,
+        ];
         $subject = trim((string)($conversation['subject'] ?? '')) === '' ? mb_substr(preg_replace('/\\s+/u', ' ', $body) ?? $body, 0, 160) : (string)$conversation['subject'];
+        // Keep assignment, status and AI-pause unchanged. This activity/unread
+        // update is what keeps the follow-up in the assigned agent's inbox.
         sh_query('UPDATE support_conversations SET subject = ?, last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_admin = 1 WHERE id = ?', [$subject, $conversationId]);
 
-        if ($handoffRequest && sh_support_handoff_enabled()) {
-            sh_query("UPDATE support_conversations SET status = 'pending', ai_paused = 1 WHERE id = ?", [$conversationId]);
-            sh_query("UPDATE support_messages SET reply_status = 'complete', reply_started_at = NULL WHERE id = ?", [$messageId]);
-            sh_support_insert_handoff_event($conversationId, $clientId, 'customer', null, 'requested', 'Customer requested a human agent.');
-            sh_insert('support_messages', [
-                'conversation_id' => $conversationId, 'reply_to_message_id' => $messageId, 'client_message_id' => null,
-                'sender' => 'system', 'source' => 'system', 'body' => sh_support_handoff_public_message($language),
-                'extra_json' => null, 'reply_status' => 'none', 'reply_started_at' => null,
-                'is_internal' => 0, 'created_at' => gmdate('Y-m-d H:i:s'),
-            ]);
-            sh_query('UPDATE support_conversations SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1 WHERE id = ?', [$conversationId]);
-            $pdo->commit();
-            return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
-        }
-        if ($handoffRequest && !sh_support_handoff_enabled()) { $handoffUnavailable = true; }
-        if ($paused) {
+        if ($humanControlled) {
+            if ($handoffRequest && sh_support_handoff_enabled()) {
+                sh_support_insert_handoff_event($conversationId, $clientId, 'customer', null, 'requested', 'Customer sent a follow-up while support controls the conversation.');
+            }
             sh_insert('support_messages', [
                 'conversation_id' => $conversationId, 'reply_to_message_id' => $messageId, 'client_message_id' => null,
                 'sender' => 'system', 'source' => 'system',
@@ -1522,10 +1579,28 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
                 'extra_json' => null, 'reply_status' => 'none', 'reply_started_at' => null,
                 'is_internal' => 0, 'created_at' => gmdate('Y-m-d H:i:s'),
             ]);
-            sh_query('UPDATE support_conversations SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1 WHERE id = ?', [$conversationId]);
+            sh_query('UPDATE support_conversations SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1, unread_for_admin = 1 WHERE id = ?', [$conversationId]);
             $pdo->commit();
-            return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
+            return sh_support_customer_send_success($conversationId, $owner, $message);
         }
+
+        if ($handoffRequest && sh_support_handoff_enabled()) {
+            sh_query("UPDATE support_conversations SET status = 'pending', ai_paused = 1 WHERE id = ?", [$conversationId]);
+            sh_query("UPDATE support_messages SET reply_status = 'complete', reply_started_at = NULL WHERE id = ?", [$messageId]);
+            $message['reply_status'] = 'complete';
+            $message['reply_started_at'] = null;
+            sh_support_insert_handoff_event($conversationId, $clientId, 'customer', null, 'requested', 'Customer requested a human agent.');
+            sh_insert('support_messages', [
+                'conversation_id' => $conversationId, 'reply_to_message_id' => $messageId, 'client_message_id' => null,
+                'sender' => 'system', 'source' => 'system', 'body' => sh_support_handoff_public_message($language),
+                'extra_json' => null, 'reply_status' => 'none', 'reply_started_at' => null,
+                'is_internal' => 0, 'created_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+            sh_query('UPDATE support_conversations SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1, unread_for_admin = 1 WHERE id = ?', [$conversationId]);
+            $pdo->commit();
+            return sh_support_customer_send_success($conversationId, $owner, $message);
+        }
+        if ($handoffRequest && !sh_support_handoff_enabled()) { $handoffUnavailable = true; }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
@@ -1534,7 +1609,7 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
     }
 
     sh_support_process_customer_message($conversationId, $messageId, $body, $owner, $handoffUnavailable);
-    return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
+    return sh_support_customer_send_success($conversationId, $owner, $message);
 }
 
 function sh_support_customer_retry(int $conversationId, int $messageId, array $owner): array
@@ -1542,26 +1617,42 @@ function sh_support_customer_retry(int $conversationId, int $messageId, array $o
     if (!sh_support_chat_enabled()) { return ['ok' => false, 'http_status' => 503, 'error' => 'Customer chat is currently unavailable.']; }
     if (!sh_support_request_rate_allowed($owner)) { return ['ok' => false, 'http_status' => 429, 'error' => 'Too many retries. Please wait a little and try again.']; }
     $pdo = sh_db();
+    $humanControlled = false;
     try {
         $pdo->beginTransaction();
         $conversation = sh_support_conversation_for_owner($conversationId, $owner, true);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
-        if ((int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0 || (string)$conversation['status'] === 'resolved') {
-            $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is paused for support.'];
+        if ((string)$conversation['status'] === 'resolved') {
+            $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved. Start a new conversation to continue.'];
         }
-        $message = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? AND sender = \'customer\' FOR UPDATE', [$messageId, $conversationId]);
+        $message = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? AND sender = \'customer\' AND is_internal = 0 FOR UPDATE', [$messageId, $conversationId]);
         if ($message === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Message not found.']; }
         $state = (string)$message['reply_status'];
-        $stalePending = $state === 'pending' && !empty($message['reply_started_at']) && strtotime((string)$message['reply_started_at'] . ' UTC') < time() - 180;
-        if ($state !== 'failed' && !$stalePending) {
-            $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => $state === 'pending' ? 'A reply is still being prepared.' : 'This message does not need a retry.'];
+        $humanControlled = (int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0
+            || in_array((string)$conversation['status'], ['pending','assigned'], true);
+        if ($humanControlled) {
+            if (!in_array($state, ['failed','pending','paused'], true)) {
+                $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This message does not need a retry.'];
+            }
+            // Convert any interrupted AI turn into an inbox follow-up. Retrying
+            // it must never restart AI after an agent has taken control.
+            sh_query("UPDATE support_messages SET reply_status = 'none', reply_started_at = NULL WHERE id = ?", [$messageId]);
+            sh_query('UPDATE support_conversations SET updated_at = UTC_TIMESTAMP(), unread_for_admin = 1 WHERE id = ?', [$conversationId]);
+        } else {
+            $stalePending = $state === 'pending' && !empty($message['reply_started_at']) && strtotime((string)$message['reply_started_at'] . ' UTC') < time() - 180;
+            if ($state !== 'failed' && !$stalePending) {
+                $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => $state === 'pending' ? 'A reply is still being prepared.' : 'This message does not need a retry.'];
+            }
+            sh_query("UPDATE support_messages SET reply_status = 'pending', reply_started_at = UTC_TIMESTAMP() WHERE id = ?", [$messageId]);
         }
-        sh_query("UPDATE support_messages SET reply_status = 'pending', reply_started_at = UTC_TIMESTAMP() WHERE id = ?", [$messageId]);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         sh_log_exception($e, 'ai-support-retry');
         return ['ok' => false, 'http_status' => 500, 'error' => 'The retry could not be started.'];
+    }
+    if ($humanControlled) {
+        return ['ok' => true, 'human_controlled' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
     }
     sh_support_process_customer_message($conversationId, $messageId, (string)$message['body'], $owner);
     return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
@@ -1580,7 +1671,8 @@ function sh_support_customer_handoff(int $conversationId, array $owner, string $
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
         if ((string)$conversation['status'] === 'resolved') { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved.']; }
         $existingEvent = sh_one('SELECT id FROM support_handoff_events WHERE conversation_id = ? AND event_key = ? LIMIT 1 FOR UPDATE', [$conversationId, $eventKey]);
-        if ($existingEvent !== null || (int)$conversation['ai_paused'] === 1 || (int)($conversation['assigned_admin_id'] ?? 0) > 0) {
+        if ($existingEvent !== null || (int)$conversation['ai_paused'] === 1 || (int)($conversation['assigned_admin_id'] ?? 0) > 0
+            || in_array((string)$conversation['status'], ['pending','assigned'], true)) {
             $pdo->commit(); return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
         }
         $lastCustomer = sh_one("SELECT body FROM support_messages WHERE conversation_id = ? AND sender = 'customer' ORDER BY id DESC LIMIT 1", [$conversationId]);

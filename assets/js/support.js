@@ -419,6 +419,18 @@
     if (last && typeof last.scrollIntoView === 'function') last.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }
 
+  function reconcileSavedSend(send, message) {
+    if (!message || message.sender !== 'customer'
+      || String(message.client_message_id || '') !== send.id || !Number(message.id)) return false;
+    const pending = optimisticSends.get(send.id);
+    if (pending) messageMap.delete(pending.tempKey);
+    messageMap.set(String(message.id), message);
+    optimisticSends.delete(send.id);
+    if (pendingSend && pendingSend.id === send.id) pendingSend = null;
+    renderMessages();
+    return true;
+  }
+
   async function transmitOptimisticSend(send) {
     if (busy || !conversation || !send) return;
     busy = true;
@@ -430,10 +442,19 @@
         method: 'POST',
         data: { id: Number(conversation.id), body: send.body, client_id: send.id },
       });
-      const snapshot = payload.snapshot || payload;
-      const confirmed = Array.isArray(snapshot.messages)
-        && snapshot.messages.some((message) => String(message.client_message_id || '') === send.id);
-      acceptSnapshot(snapshot);
+      const snapshot = payload.snapshot || (Array.isArray(payload.messages) ? payload : null);
+      let confirmed = false;
+      if (snapshot && snapshot.ok !== false && snapshot.success !== false
+        && snapshot.conversation && Array.isArray(snapshot.messages)) {
+        confirmed = snapshot.messages.some((message) => message.sender === 'customer'
+          && String(message.client_message_id || '') === send.id);
+        acceptSnapshot(snapshot);
+      }
+      // A database-committed acknowledgement is authoritative even if a later
+      // history snapshot omitted this row or could not be loaded.
+      if (!confirmed && payload.message_saved === true) {
+        confirmed = reconcileSavedSend(send, payload.message);
+      }
       if (confirmed) {
         if (chatInput.value.trim() === send.body) {
           chatInput.value = '';
@@ -489,7 +510,18 @@
     updateView();
     try {
       const payload = await request('retry', { method: 'POST', data: { id: Number(conversation.id), message_id: messageId } });
-      acceptSnapshot(payload.snapshot || payload);
+      const snapshot = payload.snapshot || (Array.isArray(payload.messages) ? payload : null);
+      if (snapshot && snapshot.ok !== false && snapshot.success !== false
+        && snapshot.conversation && Array.isArray(snapshot.messages)) {
+        acceptSnapshot(snapshot);
+      } else if (payload.message_saved === true && payload.message
+        && payload.message.sender === 'customer' && Number(payload.message.id) === Number(messageId)) {
+        messageMap.set(String(payload.message.id), payload.message);
+        clearError();
+        renderMessages();
+      } else {
+        throw new Error(tr('requestError'));
+      }
     } catch (error) { showError(error.message || tr('requestError')); }
     finally { busy = false; updateView(); }
   }
