@@ -122,15 +122,28 @@
       headers['X-CSRF-Token'] = csrf;
       config.body = JSON.stringify({ action, ...(options.data || {}) });
     }
-    const response = await fetch(url.toString(), config);
+    let response;
+    try { response = await fetch(url.toString(), config); }
+    catch (_) { throw new Error(tr('requestError')); }
     let payload;
     try { payload = await response.json(); }
     catch (_) { throw new Error(tr('requestError')); }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(tr('requestError'));
     if (!response.ok || payload.success === false) {
-      if (payload.login_url) { showError(payload.error || tr('requestError')); }
-      throw new Error(payload.error || tr('requestError'));
+      const detail = typeof payload.error === 'string' && payload.error.trim()
+        ? payload.error.trim().slice(0, 240) : tr('requestError');
+      if (payload.login_url) { showError(detail); }
+      const error = new Error(detail);
+      error.responseStatus = response.status;
+      throw error;
     }
-    if (payload.ok === false) throw new Error(payload.error || tr('requestError'));
+    if (payload.ok === false) {
+      const detail = typeof payload.error === 'string' && payload.error.trim()
+        ? payload.error.trim().slice(0, 240) : tr('requestError');
+      const error = new Error(detail);
+      error.responseStatus = response.status;
+      throw error;
+    }
     return payload;
   }
 
@@ -238,6 +251,12 @@
         state.className = 'sh-support-chat__message-state';
         state.textContent = tr('sendUnconfirmed');
         item.append(state);
+        if (message.send_error) {
+          const detail = document.createElement('p');
+          detail.className = 'sh-support-chat__message-state';
+          detail.textContent = String(message.send_error).slice(0, 240);
+          item.append(detail);
+        }
         const retry = document.createElement('button');
         retry.type = 'button';
         retry.className = 'sh-btn sh-btn--sm sh-btn--ghost';
@@ -402,7 +421,7 @@
     finally { busy = false; openButton.disabled = false; newButton.disabled = false; updateView(); }
   }
 
-  function renderOptimisticSend(send, state = 'sending') {
+  function renderOptimisticSend(send, state = 'sending', errorMessage = '') {
     messageMap.set(send.tempKey, {
       id: send.tempKey,
       optimistic: true,
@@ -411,6 +430,7 @@
       body: send.body,
       client_message_id: send.id,
       reply_status: state,
+      send_error: state === 'send_failed' ? String(errorMessage || '') : '',
       created_at: send.createdAt,
       products: [],
     });
@@ -463,12 +483,12 @@
         const last = messageList.lastElementChild;
         if (last && typeof last.scrollIntoView === 'function') last.scrollIntoView({ block: 'end', behavior: 'smooth' });
       } else {
-        renderOptimisticSend(send, 'send_failed');
+        renderOptimisticSend(send, 'send_failed', tr('requestError'));
       }
-    } catch (_) {
-      // The message row carries the recoverable state and retry action; avoid
-      // duplicating the same transport failure in a page-level banner.
-      renderOptimisticSend(send, 'send_failed');
+    } catch (error) {
+      // Keep the send retryable, and show the safe API/network detail inline
+      // rather than hiding a server rejection behind the generic state.
+      renderOptimisticSend(send, 'send_failed', error && error.message ? error.message : tr('requestError'));
     } finally {
       busy = false;
       updateView();

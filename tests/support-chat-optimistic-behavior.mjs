@@ -34,6 +34,8 @@ const stateUrls = [];
 let humanMode = false;
 let humanStatus = { status: 'pending', assigned_admin_id: 0, ai_paused: true };
 let failNextHumanResponseAfterCommit = false;
+let failNextHumanSendWithHttp = false;
+let malformNextHumanResponse = false;
 let omitNextHumanRowFromSnapshot = false;
 const humanRows = [];
 let humanMessageId = 700;
@@ -126,6 +128,14 @@ async function fetchMock(rawUrl, options = {}) {
   const body = JSON.parse(options.body || '{}');
   sendRequests.push(body);
   if (humanMode) {
+    if (failNextHumanSendWithHttp) {
+      failNextHumanSendWithHttp = false;
+      return jsonResponse({ success: false, error: 'Too many messages. Please wait a little and retry.' }, 429);
+    }
+    if (malformNextHumanResponse) {
+      malformNextHumanResponse = false;
+      return jsonResponse({ success: true, ok: true });
+    }
     const response = saveHumanSend(body);
     if (failNextHumanResponseAfterCommit) {
       failNextHumanResponseAfterCommit = false;
@@ -305,6 +315,32 @@ try {
   const humanRetry = sendRequests[sendRequests.length - 1];
   check('human-mode retry reuses its original id and does not duplicate a committed message', humanRetry.client_id === failedHumanSend.client_id && humanRows.filter((row) => row.sender === 'customer' && row.client_message_id === failedHumanSend.client_id).length === 1 && !messages.textContent.includes('Message not confirmed.'));
 
+  failNextHumanSendWithHttp = true;
+  const limitedBody = 'Could you please confirm the tracking number?';
+  input.value = limitedBody;
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await sleep(25);
+  const rejectedHumanSend = sendRequests[sendRequests.length - 1];
+  check('HTTP rate-limit failure remains visibly unconfirmed, explains the safe error and is not prematurely persisted', messages.textContent.includes('Message not confirmed.') && messages.textContent.includes('Too many messages. Please wait a little and retry.') && humanRows.filter((row) => row.sender === 'customer' && row.client_message_id === rejectedHumanSend.client_id).length === 0);
+  const rejectedRetryButton = Array.from(messages.querySelectorAll('button')).find((button) => button.textContent.includes('Retry send'));
+  rejectedRetryButton && rejectedRetryButton.click();
+  await sleep(30);
+  const retryAfterRejection = sendRequests[sendRequests.length - 1];
+  check('genuinely failed request retries the same client ID and is saved exactly once', retryAfterRejection.client_id === rejectedHumanSend.client_id && humanRows.filter((row) => row.sender === 'customer' && row.client_message_id === rejectedHumanSend.client_id).length === 1 && input.value === '');
+
+  malformNextHumanResponse = true;
+  const malformedBody = 'Please confirm the return pickup date.';
+  input.value = malformedBody;
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await sleep(25);
+  const malformedSend = sendRequests[sendRequests.length - 1];
+  check('success-shaped but incomplete API response is not treated as saved', messages.textContent.includes('Message not confirmed.') && humanRows.filter((row) => row.sender === 'customer' && row.client_message_id === malformedSend.client_id).length === 0 && input.value === malformedBody);
+  const malformedRetryButton = Array.from(messages.querySelectorAll('button')).find((button) => button.textContent.includes('Retry send'));
+  malformedRetryButton && malformedRetryButton.click();
+  await sleep(30);
+  const malformedRetry = sendRequests[sendRequests.length - 1];
+  check('malformed-response retry keeps the same ID and saves once after valid acknowledgement', malformedRetry.client_id === malformedSend.client_id && humanRows.filter((row) => row.sender === 'customer' && row.client_message_id === malformedSend.client_id).length === 1 && input.value === '');
+
   addAgentReply('The update is confirmed.');
   document.dispatchEvent(new Event('visibilitychange'));
   await sleep(25);
@@ -315,7 +351,7 @@ try {
   reloadedDom.window.eval(supportJs);
   await sleep(25);
   const reloadedMessages = reloadedDom.window.document.querySelector('[data-chat-messages]');
-  check('cold page reload restores persisted customer and agent messages from server state', reloadedDom.window.document.querySelector('[data-thread-title]').textContent.includes('#7') && reloadedMessages.textContent.includes('Please confirm the updated delivery date.') && reloadedMessages.textContent.includes('The update is confirmed.'));
+  check('cold page reload restores persisted customer and agent messages from server state', reloadedDom.window.document.querySelector('[data-thread-title]').textContent.includes('#7') && reloadedMessages.textContent.includes('Please confirm the updated delivery date.') && reloadedMessages.textContent.includes(limitedBody) && reloadedMessages.textContent.includes(malformedBody) && reloadedMessages.textContent.includes('The update is confirmed.'));
   reloadedDom.window.close();
 } finally {
   dom.window.close();
