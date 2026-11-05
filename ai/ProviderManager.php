@@ -40,6 +40,71 @@ function sh_ai_driver_label(string $driver): string
     return $cls ? $cls::defaultLabel() : ucfirst($driver);
 }
 
+/**
+ * Return trusted, local identity artwork for a registered provider driver.
+ * Matching uses only the normalized driver ID; configured names and endpoint
+ * URLs are deliberately never used to infer a vendor logo.
+ *
+ * @return array{asset:?string,alt:string,fallback:string,wide:bool,width:int,height:int}
+ */
+function sh_ai_provider_identity(string $driver): array
+{
+    static $identities = [
+        'openai' => [
+            'asset' => 'assets/images/ai-providers/openai.svg',
+            'alt' => 'OpenAI logo',
+            'fallback' => 'OpenAI',
+            'wide' => false,
+            'width' => 716,
+            'height' => 716,
+        ],
+        'openrouter' => [
+            'asset' => 'assets/images/ai-providers/openrouter.svg',
+            'alt' => 'OpenRouter logo',
+            'fallback' => 'OpenRouter',
+            'wide' => true,
+            'width' => 1608,
+            'height' => 294,
+        ],
+        'gemini' => [
+            'asset' => 'assets/images/ai-providers/gemini.png',
+            'alt' => 'Google Gemini logo',
+            'fallback' => 'Gemini',
+            'wide' => false,
+            'width' => 512,
+            'height' => 512,
+        ],
+        'anthropic' => [
+            'asset' => 'assets/images/ai-providers/anthropic.svg',
+            'alt' => 'Anthropic logo',
+            'fallback' => 'Anthropic',
+            'wide' => false,
+            'width' => 248,
+            'height' => 248,
+        ],
+        // This driver can point to many unrelated services. There is no
+        // single verified brand mark, so keep the identity explicit in text.
+        'openai_compatible' => [
+            'asset' => null,
+            'alt' => '',
+            'fallback' => 'Custom',
+            'wide' => false,
+            'width' => 0,
+            'height' => 0,
+        ],
+    ];
+
+    $key = strtolower(trim($driver));
+    return $identities[$key] ?? [
+        'asset' => null,
+        'alt' => '',
+        'fallback' => 'Custom',
+        'wide' => false,
+        'width' => 0,
+        'height' => 0,
+    ];
+}
+
 /** Build an adapter from a provider row. Null when the driver is unknown. */
 function sh_ai_adapter(array $row): ?AIProviderInterface
 {
@@ -528,12 +593,26 @@ function sh_ai_test_state_labels(): array
         'connected'           => 'Connected',
         'token_limit'         => 'Connected — token limit',
         'config_incomplete'   => 'Configuration incomplete',
+        'provider_missing'    => 'Provider missing',
+        'provider_disabled'   => 'Provider disabled',
+        'missing_key'         => 'API key missing',
+        'credential_decryption_failed' => 'Saved key unavailable',
         'auth_failed'         => 'Authentication failed',
         'permission_denied'   => 'Permission denied',
         'model_not_found'     => 'Model not available',
+        'model_unavailable'   => 'Model not available',
+        'request_rejected'    => 'Request rejected',
+        'empty_response'      => 'Empty model response',
+        'invalid_response'    => 'Invalid provider response',
         'rate_limited'        => 'Rate limited',
+        'quota_exceeded'      => 'Quota or billing limit',
         'billing'             => 'Billing problem',
         'timeout'             => 'Timed out',
+        'dns_error'           => 'DNS lookup failed',
+        'tls_error'           => 'TLS verification failed',
+        'connection_refused'  => 'Connection refused',
+        'connection_failed'   => 'Connection failed',
+        'transport_unavailable' => 'HTTP transport unavailable',
         'network_error'       => 'Network error',
         'provider_error'      => 'Provider error',
         'failed'              => 'Test failed',
@@ -546,16 +625,38 @@ function sh_ai_test_state_label(string $code): string
 }
 
 /**
- * Badge tone for a test code: ok / warn / bad. A token limit and a missing
- * configuration are warnings, never evidence of a bad key.
+ * Badge tone for a test code: ok / warn / bad. A token limit, missing
+ * configuration or unreachable transport is a warning, not evidence of a bad key.
  */
 function sh_ai_test_state_tone(string $code): string
 {
     if ($code === 'connected') { return 'ok'; }
-    if (in_array($code, ['token_limit', 'config_incomplete', 'model_not_found', 'rate_limited', 'timeout', 'network_error'], true)) {
+    if (in_array($code, ['token_limit', 'config_incomplete', 'provider_missing', 'provider_disabled', 'missing_key', 'credential_decryption_failed', 'model_not_found', 'model_unavailable', 'request_rejected', 'rate_limited', 'quota_exceeded', 'timeout', 'dns_error', 'tls_error', 'connection_refused', 'connection_failed', 'transport_unavailable', 'network_error'], true)) {
         return 'warn';
     }
     return 'bad';
+}
+
+/** Redact provider secrets, configured extra-header values and inline credentials from test diagnostics. */
+function sh_ai_redact_provider_test_text(string $text, array $provider): string
+{
+    $secrets = [];
+    if (function_exists('sh_ai_decrypt')) {
+        $key = sh_ai_decrypt((string)($provider['api_key'] ?? ''));
+        if ($key !== '') { $secrets[] = $key; }
+    }
+    $auth = trim((string)($provider['auth_header'] ?? ''));
+    if ($auth !== '') { $secrets[] = $auth; }
+    $extra = json_decode((string)($provider['extra_headers'] ?? ''), true);
+    if (is_array($extra)) {
+        foreach ($extra as $value) { if (is_scalar($value)) { $secrets[] = (string)$value; } }
+    }
+    foreach ($secrets as $secret) {
+        if (strlen($secret) >= 6) { $text = str_replace($secret, '[redacted]', $text); }
+    }
+    $text = preg_replace('/\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,}|Bearer\s+[A-Za-z0-9._~+\/-]{10,})\b/i', '[redacted]', $text) ?? $text;
+    $text = preg_replace('/\b[A-Za-z0-9_.-]*(?:api[_ -]?key|secret|token|password|authorization)[A-Za-z0-9_.-]*\s*[:=]\s*[^\s,;]+/i', '[credential]=[redacted]', $text) ?? $text;
+    return mb_substr(trim(preg_replace('/\s+/', ' ', $text) ?? $text), 0, 255);
 }
 
 /** Test one configured provider and remember the real outcome. */
@@ -569,14 +670,16 @@ function sh_ai_provider_test(int $providerId): array
                 'tested_at' => date('Y-m-d H:i:s'), 'error' => 'This provider type is unknown.'];
     }
 
-    $res = $adapter->testConnection();
-    // A provider can echo part of the request in an error. Never store or
-    // return the decrypted key, even if the vendor repeats it back.
-    $plainKey = function_exists('sh_ai_decrypt') ? sh_ai_decrypt((string)($row['api_key'] ?? '')) : '';
-    if ($plainKey !== '' && strlen($plainKey) >= 8) {
-        foreach (['message', 'error', 'detail', 'next'] as $k) {
-            if (isset($res[$k])) { $res[$k] = str_replace($plainKey, '••••', (string)$res[$k]); }
-        }
+    try {
+        $res = $adapter->testConnection();
+    } catch (Throwable $e) {
+        sh_log_line('ai-provider-test', 'Provider adapter test threw an exception; details omitted.');
+        $res = ['ok' => false, 'code' => 'provider_error', 'status' => 0,
+                'message' => 'The provider test could not be completed due to an internal error.',
+                'next' => 'Check the provider configuration and server logs, then test again.'];
+    }
+    foreach (['message', 'error', 'detail', 'next'] as $k) {
+        if (isset($res[$k])) { $res[$k] = sh_ai_redact_provider_test_text((string)$res[$k], $row); }
     }
     if (!isset($res['code']) || $res['code'] === '') {
         $res['code'] = !empty($res['ok']) ? 'connected' : 'failed';

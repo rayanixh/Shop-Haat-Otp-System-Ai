@@ -30,7 +30,7 @@ agent.
 
 | File | Responsibility |
 | --- | --- |
-| `includes/support.php` | Core service: schema ensure, identity, conversations, deterministic intents/tools, AI routing/guard, customer pipeline, admin actions, rate limits, usage, purge, and statistics. |
+| `includes/support.php` | Core service: schema ensure, identity, conversations, deterministic intents/tools, AI routing/guard, customer pipeline, admin actions, rate limits, usage, statistics, and a no-op history-retention compatibility shim. |
 | `install/schema.php` | Additive `sh_support_schema_sql()` definitions used by the installer and lazy runtime ensure. |
 | `api/support.php` | Thin CSRF-protected storefront JSON endpoint over the core pipeline. |
 | `includes/support-widget.php` | Server-rendered launcher/panel markup when support is enabled. |
@@ -38,7 +38,7 @@ agent.
 | `assets/css/app.css` | Support widget styling in the existing design system. |
 | `admin/support.php` | Searchable/filterable support inbox. |
 | `admin/support-conversation.php` | Full thread, internal notes, takeover/resume, assignment, status, customer/product/order context, events, and admin polling endpoint. |
-| `admin/support-settings.php` | General, language, AI, policy, copy, FAQ, usage, live-test, and retention controls. |
+| `admin/support-settings.php` | General, language, AI, policy, copy, FAQ, usage and live-test controls; support history is retained. |
 | `assets/js/support-admin.js` | Bounded polling for the open admin conversation page. |
 | `ai/ProviderManager.php` | Existing provider abstraction plus the routable `support_chat` task. |
 | `ai/providers/*.php` | Existing provider adapters; support can pass its own bounded timeout. |
@@ -199,7 +199,7 @@ service receives the system instructions, admin's extra support instructions,
 verified facts for the current turn, and a bounded recent public history. It
 may therefore process the customer's messages and authorized order/product
 facts under that provider's terms. Internal admin notes are not included.
-Choose a provider and retention policy appropriate for the store.
+Choose a provider appropriate for the store. Support conversation history is retained; this feature does not prune or delete support threads.
 
 ## 5. Customer widget
 
@@ -242,7 +242,7 @@ guest conversation. Signed-in customers are matched by account.
   activity events, reply form, and conversation controls.
 - **Admin → Support Settings** (`admin/support-settings.php`): all support
   configuration, route/test status, FAQs, seven-day/today counters, and manual
-  retention cleanup.
+  support-history cleanup (not available; history is retained).
 
 The admin sidebar support badge is the sum of unread customer messages on
 open/pending conversations. It updates when an admin page loads; there is no
@@ -281,7 +281,7 @@ admin page.
 | --- | --- |
 | `support.view` | View inbox and conversation threads, including internal notes. |
 | `support.reply` | Reply, add notes, take over/resume AI, assign, and change status. |
-| `support.manage` | Change support settings/FAQs, run the live AI probe, and purge retained conversations. |
+| `support.manage` | Change support settings/FAQs and run the live AI probe; there is no support-thread deletion or purge action. |
 
 Super-admin behaviour follows the existing permission system. Fresh default
 `order_manager` and `support_staff` roles receive `support.view` and
@@ -307,7 +307,6 @@ edit is required.
 | `support_timeout` | `25` | 5–90 seconds | Passed to supported provider adapters. |
 | `support_rate_per_min` | `8` | 1–60/min/session | IP limit is `max(4, 4 × session limit)` per minute. |
 | `support_daily_ai_limit` | `1000` | 0–1,000,000 | `0` disables the store-wide daily AI cap. |
-| `support_retention_days` | `180` | 0–3650 days | `0` keeps resolved/closed conversations indefinitely; purge is manual. |
 | `support_languages` | `bn,banglish,en` | subset | Enabled reply languages. |
 | `support_system_prompt` | empty | admin text | Extra tone/store instructions; built-in fact/read-only rules remain in force. |
 | `support_business_hours` | empty | admin text | Internal/reference text stored with support settings. |
@@ -382,80 +381,34 @@ Settings.
 
 ## 9. Database schema, deployment, and rollback
 
-### Tables
+### Compatibility tables and upgrade
 
-All six are additive `CREATE TABLE IF NOT EXISTS` definitions from
-`sh_support_schema_sql()`:
+The legacy storefront tables (`support_conversations`, `support_messages`,
+`support_events`, and `support_faqs`) remain in place. The AI support service
+adds `support_handoff_events`, `support_ai_usage`, and `support_rate_limits`
+and uses an additive schema-v4 upgrader. It adds missing service/legacy
+compatibility columns, widens sender/status enums, maps old unread/admin/note/
+FAQ fields, and copies event metadata using `legacy_event_id`. Existing IDs,
+conversation/message bodies, FAQ rows, and legacy columns are preserved. The
+upgrade is safe to retry: its version marker is written only after all steps
+complete, and each column/index/backfill check is idempotent.
 
-| Table | Purpose |
-| --- | --- |
-| `support_conversations` | Identity snapshots, status, assignee, AI pause, language, latest product/order context, unread counters, and activity time. |
-| `support_messages` | Customer/AI/admin/system messages, public/internal visibility, language, idempotency client ID, and safe facts metadata. Unique `(conversation_id, client_msg_id)`. |
-| `support_events` | Metadata-only audit/activity events; message bodies and secrets are not copied here. |
-| `support_faqs` | Keyword-matched FAQ answers in Bengali, Banglish, and English. |
-| `support_rate` | Hashed session/IP and order-verification rate buckets using atomic upserts. |
-| `support_usage_daily` | Daily customer/AI/fallback/admin/handoff/rate-limit counters. |
+For cPanel/phpMyAdmin, back up first, deploy all code and assets together, and
+run `install/migrations/2026-10-ai-customer-support.sql` only if you prefer to
+create missing tables manually. Then load the storefront or support page once;
+the PHP runtime upgrader adds compatibility columns. The app reports a safe
+error if it cannot finish. Do not manually rename or drop the legacy support
+tables.
 
-`support_messages` and `support_events` cascade when a conversation is
-deleted. User/admin/product references on conversations use `SET NULL`.
+### Soft rollback
 
-Fresh installs include the definitions in the installer schema. Existing
-installs create them when `sh_support_ensure_schema()` first runs from a
-support API/admin entry point and then set `support_schema_v = 1`. Starter
-FAQs are seeded only when the FAQ table is empty.
-
-### Existing-store deployment checklist
-
-1. Back up application files and the MySQL database.
-2. Deploy the code in a staging copy first when possible.
-3. Confirm PHP 8.1+ and the store's normal extensions are available. No new
-   runtime service is needed.
-4. Open **Admin → Support Settings** as an account allowed to manage support;
-   confirm the page loads without a PHP diagnostic. This safely ensures the
-   additive tables.
-5. Grant support permissions to any pre-existing custom roles that need them.
-6. Review welcome/fallback copy, human availability, policies, and FAQs. Do
-   not publish delivery charges/dates or return commitments the store cannot
-   honour.
-7. Run the acceptance checklist with a test product and, for order tests, a
-   disposable/test order—not a real customer's data.
-8. Configure/test AI only if desired. Leave the daily cap conservative.
-9. Confirm the storefront, login, cart, checkout, normal admin, courier, and
-   payment workflows still work.
-10. Train staff to check the Support Inbox; handoff has no external push
-    notification in this implementation.
-
-### Rollback
-
-For a code-only rollback, first disable support in Support Settings if the
-admin is available, then deploy the previous application release using the
-store's normal Git/file process. Existing support tables/settings can remain
-without being used by the older code.
-
-To remove support data completely, back up first, stop/disable the deployed
-support code, then run the following only against the intended database:
-
-```sql
-DROP TABLE IF EXISTS
-  support_usage_daily,
-  support_rate,
-  support_faqs,
-  support_messages,
-  support_events,
-  support_conversations;
--- Optional, only if support configuration should also be discarded:
-DELETE FROM settings WHERE setting_key LIKE 'support_%';
-```
-
-This permanently deletes conversations, internal notes, FAQs, counters, and
-events. Saved custom-role JSON may still mention `support.*` permission keys;
-they are inert if the code is rolled back and can be removed through Roles &
-Permissions.
-
-If a table was manually removed while `support_schema_v` still says `1`, the
-fast path will not repair it automatically. After a database backup, remove
-that one setting and reopen Support Settings so the idempotent create/seed
-path runs again.
+`install/migrations/2026-10-ai-customer-support-rollback.sql` is a soft disable:
+it switches customer chat/AI off and marks the support service disabled. It
+does not drop tables or delete conversations, messages, events, FAQs, or
+metrics. To re-enable after review, change `ai_support_schema_v` from
+`disabled` to `1`, then load the application once so schema v4 can verify and
+complete any additive upgrade. Restore the earlier application code only if
+it can safely ignore the added columns/new tables.
 
 ## 10. Privacy, retention, and security notes
 
@@ -471,14 +424,13 @@ path runs again.
   be pasted into FAQs, policies, system prompt, customer messages, or notes.
 - Support does not call the general AI dispatch logger with full conversation
   prompts/responses.
-- Manual purge deletes only `resolved`/`closed` conversations whose last
-  activity is older than the retention window. Messages/events cascade with
-  them. Open/pending conversations are never purged by that action. There is
-  no cron/worker, so retention does not happen automatically in the background.
+- Support history is retained; the customer/admin UI and request handlers do
+  not delete or prune conversations, messages, or handoff history.
 - The factual guard and prompt are defence-in-depth. They do not make a model
   a source of truth. Keep AI read-only and review conversations periodically.
 - Product specifications/descriptions and customer text are untrusted prompt
   data. Only PHP-built verified facts are authoritative.
+
 
 ## 11. Troubleshooting
 
@@ -529,8 +481,7 @@ storefront checks pass with that provider/model and the store's own account.
 
 ## 13. Manual acceptance checklist
 
-Use staging or clearly identified test data. Do not run purge, delete, or order
-experiments against a real customer's records.
+Use staging or clearly identified test data. Do not run destructive experiments against real customer records.
 
 - [ ] On a narrow mobile viewport, open the storefront. The launcher does not
       block the mobile navigation, the panel causes no horizontal page
@@ -588,8 +539,8 @@ experiments against a real customer's records.
   customer notifications, or WebSocket real-time delivery are included.
 - Polling introduces a small delay while a page is open; agents should keep
   the inbox/conversation page refreshed during staffed hours.
-- Retention purge is manual because shared-hosting compatibility excludes a
-  required background worker.
+- Support conversations, messages, and handoff history are retained; there is
+  no automatic pruning or customer/admin thread deletion action.
 - Previously created custom admin roles do not automatically receive new
   support permissions.
 - A local provider must be reachable from PHP and satisfy the existing

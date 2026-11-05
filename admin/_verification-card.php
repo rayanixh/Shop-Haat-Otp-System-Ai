@@ -3,6 +3,10 @@
  * Customer Verification card body. Expects $order and $vb (sh_verify_order_bundle()).
  * Rendered inside admin/orders.php and returned by admin/verification-fetch.php.
  */
+if (!defined('SH_ADMIN_PAGE_AUTHORIZED')) {
+    http_response_code(404);
+    exit;
+}
 $cv = $vb['courier'];
 $risk = $cv['risk'];
 $geo = $vb['geo'];

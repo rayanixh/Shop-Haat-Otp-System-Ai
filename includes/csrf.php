@@ -44,6 +44,7 @@ function sh_csrf_login_url(string $returnTo): string
 /** Customer expiry markers must never reroute an admin form through customer Login. */
 function sh_csrf_is_admin_request(): bool
 {
+    if (defined('SH_ADMIN_PAGE_AUTHORIZED') || defined('SH_ADMIN_ROUTE_CONTEXT')) { return true; }
     $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
     return preg_match('~/(?:admin)(?:/|$)~i', $script) === 1;
 }

@@ -86,6 +86,9 @@ $shTransition = sh_transition_config();
 <link rel="icon" href="data:image/svg+xml,<?= rawurlencode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#e8501b"/><text x="16" y="22" font-family="Arial" font-size="15" font-weight="bold" fill="#fff" text-anchor="middle">S</text></svg>') ?>">
 <?php endif; ?>
 <link rel="stylesheet" href="<?= e(sh_asset('assets/css/app.css')) ?>">
+<?php foreach (($pageStyles ?? []) as $src): ?>
+<link rel="stylesheet" href="<?= e(sh_asset((string)$src)) ?>">
+<?php endforeach; ?>
 <?= sh_theme_style_tag() ?>
 <script<?= sh_csp_nonce_attr() ?>>window.SH_BASE = <?= json_encode(sh_base_url() . '/') ?>; window.SH_CSRF = <?= json_encode(sh_csrf_token()) ?>;</script>
 <?= sh_transition_head($shTransition) ?>
@@ -163,7 +166,7 @@ $shTransition = sh_transition_config();
   <!-- Mobile header -->
   <div class="sh-mheader">
     <div class="sh-mheader__row">
-      <button class="sh-mheader__btn" type="button" data-drawer-open aria-label="Open menu" aria-expanded="false"><?= sh_icon('menu', 22) ?></button>
+      <button class="sh-mheader__btn" type="button" data-drawer-open aria-controls="sh-drawer" aria-label="Open menu" aria-expanded="false"><?= sh_icon('menu', 22) ?></button>
       <a class="sh-mheader__brand" href="<?= e(sh_url('index.php')) ?>">
         <?php if ($shLogo !== ''): ?>
           <img src="<?= e($shLogo) ?>" alt="<?= e($shSiteName) ?>" height="30">
@@ -221,7 +224,7 @@ $shTransition = sh_transition_config();
       <span><?= e($shSiteName) ?></span>
       <button type="button" data-drawer-close aria-label="Close menu"><?= sh_icon('x', 20) ?></button>
     </div>
-    <div class="sh-drawer__body">
+    <div class="sh-drawer__body" tabindex="0" aria-label="Menu links">
       <?php if ($shCategories): ?>
       <p class="sh-drawer__title">Shop by category</p>
       <ul class="sh-drawer__list">

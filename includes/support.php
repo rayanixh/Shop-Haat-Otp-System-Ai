@@ -102,7 +102,6 @@ function sh_support_defaults(): array
         'timeout'        => '25',
         'rate_per_min'   => '8',
         'daily_ai_limit' => '1000',
-        'retention_days' => '180',
         'languages'      => 'bn,banglish,en',
         'system_prompt'  => '',
         'business_hours' => '',
@@ -130,7 +129,7 @@ function sh_support_cfg(): array
     }
     $ints = ['provider_id' => [0, 0, 100000], 'max_input' => [2000, 200, 8000], 'max_tokens' => [450, 50, 2000],
              'history_turns' => [10, 2, 30], 'timeout' => [25, 5, 90], 'rate_per_min' => [8, 1, 60],
-             'daily_ai_limit' => [1000, 0, 1000000], 'retention_days' => [180, 0, 3650]];
+             'daily_ai_limit' => [1000, 0, 1000000]];
     foreach ($ints as $k => [$def, $min, $max]) {
         $cfg[$k] = max($min, min($max, (int)($cfg[$k] !== '' ? $cfg[$k] : $def)));
     }
@@ -1382,20 +1381,11 @@ function sh_support_inbox(array $f, int $page = 1, int $per = 20): array
     return ['rows' => $rows, 'total' => $total, 'page' => $page, 'per' => $per];
 }
 
-function sh_support_purge(array $cfg): int
+function sh_support_purge(array $cfg = []): int
 {
-    $days = (int)$cfg['retention_days'];
-    $deleted = 0;
-    try {
-        if ($days > 0) {
-            $pdo = sh_db();
-            $st = $pdo->prepare("DELETE FROM support_conversations WHERE status IN ('resolved','closed') AND last_message_at < (NOW() - INTERVAL ? DAY)");
-            $st->execute([$days]);
-            $deleted = $st->rowCount();
-        }
-        sh_query('DELETE FROM support_rate WHERE window_start < ?', [time() - 2 * 86400]);
-    } catch (Throwable $e) { sh_log_exception($e, 'support-purge'); }
-    return $deleted;
+    // Compatibility shim for older callers. Support threads, messages, events,
+    // and rate-limit history are never purged implicitly.
+    return 0;
 }
 
 function sh_support_stats(): array

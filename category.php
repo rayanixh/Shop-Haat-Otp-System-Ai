@@ -87,14 +87,15 @@ require_once SH_ROOT . '/includes/header.php';
   </nav>
 
   <div class="sh-listing">
-    <aside class="sh-filters" id="sh-filters">
+    <aside class="sh-filters" id="sh-filters" aria-label="Product filters">
       <form method="get" action="<?= e(sh_url('category.php')) ?>">
         <input type="hidden" name="slug" value="<?= e($category['slug']) ?>">
         <input type="hidden" name="sort" value="<?= e($sort) ?>">
         <div class="sh-filters__head">
           <?= sh_icon('sliders', 17) ?> <span style="flex:1">Filters</span>
-          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-filters-close><?= sh_icon('x', 15) ?></button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-filters-close aria-label="Close filters"><?= sh_icon('x', 15) ?></button>
         </div>
+        <div class="sh-filters__scroll" tabindex="0" aria-label="Filter options">
         <div class="sh-filters__group">
           <p class="sh-filters__title">Other categories</p>
           <?php foreach ($shCategories as $c): ?>
@@ -125,16 +126,18 @@ require_once SH_ROOT . '/includes/header.php';
           <p class="sh-filters__title">Availability</p>
           <label class="sh-filters__opt"><input type="checkbox" name="in_stock" value="1" <?= $inStock ? 'checked' : '' ?>><span>In stock only</span></label>
         </div>
+        </div>
         <div class="sh-filters__actions">
           <button class="sh-btn sh-btn--block" type="submit"><?= sh_icon('filter', 15) ?> Apply filters</button>
           <a class="sh-btn sh-btn--ghost sh-btn--block" href="<?= e(sh_url('category.php?slug=' . urlencode($category['slug']))) ?>">Reset</a>
         </div>
       </form>
     </aside>
+    <button class="sh-filters__scrim" type="button" data-filters-close hidden aria-label="Close filters"></button>
 
     <div>
       <div class="sh-mobile-tools">
-        <button type="button" data-filters-open><?= sh_icon('sliders', 16) ?> Filter</button>
+        <button type="button" data-filters-open aria-controls="sh-filters" aria-expanded="false" aria-label="Open filters"><?= sh_icon('sliders', 16) ?> Filter</button>
         <select data-sort-select aria-label="Sort products">
           <option value="popular"    <?= $sort === 'popular' ? 'selected' : '' ?>>Sort: Popular</option>
           <option value="newest"     <?= $sort === 'newest' ? 'selected' : '' ?>>Sort: Newest</option>

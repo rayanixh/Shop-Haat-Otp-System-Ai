@@ -277,7 +277,7 @@ if ($viewId > 0) {
               <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-cv-refresh="ip" data-id="<?= (int)$order['id'] ?>" <?= ($vb['ip'] !== '' && $vb['ip_configured']) ? '' : 'disabled' ?>><?= sh_icon('refresh', 13) ?> Refresh IP information</button>
             </div>
           </div>
-          <div class="sh-panel__body" data-cv-body data-id="<?= (int)$order['id'] ?>">
+          <div class="sh-panel__body" data-cv-body data-id="<?= (int)$order['id'] ?>" data-cv-endpoint="<?= e(sh_url('admin/verification-fetch.php')) ?>" data-cv-login-url="<?= e(sh_url('admin/login.php')) ?>">
             <?php require __DIR__ . '/_verification-card.php'; ?>
           </div>
           <div class="sh-panel__body sh-cv__manualbox">

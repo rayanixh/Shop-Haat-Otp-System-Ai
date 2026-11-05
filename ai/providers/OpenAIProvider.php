@@ -19,6 +19,19 @@ class OpenAIProvider extends OpenAICompatibleProvider
         return 'Keys start with sk-. Text models: gpt-4o-mini, gpt-4.1… Image models: gpt-image-1, dall-e-3.';
     }
 
+    /** OpenAI reasoning/GPT-5 families use max_completion_tokens, not max_tokens. */
+    protected function maxTokenField(string $model): string
+    {
+        return preg_match('/^(?:o\d+|gpt-5(?:$|[-.]))/i', trim($model)) === 1
+            ? 'max_completion_tokens' : 'max_tokens';
+    }
+
+    /** These model families reject the sampling temperature parameter. */
+    protected function supportsTemperature(string $model): bool
+    {
+        return preg_match('/^(?:o\d+|gpt-5(?:$|[-.]))/i', trim($model)) !== 1;
+    }
+
     protected function headers(): array
     {
         $h = ['Authorization: Bearer ' . $this->apiKey()];

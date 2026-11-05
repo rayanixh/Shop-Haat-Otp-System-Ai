@@ -22,6 +22,10 @@
  */
 
 declare(strict_types=1);
+if (!defined('SH_ADMIN_PAGE_AUTHORIZED')) {
+    http_response_code(404);
+    exit;
+}
 
 $seoPrefix  = $seoPrefix ?? 'seo';
 $seoRow     = is_array($seoRow ?? null) ? $seoRow : [];

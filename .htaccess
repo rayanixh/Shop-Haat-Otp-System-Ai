@@ -3,13 +3,17 @@
 #
 # Every block is wrapped in <IfModule> so a host that lacks a module ignores the
 # rule instead of failing. If your host returns HTTP 500 after uploading this
-# file, its AllowOverride does not permit these directives: rename this file to
-# .htaccess.off and ask your host to allow "AllowOverride All" for the folder.
-# The application itself does not depend on any rule in this file.
+# file, its AllowOverride does not permit these directives: restore the shipped
+# file and ask your host to allow "AllowOverride All" for the folder. The
+# storefront has query-string fallbacks for SEO endpoints; Custom Admin URL
+# dispatch specifically requires the rewrite rules below.
 # =============================================================================
 
 # Serve a directory request as the front controller, never as a listing.
 DirectoryIndex index.php index.html
+<IfModule mod_negotiation.c>
+  Options -MultiViews
+</IfModule>
 
 # --- Directory listings ------------------------------------------------------
 <IfModule mod_autoindex.c>
@@ -23,6 +27,8 @@ DirectoryIndex index.php index.html
   RewriteRule (^|/)\.git(/|$) - [F,L]
   RewriteRule (^|/)\.svn(/|$) - [F,L]
   RewriteRule (^|/)\.hg(/|$) - [F,L]
+  # Internal PHP modules and configuration are include-only, never HTTP APIs.
+  RewriteRule ^(?:config|includes|ai)/ - [F,L,NC]
 </IfModule>
 <IfModule mod_alias.c>
   RedirectMatch 404 (?i)/\.(git|svn|hg|env)
@@ -50,6 +56,18 @@ DirectoryIndex index.php index.html
   RewriteRule ^admin/guides/smtp/?$ admin/guides/smtp.php [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteRule ^admin/guides/firebase/?$ admin/guides/firebase.php [L]
+
+  # /admin.php is not an authentication route. It is explicitly denied even
+  # though older deployments may have shipped an alias with that name.
+  RewriteRule ^admin\.php$ - [F,L,NC]
+
+  # Custom Admin Access uses one high-entropy, normalized path segment. The
+  # dispatcher verifies the configured active/pending path and the session;
+  # unknown long paths receive a generic 404. Existing files/directories are
+  # excluded so this cannot replace a real storefront route.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^[a-z0-9_-]{32,64}/?$ admin/custom-route.php [L,QSA,NC]
 </IfModule>
 
 # --- Never serve files that can leak data or code ---------------------------

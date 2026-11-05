@@ -4,6 +4,8 @@
  * All InnoDB + utf8mb4 for shared-hosting compatibility.
  */
 
+require_once dirname(__DIR__) . '/ai/support-schema.php';
+
 function sh_schema_tables(): array
 {
     return [
@@ -16,6 +18,9 @@ function sh_schema_tables(): array
         'couriers', 'shipments', 'shipment_events', 'courier_test_results',
         'otp_verifications', 'security_logs', 'password_resets',
         'email_challenges', 'email_log',
+        'support_conversations', 'support_messages', 'support_events',
+        'support_faqs', 'support_rate', 'support_usage_daily',
+        'support_handoff_events', 'support_ai_usage', 'support_rate_limits',
     ];
 }
 
@@ -529,7 +534,7 @@ function sh_schema_sql(): array
         KEY idx_applogs_created (created_at)
     ) $E";
 
-    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql());
+    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql(), sh_ai_support_schema_sql());
 }
 
 /**
@@ -613,12 +618,9 @@ function sh_courier_schema_sql(): array
  * AI Customer Support tables (conversations, messages, events, FAQs, rate
  * buckets, daily usage counters).
  *
- * Additive only. Created by CREATE TABLE IF NOT EXISTS from both the
- * installer and the lazy schema ensure in includes/support.php, so an
- * existing store gains them without touching customers, orders or products.
- * Rollback (see docs/ai-support.md): remove the six support_ tables in
- * reverse dependency order (usage, rate, faqs, events, messages,
- * conversations). No other table references them.
+ * Legacy storefront-support tables are retained for compatibility. The newer
+ * AI support tables live in ai/support-schema.php; its additive runtime upgrade
+ * adapts these existing rows without dropping or replacing their tables.
  */
 function sh_support_schema_sql(): array
 {
@@ -666,7 +668,7 @@ function sh_support_schema_sql(): array
             PRIMARY KEY (id),
             UNIQUE KEY uq_supmsg_client (conversation_id, client_msg_id),
             KEY idx_supmsg_conv (conversation_id, id),
-            CONSTRAINT fk_supmsg_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE CASCADE,
+            CONSTRAINT fk_supmsg_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE RESTRICT,
             CONSTRAINT fk_supmsg_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
         ) $E",
         "CREATE TABLE IF NOT EXISTS support_events (
@@ -678,7 +680,7 @@ function sh_support_schema_sql(): array
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             KEY idx_supevt_conv (conversation_id, id),
-            CONSTRAINT fk_supevt_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE CASCADE,
+            CONSTRAINT fk_supevt_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE RESTRICT,
             CONSTRAINT fk_supevt_admin FOREIGN KEY (admin_id) REFERENCES admins (id) ON DELETE SET NULL
         ) $E",
         "CREATE TABLE IF NOT EXISTS support_faqs (

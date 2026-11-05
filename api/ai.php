@@ -256,11 +256,15 @@ try {
                 ], static fn($v) => $v !== null), 422);
             }
 
+            // This is an internal editor link returned only after this endpoint's
+            // admin session, CSRF and product-create checks. In custom-route mode
+            // sh_url() maps it to the active route; public storefront/API responses
+            // must never include that route.
             sh_json([
                 'success'       => true,
                 'id'            => (int)$res['id'],
                 'slug'          => (string)($res['slug'] ?? ''),
-                'url'           => (string)($res['url'] ?? ''),
+                'url'            => (string)($res['url'] ?? ''),
                 'admin_url'     => (string)($res['admin_url'] ?? ''),
                 'already_saved' => !empty($res['already_saved']),
                 'image_url'     => (string)($res['image_url'] ?? ''),

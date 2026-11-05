@@ -16,10 +16,65 @@ $admin = sh_require_superadmin();
 $errors = [];
 $notice = '';
 $testCode = null;
+$adminAccessInput = '';
+$adminAccessSuggestion = '';
+$adminAccessState = sh_admin_access_state();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
+
+    if (str_starts_with($form, 'admin_access_')) {
+        if ($form === 'admin_access_suggest') {
+            try {
+                $adminAccessSuggestion = sh_admin_access_suggest();
+                $adminAccessInput = $adminAccessSuggestion;
+                $notice = 'A cryptographically secure path suggestion was generated. It has not been saved or activated.';
+            } catch (Throwable $e) {
+                sh_log_line('security', 'Admin Access path suggestion failed.');
+                $errors[] = 'A secure suggestion could not be generated. Please try again.';
+            }
+        } elseif ($form === 'admin_access_save') {
+            $adminAccessInput = (string)($_POST['admin_access_path'] ?? '');
+            $candidate = sh_admin_access_validate_path($adminAccessInput);
+            if (empty($candidate['ok'])) {
+                $errors[] = (string)($candidate['error'] ?? 'That path is not valid.');
+            } elseif (!sh_admin_access_save_pending((string)$candidate['path'])) {
+                $errors[] = 'That path is already active or could not be saved. Choose a different path and try again.';
+            } else {
+                sh_admin_access_mark_changed_audit('pending', (string)$candidate['path']);
+                sh_flash('success', 'The proposed path is saved as pending. Your current admin route remains active until the new route is verified and explicitly applied.');
+                sh_redirect('admin/security.php');
+            }
+        } elseif ($form === 'admin_access_verify') {
+            if (!sh_admin_access_begin_verification()) {
+                $errors[] = 'Save a valid pending path before verifying it.';
+            } else {
+                $pending = sh_admin_access_state()['pending_path'];
+                sh_redirect($pending);
+            }
+        } elseif ($form === 'admin_access_apply') {
+            $pending = sh_admin_access_state()['pending_path'];
+            if (!sh_admin_access_apply_pending()) {
+                $errors[] = 'The new route is not verified or no longer passes validation. Your current admin route is unchanged.';
+            } else {
+                sh_admin_access_mark_changed_audit('enabled', $pending);
+                sh_flash('success', 'The custom admin route is active. The previous route is now blocked.');
+                header('Location: ' . sh_admin_access_route_url($pending, 'security.php'));
+                exit;
+            }
+        } elseif ($form === 'admin_access_disable') {
+            $oldPath = (string)(sh_admin_access_state()['active_path'] ?? '');
+            if (!sh_admin_access_disable()) {
+                $errors[] = 'The custom admin route could not be disabled. Your current route has not been changed.';
+            } else {
+                sh_admin_access_mark_changed_audit('disabled', $oldPath);
+                sh_flash('success', 'The custom admin route is cleared. Standard admin URLs are active again and still require authentication.');
+                sh_redirect('admin/security.php');
+            }
+        }
+        $adminAccessState = sh_admin_access_state();
+    }
 
     // Phone Verification master switch. ON = phone + OTP authentication,
     // OFF = email + password authentication. This is the single source of
@@ -126,6 +181,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$adminAccessState = sh_admin_access_state();
+if ($adminAccessInput === '') { $adminAccessInput = $adminAccessState['pending_path'] ?: ''; }
+if ($adminAccessInput === '') {
+    try { $adminAccessInput = sh_admin_access_suggest(); } catch (Throwable $e) { $adminAccessInput = ''; }
+}
+$adminAccessEnabled = (bool)$adminAccessState['enabled'];
+$adminAccessPending = (string)$adminAccessState['pending_path'];
+$adminAccessVerified = (bool)$adminAccessState['verified'];
+$adminAccessActiveUrl = $adminAccessEnabled ? sh_admin_access_route_url((string)$adminAccessState['active_path'], 'dashboard.php') : '';
+
 $s = static fn(string $k, string $fb = ''): string => (string)sh_setting($k, $fb);
 
 // The provider whose setup fields are rendered. The admin can switch it via
@@ -154,7 +219,7 @@ if ($phoneVerificationOn) {
 }
 
 $adminPage = 'security';
-$adminTitle = 'SMS / OTP Settings';
+$adminTitle = 'Security & Admin Access';
 require __DIR__ . '/_layout.php';
 ?>
 <?php if ($errors): ?>
@@ -168,6 +233,113 @@ require __DIR__ . '/_layout.php';
   <div class="sh-alert sh-alert--info"><?= sh_icon('key', 17) ?>
     <span>Test mode code (shown because the provider is “offline”): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
 <?php endif; ?>
+
+<!-- Custom Admin URL: route discovery reduction only; the normal admin login and permissions remain required. -->
+<section class="sh-panel" id="admin-access">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('lock', 17) ?> Admin Access URL</h2>
+    <?php if ($adminAccessEnabled): ?>
+      <span class="sh-badge sh-badge--ok">Custom route enabled</span>
+    <?php elseif ($adminAccessPending !== '' && $adminAccessVerified): ?>
+      <span class="sh-badge sh-badge--ok">Verified · ready to apply</span>
+    <?php elseif ($adminAccessPending !== ''): ?>
+      <span class="sh-badge sh-badge--warn">Waiting for verification</span>
+    <?php else: ?>
+      <span class="sh-badge sh-badge--muted">Disabled</span>
+    <?php endif; ?>
+  </div>
+  <div class="sh-panel__body">
+    <div class="sh-alert sh-alert--warning" style="margin:0 0 14px">
+      <?= sh_icon('alert', 17) ?>
+      <span>This changes the admin route only. It is <strong>not authentication</strong>: a valid admin session, role permission and CSRF checks are still required. Keep the new URL private. The old route stays active until a proposed route is visited and explicitly applied.</span>
+    </div>
+
+    <?php if ($adminAccessEnabled): ?>
+      <div class="sh-grid2" style="align-items:end">
+        <div class="sh-field">
+          <label class="sh-field__label" for="admin-access-active">Current Admin URL</label>
+          <input class="sh-input" id="admin-access-active" type="text" readonly value="<?= e($adminAccessActiveUrl) ?>" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="sh-field">
+          <span class="sh-field__label">Copy for your records</span>
+          <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessActiveUrl) ?>"><span data-copy-label>Copy current admin URL</span></button>
+        </div>
+      </div>
+    <?php else: ?>
+      <p class="sh-panel__note">The standard <code>/admin/</code> route is active. It remains protected by the usual admin login and permissions.</p>
+    <?php endif; ?>
+
+    <?php if ($adminAccessEnabled && $adminAccessPending !== ''): ?>
+      <div class="sh-alert sh-alert--info" style="margin:12px 0">
+        <?= sh_icon('info', 17) ?>
+        <span>A different route is pending. Your current route is still active. Verify the new route in this browser, then explicitly apply it. Applying immediately blocks the old route.</span>
+      </div>
+    <?php endif; ?>
+
+    <form method="post" novalidate style="margin-top:12px">
+      <?= sh_csrf_field() ?>
+      <input type="hidden" name="form" value="admin_access_save">
+      <div class="sh-grid2" style="align-items:end">
+        <div class="sh-field">
+          <label class="sh-field__label" for="admin-access-path">Proposed path</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="sh-badge" aria-hidden="true">/</span>
+            <input class="sh-input" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="32" maxlength="64" pattern="[a-zA-Z0-9_-]{32,64}" required autocomplete="off" autocapitalize="none" spellcheck="false">
+          </div>
+          <span class="sh-field__hint">One path segment, 32–64 URL-safe characters. A secure 192-bit suggestion is provided. No domain, slash segments, query, fragment or encoded characters.</span>
+        </div>
+        <div class="sh-field">
+          <button class="sh-btn sh-btn--ghost" type="submit" form="admin-access-suggest-form"><?= sh_icon('refresh', 14) ?> Generate secure suggestion</button>
+          <button class="sh-btn" type="submit" style="margin-left:6px"><?= sh_icon('check', 14) ?> Save proposed route</button>
+        </div>
+      </div>
+      <p class="sh-field__hint" style="margin:8px 0 0">Saving only stages a route. It does not replace the current URL or change authentication.</p>
+    </form>
+    <form method="post" id="admin-access-suggest-form" hidden>
+      <?= sh_csrf_field() ?>
+      <input type="hidden" name="form" value="admin_access_suggest">
+    </form>
+
+    <?php if ($adminAccessPending !== ''): ?>
+      <div class="sh-actions" style="margin-top:12px">
+        <?php if (!$adminAccessVerified): ?>
+          <form method="post" style="display:inline">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="admin_access_verify">
+            <button class="sh-btn sh-btn--ghost" type="submit"><?= sh_icon('external', 14) ?> Verify proposed route</button>
+          </form>
+          <span class="sh-field__hint">Verification opens the proposed path in this authenticated browser; no query-string verification flag is used.</span>
+        <?php else: ?>
+          <form method="post" style="display:inline" data-confirm="Apply this route now? The old /admin.php and direct /admin/*.php routes will stop serving the panel immediately.">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="admin_access_apply">
+            <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 14) ?> Apply verified route</button>
+          </form>
+          <span class="sh-field__hint">Verified in this browser within the last hour. Applying sends you to the new route.</span>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($adminAccessEnabled || $adminAccessPending !== ''): ?>
+      <form method="post" style="margin-top:12px" data-confirm="Disable and clear the custom admin route? Standard admin URLs will become active again, but authentication and permissions will still be required.">
+        <?= sh_csrf_field() ?>
+        <input type="hidden" name="form" value="admin_access_disable">
+        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= sh_icon('x', 14) ?> Disable and clear custom route</button>
+      </form>
+    <?php endif; ?>
+
+    <details style="margin-top:16px">
+      <summary class="sh-field__label" style="cursor:pointer">cPanel recovery and rewrite requirements</summary>
+      <div class="sh-panel__note" style="margin-top:10px">
+        <p>ShopHaat uses the root <code>.htaccess</code> rewrite to reach the dispatcher. On cPanel, keep hidden files visible in File Manager and confirm Apache/LiteSpeed rewrite support and that the directory permits the shipped <code>.htaccess</code> rules (typically <code>AllowOverride All</code>). If the proposed URL returns 404, do not apply it; the current route remains active. Restore the shipped <code>.htaccess</code> from your deployment/backup if rewrite rules were changed.</p>
+        <p>If the owner has lost the route and cannot sign in, the hosting account owner can use cPanel phpMyAdmin to disable only this routing feature; this is an out-of-band hosting recovery, not an application backdoor. Run these statements against the ShopHaat database:</p>
+        <pre class="sh-code-wrap"><code>UPDATE settings SET setting_value = '0' WHERE setting_key = 'admin_access_enabled';
+UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secret_path', 'admin_access_pending_secret', 'admin_access_verified_secret', 'admin_access_verified_at', 'admin_access_verified_by');</code></pre>
+        <p>Afterward, use the standard admin URL and sign in normally. No bypass token or unauthenticated recovery URL is created.</p>
+      </div>
+    </details>
+  </div>
+</section>
 
 <!-- Phone Verification master switch. It has an explicit Save button: changing
      the checkbox alone never writes anything. -->

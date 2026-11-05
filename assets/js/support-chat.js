@@ -39,12 +39,23 @@
   }
 
   function newClientId() {
-    var s = 'm' + Date.now().toString(36);
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
     try {
-      var b = new Uint8Array(6); window.crypto.getRandomValues(b);
-      s += '-' + Array.from(b).map(function (x) { return x.toString(16).padStart(2, '0'); }).join('');
-    } catch (e) { s += '-' + Math.floor(Math.random() * 1e9).toString(36); }
-    return s;
+      var b = new Uint8Array(16);
+      window.crypto.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40;
+      b[8] = (b[8] & 0x3f) | 0x80;
+      var hex = Array.from(b).map(function (x) { return x.toString(16).padStart(2, '0'); }).join('');
+      return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+    } catch (e) {
+      // This ID is an idempotency key, not an authorization secret.
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
   }
 
   function post(action, fields) {
@@ -145,6 +156,8 @@
       human = !!data.conversation.human;
       subEl.textContent = human ? 'Our support team will reply here. The AI assistant is paused for this chat.' : defaultSub;
       handoffBtn.hidden = human;
+      var status = String(data.conversation.status || 'open');
+      document.getElementById('sh-schat-new').hidden = !['resolved', 'closed'].includes(status);
     }
     if (Array.isArray(data.suggestions) && !sentOnce) {
       suggestEl.textContent = '';
@@ -297,7 +310,7 @@
   handoffBtn.addEventListener('click', function () {
     if (!convId) { return; }
     setStatus('Connecting you with the support team…');
-    post('handoff', { conversation_id: convId, after_id: lastId }).then(function (data) {
+    post('handoff', { conversation_id: convId, client_msg_id: newClientId(), after_id: lastId }).then(function (data) {
       applyConversation(data);
       renderAll(data.messages);
       setStatus('');

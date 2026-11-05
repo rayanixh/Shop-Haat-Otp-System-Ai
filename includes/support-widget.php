@@ -7,9 +7,10 @@
  * conversations — there is deliberately no inner scroll area. All state and
  * replies come from api/support.php; nothing here is faked client-side.
  */
-if (!function_exists('sh_setting') || sh_setting('support_enabled', '1') !== '1') { return; }
-$schatMax = max(200, min(8000, (int)sh_setting('support_max_input', '2000')));
-$schatAvail = trim((string)sh_setting('support_availability', ''));
+if (!function_exists('sh_setting') || sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) !== '1') { return; }
+$schatMax = max(200, min(8000, (int)sh_setting('support_chat_max_input', sh_setting('support_max_input', '2000'))));
+$schatAvail = trim((string)sh_setting('support_chat_hours', sh_setting('support_availability', '')));
+$schatHandoffEnabled = sh_setting('support_chat_handoff_enabled', sh_setting('support_handoff_enabled', '1')) === '1';
 $schatCfg = ['endpoint' => sh_url('api/support.php'), 'max' => $schatMax];
 ?>
 <button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-controls="sh-schat-sheet" aria-label="Open customer support chat">
@@ -42,7 +43,7 @@ $schatCfg = ['endpoint' => sh_url('api/support.php'), 'max' => $schatMax];
   <p class="sh-schat-status" id="sh-schat-status" role="status"></p>
 
   <div class="sh-schat-foot">
-    <button type="button" class="sh-schat-handoff" id="sh-schat-handoff"><?= sh_icon('user', 15) ?> Talk to a human</button>
+    <button type="button" class="sh-schat-handoff" id="sh-schat-handoff"<?= $schatHandoffEnabled ? '' : ' hidden' ?>><?= sh_icon('user', 15) ?> Talk to a human</button>
     <?php if ($schatAvail !== ''): ?><span class="sh-schat-avail"><?= e($schatAvail) ?></span><?php endif; ?>
   </div>
 </section>

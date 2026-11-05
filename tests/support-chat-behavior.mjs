@@ -65,6 +65,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * markup, and the panel must stay in page flow (no inner scroll box). */
 const widgetPhp = readFileSync(join(ROOT, 'includes/support-widget.php'), 'utf8');
 const appCss = readFileSync(join(ROOT, 'assets/css/app.css'), 'utf8');
+const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8');
+const supportApi = readFileSync(join(ROOT, 'api/support.php'), 'utf8');
 for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-schat-suggest', 'sh-schat-form',
 	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-sub', 'sh-schat-badge',
 	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close']) {
@@ -72,7 +74,10 @@ for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-sch
 }
 check('chat panel is absolutely positioned in page flow (not fixed/scrollboxed)',
 	/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
-check('no inner scroll region exists in the stylesheet', !/overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(appCss));
+const chatCss = (appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || []).join('\n');
+check('no inner scroll region exists in the chat widget styles', !/overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(chatCss));
+check('legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service', supportApi.includes("$action === 'send'") && supportApi.includes("$input['client_msg_id']") && supportApi.includes('sh_support_customer_send(') && supportApi.includes('sh_support_customer_handoff(') && supportApi.includes("$input['after_id']"));
+check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 
 const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-controls="sh-schat-sheet" aria-label="Open customer support chat">
@@ -100,13 +105,13 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 /* Scripted api/support.php ------------------------------------------------ */
 const requests = [];
 const server = {
-	nextId: 1, msgs: [], clientIds: new Map(), failNext: null, nextReply: null,
+	nextId: 1, msgs: [], clientIds: new Map(), failNext: null, nextReply: null, human: false,
 	suggestions: ['Where is my order?', 'Delivery charge koto?'],
 	push(kind, body, ai) {
 		const m = { id: this.nextId++, kind, ai: !!ai, body, at: '2026-08-15 10:0' + (this.nextId % 10) + ':00' };
 		this.msgs.push(m); return m;
 	},
-	resetConv() { this.msgs = []; this.clientIds.clear(); },
+	resetConv() { this.msgs = []; this.clientIds.clear(); this.human = false; },
 };
 server.push('assistant', 'Welcome to ShopHaat!', false);
 function convPublic(human) { return { id: 42, status: human ? 'pending' : 'open', ai_active: !human, human: !!human, lang: 'en' }; }
@@ -133,9 +138,11 @@ function fakeFetch(url, init) {
 			}
 			server.clientIds.set(cmid, true);
 			server.push('customer', p.get('message'), false);
-			const r = server.nextReply || { body: 'Checked: Trail Runner Shoe — ৳1,250 · in stock\n/product.php?slug=trail-runner', ai: false };
-			server.nextReply = null;
-			server.push('assistant', r.body, r.ai);
+			if (!server.human) {
+				const r = server.nextReply || { body: 'Checked: Trail Runner Shoe — ৳1,250 · in stock\n/product.php?slug=trail-runner', ai: false };
+				server.nextReply = null;
+				server.push('assistant', r.body, r.ai);
+			}
 			return json({ ok: true, conversation: convPublic(server.human), messages: fresh(), suggestions: [] });
 		}
 		default: return json({ ok: false, error: 'bad' }, false, 400);
@@ -171,8 +178,8 @@ check('quick suggestions render', $$('#sh-schat-suggest .sh-schat-chip').length 
 $$('#sh-schat-suggest .sh-schat-chip')[0].click();
 await sleep(30);
 check('suggestion is sent as a message', reqs('send').length >= 1 && reqs('send').at(-1).p.get('message') === 'Where is my order?');
-check('send carries a client_msg_id and conversation id',
-	(reqs('send').at(-1).p.get('client_msg_id') || '').length >= 8 && reqs('send').at(-1).p.get('conversation_id') === '42');
+check('send carries a UUIDv4 client_msg_id and conversation id',
+	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reqs('send').at(-1).p.get('client_msg_id') || '') && reqs('send').at(-1).p.get('conversation_id') === '42');
 check('deterministic reply is labelled Support, never AI',
 	$$('.sh-schat-msg .sh-schat-who').some((w) => w.textContent === 'Support') &&
 	!$$('.sh-schat-msg .sh-schat-who').some((w) => w.textContent === 'AI assistant'));
@@ -231,6 +238,14 @@ check('handoff posts to the API', reqs('handoff').length === 1);
 check('handoff hides the button and updates the subtitle',
 	$('#sh-schat-handoff').hidden === true && $('#sh-schat-sub').textContent.includes('support team will reply'));
 check('handoff notice renders as a system line', !!$('.sh-schat-notice'));
+check('handoff uses a UUIDv4 idempotency key', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reqs('handoff')[0].p.get('client_msg_id') || ''));
+const noticeCountAtHandoff = $$('#sh-schat-messages .sh-schat-notice').length;
+const customerCountAtHandoff = server.msgs.filter((m) => m.kind === 'customer').length;
+const aiCountAtHandoff = $$('#sh-schat-messages .sh-schat-msg.is-assistant').length;
+$('#sh-schat-input').value = 'I have one more question for the support agent.';
+$('#sh-schat-form').requestSubmit();
+await sleep(30);
+check('human-mode follow-up is saved in the same thread without AI or a repeated notice', server.msgs.filter((m) => m.kind === 'customer').length === customerCountAtHandoff + 1 && $$('#sh-schat-messages .sh-schat-notice').length === noticeCountAtHandoff && $$('#sh-schat-messages .sh-schat-msg.is-assistant').length === aiCountAtHandoff && $('#sh-schat-messages').textContent.includes('I have one more question for the support agent.'));
 
 /* 8. New conversation resets --------------------------------------------------- */
 $('#sh-schat-new').click();

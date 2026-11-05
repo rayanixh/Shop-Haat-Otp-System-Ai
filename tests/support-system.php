@@ -238,13 +238,15 @@ for ($i = 0; $i < 12; $i++) {
 }
 ss_ok($limited, 'Burst messaging is rate limited');
 
-/* --- 11. Retention purge --------------------------------------------------------------------------------------- */
+/* --- 11. History is retained ------------------------------------------------------------------------------- */
 $oldConv = sh_support_create_conversation($guest('gold-' . $sfx));
+$oldMessageId = sh_support_insert_message((int)$oldConv['id'], 'customer', 'History preservation sentinel');
 sh_query("UPDATE support_conversations SET status = 'resolved', last_message_at = DATE_SUB(NOW(), INTERVAL 400 DAY) WHERE id = ?", [(int)$oldConv['id']]);
 $openConv = sh_support_conversation((int)$c9['id']);
 $deleted = sh_support_purge(sh_support_cfg());
-ss_ok($deleted >= 1 && sh_support_conversation((int)$oldConv['id']) === null, 'Purge removes old resolved conversations');
-ss_ok($openConv !== null && sh_support_conversation((int)$c9['id']) !== null, 'Purge never touches active conversations');
+ss_ok($deleted === 0 && sh_support_conversation((int)$oldConv['id']) !== null, 'Compatibility purge is a no-op for old resolved conversations');
+ss_ok($oldMessageId > 0 && sh_one('SELECT id FROM support_messages WHERE id = ?', [$oldMessageId]) !== null, 'Conversation message history remains intact');
+ss_ok($openConv !== null && sh_support_conversation((int)$c9['id']) !== null, 'History retention leaves active conversations intact');
 
 /* --- 12. Disabled chat rejects cleanly --------------------------------------------------------------------------- */
 $beforeCount = $countMsgs((int)$cR['id'], 'customer');
