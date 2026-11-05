@@ -24,6 +24,9 @@ if ($isPending && !$isActive) {
     }
 }
 
+// This dispatcher does not render admin pages itself: every validated target
+// enforces sh_require_admin/sh_require_perm. Pending-route verification checks
+// sh_admin() and requires the superadmin role before recording the route.
 // The route secret alone never authorizes the panel. This context merely allows
 // the dispatcher to include a fixed, validated PHP route; every target still
 // executes its existing authentication and role guards.
