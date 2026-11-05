@@ -160,8 +160,9 @@ class OpenAICompatibleProvider extends AbstractAIProvider
         }
         if (!empty($options['json'])) { $payload['response_format'] = ['type' => 'json_object']; }
 
-        $res = $this->chat($payload);
-        if (empty($res['ok'])) { return $res; }
+        $timeout = max(5, min(300, (int)($options['timeout'] ?? 120)));
+        $res = $this->chat($payload, $timeout);
+        if (!$res['ok']) { return $res; }
         $j = $res['json'];
         $choice = $j['choices'][0] ?? null;
         if (!is_array($choice) || !isset($choice['message']) || !is_array($choice['message'])) {
