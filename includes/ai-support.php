@@ -45,17 +45,18 @@ function sh_support_schema_ensure(): bool
         foreach ($all as $table) {
             if (!sh_support_table_exists($table)) { $tablesReady = false; break; }
         }
-        // The explicit rollback marker prevents an active copy of the feature
-        // from recreating dropped tables on the next customer/admin request.
-        if ($marked === 'disabled' && !$tablesReady) { return $ready = false; }
-        if ($marked !== '1' || !$tablesReady) {
+        // A rollback marker disables the feature without dropping or recreating
+        // tables; retained conversations and history are never removed.
+        if ($marked === 'disabled') { return $ready = false; }
+        if ($marked !== '4' || !$tablesReady) {
             $pdo = sh_db();
             if ($pdo->inTransaction()) {
                 sh_log_line('ai-support-schema', 'Schema setup deferred because a database transaction is active.');
                 return $ready = false;
             }
-            foreach (sh_support_schema_sql() as $ddl) { $pdo->exec($ddl); }
-            sh_query("INSERT INTO settings (setting_key, setting_value) VALUES ('ai_support_schema_v','1')
+            foreach (sh_ai_support_schema_sql() as $ddl) { $pdo->exec($ddl); }
+            sh_support_schema_upgrade_legacy($pdo);
+            sh_query("INSERT INTO settings (setting_key, setting_value) VALUES ('ai_support_schema_v','4')
                       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
         }
         $faqSeeded = (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'ai_support_faq_seeded_v' LIMIT 1", [], '');
@@ -161,24 +162,15 @@ function sh_support_handoff_enabled(): bool
 
 function sh_support_retention_days(): int
 {
-    return max(30, min(3650, (int)sh_support_setting('retention_days', '180')));
+    // Support records are retained indefinitely. Keep the compatibility helper
+    // but do not expose a deletion window.
+    return 0;
 }
 
-/** Delete old resolved threads in small batches; never delete active requests. */
+/** Intentionally no-op: support history must not be pruned on requests. */
 function sh_support_retention_prune(): void
 {
-    try {
-        $last = (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'ai_support_retention_last_run' LIMIT 1", [], '');
-        if ($last !== '' && strtotime($last . ' UTC') > time() - 86400) { return; }
-        $days = sh_support_retention_days();
-        $cutoff = gmdate('Y-m-d H:i:s', time() - ($days * 86400));
-        sh_query("DELETE FROM support_conversations WHERE status = 'resolved' AND updated_at < ? ORDER BY id LIMIT 200", [$cutoff]);
-        sh_query('DELETE FROM support_rate_limits WHERE expires_at < UTC_TIMESTAMP() ORDER BY expires_at LIMIT 1000');
-        sh_query("INSERT INTO settings (setting_key, setting_value) VALUES ('ai_support_retention_last_run', ?)
-                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)", [gmdate('Y-m-d H:i:s')]);
-    } catch (Throwable $e) {
-        sh_log_exception($e, 'ai-support-retention');
-    }
+    // No conversation, message, event, FAQ, or metric rows are removed here.
 }
 
 /** A guest token is random, HttpOnly, SameSite and stored only as a SHA-256 digest in MySQL. */
@@ -248,7 +240,7 @@ function sh_support_create_conversation(array $owner): array
     if (!sh_support_chat_enabled()) { return ['ok' => false, 'error' => 'Customer chat is currently unavailable.']; }
     if (!sh_support_schema_ensure()) { return ['ok' => false, 'error' => 'Customer support is temporarily unavailable.']; }
     $existing = sh_support_latest_conversation($owner);
-    if ($existing !== null && (string)$existing['status'] !== 'resolved') {
+    if ($existing !== null && !in_array((string)$existing['status'], ['resolved', 'closed'], true)) {
         return ['ok' => true, 'conversation' => $existing, 'created' => false];
     }
     if ((int)($owner['user_id'] ?? 0) <= 0 && !preg_match('/^[a-f0-9]{64}$/', (string)($owner['guest_hash'] ?? ''))) {
@@ -742,7 +734,7 @@ function sh_support_context_messages(int $conversationId, int $latestId, int $li
     $limit = max(1, min(16, $limit));
     $rows = sh_all('SELECT sender, source, body FROM support_messages
                     WHERE conversation_id = ? AND id < ? AND is_internal = 0
-                      AND sender IN (\'customer\',\'assistant\',\'admin\',\'system\')
+                      AND sender IN (\'customer\',\'ai\',\'assistant\',\'admin\',\'system\')
                     ORDER BY id DESC LIMIT ' . $limit, [$conversationId, $latestId]);
     return array_reverse($rows);
 }
@@ -773,8 +765,10 @@ function sh_support_build_ai_user_prompt(int $conversationId, int $currentMessag
     $history = sh_support_context_messages($conversationId, $currentMessageId, $contextLimit);
     $historyData = [];
     foreach ($history as $row) {
+        $sender = (string)$row['sender'];
+        if ($sender === 'ai') { $sender = 'assistant'; } // legacy main-schema label
         $historyData[] = [
-            'speaker' => (string)($row['sender'] === 'assistant' && $row['source'] === 'fallback' ? 'system' : $row['sender']),
+            'speaker' => $sender === 'assistant' && $row['source'] === 'fallback' ? 'system' : $sender,
             'text' => mb_substr((string)$row['body'], 0, 1000),
         ];
     }
@@ -1209,7 +1203,7 @@ function sh_support_save_reply(int $conversationId, int $customerMessageId, stri
         if ($conversation === null || $incoming === null) { $pdo->rollBack(); return ['saved' => false, 'paused' => true]; }
         if ((string)$incoming['reply_status'] !== 'pending') { $pdo->commit(); return ['saved' => false, 'paused' => (string)$incoming['reply_status'] === 'paused']; }
         if ((int)$conversation['ai_paused'] === 1 || (int)$conversation['assigned_admin_id'] > 0
-            || in_array((string)$conversation['status'], ['pending','assigned','resolved'], true)) {
+            || in_array((string)$conversation['status'], ['pending','assigned','resolved','closed'], true)) {
             sh_query("UPDATE support_messages SET reply_status = 'paused', reply_started_at = NULL WHERE id = ?", [$customerMessageId]);
             $pdo->commit();
             return ['saved' => false, 'paused' => true];
@@ -1267,10 +1261,7 @@ function sh_support_mark_reply_failed(int $conversationId, int $customerMessageI
         // or a stale fallback after a human has paused the thread.
         $paused = (int)$conversation['ai_paused'] === 1
             || (int)$conversation['assigned_admin_id'] > 0
-            || in_array((string)$conversation['status'], ['pending','assigned','resolved'], true);
-        sh_query("DELETE FROM support_messages
-                  WHERE conversation_id = ? AND reply_to_message_id = ?
-                    AND sender = 'assistant' AND source = 'fallback'", [$conversationId, $customerMessageId]);
+            || in_array((string)$conversation['status'], ['pending','assigned','resolved','closed'], true);
         sh_query('UPDATE support_messages SET reply_status = ?, reply_started_at = NULL WHERE id = ?',
             [$paused ? 'paused' : 'failed', $customerMessageId]);
         sh_query('UPDATE support_conversations SET last_message_at = (SELECT MAX(created_at) FROM support_messages WHERE conversation_id = ?), updated_at = UTC_TIMESTAMP() WHERE id = ?', [$conversationId, $conversationId]);
@@ -1329,7 +1320,7 @@ function sh_support_process_customer_message(int $conversationId, int $customerM
     $incoming = sh_one('SELECT reply_status FROM support_messages WHERE id = ? AND conversation_id = ?', [$customerMessageId, $conversationId]);
     if ($current === null || $incoming === null || (string)$incoming['reply_status'] !== 'pending'
         || (int)$current['ai_paused'] === 1 || (int)$current['assigned_admin_id'] > 0
-        || in_array((string)$current['status'], ['pending','assigned','resolved'], true)) {
+        || in_array((string)$current['status'], ['pending','assigned','resolved','closed'], true)) {
         return sh_support_mark_reply_failed($conversationId, $customerMessageId);
     }
 
@@ -1375,17 +1366,18 @@ function sh_support_handoff_public_message(string $language): string
 
 function sh_support_insert_handoff_event(int $conversationId, string $eventKey, string $actorType, ?int $adminId, string $event, string $reason = ''): void
 {
-    try {
-        sh_insert('support_handoff_events', [
-            'conversation_id' => $conversationId,
-            'event_key' => sh_support_valid_client_id($eventKey) ? $eventKey : null,
-            'actor_type' => in_array($actorType, ['customer','admin','system'], true) ? $actorType : 'system',
-            'actor_admin_id' => $adminId,
-            'event' => mb_substr($event, 0, 40),
-            'reason' => $reason !== '' ? mb_substr($reason, 0, 255) : null,
-            'created_at' => gmdate('Y-m-d H:i:s'),
+    sh_query('INSERT INTO support_handoff_events
+        (conversation_id, event_key, actor_type, actor_admin_id, event, reason, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE id = id', [
+            $conversationId,
+            sh_support_valid_client_id($eventKey) ? $eventKey : null,
+            in_array($actorType, ['customer','admin','system'], true) ? $actorType : 'system',
+            $adminId,
+            mb_substr($event, 0, 40),
+            $reason !== '' ? mb_substr($reason, 0, 255) : null,
+            gmdate('Y-m-d H:i:s'),
         ]);
-    } catch (Throwable $e) { sh_log_exception($e, 'ai-support-handoff-event'); }
 }
 
 function sh_support_public_message_row(array $row): array
@@ -1434,12 +1426,23 @@ function sh_support_public_conversation(array $conversation): array
     ];
 }
 
+function sh_support_customer_mark_read(int $conversationId, array $owner): ?bool
+{
+    if ($conversationId <= 0) { return false; }
+    try {
+        if (sh_support_conversation_for_owner($conversationId, $owner) === null) { return false; }
+        sh_query('UPDATE support_conversations SET unread_for_customer = 0 WHERE id = ?', [$conversationId]);
+        return true;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'ai-support-customer-mark-read');
+        return null;
+    }
+}
+
 function sh_support_customer_snapshot(int $conversationId, array $owner): array
 {
     $conversation = sh_support_conversation_for_owner($conversationId, $owner);
     if ($conversation === null) { return ['ok' => false, 'error' => 'Conversation not found.']; }
-    try { sh_query('UPDATE support_conversations SET unread_for_customer = 0 WHERE id = ?', [$conversationId]); } catch (Throwable $e) {}
-    $conversation['unread_for_customer'] = 0;
     $page = sh_support_customer_messages($conversationId, 0, SH_SUPPORT_HISTORY_BATCH);
     return [
         'ok' => true,
@@ -1526,7 +1529,7 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
             $pdo->commit();
             return sh_support_customer_send_success($conversationId, $owner, $duplicate, true);
         }
-        if ((string)$conversation['status'] === 'resolved') {
+        if (in_array((string)$conversation['status'], ['resolved', 'closed'], true)) {
             $pdo->rollBack();
             return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved. Start a new conversation to continue.'];
         }
@@ -1563,23 +1566,11 @@ function sh_support_customer_send(int $conversationId, array $owner, string $bod
         $subject = trim((string)($conversation['subject'] ?? '')) === '' ? mb_substr(preg_replace('/\\s+/u', ' ', $body) ?? $body, 0, 160) : (string)$conversation['subject'];
         // Keep assignment, status and AI-pause unchanged. This activity/unread
         // update is what keeps the follow-up in the assigned agent's inbox.
-        sh_query('UPDATE support_conversations SET subject = ?, last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_admin = 1 WHERE id = ?', [$subject, $conversationId]);
-
+        sh_query('UPDATE support_conversations SET subject = ?, last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_admin = 1' . ($humanControlled ? ', ai_paused = 1' : '') . ' WHERE id = ?', [$subject, $conversationId]);
         if ($humanControlled) {
-            if ($handoffRequest && sh_support_handoff_enabled()) {
-                sh_support_insert_handoff_event($conversationId, $clientId, 'customer', null, 'requested', 'Customer sent a follow-up while support controls the conversation.');
-            }
-            sh_insert('support_messages', [
-                'conversation_id' => $conversationId, 'reply_to_message_id' => $messageId, 'client_message_id' => null,
-                'sender' => 'system', 'source' => 'system',
-                'body' => sh_support_localized($language,
-                    'Your message has been saved for support.',
-                    'আপনার বার্তাটি সাপোর্টের জন্য সংরক্ষণ করা হয়েছে।',
-                    'Apnar message support-er jonno save kora hoyeche.'),
-                'extra_json' => null, 'reply_status' => 'none', 'reply_started_at' => null,
-                'is_internal' => 0, 'created_at' => gmdate('Y-m-d H:i:s'),
-            ]);
-            sh_query('UPDATE support_conversations SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1, unread_for_admin = 1 WHERE id = ?', [$conversationId]);
+            sh_query("UPDATE support_messages SET reply_status = 'paused', reply_started_at = NULL WHERE conversation_id = ? AND sender = 'customer' AND reply_status = 'pending'", [$conversationId]);
+            // The customer row and inbox activity are committed without invoking
+            // AI, FAQ, fallback, handoff-event, or system-notice code.
             $pdo->commit();
             return sh_support_customer_send_success($conversationId, $owner, $message);
         }
@@ -1622,7 +1613,7 @@ function sh_support_customer_retry(int $conversationId, int $messageId, array $o
         $pdo->beginTransaction();
         $conversation = sh_support_conversation_for_owner($conversationId, $owner, true);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
-        if ((string)$conversation['status'] === 'resolved') {
+        if (in_array((string)$conversation['status'], ['resolved', 'closed'], true)) {
             $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved. Start a new conversation to continue.'];
         }
         $message = sh_one('SELECT * FROM support_messages WHERE id = ? AND conversation_id = ? AND sender = \'customer\' AND is_internal = 0 FOR UPDATE', [$messageId, $conversationId]);
@@ -1637,7 +1628,7 @@ function sh_support_customer_retry(int $conversationId, int $messageId, array $o
             // Convert any interrupted AI turn into an inbox follow-up. Retrying
             // it must never restart AI after an agent has taken control.
             sh_query("UPDATE support_messages SET reply_status = 'none', reply_started_at = NULL WHERE id = ?", [$messageId]);
-            sh_query('UPDATE support_conversations SET updated_at = UTC_TIMESTAMP(), unread_for_admin = 1 WHERE id = ?', [$conversationId]);
+            sh_query('UPDATE support_conversations SET ai_paused = 1, updated_at = UTC_TIMESTAMP(), unread_for_admin = 1 WHERE id = ?', [$conversationId]);
         } else {
             $stalePending = $state === 'pending' && !empty($message['reply_started_at']) && strtotime((string)$message['reply_started_at'] . ' UTC') < time() - 180;
             if ($state !== 'failed' && !$stalePending) {
@@ -1669,7 +1660,7 @@ function sh_support_customer_handoff(int $conversationId, array $owner, string $
         $pdo->beginTransaction();
         $conversation = sh_support_conversation_for_owner($conversationId, $owner, true);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
-        if ((string)$conversation['status'] === 'resolved') { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved.']; }
+        if (in_array((string)$conversation['status'], ['resolved', 'closed'], true)) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'This conversation is resolved.']; }
         $existingEvent = sh_one('SELECT id FROM support_handoff_events WHERE conversation_id = ? AND event_key = ? LIMIT 1 FOR UPDATE', [$conversationId, $eventKey]);
         if ($existingEvent !== null || (int)$conversation['ai_paused'] === 1 || (int)($conversation['assigned_admin_id'] ?? 0) > 0
             || in_array((string)$conversation['status'], ['pending','assigned'], true)) {
@@ -1695,20 +1686,6 @@ function sh_support_customer_handoff(int $conversationId, array $owner, string $
     return ['ok' => true, 'snapshot' => sh_support_customer_snapshot($conversationId, $owner)];
 }
 
-function sh_support_customer_delete(int $conversationId, array $owner): array
-{
-    try {
-        $conversation = sh_support_conversation_for_owner($conversationId, $owner);
-        if ($conversation === null) { return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
-        if ((string)$conversation['status'] !== 'resolved') { return ['ok' => false, 'http_status' => 409, 'error' => 'Resolve the conversation before deleting it.']; }
-        sh_query('DELETE FROM support_conversations WHERE id = ?', [$conversationId]);
-        return ['ok' => true];
-    } catch (Throwable $e) {
-        sh_log_exception($e, 'ai-support-customer-delete');
-        return ['ok' => false, 'http_status' => 500, 'error' => 'The conversation could not be deleted.'];
-    }
-}
-
 function sh_support_customer_state(array $owner): array
 {
     $conversation = sh_support_latest_conversation($owner);
@@ -1723,7 +1700,7 @@ function sh_support_customer_state(array $owner): array
  * Admin support inbox services. Every caller must require support.manage.
  * ---------------------------------------------------------------------- */
 
-function sh_support_admin_can_id(int $adminId, string $permission = 'support.manage'): bool
+function sh_support_admin_can_id(int $adminId, string $permission = 'support.reply'): bool
 {
     if ($adminId <= 0) { return false; }
     static $cache = [];
@@ -1739,8 +1716,13 @@ function sh_support_admin_can_id(int $adminId, string $permission = 'support.man
         if ($role === null) { return $cache[$cacheKey] = true; }
         if ((string)$role['slug'] === 'super_admin') { return $cache[$cacheKey] = !in_array($permission, sh_perms_superadmin_only(), true); }
         $permissions = json_decode((string)($role['permissions'] ?? '[]'), true);
+        $allowed = match ($permission) {
+            'support.view' => ['support.view', 'support.reply', 'support.manage'],
+            'support.reply' => ['support.reply', 'support.manage'],
+            default => [$permission],
+        };
         return $cache[$cacheKey] = is_array($permissions)
-            && in_array($permission, $permissions, true)
+            && count(array_intersect($allowed, $permissions)) > 0
             && !in_array($permission, sh_perms_superadmin_only(), true);
     } catch (Throwable $e) {
         sh_log_exception($e, 'ai-support-agent-permission');
@@ -1763,7 +1745,7 @@ function sh_support_authorized_agents(): array
 function sh_support_admin_conversations(string $status, string $query, int $page = 1, int $perPage = 25): array
 {
     $where = ['1=1']; $args = [];
-    if (in_array($status, ['open','pending','assigned','resolved'], true)) { $where[] = 'c.status = ?'; $args[] = $status; }
+    if (in_array($status, ['open','pending','assigned','resolved','closed'], true)) { $where[] = 'c.status = ?'; $args[] = $status; }
     $query = mb_substr(trim($query), 0, 100);
     if ($query !== '') {
         $where[] = '(c.subject LIKE ? OR u.name LIKE ? OR u.email LIKE ? OR CAST(c.id AS CHAR) LIKE ?)';
@@ -1840,7 +1822,7 @@ function sh_support_admin_reply(int $conversationId, int $adminId, string $body,
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
         $duplicate = sh_one('SELECT id FROM support_messages WHERE conversation_id = ? AND client_message_id = ? LIMIT 1 FOR UPDATE', [$conversationId, $clientId]);
         if ($duplicate !== null) { $pdo->commit(); return ['ok' => true, 'duplicate' => true, 'message_id' => (int)$duplicate['id']]; }
-        if (!$internal && (string)$conversation['status'] === 'resolved') { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'Reopen the conversation before replying.']; }
+        if (!$internal && in_array((string)$conversation['status'], ['resolved', 'closed'], true)) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'Reopen the conversation before replying.']; }
         $assignee = (int)($conversation['assigned_admin_id'] ?? 0);
         if (!$internal && $assignee > 0 && $assignee !== $adminId && !sh_admin_is_superadmin()) {
             $pdo->rollBack(); return ['ok' => false, 'http_status' => 403, 'error' => 'This conversation is assigned to another support agent. Take over or reassign it first.'];
@@ -1885,8 +1867,14 @@ function sh_support_admin_transition(int $conversationId, int $adminId, string $
         $conversation = sh_one('SELECT * FROM support_conversations WHERE id = ? FOR UPDATE', [$conversationId]);
         if ($conversation === null) { $pdo->rollBack(); return ['ok' => false, 'http_status' => 404, 'error' => 'Conversation not found.']; }
         $assigned = (int)($conversation['assigned_admin_id'] ?? 0);
-        $resolved = (string)$conversation['status'] === 'resolved';
+        $resolved = in_array((string)$conversation['status'], ['resolved', 'closed'], true);
         $superadmin = sh_admin_is_superadmin();
+        if ($action === 'resume_ai' && !$resolved && (int)$conversation['ai_paused'] === 0
+            && $assigned === 0 && (string)$conversation['status'] === 'open') {
+            // Refresh/retry of a completed Resume AI action is a no-op.
+            $pdo->commit();
+            return ['ok' => true, 'unchanged' => true];
+        }
         if ($resolved && $action !== 'reopen') {
             $pdo->rollBack(); return ['ok' => false, 'http_status' => 409, 'error' => 'Reopen the conversation before changing its assignment or AI state.'];
         }
@@ -1919,8 +1907,8 @@ function sh_support_admin_transition(int $conversationId, int $adminId, string $
             sh_query("UPDATE support_messages SET reply_status = 'paused', reply_started_at = NULL WHERE conversation_id = ? AND sender = 'customer' AND reply_status = 'pending'", [$conversationId]);
             $reason = $reason !== '' ? $reason : 'Conversation resolved by support.';
         } elseif ($action === 'reopen') {
-            sh_query("UPDATE support_conversations SET assigned_admin_id = NULL, status = 'open', ai_paused = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?", [$conversationId]);
-            $reason = $reason !== '' ? $reason : 'Conversation reopened and returned to AI.';
+            sh_query("UPDATE support_conversations SET assigned_admin_id = NULL, status = 'open', ai_paused = 1, updated_at = UTC_TIMESTAMP() WHERE id = ?", [$conversationId]);
+            $reason = $reason !== '' ? $reason : 'Conversation reopened; AI remains paused until an authorized admin explicitly resumes it.';
         } else {
             $pdo->rollBack(); return ['ok' => false, 'http_status' => 400, 'error' => 'Unknown support action.'];
         }
@@ -1948,17 +1936,6 @@ function sh_support_admin_poll(int $conversationId, int $afterMessageId, int $af
                       WHERE h.conversation_id = ? AND h.id > ? ORDER BY h.id ASC LIMIT 20',
                       [$conversationId, max(0, $afterEventId)]);
     return ['ok' => true, 'conversation' => $conversation, 'messages' => $rows, 'events' => $events];
-}
-
-function sh_support_admin_delete(int $conversationId): array
-{
-    try {
-        sh_query('DELETE FROM support_conversations WHERE id = ?', [$conversationId]);
-        return ['ok' => true];
-    } catch (Throwable $e) {
-        sh_log_exception($e, 'ai-support-admin-delete');
-        return ['ok' => false, 'http_status' => 500, 'error' => 'The conversation could not be deleted.'];
-    }
 }
 
 function sh_support_faq_get(int $faqId): ?array
@@ -2048,8 +2025,6 @@ function sh_support_settings_save(int $adminId, array $input, bool $allowAiConfi
         if ($key === 'contact_phone') { $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value) ?? ''; }
         $values[$key] = $value;
     }
-    $values['retention_days'] = (string)max(30, min(3650, (int)($input['retention_days'] ?? 180)));
-
     $aiValues = [];
     $providerIdToSave = null;
     $modelToSave = '';

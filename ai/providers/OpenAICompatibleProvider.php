@@ -183,11 +183,17 @@ class OpenAICompatibleProvider extends AbstractAIProvider
                 'model' => (string)($j['model'] ?? $model), 'status' => (int)($res['status'] ?? 200)];
     }
 
-    /** OpenAI-compatible APIs use max_tokens unless a concrete driver overrides it. */
-    protected function maxTokenField(string $model): string { return 'max_tokens'; }
+    /** OpenAI o-series and GPT-5 use max_completion_tokens; other compatible APIs default to max_tokens. */
+    protected function maxTokenField(string $model): string
+    {
+        return preg_match('/^(o[1-9]|gpt-5)/i', $model) === 1 ? 'max_completion_tokens' : 'max_tokens';
+    }
 
-    /** Most compatible APIs accept temperature; concrete model drivers may omit it. */
-    protected function supportsTemperature(string $model): bool { return true; }
+    /** Most compatible APIs accept temperature; known reasoning families do not. */
+    protected function supportsTemperature(string $model): bool
+    {
+        return preg_match('/^(o[1-9]|gpt-5)/i', $model) !== 1;
+    }
 
     public function generateStructuredContent(string $system, string $user, array $options = []): array
     {

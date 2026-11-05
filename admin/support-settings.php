@@ -43,10 +43,8 @@ function sh_support_settings_ai_audit_snapshot(): array
 function sh_support_settings_general_audit_snapshot(): array
 {
     $snapshot = [];
-    foreach (['enabled', 'handoff_enabled', 'hours', 'contact_email', 'contact_phone', 'personality', 'instructions', 'retention_days'] as $key) {
-        $snapshot[$key] = $key === 'retention_days'
-            ? (string)sh_support_retention_days()
-            : sh_support_setting($key, '');
+    foreach (['enabled', 'handoff_enabled', 'hours', 'contact_email', 'contact_phone', 'personality', 'instructions'] as $key) {
+        $snapshot[$key] = sh_support_setting($key, '');
     }
     foreach (['delivery', 'payment', 'returns'] as $kind) {
         foreach (['en', 'bn', 'banglish'] as $language) {
@@ -183,7 +181,6 @@ $settings = [
     'contact_phone' => sh_support_setting('contact_phone', (string)sh_setting('contact_phone', '')),
     'personality' => sh_support_setting('personality', 'Friendly, clear and professional.'),
     'instructions' => sh_support_setting('instructions', ''),
-    'retention_days' => sh_support_retention_days(),
     'request_timeout' => (int)sh_support_setting('request_timeout', '15'),
     'output_tokens' => (int)sh_support_setting('output_tokens', '350'),
     'daily_limit' => (int)sh_support_setting('daily_limit', '100'),
@@ -277,7 +274,6 @@ require __DIR__ . '/_layout.php';
           <div class="sh-field"><label class="sh-field__label" for="support-hours">Support hours shown to customers</label><input class="sh-input" id="support-hours" name="hours" maxlength="120" value="<?= e($settings['hours']) ?>" placeholder="Leave blank if not published"></div>
           <div class="sh-field"><label class="sh-field__label" for="support-email">Support email</label><input class="sh-input" id="support-email" name="contact_email" type="email" maxlength="254" value="<?= e($settings['contact_email']) ?>" placeholder="Uses store contact email when blank"></div>
           <div class="sh-field"><label class="sh-field__label" for="support-phone">Support phone</label><input class="sh-input" id="support-phone" name="contact_phone" maxlength="40" value="<?= e($settings['contact_phone']) ?>" placeholder="Uses store contact phone when blank"></div>
-          <div class="sh-field"><label class="sh-field__label" for="support-retention">Resolved conversation retention (days)</label><input class="sh-input" id="support-retention" name="retention_days" type="number" min="30" max="3650" value="<?= (int)$settings['retention_days'] ?>"><small class="sh-formcard__note">At most 200 old resolved threads are pruned per daily visit. Open or pending threads are never pruned.</small></div>
         </div>
 
         <div class="sh-field"><label class="sh-field__label" for="support-personality">Assistant tone (style only)</label><textarea class="sh-textarea" id="support-personality" name="personality" rows="2" maxlength="500"><?= e($settings['personality']) ?></textarea></div>

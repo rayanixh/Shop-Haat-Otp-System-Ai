@@ -12,11 +12,36 @@ require_once SH_ROOT . '/includes/admin-perms.php';
 sh_require_perm('system.notifications');
 sh_admin_schema_ensure();
 
+/** Redirect only to a validated same-site notification destination. */
+function sh_admin_notification_redirect(string $raw): void
+{
+    $parts = parse_url($raw);
+    if (!is_array($parts) || isset($parts['scheme']) || isset($parts['host']) || isset($parts['user']) || isset($parts['pass'])) {
+        sh_redirect('admin/inbox.php');
+    }
+    $target = (string)($parts['path'] ?? '');
+    if ($target === '') { sh_redirect('admin/inbox.php'); }
+    if (isset($parts['query']) && $parts['query'] !== '') { $target .= '?' . $parts['query']; }
+    $safe = sh_safe_redirect($target, '');
+    if ($safe === '') { sh_redirect('admin/inbox.php'); }
+    $fragment = (string)($parts['fragment'] ?? '');
+    if ($fragment !== '' && preg_match('/^[A-Za-z0-9_-]{1,100}$/D', $fragment) === 1) { $safe .= '#' . $fragment; }
+    sh_redirect($safe);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     $form = sh_post('form');
+    $openUrl = '';
     try {
-        if ($form === 'read_all') {
+        if ($form === 'open') {
+            $id = sh_int($_POST['id'] ?? 0);
+            $n = $id > 0 ? sh_one('SELECT * FROM admin_notifications WHERE id = ? LIMIT 1', [$id]) : null;
+            if ($n !== null) {
+                sh_query('UPDATE admin_notifications SET is_read = 1, read_at = NOW() WHERE id = ?', [$id]);
+                $openUrl = (string)($n['url'] ?? '');
+            }
+        } elseif ($form === 'read_all') {
             sh_query('UPDATE admin_notifications SET is_read = 1, read_at = NOW() WHERE is_read = 0');
             sh_flash('success', 'All notifications marked as read.');
         } elseif ($form === 'read') {
@@ -28,20 +53,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sh_flash('success', 'Read notifications older than 30 days were removed.');
         }
     } catch (Throwable $e) { sh_log_exception($e, 'admin-inbox'); sh_flash('error', 'The action could not be completed.'); }
-    $back = sh_post('back') !== '' ? (string)($_SERVER['HTTP_REFERER'] ?? '') : '';
-    if ($back !== '' && str_starts_with($back, sh_site_url())) { header('Location: ' . $back); exit; }
+    if ($openUrl !== '') { sh_admin_notification_redirect($openUrl); }
+    $back = sh_safe_redirect(sh_post('back'), '');
+    if ($back !== '') { sh_redirect($back); }
     sh_redirect('admin/inbox.php' . (sh_post('filter') === 'unread' ? '?filter=unread' : ''));
 }
 
-// Open: mark read and jump to the related item.
+// Legacy GET links remain navigational only; reading a notification is a POST.
 $open = sh_int($_GET['open'] ?? 0);
 if ($open > 0) {
-    $n = sh_one('SELECT * FROM admin_notifications WHERE id = ?', [$open]);
-    if ($n) {
-        sh_query('UPDATE admin_notifications SET is_read = 1, read_at = NOW() WHERE id = ?', [$open]);
-        $url = (string)($n['url'] ?? '');
-        if ($url !== '' && !preg_match('~^(https?:)?//~i', $url)) { sh_redirect(ltrim($url, '/')); }
-    }
+    $n = sh_one('SELECT * FROM admin_notifications WHERE id = ? LIMIT 1', [$open]);
+    $url = is_array($n) ? (string)($n['url'] ?? '') : '';
+    if ($url !== '') { sh_admin_notification_redirect($url); }
     sh_redirect('admin/inbox.php');
 }
 
@@ -102,7 +125,7 @@ require __DIR__ . '/_layout.php';
               <small><?= e($types[$n['type']] ?? ucwords(str_replace('_', ' ', (string)$n['type']))) ?> · <?= e(date('d M Y H:i', strtotime($n['created_at']))) ?> · <?= e(sh_time_ago($n['created_at'])) ?></small>
             </div>
             <div class="sh-inbox__actions">
-              <?php if ($n['url']): ?><a class="sh-btn sh-btn--sm" href="<?= e(sh_url('admin/inbox.php?open=' . (int)$n['id'])) ?>">Open</a><?php endif; ?>
+              <?php if ($n['url']): ?><form method="post" style="display:inline"><?= sh_csrf_field() ?><input type="hidden" name="form" value="open"><input type="hidden" name="id" value="<?= (int)$n['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>"><button class="sh-btn sh-btn--sm" type="submit">Open</button></form><?php endif; ?>
               <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="id" value="<?= (int)$n['id'] ?>"><input type="hidden" name="filter" value="<?= e($filter) ?>">
                 <input type="hidden" name="form" value="<?= (int)$n['is_read'] ? 'unread' : 'read' ?>">
                 <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= (int)$n['is_read'] ? 'Mark unread' : 'Mark read' ?></button></form>

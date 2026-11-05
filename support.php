@@ -85,7 +85,6 @@ require_once SH_ROOT . '/includes/header.php';
       <ol class="sh-support-chat__messages" data-chat-messages aria-live="polite" aria-relevant="additions text"></ol>
       <div class="sh-support-chat__actions" data-chat-actions>
         <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-handoff>Request human support</button>
-        <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-chat-delete hidden>Delete resolved conversation</button>
       </div>
       <form class="sh-support-chat__compose" data-chat-form>
         <label class="sh-support-chat__message-label" for="sh-support-message">Your message</label>
@@ -99,8 +98,7 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
   </section>
 
-  <div class="sh-cartlayout">
-    <div class="sh-section">
+  <section class="sh-section sh-support-contact">
       <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('headphones', 18) ?> Contact Support</h2></div>
       <?php if ($sent): ?>
         <div class="sh-alert sh-alert--success"><?= sh_icon('check-circle', 16) ?>
@@ -124,25 +122,6 @@ require_once SH_ROOT . '/includes/header.php';
           <textarea class="sh-textarea" id="sp-msg" name="message" required minlength="10" maxlength="2000"><?= e($form['message']) ?></textarea></div>
         <button class="sh-btn" type="submit"><?= sh_icon('send', 15) ?> Send message</button>
       </form>
-    </div>
-    <aside class="sh-summary">
-      <h2 class="sh-summary__title">Other ways to reach us</h2>
-      <?php $supportPhone = trim(sh_support_setting('contact_phone', ''));
-      if ($supportPhone === '') { $supportPhone = trim((string)sh_setting('contact_phone', '')); }
-      $supportEmail = trim(sh_support_setting('contact_email', ''));
-      if ($supportEmail === '') { $supportEmail = trim((string)sh_setting('contact_email', '')); }
-      $supportContacts = array_filter([
-          'phone' => $supportPhone,
-          'mail' => $supportEmail,
-          'map-pin' => trim((string)sh_setting('contact_address', '')),
-      ], static fn(string $value): bool => $value !== ''); ?>
-      <?php if ($supportContacts): ?><ul class="sh-support-contact-list">
-        <?php foreach ($supportContacts as $icon => $value): ?><li><?= sh_icon($icon, 14) ?><span><?= e($value) ?></span></li><?php endforeach; ?>
-      </ul><?php else: ?><p class="sh-support-muted">The store has not published phone, email or address details here.</p><?php endif; ?>
-      <?php $supportHours = trim(sh_support_setting('hours', '')); ?>
-      <?php if ($supportHours !== ''): ?><p class="sh-support-muted"><strong>Support hours:</strong> <?= e($supportHours) ?></p>
-      <?php else: ?><p class="sh-support-muted">No support hours are configured. Chat does not indicate live staff availability or promise a response time.</p><?php endif; ?>
-    </aside>
-  </div>
+  </section>
 </div>
 <?php require_once SH_ROOT . '/includes/footer.php'; ?>

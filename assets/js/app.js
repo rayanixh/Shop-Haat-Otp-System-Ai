@@ -133,6 +133,11 @@
   }
   function handleSessionExpired(payload) {
     if (!payload || (!payload.auth_required && !payload.session_expired)) { return false; }
+    // An admin API deliberately omits its custom login URL when the caller is
+    // not already inside the secret route, so the route cannot leak publicly.
+    // Reloading the open admin page lets its dispatcher send this browser to
+    // the correct login route without exposing the secret in the API response.
+    if (payload.admin_required) { window.location.reload(); return true; }
     var destination = safeLoginUrl(payload);
     // A stale form on Login itself should receive a new token rather than add
     // redirect parameters forever. Other pages retain their safe return path.
@@ -2127,14 +2132,23 @@
       var cur = box.querySelector('[data-cv]');
       if (cur) cur.style.opacity = '.55';
     }
-    fetch((window.SH_BASE || '/') + 'admin/verification-fetch.php', {
-      method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    var endpoint = box.getAttribute('data-cv-endpoint');
+    if (!endpoint) { busy = false; return; }
+    fetch(endpoint, {
+      method: 'POST', body: fd, credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
     }).then(function (r) {
-      // fetch follows the admin guard's redirect. Send the browser there rather
-      // than placing a login document inside the verification card.
-      if (r.status === 401 || /\/admin\/login\.php(?:$|[?#])/i.test(r.url || '')) {
-        window.location.assign(r.url || ((window.SH_BASE || '/') + 'admin/login.php'));
-        return '';
+      // The endpoint returns structured 401 JSON. In custom-route mode an
+      // unauthenticated public API response omits the secret URL, so use the
+      // admin page's protected login link or reload the current route.
+      if (r.status === 401) {
+        return r.json().then(function (payload) {
+          var loginUrl = payload && typeof payload.login_url === 'string' && payload.login_url
+            ? payload.login_url : (box.getAttribute('data-cv-login-url') || '');
+          if (loginUrl) window.location.assign(loginUrl);
+          else window.location.reload();
+          return '';
+        }).catch(function () { window.location.reload(); return ''; });
       }
       if (r.headers.get('X-ShopHaat-CSRF-Refresh') === '1') {
         window.location.reload();

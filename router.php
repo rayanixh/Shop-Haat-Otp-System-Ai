@@ -6,6 +6,13 @@
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $file = __DIR__ . $path;
 
+// Match the production .htaccess rule for include-only implementation files.
+if ($path === '/admin.php' || preg_match('~^/(?:config|includes|ai)/~i', $path) === 1) {
+    http_response_code(404);
+    echo 'Not found.';
+    return true;
+}
+
 if ($path !== '/' && is_file($file)) {
     if (substr($file, -4) === '.php') { return false; }
     $mimes = [
@@ -30,6 +37,14 @@ if ($path === '/robots.txt' || $path === '/sitemap.xml' || preg_match('~^/sitema
         $_REQUEST['file'] = $m[1];
     }
     require __DIR__ . $script;
+    return true;
+}
+
+// Custom Admin Access mirrors the root .htaccess one-segment rewrite. The
+// dispatcher itself verifies that the route is currently configured.
+if (preg_match('~^/[a-z0-9_-]{32,64}/?$~i', $path) === 1) {
+    $_SERVER['SCRIPT_NAME'] = '/admin/custom-route.php';
+    require __DIR__ . '/admin/custom-route.php';
     return true;
 }
 

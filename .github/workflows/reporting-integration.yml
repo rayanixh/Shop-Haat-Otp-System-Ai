@@ -29,6 +29,11 @@ jobs:
         run: php tools/security-scan.php --fail-on=high
       - name: Security regression suite
         run: php tests/security-regression.php
+      # Pure support-chat logic with no database or network: language/intent
+      # routing, verified-fact composition, the AI output guard, secret-safe
+      # message shapes and the static CSRF/permission/no-scroll-box wiring.
+      - name: AI customer support unit suite
+        run: php tests/support-unit.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -60,18 +65,20 @@ jobs:
       #     token limit, rejected key, server error, network failure, timeout)
       #     renders in the card and the button always resets.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
           SH_NA_REQUIRE_JSDOM: '1'
           SH_PT2_REQUIRE_JSDOM: '1'
+          SH_SC_REQUIRE_JSDOM: '1'
         run: |
           npm install --no-save --no-package-lock jsdom@26.1.0
           node tests/page-transition-behavior.mjs
           node tests/slider-behavior.mjs
           node tests/no-autosave-behavior.mjs
           node tests/provider-test-behavior.mjs
+          node tests/support-chat-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
@@ -179,3 +186,12 @@ jobs:
         run: php tests/seo-content-length.php
       - name: AI Auto Work full-product save against MySQL
         run: php tests/product-ai-save.php
+      # AI customer support against real MySQL, intentionally with a configured
+      # but unreachable AI provider: persistent multilingual conversations,
+      # verified product/order tools, both-factor guest order authorization,
+      # cross-customer isolation, idempotent sends, rate limits, handoff and
+      # takeover/resume, retention purge, and honest deterministic fallback.
+      # It runs last because it resets its own support tables in the disposable
+      # test database; no external provider or live credential is used.
+      - name: AI customer support end-to-end against MySQL
+        run: php tests/support-system.php

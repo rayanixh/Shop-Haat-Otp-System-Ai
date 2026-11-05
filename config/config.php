@@ -63,6 +63,13 @@ function sh_base_url(): string
 
 function sh_url(string $path = ''): string
 {
+    // During an authenticated custom-admin request, convert trusted internal
+    // admin links to the active secret route. Public pages and APIs never get
+    // this mapping, so the route cannot leak into storefront markup/config.
+    if (function_exists('sh_admin_access_map_url')) {
+        $adminUrl = sh_admin_access_map_url($path);
+        if (is_string($adminUrl) && $adminUrl !== '') { return $adminUrl; }
+    }
     return sh_base_url() . '/' . ltrim($path, '/');
 }
 
@@ -319,3 +326,4 @@ require_once SH_ROOT . '/install/schema.php';
 require_once SH_ROOT . '/includes/phone-otp.php';
 require_once SH_ROOT . '/includes/google-auth.php';
 require_once SH_ROOT . '/includes/theme.php';
+require_once SH_ROOT . '/includes/admin-access.php';

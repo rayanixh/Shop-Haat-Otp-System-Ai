@@ -12,6 +12,49 @@ function sh_support_api_fail(string $message, int $status = 400): void
     sh_json(['success' => false, 'error' => $message], $status);
 }
 
+/** Adapter for the existing footer widget's URL-encoded start/new/poll protocol. */
+function sh_support_legacy_widget_fail(string $message, int $status = 400): void
+{
+    sh_json(['ok' => false, 'error' => $message], $status);
+}
+
+function sh_support_legacy_widget_message(array $message): array
+{
+    $sender = (string)($message['sender'] ?? 'system');
+    $kind = $sender === 'customer' ? 'customer'
+        : ($sender === 'admin' ? 'agent'
+            : (in_array($sender, ['assistant', 'ai'], true) ? 'assistant' : 'notice'));
+    return [
+        'id' => (int)($message['id'] ?? 0),
+        'kind' => $kind,
+        'body' => (string)($message['body'] ?? ''),
+        'at' => (string)($message['created_at'] ?? ''),
+        'ai' => in_array($sender, ['assistant', 'ai'], true),
+    ];
+}
+
+function sh_support_legacy_widget_payload(array $snapshot, ?array $messages = null): array
+{
+    $conversation = is_array($snapshot['conversation'] ?? null) ? $snapshot['conversation'] : [];
+    $status = (string)($conversation['status'] ?? 'open');
+    $paused = !empty($conversation['ai_paused']);
+    $human = $paused || in_array($status, ['pending', 'assigned'], true)
+        || (int)($conversation['assigned_admin_id'] ?? 0) > 0;
+    $rows = $messages ?? (is_array($snapshot['messages'] ?? null) ? $snapshot['messages'] : []);
+    return [
+        'ok' => true,
+        'conversation' => [
+            'id' => (int)($conversation['id'] ?? 0),
+            'status' => $status,
+            'human' => $human,
+            'ai_paused' => $paused,
+            'assigned_admin_id' => (int)($conversation['assigned_admin_id'] ?? 0),
+        ],
+        'messages' => array_map('sh_support_legacy_widget_message', $rows),
+        'suggestions' => [],
+    ];
+}
+
 if (sh_db_config() === null || !sh_is_locked()) {
     sh_support_api_fail('The store is not installed yet.', 503);
 }
@@ -56,11 +99,15 @@ if ($isAdminAction) {
     sh_session_start();
     $admin = sh_require_admin();
     sh_perms_schema_ensure();
-    if (!sh_admin_can('support.manage')) { sh_support_api_fail('You do not have permission to use the support inbox.', 403); }
+    $requiredAdminPerms = $action === 'admin_mark_read'
+        ? ['support.view', 'support.reply', 'support.manage']
+        : ($method === 'POST'
+            ? ['support.reply', 'support.manage']
+            : ['support.view', 'support.reply', 'support.manage']);
+    if (!sh_admin_can(...$requiredAdminPerms)) { sh_support_api_fail('You do not have permission to use this support action.', 403); }
     if ($method === 'POST') { sh_csrf_require(); }
     $adminId = (int)$admin['id'];
     if (!sh_support_schema_ensure()) { sh_support_api_fail('The support database is not ready. Run the support migration.', 503); }
-    sh_support_retention_prune();
 
     if ($method === 'GET' && $action === 'admin_list') {
         $result = sh_support_admin_conversations(
@@ -76,7 +123,6 @@ if ($isAdminAction) {
         $conversationId = max(0, (int)($_GET['id'] ?? 0));
         $conversation = sh_support_admin_conversation($conversationId);
         if ($conversation === null) { sh_support_api_fail('Conversation not found.', 404); }
-        sh_support_admin_mark_read($conversationId);
         $messages = sh_support_admin_messages($conversationId, max(0, (int)($_GET['before_id'] ?? 0)), 30);
         sh_json([
             'success' => true,
@@ -99,6 +145,15 @@ if ($isAdminAction) {
         );
         if (empty($poll['ok'])) { sh_support_api_fail((string)($poll['error'] ?? 'Conversation not found.'), 404); }
         sh_json(['success' => true] + $poll);
+    }
+
+    if ($method === 'POST' && $action === 'admin_mark_read') {
+        $conversationId = max(0, (int)($input['id'] ?? 0));
+        if ($conversationId <= 0 || sh_support_admin_conversation($conversationId) === null) {
+            sh_support_api_fail('Conversation not found.', 404);
+        }
+        sh_support_admin_mark_read($conversationId);
+        sh_json(['success' => true]);
     }
 
     if ($method === 'POST' && $action === 'admin_reply') {
@@ -129,7 +184,6 @@ if ($isAdminAction) {
 }
 
 if (!sh_support_schema_ensure()) { sh_support_api_fail('The support database is not ready. Run the support migration.', 503); }
-sh_support_retention_prune();
 sh_session_start();
 $guestToken = sh_support_guest_token();
 $owner = sh_support_owner_context(
@@ -138,6 +192,66 @@ $owner = sh_support_owner_context(
     is_array($_SESSION['guest_orders'] ?? null) ? $_SESSION['guest_orders'] : []
 );
 if ($method === 'POST') { sh_csrf_require(); }
+
+if ($method === 'POST' && $action === 'mark_read') {
+    $result = sh_support_customer_mark_read(max(0, (int)($input['id'] ?? 0)), $owner);
+    if ($result === false) { sh_support_api_fail('Conversation not found.', 404); }
+    if ($result === null) { sh_support_api_fail('The conversation could not be updated.', 500); }
+    sh_json(['success' => true]);
+}
+
+$legacyWidgetAction = $method === 'POST' && in_array($action, ['start', 'new', 'poll'], true);
+$legacyWidgetAction = $legacyWidgetAction
+    || ($method === 'POST' && $action === 'send' && isset($input['conversation_id']) && !isset($input['id']))
+    || ($method === 'POST' && $action === 'handoff' && isset($input['conversation_id']) && !isset($input['id']));
+if ($legacyWidgetAction) {
+    if (in_array($action, ['start', 'new'], true)) {
+        if (!sh_support_request_rate_allowed($owner)) { sh_support_legacy_widget_fail('Too many requests. Please wait and try again.', 429); }
+        $created = sh_support_create_conversation($owner);
+        if (empty($created['ok']) || !is_array($created['conversation'] ?? null)) {
+            sh_support_legacy_widget_fail((string)($created['error'] ?? 'Could not start a conversation.'), 503);
+        }
+        $snapshot = sh_support_customer_snapshot((int)$created['conversation']['id'], $owner);
+        if (empty($snapshot['ok'])) { sh_support_legacy_widget_fail('Could not load the conversation.', 500); }
+        sh_json(sh_support_legacy_widget_payload($snapshot));
+    }
+
+    $conversationId = max(0, (int)($input['conversation_id'] ?? 0));
+    if ($action === 'poll') {
+        $conversation = sh_support_conversation_for_owner($conversationId, $owner);
+        if ($conversation === null) { sh_support_legacy_widget_fail('Conversation not found.', 404); }
+        sh_query('UPDATE support_conversations SET unread_for_customer = 0 WHERE id = ?', [$conversationId]);
+        $afterId = max(0, (int)($input['after_id'] ?? 0));
+        $messages = sh_all("SELECT * FROM support_messages
+                            WHERE conversation_id = ? AND id > ? AND is_internal = 0
+                              AND sender <> 'internal_note'
+                            ORDER BY id ASC LIMIT 50", [$conversationId, $afterId]);
+        sh_json(sh_support_legacy_widget_payload(['conversation' => $conversation], $messages));
+    }
+
+    if ($action === 'send') {
+        $result = sh_support_customer_send(
+            $conversationId,
+            $owner,
+            (string)($input['message'] ?? ''),
+            (string)($input['client_msg_id'] ?? '')
+        );
+        if (empty($result['ok'])) {
+            sh_support_legacy_widget_fail((string)($result['error'] ?? 'The message could not be saved.'), (int)($result['http_status'] ?? 400));
+        }
+        $snapshot = is_array($result['snapshot'] ?? null) ? $result['snapshot'] : sh_support_customer_snapshot($conversationId, $owner);
+        sh_json(sh_support_legacy_widget_payload($snapshot));
+    }
+
+    if ($action === 'handoff') {
+        $result = sh_support_customer_handoff($conversationId, $owner, (string)($input['client_msg_id'] ?? ''));
+        if (empty($result['ok'])) {
+            sh_support_legacy_widget_fail((string)($result['error'] ?? 'The handoff request could not be saved.'), (int)($result['http_status'] ?? 400));
+        }
+        $snapshot = is_array($result['snapshot'] ?? null) ? $result['snapshot'] : sh_support_customer_snapshot($conversationId, $owner);
+        sh_json(sh_support_legacy_widget_payload($snapshot));
+    }
+}
 
 if ($method === 'GET' && $action === 'state') {
     sh_json(sh_support_customer_state($owner));
@@ -180,12 +294,6 @@ if ($method === 'POST' && $action === 'handoff') {
     $result = sh_support_customer_handoff(max(0, (int)($input['id'] ?? 0)), $owner, (string)($input['client_id'] ?? ''));
     if (empty($result['ok'])) { sh_support_api_fail((string)($result['error'] ?? 'The handoff request could not be saved.'), (int)($result['http_status'] ?? 400)); }
     sh_json(['success' => true] + $result);
-}
-
-if ($method === 'POST' && $action === 'delete') {
-    $result = sh_support_customer_delete(max(0, (int)($input['id'] ?? 0)), $owner);
-    if (empty($result['ok'])) { sh_support_api_fail((string)($result['error'] ?? 'The conversation could not be deleted.'), (int)($result['http_status'] ?? 400)); }
-    sh_json(['success' => true]);
 }
 
 sh_support_api_fail('Unknown support action.', 404);

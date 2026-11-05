@@ -17,7 +17,6 @@
   const newButton = $('[data-chat-new]');
   const olderButton = $('[data-load-older]');
   const handoffButton = $('[data-handoff]');
-  const deleteButton = $('[data-chat-delete]');
   const sendButton = $('[data-chat-send]');
   const threadState = $('[data-thread-state]');
   const threadTitle = $('[data-thread-title]');
@@ -26,6 +25,7 @@
   const unavailableNode = $('[data-chat-unavailable]');
   const messageMap = new Map();
   const optimisticSends = new Map();
+  const customerReadRequests = new Set();
 
   const text = {
     en: {
@@ -34,8 +34,7 @@
       sending: 'Replying…', send: 'Send', preparing: 'Replying…', failed: "Sorry, I couldn't reply right now. Please try again.",
       retrySend: 'Retry send', sendUnconfirmed: 'Message not confirmed.', retry: 'Retry',
       you: 'You', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
-      conversation: 'Conversation', newChat: 'Start a new conversation', delete: 'Delete resolved conversation',
-      deleteConfirm: 'Permanently delete this resolved support conversation and its messages?',
+      conversation: 'Conversation', newChat: 'Start a new conversation',
       handoff: 'Request human support', resolvedForm: 'This conversation is resolved.',
       waiting: 'Your message is saved for human support.', chars: 'characters', older: 'Load older messages',
       requestError: 'Sorry, something went wrong. Please try again.', tooLong: 'Messages may contain at most 2,000 characters.',
@@ -48,8 +47,7 @@
       sending: 'উত্তর দেওয়া হচ্ছে…', send: 'পাঠান', preparing: 'উত্তর দেওয়া হচ্ছে…', failed: 'দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না। অনুগ্রহ করে আবার চেষ্টা করুন।',
       retrySend: 'আবার পাঠান', sendUnconfirmed: 'বার্তাটি নিশ্চিত করা যায়নি।', retry: 'আবার চেষ্টা',
       you: 'আপনি', assistant: 'ShopHaat সহকারী', agent: 'সাপোর্ট এজেন্ট', system: 'সাপোর্ট আপডেট',
-      conversation: 'কথোপকথন', newChat: 'নতুন কথোপকথন শুরু করুন', delete: 'সমাধান হওয়া কথোপকথন মুছুন',
-      deleteConfirm: 'এই সমাধান হওয়া সাপোর্ট কথোপকথন ও বার্তাগুলো স্থায়ীভাবে মুছবেন?',
+      conversation: 'কথোপকথন', newChat: 'নতুন কথোপকথন শুরু করুন',
       handoff: 'মানব-সাপোর্ট চান', resolvedForm: 'এই কথোপকথন সমাধান হয়েছে।',
       waiting: 'আপনার বার্তাটি মানব-সাপোর্টের জন্য সংরক্ষিত হয়েছে।', chars: 'অক্ষর', older: 'আগের বার্তা দেখুন',
       requestError: 'দুঃখিত, একটি সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।', tooLong: 'বার্তায় সর্বোচ্চ ২,০০০ অক্ষর লেখা যাবে।',
@@ -62,8 +60,7 @@
       sending: 'Reply hocche…', send: 'Send', preparing: 'Reply hocche…', failed: 'Sorry, ekhon reply dite parchi na. Please abar try korun.',
       retrySend: 'Abar pathan', sendUnconfirmed: 'Message confirm hoyni.', retry: 'Abar try korun',
       you: 'Apni', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
-      conversation: 'Conversation', newChat: 'Notun conversation shuru korun', delete: 'Resolved conversation delete korun',
-      deleteConfirm: 'Ei resolved support conversation ebong message-gulo permanently delete korben?',
+      conversation: 'Conversation', newChat: 'Notun conversation shuru korun',
       handoff: 'Human support chan', resolvedForm: 'Ei conversation resolve hoyeche.',
       waiting: 'Apnar message human support-er jonno save hoyeche.', chars: 'character', older: 'Purono message load korun',
       requestError: 'Sorry, ekta problem hoyeche. Please abar try korun.', tooLong: 'Message-e shorboccho 2,000 character thakte parbe.',
@@ -147,6 +144,20 @@
     return payload;
   }
 
+  async function markCustomerRead(conversationId) {
+    const id = Number(conversationId || 0);
+    if (!Number.isSafeInteger(id) || id <= 0 || customerReadRequests.has(id)) return;
+    customerReadRequests.add(id);
+    try {
+      await request('mark_read', { method: 'POST', data: { id } });
+      if (conversation && Number(conversation.id) === id) conversation.unread_for_customer = 0;
+    } catch (_) {
+      // A later state poll can retry; leave the transcript usable if read-marking fails.
+    } finally {
+      customerReadRequests.delete(id);
+    }
+  }
+
   function localTime(value) {
     if (!value) return '';
     const date = new Date(String(value).replace(' ', 'T') + 'Z');
@@ -208,7 +219,8 @@
 
   function appendReplyRetry(parent, message) {
     if (!support || !support.enabled || !conversation || conversation.ai_paused
-      || Number(conversation.assigned_admin_id || 0) > 0 || conversation.status === 'resolved') return;
+      || Number(conversation.assigned_admin_id || 0) > 0
+      || ['pending', 'assigned', 'resolved', 'closed'].includes(conversation.status)) return;
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.className = 'sh-btn sh-btn--sm sh-btn--ghost';
@@ -227,7 +239,8 @@
     list.forEach((message) => {
       if (message.is_internal || message.sender === 'internal_note') return;
       const item = document.createElement('li');
-      const displaySender = message.sender === 'assistant' && message.source === 'fallback' ? 'system' : message.sender;
+      const normalizedSender = message.sender === 'ai' ? 'assistant' : message.sender;
+      const displaySender = normalizedSender === 'assistant' && message.source === 'fallback' ? 'system' : normalizedSender;
       item.className = `sh-support-chat__message sh-support-chat__message--${['customer', 'assistant', 'admin', 'system'].includes(displaySender) ? displaySender : 'system'}`;
       const meta = document.createElement('p');
       meta.className = 'sh-support-chat__message-meta';
@@ -296,7 +309,6 @@
     newButton.textContent = tr('newChat');
     olderButton.textContent = tr('older');
     handoffButton.textContent = tr('handoff');
-    deleteButton.textContent = tr('delete');
     if (sendButton.lastChild && sendButton.lastChild.nodeType === Node.TEXT_NODE) {
       sendButton.lastChild.textContent = ` ${busy ? tr('sending') : tr('send')}`;
     }
@@ -320,7 +332,7 @@
 
   function updateView() {
     const enabled = support ? support.enabled !== false : true;
-    const isResolved = conversation && conversation.status === 'resolved';
+    const isResolved = conversation && ['resolved', 'closed'].includes(conversation.status);
     const hasConversation = Boolean(conversation && Number(conversation.id) > 0);
     const canSend = enabled && hasConversation && !isResolved;
     const handoffEnabled = Boolean(support && support.handoff_enabled);
@@ -335,14 +347,13 @@
 
     if (hasConversation) {
       threadTitle.textContent = conversation.subject || `${tr('conversation')} #${conversation.id}`;
-      threadState.textContent = conversation.status === 'resolved' ? tr('resolved')
+      threadState.textContent = isResolved ? tr('resolved')
         : conversation.status === 'pending' ? tr('pending')
           : conversation.status === 'assigned' || Number(conversation.assigned_admin_id || 0) > 0 ? tr('assigned') : tr('active');
       newButton.hidden = !isResolved || !enabled;
-      deleteButton.hidden = !isResolved;
       olderButton.hidden = !hasMore;
       handoffButton.hidden = !enabled || !handoffEnabled || isResolved || needsHuman;
-      actionsNode.hidden = handoffButton.hidden && deleteButton.hidden;
+      actionsNode.hidden = handoffButton.hidden;
       chatForm.hidden = !canSend;
       disabledNode.hidden = canSend;
       disabledNode.textContent = isResolved ? tr('resolvedForm') : !enabled ? tr('disabled') : needsHuman ? tr('waiting') : '';
@@ -356,7 +367,6 @@
       disabledNode.hidden = true;
       actionsNode.hidden = true;
       handoffButton.hidden = true;
-      deleteButton.hidden = true;
       newButton.hidden = true;
       olderButton.hidden = true;
     }
@@ -399,6 +409,9 @@
     }
     clearError();
     updateView();
+    if (nextConversation && Number(nextConversation.unread_for_customer || 0) > 0) {
+      void markCustomerRead(nextId);
+    }
   }
 
   async function loadState() {
@@ -558,21 +571,6 @@
     finally { busy = false; updateView(); }
   }
 
-  async function deleteConversation() {
-    if (busy || !conversation || !window.confirm(tr('deleteConfirm'))) return;
-    busy = true;
-    deleteButton.disabled = true;
-    try {
-      await request('delete', { method: 'POST', data: { id: Number(conversation.id) } });
-      conversation = null;
-      messageMap.clear();
-      hasMore = false;
-      olderCursor = 0;
-      await loadState();
-    } catch (error) { showError(error.message || tr('requestError')); }
-    finally { busy = false; updateView(); }
-  }
-
   async function loadOlder() {
     if (busy || !conversation || !hasMore || olderCursor <= 0) return;
     busy = true;
@@ -614,7 +612,6 @@
   chatForm.addEventListener('submit', sendMessage);
   olderButton.addEventListener('click', loadOlder);
   handoffButton.addEventListener('click', requestHandoff);
-  deleteButton.addEventListener('click', deleteConversation);
   chatInput.addEventListener('input', updateCharCount);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 

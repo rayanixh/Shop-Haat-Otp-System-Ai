@@ -14,11 +14,11 @@ This guide covers the additive customer-support feature in the existing ShopHaat
 1. Deploy to staging first if available. Save a full database export from cPanel/phpMyAdmin and a file backup of the current release. Keep both outside the public web root.
 2. Confirm the host meets the project’s existing requirements: PHP 8.1+, `pdo`, `pdo_mysql`, `mbstring`, and MySQL 5.7+ or MariaDB 10.3+. Ensure the database user can create tables and indexes, or plan to run the SQL migration using phpMyAdmin.
 3. Upload the branch’s changed PHP, CSS, JavaScript and migration files together. Do not deploy only the UI or only the API/schema.
-4. Run `install/migrations/2026-10-ai-customer-support.sql` against the ShopHaat database. It creates six support-owned tables and can be run again safely. It does not alter the catalog, customers, orders, carts, payments, stock or existing AI provider/model tables.
+4. If you prefer phpMyAdmin, run `install/migrations/2026-10-ai-customer-support.sql` to create missing tables. After deployment, load the storefront once so the schema-v4 PHP upgrader can add missing compatibility columns to existing legacy support tables and change support-child delete cascades to RESTRICT. It preserves legacy IDs, messages, FAQs, events and columns; no support rows are dropped.
 5. Sign in as the store owner and open **Admin → Customer Support → Support Inbox**. The role helper provisions the least-privilege `support_agent` role if it is missing. Assign that role to a trusted admin, or explicitly grant `support.manage` to an existing role. Existing `support_staff` roles are not elevated automatically.
 6. Only admins who have both `support.manage` and the existing `ai.use` permission can configure or test AI. Provider credentials remain managed in **AI Auto Work → AI Providers**.
 
-The support tables are also created idempotently by the existing application schema integration/first-use schema check when database permissions allow. The manual migration is the recommended, reviewable cPanel deployment step. If automatic setup cannot run, the admin page/API reports that the support database is not ready instead of silently claiming success.
+The AI support tables are created idempotently by the existing application schema integration/first-use schema check when database permissions allow. The manual migration creates missing tables, while the PHP upgrader handles additive column/index/backfill work for the legacy ShopHaat schema. If automatic setup cannot run, the admin page/API reports that the support database is not ready instead of silently claiming success. No support-thread delete or retention-prune action is available; conversations and history are retained.
 
 ## Configure the service
 
@@ -40,6 +40,7 @@ Run these against the actual deployed PHP/MySQL environment and a test provider/
 - Test an active product, an inactive product, stock/price display, and an unknown product. Only current active catalog records should produce product cards.
 - Test an account order, a guest order from its original browser session, and an order ID/number entered from another browser/session. Verify the latter returns no private order facts. Check that no order/payment/cart/inventory state changes.
 - Request human support. Confirm the localized system message, event, pending queue state and AI pause. Assign the thread, send a public reply, add an internal note, pause/resume AI, resolve and reopen. Verify internal notes never appear in the customer transcript.
+- After handoff, send several customer follow-ups, including retrying a response after refresh and from two tabs. Every customer message is saved once, no AI/FAQ/fallback reply or repeated handoff notice is created, unread/assignment/history remain intact, and only an authorized **Resume AI** action resumes automatic replies.
 - Confirm that only support-authorized admins can access inbox/settings APIs, that CSRF and cross-origin POST checks reject invalid requests, and that input/rate limits fail safely.
 - Check desktop and mobile page flow. Support transcript/inbox/history must grow with the document and use explicit **Load older messages** batches—no nested or fixed-height scrolling areas.
 - Re-test the existing Contact Support email form and ordinary account, checkout, payment, order, tracking and inventory workflows.
@@ -50,16 +51,14 @@ Run these against the actual deployed PHP/MySQL environment and a test provider/
 - A provider outage, disabled AI, a daily limit, invalid configuration or an empty provider answer uses deterministic fallback or a safe error. AI never writes to cart/order/payment/inventory state.
 - No database connection, provider key, customer data or browser was available in the implementation sandbox. The source-level checks run during implementation are listed in the pull-request report; they do not replace the staging checklist above.
 
-## Rollback
+## Soft rollback
 
-**The rollback SQL permanently deletes support conversations/messages, handoff history, FAQ edits and usage metrics. Export any records that must be retained first.**
+`install/migrations/2026-10-ai-customer-support-rollback.sql` is intentionally non-destructive. It disables customer chat/AI and writes an `ai_support_schema_v=disabled` marker, but it does not drop tables or delete conversations, messages, handoff history, FAQs or metrics. Do not run manual `DROP TABLE` statements against support tables.
 
-1. In Support Settings, disable customer chat and AI. Preserve the current database and file backups.
-2. Export `support_conversations`, `support_messages`, `support_handoff_events`, `support_faqs`, `support_ai_usage` and `support_rate_limits` if support history must be retained.
-3. If removing the feature from the release, restore the backed-up pre-feature PHP/assets and schema integration together. The existing Contact Support email form and unrelated store workflows remain.
-4. If dropping support data, run `install/migrations/2026-10-ai-customer-support-rollback.sql`. It drops only the six support-owned tables, forces customer chat and support AI off, and writes an `ai_support_schema_v=disabled` marker so a still-deployed copy of the support code will not recreate them on the next request. The inbox/API will remain unavailable until the forward migration is re-applied.
-5. The rollback preserves the other `support_chat_*` settings and the shared AI provider configuration in the existing settings tables. The chat/AI enable switches remain `0`; explicitly re-enable them in Support Settings only after review. If the owner wants to discard the remaining support-specific configuration, remove only those `support_chat_*` keys after review. Do not delete `ai_providers`, `ai_models`, or general AI settings.
-6. To re-enable later, deploy the support code and re-run the forward migration. The schema check clears the disabled marker when all tables exist; the FAQ seed marker is reset by rollback so the default FAQs can be seeded again.
+1. Preserve the current database and file backups.
+2. Run the soft rollback SQL only if support needs to be disabled while keeping its history. Alternatively, switch chat/AI off in Support Settings.
+3. If reverting application files, restore the backed-up release and schema integration together; keep the support tables so the legacy data remains available.
+4. To re-enable later, review the code and schema, set `ai_support_schema_v` from `disabled` to `1`, then load the application once to run the idempotent schema-v4 compatibility check. Re-enable chat/AI only after verification. Do not delete provider configuration or support history as part of rollback.
 
 ## Validation limits for this change
 

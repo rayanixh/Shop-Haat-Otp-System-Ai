@@ -23,7 +23,7 @@ function sh_perms_catalog(): array
         'Payments' => ['payments.view' => 'View payments', 'payments.verify' => 'Verify payments', 'payments.reject' => 'Reject payments', 'payments.refund' => 'Mark refunds (where supported)'],
         'Products' => ['products.view' => 'View products', 'products.create' => 'Create products', 'products.edit' => 'Edit products', 'products.delete' => 'Delete products', 'products.stock' => 'Manage stock / inventory', 'catalog.manage' => 'Manage categories & coupons'],
         'Customers' => ['customers.view' => 'View customers', 'customers.details' => 'View customer details', 'customers.orders' => 'View customer order history', 'customers.manage' => 'Block / reactivate customers'],
-        'Customer Support' => ['support.manage' => 'Manage customer-support inbox, replies, FAQs and policies'],
+        'Customer Support' => ['support.view' => 'View customer-support inbox and internal notes', 'support.reply' => 'Reply, add notes, assign and change conversation status', 'support.manage' => 'Manage customer-support settings and FAQs'],
         'Customer Verification' => ['verification.courier' => 'View courier history', 'verification.ip' => 'View IP address', 'verification.location' => 'View approximate location'],
         'Reports' => ['reports.view' => 'View reports', 'reports.export' => 'Export reports (CSV)'],
         'Settings' => ['settings.view' => 'View settings', 'settings.edit' => 'Edit settings', 'storefront.manage' => 'Homepage images, theme & page transition', 'integrations.manage' => 'Payment methods, couriers, messaging & notifications', 'seo.manage' => 'SEO Manager: titles, descriptions, sitemap & search-engine settings'],
@@ -50,17 +50,17 @@ function sh_perms_default_roles(): array
     return [
         ['slug' => 'super_admin', 'name' => 'Super Admin', 'description' => 'Full access to every module, including admins, roles and backups.', 'is_system' => 1, 'permissions' => sh_perms_all()],
         ['slug' => 'order_manager', 'name' => 'Order Manager', 'description' => 'Handles orders, shipping and customer verification.', 'is_system' => 0,
-            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'orders.update_status', 'orders.cancel', 'customers.view', 'customers.details', 'customers.orders', 'verification.courier', 'verification.ip', 'verification.location', 'reports.view', 'system.notifications']],
+            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'orders.update_status', 'orders.cancel', 'customers.view', 'customers.details', 'customers.orders', 'verification.courier', 'verification.ip', 'verification.location', 'reports.view', 'system.notifications', 'support.view', 'support.reply']],
         ['slug' => 'payment_manager', 'name' => 'Payment Manager', 'description' => 'Verifies and rejects payments.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'payments.verify', 'payments.reject', 'payments.refund', 'customers.view', 'customers.details', 'reports.view', 'system.notifications']],
         ['slug' => 'product_manager', 'name' => 'Product Manager', 'description' => 'Manages the catalogue and inventory.', 'is_system' => 0,
             'permissions' => ['dashboard.view', 'products.view', 'products.create', 'products.edit', 'products.delete', 'products.stock', 'catalog.manage', 'reports.view', 'system.notifications', 'ai.use']],
         ['slug' => 'support_agent', 'name' => 'Support Agent', 'description' => 'Handles customer-support conversations and handoff without access to AI provider credentials or store operations.', 'is_system' => 0,
-            'permissions' => ['dashboard.view', 'support.manage', 'system.notifications']],
+            'permissions' => ['dashboard.view', 'support.view', 'support.reply', 'system.notifications']],
         // Existing support_staff roles are intentionally not elevated automatically.
         // An owner can grant support.manage explicitly in Roles & Permissions.
-        ['slug' => 'support_staff', 'name' => 'Support Staff', 'description' => 'Read-only access to orders, payments and customers.', 'is_system' => 0,
-            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'customers.view', 'customers.details', 'customers.orders', 'system.notifications']],
+        ['slug' => 'support_staff', 'name' => 'Support Staff', 'description' => 'Handles customer conversations with read-only access to orders, payments and customers.', 'is_system' => 0,
+            'permissions' => ['dashboard.view', 'orders.view', 'orders.details', 'payments.view', 'customers.view', 'customers.details', 'customers.orders', 'system.notifications', 'support.view', 'support.reply']],
     ];
 }
 
@@ -152,7 +152,11 @@ function sh_admin_permissions(): array
 function sh_admin_can(string ...$perms): bool
 {
     $have = sh_admin_permissions();
-    foreach ($perms as $p) { if (in_array($p, $have, true)) { return true; } }
+    foreach ($perms as $p) {
+        if (in_array($p, $have, true)) { return true; }
+        // The broad support.manage permission includes inbox viewing/replies.
+        if (in_array($p, ['support.view', 'support.reply'], true) && in_array('support.manage', $have, true)) { return true; }
+    }
     return false;
 }
 

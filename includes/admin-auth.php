@@ -11,6 +11,10 @@ const SH_ADMIN_IDLE_TIMEOUT = 7200; // 2 hours
 
 function sh_admin(): ?array
 {
+    // A configured custom URL blocks every legacy /admin/*.php entry point.
+    // The dispatcher defines SH_ADMIN_ROUTE_CONTEXT only after matching the
+    // active or pending secret path; the secret itself is never auth.
+    if (function_exists('sh_admin_access_guard_request')) { sh_admin_access_guard_request(); }
     static $admin = null;
     static $done = false;
     if ($done) { return $admin; }
@@ -57,6 +61,7 @@ function sh_admin_logout(bool $expired = false): void
 {
     sh_session_start();
     unset($_SESSION['admin_id'], $_SESSION['admin_seen'], $_SESSION['csrf_token']);
+    if (defined('SH_ADMIN_ACCESS_VERIFY_SESSION_KEY')) { unset($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]); }
     if ($expired) { $_SESSION['sh_admin_expired'] = 1; }
     else { unset($_SESSION['sh_admin_expired']); }
     session_regenerate_id(true);
@@ -66,18 +71,34 @@ function sh_admin_logout(bool $expired = false): void
 function sh_require_admin(): array
 {
     $a = sh_admin();
+    if ($a !== null && !defined('SH_ADMIN_PAGE_AUTHORIZED')) { define('SH_ADMIN_PAGE_AUTHORIZED', true); }
+    if ($a !== null && function_exists('sh_admin_access_enabled') && sh_admin_access_enabled()
+        && preg_match('~(?:^|/)api(?:/|$)~i', (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '')) === 1
+        && !defined('SH_ADMIN_ROUTE_CONTEXT')) {
+        // Authenticated admin APIs may return internal admin links, but only
+        // after the ordinary session check has succeeded.
+        define('SH_ADMIN_ROUTE_CONTEXT', true);
+    }
     if ($a === null) {
         $redirect = (string)($_SERVER['REQUEST_URI'] ?? 'admin/dashboard.php');
         $loginUrl = 'admin/login.php?redirect=' . urlencode($redirect);
         $expired = !empty($_SESSION['sh_admin_expired']);
         if (sh_wants_json()) {
+            // Never disclose the custom route to unauthenticated public API
+            // callers. Admin pages can reload their already-open secret URL;
+            // route-dispatched AJAX can receive the current custom login URL.
+            $jsonLoginUrl = sh_url($loginUrl);
+            if (function_exists('sh_admin_access_enabled') && sh_admin_access_enabled()
+                && !defined('SH_ADMIN_ROUTE_CONTEXT')) {
+                $jsonLoginUrl = null;
+            }
             sh_json([
                 'success' => false,
                 'error' => $expired ? 'Your admin session has expired. Please sign in again.' : 'Admin authentication required.',
                 'auth_required' => true,
                 'session_expired' => $expired,
                 'admin_required' => true,
-                'login_url' => sh_url($loginUrl),
+                'login_url' => $jsonLoginUrl,
             ], 401);
         }
         if ($expired) {
@@ -85,6 +106,12 @@ function sh_require_admin(): array
             sh_flash('info', 'Your admin session has expired. Please sign in again.');
         }
         sh_redirect($loginUrl);
+    }
+    // Every admin POST mutates state or performs a protected action. Enforce
+    // CSRF centrally so a route cannot accidentally omit its page-level check.
+    if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'POST'
+        && function_exists('sh_csrf_require')) {
+        sh_csrf_require();
     }
     return $a;
 }

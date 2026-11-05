@@ -12,14 +12,16 @@ const supportJs = readFileSync(join(ROOT, 'assets/js/support.js'), 'utf8');
 const supportCss = readFileSync(join(ROOT, 'assets/css/support.css'), 'utf8');
 const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8');
 const supportApi = readFileSync(join(ROOT, 'api/support.php'), 'utf8');
+const supportAdminJs = readFileSync(join(ROOT, 'assets/js/support-admin.js'), 'utf8');
 const supportSchema = readFileSync(join(ROOT, 'ai/support-schema.php'), 'utf8');
+const installSchema = readFileSync(join(ROOT, 'install/schema.php'), 'utf8');
 
 const html = `<!doctype html><html><body>
 <div data-support-chat data-api="/api/support.php" data-csrf="test-token">
   <div data-chat-error hidden></div>
   <div data-chat-empty hidden><p data-chat-unavailable hidden></p><button data-chat-open></button></div>
   <div data-chat-history hidden><span data-thread-title></span><span data-thread-state></span>
-    <button data-chat-new hidden></button><button data-chat-delete hidden></button>
+    <button data-chat-new hidden></button>
     <ol data-chat-messages></ol><button data-load-older hidden></button>
     <div data-chat-actions><button data-handoff hidden></button></div>
     <form data-chat-form><textarea data-chat-input></textarea><span data-char-count></span><button data-chat-send><svg></svg> Send</button></form>
@@ -37,6 +39,8 @@ let failNextHumanResponseAfterCommit = false;
 let failNextHumanSendWithHttp = false;
 let malformNextHumanResponse = false;
 let omitNextHumanRowFromSnapshot = false;
+let unreadForCustomer = false;
+const markReadRequests = [];
 const humanRows = [];
 let humanMessageId = 700;
 const emptySnapshot = {
@@ -117,7 +121,21 @@ function jsonResponse(payload, status = 200) {
 async function fetchMock(rawUrl, options = {}) {
   const url = new URL(rawUrl, 'http://localhost');
   const action = url.searchParams.get('action');
-  if (action === 'state') { stateUrls.push(url.search); return jsonResponse(humanMode ? makeHumanSnapshot() : emptySnapshot); }
+  if (action === 'state') {
+    stateUrls.push(url.search);
+    const snapshot = humanMode ? makeHumanSnapshot() : { ...emptySnapshot, conversation: { ...emptySnapshot.conversation } };
+    if (snapshot.conversation) snapshot.conversation.unread_for_customer = unreadForCustomer ? 1 : 0;
+    return jsonResponse(snapshot);
+  }
+  if (action === 'mark_read') {
+    const body = JSON.parse(options.body || '{}');
+    markReadRequests.push({ method: options.method, csrf: options.headers && options.headers['X-CSRF-Token'], ...body });
+    if (options.method !== 'POST' || !options.headers || options.headers['X-CSRF-Token'] !== 'test-token') {
+      return jsonResponse({ success: false, error: 'CSRF required.' }, 403);
+    }
+    unreadForCustomer = false;
+    return jsonResponse({ success: true });
+  }
   if (action === 'retry') {
     const body = JSON.parse(options.body || '{}');
     retryRequests.push(body);
@@ -189,7 +207,7 @@ try {
   check('ordinary messages reach selected-model inference after order authorization', inferenceAt > 0 && processCode.indexOf('sh_support_find_authorized_order(') < inferenceAt && !/if\s*\(\s*!\s*\$faqs/.test(processCode));
   check('configuration and inference failures mark the saved message failed instead of saving an FAQ reply', processCode.includes('sh_support_mark_reply_failed($conversationId, $customerMessageId)') && !processCode.slice(inferenceAt).includes("'fallback'"));
   check('stale pending replies become retryable after the same bounded 180-second window', supportJs.includes('>= 180000') && supportBackend.includes('time() - 180'));
-  check('only real AI replies are stored as assistant messages', supportBackend.includes("$sender = $source === 'ai' ? 'assistant' : 'system';") && supportJs.includes("message.source === 'fallback' ? 'system' : message.sender"));
+  check('only real AI replies are stored/rendered as assistant messages', supportBackend.includes("$sender = $source === 'ai' ? 'assistant' : 'system';") && supportJs.includes("message.sender === 'ai' ? 'assistant' : message.sender") && supportJs.includes("normalizedSender === 'assistant' && message.source === 'fallback' ? 'system' : normalizedSender"));
 
   const sendStart = supportBackend.indexOf('function sh_support_customer_send(');
   const sendEnd = supportBackend.indexOf('function sh_support_customer_retry(', sendStart);
@@ -197,11 +215,15 @@ try {
   const retryStart = sendEnd;
   const retryEnd = supportBackend.indexOf('function sh_support_customer_handoff(', retryStart);
   const retryCode = supportBackend.slice(retryStart, retryEnd);
-  check('customer send is owner-scoped and blocks only resolved conversations, not human takeover', sendCode.includes('sh_support_conversation_for_owner($conversationId, $owner, true)') && sendCode.includes("status'] === 'resolved'") && sendCode.includes("$humanControlled = (int)$conversation['ai_paused'] === 1") && sendCode.includes("in_array((string)$conversation['status'], ['pending','assigned'], true)"));
-  check('human-controlled sends keep assignment/status and refresh agent activity/unread state', sendCode.includes("SET subject = ?, last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_admin = 1") && sendCode.includes("SET last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_customer = 1, unread_for_admin = 1") && !sendCode.includes("SET status = 'assigned'"));
-  check('human-controlled sends use no AI reply state and return before inference', sendCode.includes("$replyStatus = $humanControlled ? 'none' : 'pending'") && sendCode.indexOf('if ($humanControlled) {') < sendCode.indexOf('sh_support_process_customer_message('));
-  check('pending/assigned status alone also blocks AI before inference and suppresses late replies', processCode.includes("in_array((string)$current['status'], ['pending','assigned','resolved'], true)") && supportBackend.includes("in_array((string)$conversation['status'], ['pending','assigned','resolved'], true)"));
-  check('committed messages have an exact-row acknowledgement and idempotent retries are checked before resolved status', supportBackend.includes("'message_saved' => true") && sendCode.includes("(string)$duplicate['sender'] !== 'customer'") && sendCode.includes("hash_equals((string)$duplicate['body'], $body)") && sendCode.indexOf('if ($duplicate !== null)') < sendCode.indexOf("if ((string)$conversation['status'] === 'resolved')"));
+  check('customer send is owner-scoped and blocks only resolved/closed threads, not human takeover', sendCode.includes('sh_support_conversation_for_owner($conversationId, $owner, true)') && sendCode.includes("['resolved', 'closed']") && sendCode.includes("$humanControlled = (int)$conversation['ai_paused'] === 1") && sendCode.includes("in_array((string)$conversation['status'], ['pending','assigned'], true)"));
+  const humanBranchStart = sendCode.indexOf('if ($humanControlled) {');
+  const humanBranchEnd = sendCode.indexOf("if ($handoffRequest && sh_support_handoff_enabled())", humanBranchStart);
+  const humanBranch = sendCode.slice(humanBranchStart, humanBranchEnd);
+  check('human-controlled follow-ups preserve state and update only inbox activity', sendCode.includes("SET subject = ?, last_message_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP(), unread_for_admin = 1") && !humanBranch.includes("SET status = 'assigned'") && !humanBranch.includes('assigned_admin_id =') && !humanBranch.includes('ai_paused ='));
+  check('human-controlled follow-ups create no AI, fallback, handoff event, FAQ reply, or repeated system notice', humanBranch.includes('$pdo->commit()') && !humanBranch.includes('sh_insert(') && !humanBranch.includes('sh_support_insert_handoff_event') && sendCode.indexOf('if ($humanControlled) {') < sendCode.indexOf('sh_support_process_customer_message('));
+  check('human-controlled sends use no AI reply state and return before inference', sendCode.includes("$replyStatus = $humanControlled ? 'none' : 'pending'") && humanBranch.includes('return sh_support_customer_send_success'));
+  check('pending/assigned/closed status alone also blocks AI before inference and suppresses late replies', processCode.includes("in_array((string)$current['status'], ['pending','assigned','resolved','closed'], true)") && supportBackend.includes("in_array((string)$conversation['status'], ['pending','assigned','resolved','closed'], true)"));
+  check('committed messages have an exact-row acknowledgement and idempotent retries are checked before resolved status', supportBackend.includes("'message_saved' => true") && sendCode.includes("(string)$duplicate['sender'] !== 'customer'") && sendCode.includes("hash_equals((string)$duplicate['body'], $body)") && sendCode.indexOf('if ($duplicate !== null)') < sendCode.indexOf("if (in_array((string)$conversation['status'], ['resolved', 'closed'], true))"));
   check('customer AI-reply retry during takeover queues the existing row for the agent without invoking AI', retryCode.includes("reply_status = 'none'") && retryCode.includes('unread_for_admin = 1') && retryCode.indexOf('if ($humanControlled) {') < retryCode.indexOf('sh_support_process_customer_message('));
   const ownerStart = supportBackend.indexOf('function sh_support_owner_clause(');
   const ownerEnd = supportBackend.indexOf('function sh_support_conversation_for_owner(', ownerStart);
@@ -213,14 +235,34 @@ try {
   const customerMessagesEnd = supportBackend.indexOf('function sh_support_public_conversation(', customerMessagesStart);
   const customerMessagesCode = supportBackend.slice(customerMessagesStart, customerMessagesEnd);
   check('customer API still enforces CSRF, request limits, length/client-ID validation and owner-scoped send', supportApi.includes("if ($method === 'POST') { sh_csrf_require(); }") && sendCode.includes('sh_support_request_rate_allowed($owner)') && sendCode.includes('sh_support_valid_client_id($clientId)') && sendCode.includes('sh_support_clean_text($body, SH_SUPPORT_MESSAGE_MAX)') && sendCode.includes('sh_support_conversation_for_owner($conversationId, $owner, true)'));
+  const customerSnapshotStart = supportBackend.indexOf('function sh_support_customer_snapshot(');
+  const customerSnapshotEnd = supportBackend.indexOf('function sh_support_customer_send_success(', customerSnapshotStart);
+  const customerSnapshotCode = supportBackend.slice(customerSnapshotStart, customerSnapshotEnd);
+  check('customer GET state is read-only; unread clearing uses owner-scoped CSRF POST and frontend follows it', !customerSnapshotCode.includes('UPDATE support_conversations SET unread_for_customer = 0') && supportBackend.includes('function sh_support_customer_mark_read(') && supportApi.includes("$method === 'POST' && $action === 'mark_read'") && supportJs.includes("request('mark_read', { method: 'POST'"));
   check('cross-customer isolation still scopes logged-in users and guest tokens independently', ownerCode.includes('user_id = ?') && ownerCode.includes('guest_token_hash = ?') && ownerCode.includes('1 = 0') && supportApi.includes('sh_support_owner_context('));
   check('customer snapshots exclude internal notes while the agent thread remains separate', customerMessagesCode.includes('is_internal = 0') && customerMessagesCode.includes('sender <>') && customerMessagesCode.includes('internal_note') && supportBackend.includes("$sender = $internal ? 'internal_note' : 'admin';"));
+  const adminThreadReadStart = supportApi.indexOf("if ($method === 'GET' && $action === 'admin_thread')");
+  const adminThreadReadEnd = supportApi.indexOf("if ($method === 'GET' && $action === 'admin_poll')", adminThreadReadStart);
+  const adminThreadReadCode = supportApi.slice(adminThreadReadStart, adminThreadReadEnd);
+  check('opening an admin thread is read-only GET; marking it read is a CSRF-protected POST', adminThreadReadCode.includes('sh_support_admin_messages(') && !adminThreadReadCode.includes('sh_support_admin_mark_read') && supportApi.includes("$method === 'POST' && $action === 'admin_mark_read'") && supportAdminJs.includes("request('admin_mark_read', { method: 'POST'"));
   check('assigned follow-ups remain visible and bubble the assigned conversation in the agent inbox', adminListCode.includes('c.unread_for_admin') && adminListCode.includes('c.updated_at DESC') && adminListCode.includes('m.is_internal = 0') && supportBackend.includes('function sh_support_admin_poll('));
-  check('existing schema already supports manual customer/admin/system rows and the non-AI none status', supportSchema.includes("sender ENUM('customer','assistant','admin','internal_note','system')") && supportSchema.includes("source ENUM('ai','fallback','manual','system')") && supportSchema.includes("reply_status ENUM('none','pending','complete','failed','paused')"));
+  check('support schema keeps both legacy AI and new assistant sender labels plus the non-AI none status', supportSchema.includes("sender ENUM('customer','ai','assistant','admin','internal_note','system')") && supportSchema.includes("source ENUM('ai','fallback','manual','system')") && supportSchema.includes("reply_status ENUM('none','pending','complete','failed','paused')"));
+  check('legacy support fields, schema-v4 upgrade and restrictive history foreign keys are present without replacing old rows', ['customer_name', 'customer_email', 'customer_phone', 'last_product_id', 'last_order_number', 'context_summary', 'unread_admin', 'unread_customer', 'legacy_event_id', 'facts_json', 'client_msg_id'].every((field) => supportSchema.includes(field)) && supportSchema.includes('function sh_support_schema_upgrade_legacy') && supportSchema.includes('function sh_support_schema_restrict_conversation_delete') && supportSchema.includes('ON DELETE RESTRICT') && supportSchema.includes('DELETE_RULE') && installSchema.includes('fk_supmsg_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE RESTRICT') && installSchema.includes('fk_supevt_conv FOREIGN KEY (conversation_id) REFERENCES support_conversations (id) ON DELETE RESTRICT') && supportBackend.includes("ai_support_schema_v','4'"));
+  check('handoff event upsert is idempotent and is part of the transaction', supportBackend.includes('ON DUPLICATE KEY UPDATE id = id') && supportBackend.includes('function sh_support_customer_handoff'));
+  check('reopen keeps AI paused until a separate explicit Resume AI action', supportBackend.includes("Conversation reopened; AI remains paused until an authorized admin explicitly resumes it.") && supportBackend.includes("status = 'open', ai_paused = 1") && supportBackend.includes("$action === 'resume_ai'"));
+  check('no support conversation/message/event deletion or retention-prune query remains in live handlers', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events|events|ai_usage|rate_limits)/i.test(supportBackend + supportApi + readFileSync(join(ROOT, 'includes/support.php'), 'utf8')) && !supportBackend.includes('sh_support_retention_prune();'));
   check('front end accepts a committed message acknowledgement even when the snapshot omits that row', supportJs.includes('payload.message_saved === true') && supportJs.includes('reconcileSavedSend(send, payload.message)') && supportJs.includes("message.sender === 'customer'"));
 
   await sleep(20);
   check('customer state loaded before sending', document.querySelector('[data-thread-title]').textContent.includes('#7'));
+
+  unreadForCustomer = true;
+  const unreadDom = new JSDOM(html, { url: 'http://localhost/support.php', runScripts: 'outside-only' });
+  unreadDom.window.fetch = fetchMock;
+  unreadDom.window.eval(supportJs);
+  await sleep(30);
+  unreadDom.window.close();
+  check('unread customer state is cleared only by same-origin POST carrying the CSRF token', markReadRequests.some((request) => request.method === 'POST' && request.csrf === 'test-token' && request.id === 7) && unreadForCustomer === false);
 
   input.value = 'Where is my order?';
   form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

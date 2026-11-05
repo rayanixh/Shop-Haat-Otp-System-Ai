@@ -53,7 +53,8 @@ class AnthropicProvider extends AbstractAIProvider
             $payload['system'] = trim(($payload['system'] ?? '') . "\nRespond with a single JSON object only, no prose, no code fences.");
         }
 
-        $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, 120);
+        $timeout = max(5, min(300, (int)($options['timeout'] ?? 120)));
+        $res = AIHttpClient::post($this->baseUrl() . '/messages', $this->headers(), $payload, $timeout);
         if (!$res['ok']) { return $this->httpFailure($res); }
         $j = $res['json'];
         $envelope = $this->responseEnvelopeFailure((array)$j, (int)($res['status'] ?? 200));

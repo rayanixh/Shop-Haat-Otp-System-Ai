@@ -9,7 +9,9 @@ require_once SH_ROOT . '/includes/ai-support.php';
 sh_session_start();
 $admin = sh_require_admin();
 sh_perms_schema_ensure();
-sh_require_perm('support.manage');
+if (!sh_admin_can('support.view', 'support.reply', 'support.manage')) { sh_admin_deny(); }
+$canReply = sh_admin_can('support.reply', 'support.manage');
+$canManage = sh_admin_can('support.manage');
 if (!sh_support_schema_ensure()) {
     http_response_code(503);
     $adminTitle = 'Support Inbox';
@@ -19,8 +21,6 @@ if (!sh_support_schema_ensure()) {
     require __DIR__ . '/_footer.php';
     exit;
 }
-sh_support_retention_prune();
-
 $adminPage = 'support';
 $adminTitle = 'Customer Support Inbox';
 $adminStyles = ['assets/css/support-admin.css'];
@@ -47,7 +47,7 @@ require __DIR__ . '/_layout.php';
       <h2>Support Inbox</h2>
       <p>Assign and reply to customer threads, add internal-only notes, pause or resume AI, and resolve conversations. Messages and customer details are visible only to administrators with the support permission.</p>
     </div>
-    <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php')) ?>"><?= sh_icon('settings', 14) ?> Settings &amp; FAQs</a>
+    <?php if ($canManage): ?><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php')) ?>"><?= sh_icon('settings', 14) ?> Settings &amp; FAQs</a><?php endif; ?>
   </div>
 
   <div class="sh-support-admin__stats" data-support-stats>
@@ -61,7 +61,7 @@ require __DIR__ . '/_layout.php';
     <label class="sh-field"><span class="sh-field__label">Status</span>
       <select class="sh-select" name="status" data-filter-status>
         <option value="">All conversations</option>
-        <?php foreach (['open' => 'Open', 'pending' => 'Pending human support', 'assigned' => 'Assigned', 'resolved' => 'Resolved'] as $key => $label): ?>
+        <?php foreach (['open' => 'Open', 'pending' => 'Pending human support', 'assigned' => 'Assigned', 'resolved' => 'Resolved', 'closed' => 'Closed'] as $key => $label): ?>
           <option value="<?= e($key) ?>" <?= $statusFilter === $key ? 'selected' : '' ?>><?= e($label) ?></option>
         <?php endforeach; ?>
       </select>
@@ -118,7 +118,7 @@ require __DIR__ . '/_layout.php';
         <button class="sh-btn sh-btn--sm sh-btn--ghost sh-support-admin__older" type="button" data-thread-older hidden>Load older messages</button>
         <ol class="sh-support-admin__messages" data-thread-messages aria-live="polite" aria-relevant="additions text"></ol>
 
-        <form class="sh-support-admin__reply" data-reply-form>
+        <form class="sh-support-admin__reply" data-reply-form <?= $canReply ? '' : 'hidden' ?>>
           <label class="sh-field"><span class="sh-field__label">Message type</span>
             <select class="sh-select" data-reply-kind>
               <option value="public">Reply to customer</option>

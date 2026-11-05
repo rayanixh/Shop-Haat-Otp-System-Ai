@@ -1,4 +1,8 @@
 <?php
+if (!defined('SH_ADMIN_PAGE_AUTHORIZED')) {
+    http_response_code(404);
+    exit;
+}
 /**
  * Admin shell (sidebar + topbar). Include after sh_require_admin().
  * Expects $adminPage and $adminTitle.
@@ -63,7 +67,8 @@ $nav = [
         ['verification', 'verification.php', 'shield', 'Verification Providers', 0, 'integrations.manage'],
     ],
     'Customer Support' => [
-        ['support', 'support.php', 'message', 'Support Inbox', 0, 'support.manage'],
+        ['support', 'support.php', 'message', 'Support Inbox', $badgeSupport, 'support.view'],
+        ['support-settings', 'support-settings.php', 'settings', 'Support Settings', 0, 'support.manage'],
     ],
     'Reports' => [
         ['reports:sales',     'reports.php?tab=sales',     'trending-up', 'Sales Reports', 0, 'reports.view'],
@@ -90,7 +95,7 @@ $nav = [
         ['google_login', 'google-login.php',     'log-in',   'Google Login', 0, '@superadmin'],
     ],
     'Security' => [
-        ['security',      'security.php',      'smartphone', 'SMS / OTP', 0, '@superadmin'],
+        ['security',      'security.php',      'shield', 'Security & Access', 0, '@superadmin'],
         ['otp_logs',      'otp-logs.php',      'message',    'OTP Logs', 0, '@superadmin'],
         ['security_logs', 'security-logs.php', 'lock',       'Security Logs', 0, '@superadmin'],
     ],
@@ -171,8 +176,12 @@ $adminFlash = sh_flash_pull();
     <p class="sh-admin-sidebar__group">Account</p>
     <a class="sh-admin-sidebar__link" href="<?= e(sh_url('index.php')) ?>" target="_blank" rel="noopener">
       <?= sh_icon('external', 17) ?><span>View store</span></a>
-    <a class="sh-admin-sidebar__link" href="<?= e(sh_url('admin/logout.php')) ?>">
-      <?= sh_icon('log-out', 17) ?><span>Sign out</span></a>
+    <form method="post" action="<?= e(sh_url('admin/logout.php')) ?>">
+      <?= sh_csrf_field() ?>
+      <button class="sh-admin-sidebar__link" type="submit" style="width:100%;text-align:left;background:none;border:0;color:inherit;cursor:pointer;font:inherit">
+        <?= sh_icon('log-out', 17) ?><span>Sign out</span>
+      </button>
+    </form>
     <div style="height:24px"></div>
     </nav>
   </aside>
@@ -193,14 +202,19 @@ $adminFlash = sh_flash_pull();
         </a>
         <div class="sh-admin-bell__menu" hidden>
           <div class="sh-admin-bell__head"><strong>Notifications</strong>
-            <?php if ($badgeInbox > 0): ?><form method="post" action="<?= e(sh_url('admin/inbox.php')) ?>"><?= sh_csrf_field() ?><input type="hidden" name="form" value="read_all"><input type="hidden" name="back" value="1"><button type="submit">Mark all as read</button></form><?php endif; ?>
+            <?php if ($badgeInbox > 0): ?><form method="post" action="<?= e(sh_url('admin/inbox.php')) ?>"><?= sh_csrf_field() ?><input type="hidden" name="form" value="read_all"><input type="hidden" name="back" value="<?= e(sh_csrf_return_target()) ?>"><button type="submit">Mark all as read</button></form><?php endif; ?>
           </div>
           <?php if (!$inboxItems): ?><p class="sh-admin-bell__empty">You're all caught up.</p>
           <?php else: foreach ($inboxItems as $n): ?>
-            <a class="sh-admin-bell__item" href="<?= e(sh_url('admin/inbox.php?open=' . (int)$n['id'])) ?>">
-              <span class="sh-admin-bell__icon"><?= sh_icon(sh_admin_notification_icon((string)$n['type']), 15) ?></span>
-              <span class="sh-admin-bell__text"><strong><?= e($n['title']) ?></strong><?php if ($n['body']): ?><small><?= e($n['body']) ?></small><?php endif; ?><small><?= e(sh_time_ago($n['created_at'])) ?></small></span>
-            </a>
+            <form method="post" action="<?= e(sh_url('admin/inbox.php')) ?>" style="margin:0">
+              <?= sh_csrf_field() ?>
+              <input type="hidden" name="form" value="open">
+              <input type="hidden" name="id" value="<?= (int)$n['id'] ?>">
+              <button class="sh-admin-bell__item" type="submit" style="display:flex;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;cursor:pointer">
+                <span class="sh-admin-bell__icon"><?= sh_icon(sh_admin_notification_icon((string)$n['type']), 15) ?></span>
+                <span class="sh-admin-bell__text"><strong><?= e($n['title']) ?></strong><?php if ($n['body']): ?><small><?= e($n['body']) ?></small><?php endif; ?><small><?= e(sh_time_ago($n['created_at'])) ?></small></span>
+              </button>
+            </form>
           <?php endforeach; endif; ?>
           <a class="sh-admin-bell__all" href="<?= e(sh_url('admin/inbox.php')) ?>">View all notifications</a>
         </div>

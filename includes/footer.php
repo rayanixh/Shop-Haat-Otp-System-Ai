@@ -108,8 +108,11 @@ $fCats = $shCategories ?? sh_categories();
   <a href="<?= e(sh_url('account.php')) ?>"><?= sh_icon('user', 20) ?><span>Account</span></a>
 </nav>
 
+<?php $shDedicatedSupportPage = basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'support.php'; if (!$shDedicatedSupportPage && function_exists('sh_setting') && sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) === '1') { include __DIR__ . '/support-widget.php'; } ?>
+
 <div class="sh-toasts" id="sh-toasts" aria-live="polite" aria-atomic="true"></div>
 <script src="<?= e(sh_asset('assets/js/app.js')) ?>" defer></script>
+<?php if (!$shDedicatedSupportPage && function_exists('sh_setting') && sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) === '1'): ?><script src="<?= e(sh_asset('assets/js/support-chat.js')) ?>" defer></script><?php endif; ?>
 <?php foreach (($pageScripts ?? []) as $src): ?>
 <script src="<?= e(sh_asset((string)$src)) ?>" defer></script>
 <?php endforeach; ?>

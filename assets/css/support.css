@@ -183,18 +183,13 @@
 }
 .sh-support-chat__compose-foot { align-items: center; margin-top: 9px; }
 .sh-support-chat__counter { color: var(--sh-muted, #667085); font-size: 12px; }
-.sh-support-chat__disabled,
-.sh-support-muted {
+.sh-support-chat__disabled {
   color: var(--sh-muted, #667085);
   font-size: 13px;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
 .sh-support-chat__disabled { margin-top: 14px; padding: 12px; border-radius: 10px; background: #f7f8fa; }
-.sh-support-contact-list { display: grid; gap: 9px; list-style: none; margin: 0; padding: 0; }
-.sh-support-contact-list li { display: flex; gap: 9px; align-items: flex-start; color: var(--sh-ink-2, #344054); font-size: 13px; line-height: 1.6; }
-.sh-support-contact-list li span { min-width: 0; overflow-wrap: anywhere; }
-.sh-support-muted { margin: 10px 0 0; }
 @media (max-width: 680px) {
   .sh-support-chat { padding: 16px; border-radius: 14px; }
   .sh-support-chat__heading { align-items: flex-start; }

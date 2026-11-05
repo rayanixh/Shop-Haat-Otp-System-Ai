@@ -5,6 +5,7 @@
   const api = root.dataset.api || '';
   const csrf = root.dataset.csrf || '';
   const adminId = Number(root.dataset.adminId || 0);
+  const canReply = root.dataset.canReply === '1';
   const superadmin = root.dataset.superadmin === '1';
   const $ = (selector) => root.querySelector(selector);
   const listNode = $('[data-conversation-list]');
@@ -29,6 +30,8 @@
   const takeoverButton = $('[data-takeover]');
   const aiActionButton = $('[data-ai-action]');
   const resolveButton = $('[data-resolve-action]');
+  const threadActions = $('.sh-support-admin__thread-actions');
+  const assignmentControls = $('.sh-support-admin__assignment');
   const replyForm = $('[data-reply-form]');
   const replyKind = $('[data-reply-kind]');
   const replyLabel = $('[data-reply-label]');
@@ -80,6 +83,12 @@
     const response = await fetch(url.toString(), config);
     let data;
     try { data = await response.json(); } catch (_) { throw new Error('The server returned an unreadable response.'); }
+    if (response.status === 401 && data.admin_required) {
+      // The shared API intentionally never reveals a custom admin route to an
+      // unauthenticated caller. Reload the already-open admin URL instead.
+      window.location.reload();
+      throw new Error('Your admin session expired. Reloading the sign-in page.');
+    }
     if (!response.ok || data.success === false) throw new Error(data.error || 'The request could not be completed.');
     return data;
   }
@@ -92,7 +101,7 @@
   }
 
   function statusLabel(status) {
-    return ({ open: 'Open', pending: 'Pending human support', assigned: 'Assigned', resolved: 'Resolved' })[status] || String(status || 'Open');
+    return ({ open: 'Open', pending: 'Pending human support', assigned: 'Assigned', resolved: 'Resolved', closed: 'Closed' })[status] || String(status || 'Open');
   }
 
   function makeBadge(label, modifier = '') {
@@ -197,6 +206,9 @@
     try {
       const data = await request('admin_thread', { params: { id } });
       populateThread(data, false);
+      // Reading a thread changes its unread state, so keep that mutation on a
+      // CSRF-protected POST instead of the history/refreshable GET endpoint.
+      try { await request('admin_mark_read', { method: 'POST', data: { id } }); } catch (_) {}
       if (scrollIntoView && window.matchMedia('(max-width: 980px)').matches) {
         threadNode.scrollIntoView({ block: 'start', behavior: 'smooth' });
       }
@@ -260,8 +272,10 @@
     threadStatus.textContent = [statusLabel(currentThread.status), assignee, Number(currentThread.ai_paused) ? 'AI paused' : 'AI active', last].filter(Boolean).join(' · ');
 
     const assignedId = Number(currentThread.assigned_admin_id || 0);
-    const resolved = currentThread.status === 'resolved';
+    const resolved = currentThread.status === 'resolved' || currentThread.status === 'closed';
     const assignedToOther = assignedId > 0 && assignedId !== adminId && !superadmin;
+    threadActions.hidden = !canReply;
+    assignmentControls.hidden = !canReply;
     aiActionButton.textContent = Number(currentThread.ai_paused) ? 'Resume AI' : 'Pause AI & take over';
     aiActionButton.dataset.transition = Number(currentThread.ai_paused) ? 'resume_ai' : 'takeover';
     aiActionButton.disabled = resolved || assignedToOther;
@@ -272,11 +286,11 @@
     takeoverButton.disabled = resolved || assignedToOther;
     assignButton.disabled = resolved || !agentSelect.value;
     unassignButton.hidden = assignedId <= 0;
-    unassignButton.disabled = resolved || assignedToOther;
-    replyForm.hidden = resolved;
-    replyInput.disabled = resolved;
-    replyKind.disabled = resolved;
-    replySend.disabled = resolved || busy;
+    unassignButton.disabled = !canReply || resolved || assignedToOther;
+    replyForm.hidden = resolved || !canReply;
+    replyInput.disabled = resolved || !canReply;
+    replyKind.disabled = resolved || !canReply;
+    replySend.disabled = resolved || !canReply || busy;
     olderButton.hidden = !hasMore;
     renderEvents();
     renderMessages();
@@ -293,17 +307,18 @@
     }
     items.forEach((message) => {
       const sender = String(message.sender || 'system');
+      const displaySender = sender === 'ai' ? 'assistant' : sender;
       const internal = sender === 'internal_note' || Number(message.is_internal) === 1;
-      const allowedClass = ['customer', 'assistant', 'admin', 'system', 'internal_note'].includes(sender) ? sender : 'system';
+      const allowedClass = ['customer', 'assistant', 'admin', 'system', 'internal_note'].includes(displaySender) ? displaySender : 'system';
       const item = document.createElement('li');
       item.className = `sh-support-admin__message sh-support-admin__message--${allowedClass}`;
       const meta = document.createElement('p');
       meta.className = 'sh-support-admin__message-meta';
       const who = document.createElement('strong');
       who.textContent = internal ? 'Internal note · not sent to customer'
-        : sender === 'customer' ? 'Customer'
-          : sender === 'assistant' ? 'AI / fallback assistant'
-            : sender === 'admin' ? (message.admin_name ? `Support agent · ${message.admin_name}` : 'Support agent') : 'System update';
+        : displaySender === 'customer' ? 'Customer'
+          : displaySender === 'assistant' ? 'AI / fallback assistant'
+            : displaySender === 'admin' ? (message.admin_name ? `Support agent · ${message.admin_name}` : 'Support agent') : 'System update';
       meta.append(who);
       const time = document.createElement('time');
       time.dateTime = String(message.created_at || '');
