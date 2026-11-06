@@ -327,3 +327,9 @@ require_once SH_ROOT . '/includes/phone-otp.php';
 require_once SH_ROOT . '/includes/google-auth.php';
 require_once SH_ROOT . '/includes/theme.php';
 require_once SH_ROOT . '/includes/admin-access.php';
+
+// With a custom admin URL active, block every legacy /admin/*.php entry point
+// at bootstrap time — not only files that happen to call sh_admin(). This
+// covers include-only partials, AJAX fragments, exports and upload handlers.
+// Authentication itself is still enforced independently on every target.
+sh_admin_access_guard_request();

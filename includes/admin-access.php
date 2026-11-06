@@ -40,9 +40,20 @@ function sh_admin_access_normalize_path($value): ?string
         'admin', 'adminphp', 'admin-login', 'admin-login-php', 'login', 'logout',
         'api', 'assets', 'uploads', 'install', 'support', 'cart', 'checkout',
         'account', 'orders', 'products', 'product', 'category', 'categories',
-        'robots', 'sitemap', 'health', 'status', 'security',
+        'robots', 'sitemap', 'health', 'status', 'security', 'cron', 'config',
+        'includes', 'lib', 'logs', 'tests', 'tools', 'docs', 'auth', 'installer',
+        'index', 'track', 'help', 'page', 'payment', 'password', 'otp', 'register',
+        'verify-email', 'forgot-password', 'reset-password', 'telegram-webhook',
     ];
-    if (in_array($path, $reserved, true) || str_starts_with($path, 'admin-')) { return null; }
+    if (in_array($path, $reserved, true)) { return null; }
+    // Reject routes that share a prefix with a known application/endpoint
+    // namespace even when a long random suffix is attached. This keeps the
+    // custom secret away from customer routes, API routes, static assets and
+    // the SEO/robots rewrite rules in the root .htaccess.
+    foreach (['admin-', 'api-', 'assets-', 'uploads-', 'install-', 'config-',
+              'includes-', 'sitemap-', 'robots-', 'cron-', 'auth-', 'lib-'] as $prefix) {
+        if (str_starts_with($path, $prefix)) { return null; }
+    }
     return $path;
 }
 
@@ -357,8 +368,21 @@ function sh_admin_access_guard_request(): void
 {
     if (!sh_admin_access_enabled() || defined('SH_ADMIN_ROUTE_CONTEXT')) { return; }
     $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    // The front controller for a validated custom URL is rewritten to this
+    // file. The dispatcher performs the secret-path, session and role checks
+    // itself; every target it includes still runs sh_require_admin().
+    if (preg_match('~(?:^|/)admin/custom-route\.php$~i', $script) === 1) { return; }
     $requestPath = (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '');
+    // Some LiteSpeed/cPanel setups keep SCRIPT_NAME as the original pretty URL.
+    // Recognize the configured route itself as the dispatcher entry point too.
+    $requested = sh_admin_access_request_path();
+    if ($requested !== null) {
+        $current = sh_admin_access_state();
+        if (($current['enabled'] && $current['active_path'] !== '' && hash_equals($current['active_path'], $requested))
+            || ($current['pending_path'] !== '' && hash_equals($current['pending_path'], $requested))) { return; }
+    }
     if (preg_match('~(?:^|/)admin(?:/|$)~i', $script) === 1
+        || preg_match('~(?:^|/)admin\.php$~i', $requestPath) === 1
         || preg_match('~(?:^|/)admin(?:/|$)~i', $requestPath) === 1) {
         sh_admin_access_not_found();
     }

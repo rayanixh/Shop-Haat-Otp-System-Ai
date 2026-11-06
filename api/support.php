@@ -38,8 +38,8 @@ function sh_support_legacy_widget_payload(array $snapshot, ?array $messages = nu
     $conversation = is_array($snapshot['conversation'] ?? null) ? $snapshot['conversation'] : [];
     $status = (string)($conversation['status'] ?? 'open');
     $paused = !empty($conversation['ai_paused']);
-    $human = $paused || in_array($status, ['pending', 'assigned'], true)
-        || (int)($conversation['assigned_admin_id'] ?? 0) > 0;
+    // One source of truth: the same state machine the message pipeline uses.
+    $human = sh_support_human_controlled($conversation);
     $rows = $messages ?? (is_array($snapshot['messages'] ?? null) ? $snapshot['messages'] : []);
     return [
         'ok' => true,

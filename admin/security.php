@@ -54,14 +54,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 sh_redirect($pending);
             }
         } elseif ($form === 'admin_access_apply') {
-            $pending = sh_admin_access_state()['pending_path'];
-            if (!sh_admin_access_apply_pending()) {
-                $errors[] = 'The new route is not verified or no longer passes validation. Your current admin route is unchanged.';
+            // Server-side explicit confirmation that the operator actually
+            // opened and used the new URL. A JS confirm() is only a UI hint;
+            // the switch is never completed without this submitted checkbox.
+            if (sh_post('admin_access_confirm_works') !== '1') {
+                $errors[] = 'Open the proposed URL, confirm the admin panel loads, and tick the confirmation box before applying. Your current admin route is unchanged.';
             } else {
-                sh_admin_access_mark_changed_audit('enabled', $pending);
-                sh_flash('success', 'The custom admin route is active. The previous route is now blocked.');
-                header('Location: ' . sh_admin_access_route_url($pending, 'security.php'));
-                exit;
+                $pending = sh_admin_access_state()['pending_path'];
+                if (!sh_admin_access_apply_pending()) {
+                    $errors[] = 'The new route is not verified or no longer passes validation. Your current admin route is unchanged.';
+                } else {
+                    sh_admin_access_mark_changed_audit('enabled', $pending);
+                    sh_flash('success', 'The custom admin route is active. The previous route is now blocked.');
+                    header('Location: ' . sh_admin_access_route_url($pending, 'security.php'));
+                    exit;
+                }
             }
         } elseif ($form === 'admin_access_disable') {
             $oldPath = (string)(sh_admin_access_state()['active_path'] ?? '');
@@ -190,6 +197,7 @@ $adminAccessEnabled = (bool)$adminAccessState['enabled'];
 $adminAccessPending = (string)$adminAccessState['pending_path'];
 $adminAccessVerified = (bool)$adminAccessState['verified'];
 $adminAccessActiveUrl = $adminAccessEnabled ? sh_admin_access_route_url((string)$adminAccessState['active_path'], 'dashboard.php') : '';
+$adminAccessPendingUrl = $adminAccessPending !== '' ? sh_admin_access_route_url($adminAccessPending, 'security.php') : '';
 
 $s = static fn(string $k, string $fb = ''): string => (string)sh_setting($k, $fb);
 
@@ -276,6 +284,19 @@ require __DIR__ . '/_layout.php';
       </div>
     <?php endif; ?>
 
+    <?php if ($adminAccessPendingUrl !== ''): ?>
+      <div class="sh-grid2" style="align-items:end;margin-top:12px">
+        <div class="sh-field">
+          <label class="sh-field__label" for="admin-access-pending">Proposed Admin URL (not active yet)</label>
+          <input class="sh-input" id="admin-access-pending" type="text" readonly value="<?= e($adminAccessPendingUrl) ?>" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="sh-field">
+          <span class="sh-field__label">Save it before switching</span>
+          <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessPendingUrl) ?>"><span data-copy-label>Copy proposed URL</span></button>
+        </div>
+      </div>
+    <?php endif; ?>
+
     <form method="post" novalidate style="margin-top:12px">
       <?= sh_csrf_field() ?>
       <input type="hidden" name="form" value="admin_access_save">
@@ -313,6 +334,10 @@ require __DIR__ . '/_layout.php';
           <form method="post" style="display:inline" data-confirm="Apply this route now? The old /admin.php and direct /admin/*.php routes will stop serving the panel immediately.">
             <?= sh_csrf_field() ?>
             <input type="hidden" name="form" value="admin_access_apply">
+            <label class="sh-check" style="display:flex;margin-bottom:8px">
+              <input type="checkbox" name="admin_access_confirm_works" value="1" required>
+              I opened the proposed URL in this browser and confirmed the admin panel, forms and links work.
+            </label>
             <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 14) ?> Apply verified route</button>
           </form>
           <span class="sh-field__hint">Verified in this browser within the last hour. Applying sends you to the new route.</span>
@@ -335,7 +360,7 @@ require __DIR__ . '/_layout.php';
         <p>If the owner has lost the route and cannot sign in, the hosting account owner can use cPanel phpMyAdmin to disable only this routing feature; this is an out-of-band hosting recovery, not an application backdoor. Run these statements against the ShopHaat database:</p>
         <pre class="sh-code-wrap"><code>UPDATE settings SET setting_value = '0' WHERE setting_key = 'admin_access_enabled';
 UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secret_path', 'admin_access_pending_secret', 'admin_access_verified_secret', 'admin_access_verified_at', 'admin_access_verified_by');</code></pre>
-        <p>Afterward, use the standard admin URL and sign in normally. No bypass token or unauthenticated recovery URL is created.</p>
+        <p>Afterward, use the standard admin URL and sign in normally. No bypass token or unauthenticated recovery URL is created. The full runbook (including the no-lockout verification sequence and the path rules) ships as <code>docs/ADMIN-ACCESS-URL.md</code> in the release archive; documentation is deliberately not served over HTTP.</p>
       </div>
     </details>
   </div>
