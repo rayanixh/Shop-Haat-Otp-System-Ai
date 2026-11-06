@@ -72,9 +72,9 @@ Run in this session with the PHP 8.5 WASM CLI (`@php-wasm/cli 3.1.62`), Node.js 
 | `php -l` on every PHP file (WASM CLI) | No syntax errors. PHP 8.5 emits pre-existing `http_response_header` deprecation notices in unrelated files. |
 | `php tools/security-scan.php --fail-on=high` | `critical 0 high 0 medium 0 low 0`, 179 files. |
 | `php tests/security-regression.php` | `passed 185 failed 0 skipped 1` (header-emission check not applicable in CLI). |
-| `php tests/support-unit.php` | `Passed: 57 Failed: 0`. |
+| `php tests/support-unit.php` | `Passed: 58 Failed: 0`. |
 | `php tests/human-support-handoff.php` | `passed 117 failed 0`, real PHP service functions + real PDO SQL on **SQLite** with MySQL SQL translated. |
-| `SH_TEST_PHP_BIN=… php tests/admin-access-url.php` | `passed 147 failed 0`, real PDO + 9 isolated PHP subprocesses for 404/auth guards. |
+| `SH_TEST_PHP_BIN=… php tests/admin-access-url.php` | `passed 164 failed 0`, real PDO + 9 isolated PHP subprocesses for 404/auth guards. |
 | `node --check assets/js/support.js` | OK. |
 | `node tests/admin-access-regression.mjs` | `11 passed, 0 failed`. |
 | `node tests/admin-notification-regression.mjs` | `5 passed, 0 failed`. |
@@ -87,7 +87,7 @@ Run in this session with the PHP 8.5 WASM CLI (`@php-wasm/cli 3.1.62`), Node.js 
 
 `tests/human-support-handoff.php` covers one confirmation, silent follow-ups, duplicate client IDs, repeated handoff, the live-DB AI gate, admin reply visibility, Resume AI and a second genuine cycle, agent takeover, legacy backfill, and the `assign`/`resolve`/`reopen`/`resume_ai` confirmation audit. `tests/admin-access-url.php` covers validation, collisions, CSPRNG, the no-lockout lifecycle, link rewriting, 404s, unauthenticated admin denial, independent API/endpoint guards and secret-free public files.
 
-**These are not MySQL or HTTP tests.** The SQLite translation cannot prove InnoDB `FOR UPDATE`, `ON DUPLICATE KEY UPDATE`, `UTC_TIMESTAMP()`, `information_schema` or foreign-key behavior under real concurrency. `SH_TEST_MYSQL_DSN` is provided for running the same suites against real MySQL/MariaDB. DB/HTTP suites that printed the installer page or timed out here (`tests/support-system.php`, `reporting-integration.php`, `installer-demo-data.php`, `email-system.php`, `product-ai-save.php`, `courier-connection-tests.php`, `seo-content-length.php`, the SMTP/HTTP shell tests) were **not** run successfully and are not claimed as passing.
+**These are not MySQL, HTTP or real-browser tests.** The SQLite translation cannot prove InnoDB `FOR UPDATE`, `ON DUPLICATE KEY UPDATE`, `UTC_TIMESTAMP()`, `information_schema` or foreign-key behavior under real concurrency. `SH_TEST_MYSQL_DSN` is provided for running the same suites against real MySQL/MariaDB. The jsdom harness checks fixed positioning, viewport metrics and messaging logic at source/DOM level, but cannot prove a narrow Android viewport, different viewport heights, address-bar expansion/collapse, safe-area insets, stacking order or actual touch scrolling — those still need a real device/browser. No live HTTP login, custom-route activation round trip, direct-admin/AJAX/upload/export request, storefront/checkout test or cPanel run was performed. DB/HTTP suites that printed the installer page or timed out here (`tests/support-system.php`, `reporting-integration.php`, `installer-demo-data.php`, `email-system.php`, `product-ai-save.php`, `courier-connection-tests.php`, `seo-content-length.php`, the SMTP/HTTP shell tests) were **not** run successfully and are not claimed as passing.
 
 ## Remaining issues / still required on staging
 
@@ -108,5 +108,5 @@ Run in this session with the PHP 8.5 WASM CLI (`@php-wasm/cli 3.1.62`), Node.js 
 * Request human support. Confirm **exactly one** localized confirmation, one marker event, pending queue state and AI pause. Assign the thread, send a public reply, add an internal note, resolve, reopen, and explicitly resume AI. Verify internal notes never appear in the customer transcript.
 * After handoff, send several customer follow-ups, retry after refresh and from two tabs. Every customer message is saved once, no AI/FAQ/fallback reply or repeated handoff notice is created, unread/assignment/history remain intact, and only an authorized **Resume AI** resumes automatic replies.
 * Confirm that only support-authorized admins can access inbox/settings APIs, that CSRF and cross-origin POST checks reject invalid requests, and that input/rate limits fail safely.
-* Check desktop and mobile page flow. Support transcript/inbox/history must grow with the document and use explicit **Load older messages** batches — no nested or fixed-height scrolling areas, and no leftover contact section.
+* Check desktop and mobile page flow. The dedicated support page transcript and the admin inbox/history grow with the document and use explicit **Load older messages** batches — no nested or fixed-height scrolling areas, and no leftover contact section. The **floating widget** is the intentional exception: it is viewport-fixed and bottom-anchored above the mobile bottom navigation (with safe-area insets); only its message log scrolls internally, scrolling the website behind it must not move the popup, and input/Send/**Talk to a human** stay usable.
 * Re-test ordinary account, checkout, payment, order, tracking and inventory workflows, plus the admin URL checks in [ADMIN-ACCESS-URL.md](ADMIN-ACCESS-URL.md).

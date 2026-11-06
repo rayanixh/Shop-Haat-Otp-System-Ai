@@ -29,18 +29,20 @@ Knowing the secret URL never grants access. Hiding `/admin.php` also never repla
 
 4. Admin-to-admin links are rewritten by `sh_url()` → `sh_admin_access_map_url()` only while `SH_ADMIN_ROUTE_CONTEXT` is defined on an authenticated admin request. Storefront pages, public APIs, `robots.txt`, `sitemap.xml`, JavaScript and CSS never receive the secret.
 
-**cPanel requirements:** hidden files must be visible in File Manager so the shipped `.htaccess` is actually uploaded; Apache/LiteSpeed `mod_rewrite` must be enabled; the directory must permit the shipped directives (usually `AllowOverride All`). On hosts where rewriting is unavailable, the proposed URL will return 404 — **do not apply it**. The current route stays active until you explicitly apply a verified route.
+**cPanel requirements:** hidden files must be visible in File Manager so the shipped `.htaccess` is actually uploaded; Apache/LiteSpeed `mod_rewrite` must be enabled; the directory must permit the shipped directives (usually `AllowOverride All`). On hosts where rewriting is unavailable, the proposed URL will return 404 — **do not apply it**. The current route stays active until you explicitly verify and activate the new URL.
 
 ## Safe configuration sequence (no lockout)
 
-1. Sign in as the **Super Admin** through the current route.
-2. Open **Admin → Security & Admin Access → Admin Access URL**.
-3. Press **Generate secure suggestion** (192 bits from `random_bytes()`), or type your own path: one lowercase URL-safe segment of 32–64 characters. Domains, extra segments, slashes, spaces, dots, query strings, fragments, percent-encoding and reserved/colliding routes are rejected server-side.
-4. Press **Save proposed route**. This only stages the value in the existing `settings` table. The current route stays fully active. Copy the displayed **Proposed Admin URL** and keep it in your password manager.
-5. Press **Verify proposed route**. The application opens the staged path in the *same authenticated browser session* (a one-use session ticket, no query-string verification token), requires the superadmin role, and records a `verified` marker valid for one hour. The old route is still active.
-6. Tick the explicit **"I opened the proposed URL … and confirmed the admin panel, forms and links work"** checkbox and press **Apply verified route**. The checkbox is validated server-side (not just a browser `confirm()`); without it nothing changes. Only now is the staged path promoted to active and the previous route blocked. The browser is redirected to the new URL. Confirm you can open the dashboard, settings, forms, AJAX actions and uploads on the new route before closing the old tab.
+The section is a three-step indicator: **1 Generate or enter a new URL → 2 Save proposed route → 3 Verify and activate**. Completed and remaining steps are shown separately on desktop and stacked on narrow screens.
 
-If verification fails at any point, nothing changes: the active route (or the standard `/admin/` route when the feature is off) remains usable.
+1. Sign in as the **Super Admin** through the current route.
+2. Open **Admin → Security & Admin Access → Admin Access URL**. The panel shows **Current active Admin URL** (the standard `/admin/login.php` when the feature is off).
+3. **Step 1.** Press **Generate secure suggestion** (192 bits from `random_bytes()`), or type your own path: one lowercase URL-safe segment of 32–64 characters. Domains, extra segments, slashes, spaces, dots, query strings, fragments, percent-encoding and reserved/colliding routes are still rejected server-side. The complete **New proposed Admin URL**, including the domain, is displayed and wraps on mobile; **Copy full URL** copies it. It is explicitly marked as *not active yet*.
+4. **Step 2.** Press **Save proposed route**. This only stages the value in the existing `settings` table and issues a one-use same-session ticket. The page then reads **Saved — verification required**. The current Admin URL stays fully active.
+5. **Step 3.** Copy the complete proposed URL and open it in the same browser while still signed in as the Super Admin (the **Open proposed Admin URL** link does this too). The one-use ticket, the admin session and the superadmin role are checked; without them the request is a generic 404. A **GET** on that URL only renders a verification screen — it never records verification and never changes the active route.
+6. On that screen press **Verify and activate new Admin URL**. This is an explicit, CSRF-protected **POST** from the staged URL itself; the server re-checks the ticket, session, role, path validity and collision rules. Only now is the staged path promoted to active and the previous route blocked. The response reads **New Admin URL is active**, shows the new **Current active Admin URL** with **Copy full URL**, and offers **Open Admin Panel**. It states that the old route is now disabled.
+
+If anything fails before step 6, nothing changes: the active route (or the standard `/admin/` route when the feature is off) remains usable. Confirm you can open the dashboard, settings, forms, AJAX actions and uploads on the new route before closing the old tab.
 
 **Disable / restore:** an authenticated superadmin can press **Disable and clear custom route** on the same page. The standard `/admin/` route becomes reachable again, still protected by the normal admin login, roles and CSRF. There is no unauthenticated disable endpoint.
 
@@ -83,7 +85,7 @@ The feature reuses the existing `settings` table; **no migration, new table or n
 * Reject leading/trailing/multiple slashes, backslashes, whitespace, `.`, `:`, `%`, `?`, `#`, complete URLs, and encoded traversal.
 * Reject reserved admin/customer/API/asset namespaces and prefixes (`admin-`, `api-`, `assets-`, `sitemap-`, …).
 * Reject a path that already exists as an application file/directory or as a live catalogue/category/brand/page slug.
-* Reject an empty, stale, unverified or expired candidate on apply; the active route is never removed before a verified replacement is stored.
+* Reject an empty, stale, unverified or expired candidate on apply; the active route is never removed before a verified replacement is stored. Opening a staged URL is a GET with no side effects; activation is a separate CSRF-protected POST from that URL.
 
 ## `.htaccess` and hosting limitations
 
@@ -97,6 +99,6 @@ The feature reuses the existing `settings` table; **no migration, new table or n
 
 `tests/admin-access-url.php` executes the real functions in `includes/admin-access.php` against a real PDO database and runs the routing guards in isolated PHP subprocesses (a blocked request terminates the process with a generic 404). With no MySQL DSN configured it uses in-memory SQLite with an explicit MySQL-SQL translation layer; set `SH_TEST_MYSQL_DSN`, `SH_TEST_MYSQL_USER` and `SH_TEST_MYSQL_PASS` to run the same suite against real MySQL/MariaDB. `SH_TEST_PHP_BIN` can point the subprocess checks at a specific PHP binary.
 
-The suite covers: path normalization/validation, filesystem and live-slug collisions, CSPRNG suggestions, the staged → verified → applied → disabled lifecycle, link rewriting, include allowlist, generic 404s for `/admin.php` and direct admin PHP files, the dispatcher exception, unauthenticated `sh_require_admin()` redirect, independent auth/CSRF/RBAC on admin and customer APIs, secret-free public files, and the cPanel recovery documentation. `tests/admin-access-regression.mjs` adds source-level checks.
+The suite covers: path normalization/validation, filesystem and live-slug collisions, CSPRNG suggestions, the staged → verified → applied → disabled lifecycle, link rewriting, include allowlist, generic 404s for `/admin.php` and direct admin PHP files, the dispatcher exception, unauthenticated `sh_require_admin()` redirect, independent auth/CSRF/RBAC on admin and customer APIs, secret-free public files, the three-step UX labels, the explicit activation gate and the cPanel recovery documentation. `tests/admin-access-regression.mjs` adds source-level checks.
 
-**Not validated here:** a live Apache/LiteSpeed/cPanel request, a real MySQL 8/MariaDB connection, an authenticated browser login and dashboard through the new URL, file uploads/exports over HTTP, and the phpMyAdmin recovery SQL on a live cPanel account. Those must be repeated on staging before enabling customer traffic.
+**Not validated here:** a live Apache/LiteSpeed/cPanel request, a real MySQL 8/MariaDB connection, an authenticated browser login and dashboard through the new URL, the actual GET → **Verify and activate new Admin URL** POST round trip over HTTP (CSRF, session ticket, cookies, redirect and old-route blocking), file uploads/exports over HTTP, and the phpMyAdmin recovery SQL on a live cPanel account. Those must be repeated on staging before enabling customer traffic.

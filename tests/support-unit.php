@@ -148,20 +148,30 @@ su_ok(str_contains($schema, 'UNIQUE KEY uq_supmsg_client'), 'Client message id i
 su_ok(substr_count($schema, 'CREATE TABLE IF NOT EXISTS support_') === 6, 'Six additive support tables declared');
 $js = $src('assets/js/support-chat.js');
 su_ok(str_contains($js, 'textContent') && !str_contains($js, 'innerHTML'), 'Widget renders message text via textContent only (no HTML injection)');
-// The support chat must not create a nested scroll container. Storefront drawer,
-// filter rail and admin sidebar are page-level scroll regions and are allowed;
-// only support-chat rules are checked here (in both shipped CSS files).
+// The floating widget is viewport-fixed. Its message log is the ONLY support
+// rule allowed to own an internal scroll region; the dedicated support page
+// still grows with the document and must have no scroll box at all.
 $css = $src('assets/css/app.css');
 $supportCss = $src('assets/css/support.css');
-$supportScroll = static function (string $stylesheet): bool {
-    foreach ([$stylesheet] as $sheet) {
-        if (preg_match('/\.(?:sh-schat|sh-support-chat)[^{]*\{[^}]*overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/s', $sheet) === 1) { return true; }
+$supportScrollRules = static function (string $stylesheet): array {
+    preg_match_all('/\.(sh-schat[a-z0-9_-]*|sh-support-chat[a-z0-9_-]*)[^{]*\{([^}]*)\}/s', $stylesheet, $rules, PREG_SET_ORDER);
+    $offenders = [];
+    foreach ($rules as $rule) {
+        if (preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $rule[2]) === 1) { $offenders[] = $rule[1]; }
     }
-    return false;
+    return $offenders;
 };
-su_ok(!$supportScroll($css) && !$supportScroll($supportCss)
+$widgetScroll = $supportScrollRules($css);
+su_ok($widgetScroll === ['sh-schat-messages']
+   && $supportScrollRules($supportCss) === []
    && preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $supportCss) !== 1,
-   'No internal scroll box anywhere in support CSS');
+   'Only the fixed widget message log scrolls internally; support page CSS has no scroll box');
+su_ok(str_contains($css, '.sh-schat-sheet {') && str_contains($css, 'position: fixed; right: 16px; left: auto; top: auto;')
+   && str_contains($css, 'bottom: calc(var(--sh-schat-bottom) + env(safe-area-inset-bottom, 0px))')
+   && str_contains($css, 'overscroll-behavior: contain;')
+   && str_contains($src('assets/js/support-chat.js'), 'syncViewport()')
+   && !str_contains($src('assets/js/support-chat.js'), 'window.scrollY'),
+   'Widget panel is fixed/bottom-anchored with safe-area support and no document-scroll pinning');
 // The old per-conversation page is now a permission-gated redirect into the
 // guarded inbox; both endpoints require support.reply (directly or via manage).
 su_ok(str_contains($src('admin/support-conversation.php'), "sh_require_perm('support.view', 'support.reply', 'support.manage')")

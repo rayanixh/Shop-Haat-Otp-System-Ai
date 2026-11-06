@@ -6,8 +6,9 @@
  * checks below) with a scripted fetch() standing in for api/support.php,
  * and asserts the customer-visible rules:
  *
- *   - opening the panel reveals it once (a single start call) in the page
- *     flow — absolutely positioned at the scroll offset, never a scroll box;
+ *   - opening the panel reveals it once (a single start call) as a
+ *     viewport-fixed, bottom-anchored popup; the message log alone scrolls
+ *     internally and the page is never scroll-pinned or scroll-locked;
  *   - every request carries the CSRF token and an idempotent client_msg_id,
  *     and a failed send offers Retry reusing that same id;
  *   - message bodies render as TEXT (an XSS payload stays inert) and only
@@ -62,7 +63,7 @@ function check(name, condition, detail) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* Fixture fidelity: every hook the script needs must exist in the shipped
- * markup, and the panel must stay in page flow (no inner scroll box). */
+ * markup, and the panel must be viewport-fixed and bottom-anchored. */
 const widgetPhp = readFileSync(join(ROOT, 'includes/support-widget.php'), 'utf8');
 const appCss = readFileSync(join(ROOT, 'assets/css/app.css'), 'utf8');
 const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8');
@@ -72,10 +73,18 @@ for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-sch
 	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close']) {
 	check('shipped widget markup has #' + id, widgetPhp.includes('id="' + id + '"'));
 }
-check('chat panel is absolutely positioned in page flow (not fixed/scrollboxed)',
-	/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
-const chatCss = (appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || []).join('\n');
-check('no inner scroll region exists in the chat widget styles', !/overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(chatCss));
+check('chat panel is viewport-fixed, bottom-anchored and safe-area aware',
+	/\.sh-schat-sheet\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*calc\(var\(--sh-schat-bottom\) \+ env\(safe-area-inset-bottom/s.test(appCss)
+	&& !/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
+const chatRules = appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || [];
+const scrollingRules = chatRules.filter((r) => /overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(r));
+check('only the message log owns an internal scroll region',
+	scrollingRules.length === 1 && /^\.sh-schat-messages/.test(scrollingRules[0])
+	&& /overscroll-behavior:\s*contain/.test(scrollingRules[0]));
+const chatJs = readFileSync(join(ROOT, 'assets/js/support-chat.js'), 'utf8');
+check('widget JS never pins the panel to document scroll and re-measures the viewport',
+	!chatJs.includes('window.scrollY') && !chatJs.includes('form.scrollIntoView')
+	&& chatJs.includes('syncViewport()') && chatJs.includes('visualViewport'));
 check('legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service', supportApi.includes("$action === 'send'") && supportApi.includes("$input['client_msg_id']") && supportApi.includes('sh_support_customer_send(') && supportApi.includes('sh_support_customer_handoff(') && supportApi.includes("$input['after_id']"));
 check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 
@@ -164,11 +173,20 @@ const reqs = (a) => requests.filter((r) => r.action === a);
 
 /* 1. Open → exactly one start, panel in flow, welcome + suggestions ------- */
 check('sheet starts hidden', $('#sh-schat-sheet').hidden === true);
+const formEl = $('#sh-schat-form');
+let pageScrollIntoViewCalls = 0;
+formEl.scrollIntoView = () => { pageScrollIntoViewCalls += 1; };
 $('#sh-schat-fab').click();
 await sleep(30);
 const sheet = $('#sh-schat-sheet');
 check('opening reveals the panel', sheet.hidden === false);
-check('panel is pinned to the current scroll offset (page flow)', sheet.style.top === '10px', sheet.style.top);
+check('opening never writes an inline document-scroll top', sheet.style.top === '', sheet.style.top);
+check('viewport metrics are applied to the fixed panel', sheet.style.getPropertyValue('--sh-schat-bottom') !== '');
+check('chat replies never scroll the website behind the fixed panel', pageScrollIntoViewCalls === 0, String(pageScrollIntoViewCalls));
+check('website scrolling stays unlocked and independent',
+	window.document.body.style.overflow === '' && window.document.documentElement.style.overflow === '');
+window.dispatchEvent(new window.Event('scroll'));
+check('a document scroll event never re-pins the panel', sheet.style.top === '' && sheet.style.getPropertyValue('--sh-schat-bottom') !== '', sheet.style.top);
 check('fab reports expanded state', $('#sh-schat-fab').getAttribute('aria-expanded') === 'true');
 check('start called once with the CSRF token', reqs('start').length === 1 && reqs('start')[0].p.get('csrf_token') === 'csrf-test-token');
 check('welcome message renders', $('#sh-schat-messages').textContent.includes('Welcome to ShopHaat!'));

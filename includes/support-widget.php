@@ -2,10 +2,11 @@
 /**
  * Support chat widget (storefront) — markup only.
  *
- * The panel lives in the normal page flow (absolutely positioned at the
- * current scroll offset by JS), so the page itself scrolls through long
- * conversations — there is deliberately no inner scroll area. All state and
- * replies come from api/support.php; nothing here is faked client-side.
+ * Both nodes are direct children of <body>. The panel is viewport-fixed and
+ * bottom/right anchored by CSS, clears the mobile bottom navigation and safe
+ * area, and never follows document scroll; only #sh-schat-messages scrolls
+ * internally. The page itself keeps its normal, independent scrolling. All
+ * state and replies come from api/support.php; nothing is faked client-side.
  */
 if (!function_exists('sh_setting') || sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) !== '1') { return; }
 $schatMax = max(200, min(8000, (int)sh_setting('support_chat_max_input', sh_setting('support_max_input', '2000'))));

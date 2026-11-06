@@ -39,11 +39,15 @@ const cases = [
   ['candidate checks filesystem and storefront slug collisions before saving',
     access.includes('file_exists($candidate)') && access.includes('DirectoryIterator($root)') && access.includes("['products', 'categories', 'brands', 'blog_posts', 'pages', 'custom_pages']") && access.includes("LOWER(slug) = ?")],
   ['suggestions use cryptographic randomness and are not saved by the suggestion action',
-    access.includes('bin2hex(random_bytes(24))') && security.includes("$form === 'admin_access_suggest'") && security.includes('It has not been saved or activated.')],
+    access.includes('bin2hex(random_bytes(24))') && security.includes("$form === 'admin_access_suggest'") && security.includes('It is not saved or active yet.')],
   ['saving a proposal only changes pending verification metadata, not the active route',
     savePending.includes('SH_ADMIN_ACCESS_PENDING_KEY => $path') && savePending.includes("SH_ADMIN_ACCESS_VERIFIED_KEY => ''") && !savePending.includes('SH_ADMIN_ACCESS_ACTIVE_KEY =>')],
-  ['dispatcher verifies a pending path from an authenticated same-session ticket without a query bypass',
-    dispatcher.includes('sh_admin_access_request_path()') && dispatcher.includes('SH_ADMIN_ACCESS_VERIFY_SESSION_KEY') && dispatcher.includes('sh_admin_access_record_verification(') && !/verify_admin_url\s*=\s*1/i.test(dispatcher + security)],
+  ['a pending path requires a same-session ticket and shows a verification screen; a GET never verifies or activates',
+    dispatcher.includes('sh_admin_access_request_path()') && dispatcher.includes('SH_ADMIN_ACCESS_VERIFY_SESSION_KEY')
+    && dispatcher.includes("define('SH_ADMIN_ACCESS_VERIFY_SCREEN', true)")
+    && !dispatcher.includes('sh_admin_access_record_verification(') && !dispatcher.includes('sh_admin_access_apply_pending(')
+    && security.includes("!\$adminAccessVerifyScreen") && security.includes("'admin_access_verify_activate'")
+    && !/verify_admin_url\s*=\s*1/i.test(dispatcher + security)],
   ['apply requires a fresh matching verification, revalidates, and atomically activates the route',
     access.includes('hash_equals($pending, $verified)') && access.includes('$verifiedAt < time() - 3600') && access.includes('sh_admin_access_validate_path($pending)') && access.includes('SH_ADMIN_ACCESS_ENABLED_KEY => \'1\'') && access.includes('SH_ADMIN_ACCESS_ACTIVE_KEY => $pending')],
   ['dispatcher only includes fixed PHP targets resolved under the admin directory',
@@ -53,7 +57,7 @@ const cases = [
   ['applied mode blocks legacy/direct admin PHP and the old /admin.php alias',
     access.includes('function sh_admin_access_guard_request()') && access.includes('sh_admin_access_not_found();') && htaccess.includes('RewriteRule ^admin\\.php$ - [F,L,NC]') && htaccess.includes('admin/custom-route.php') && router.includes('admin/custom-route.php') && auth.includes('sh_admin_access_guard_request()')],
   ['auth remains independent; admin POSTs require CSRF, login regenerates sessions, cookies are hardened, and public sitemap output omits the secret',
-    auth.includes('sh_csrf_require();') && csrf.includes("defined('SH_ADMIN_ROUTE_CONTEXT')") && login.includes('sh_auth_throttle_blocked') && auth.includes('session_regenerate_id(true)') && logout.includes('sh_csrf_require();') && logout.includes("!== 'POST'") && layout.includes('sh_csrf_field()') && layout.includes("if (!defined('SH_ADMIN_PAGE_AUTHORIZED'))") && !layout.includes('!defined(\'SH_ADMIN_ROUTE_CONTEXT\')') && config.includes("'httponly' => true") && config.includes("'samesite' => 'Lax'") && config.includes("'secure'   => sh_request_is_https()") && access.includes("!defined('SH_ADMIN_ROUTE_CONTEXT') || !sh_admin_access_enabled()") && security.includes('Generate secure suggestion') && security.includes('Save proposed route') && security.includes('Verify proposed route') && security.includes('Apply verified route') && security.includes('Disable and clear custom route') && security.includes('cPanel recovery') && !seo.includes('admin_access_secret_path')],
+    auth.includes('sh_csrf_require();') && csrf.includes("defined('SH_ADMIN_ROUTE_CONTEXT')") && login.includes('sh_auth_throttle_blocked') && auth.includes('session_regenerate_id(true)') && logout.includes('sh_csrf_require();') && logout.includes("!== 'POST'") && layout.includes('sh_csrf_field()') && layout.includes("if (!defined('SH_ADMIN_PAGE_AUTHORIZED'))") && !layout.includes('!defined(\'SH_ADMIN_ROUTE_CONTEXT\')') && config.includes("'httponly' => true") && config.includes("'samesite' => 'Lax'") && config.includes("'secure'   => sh_request_is_https()") && access.includes("!defined('SH_ADMIN_ROUTE_CONTEXT') || !sh_admin_access_enabled()") && security.includes('Generate secure suggestion') && security.includes('Save proposed route') && security.includes('Saved — verification required') && security.includes('Verify and activate new Admin URL') && security.includes('New Admin URL is active') && security.includes('Open Admin Panel') && security.includes('Copy full URL') && security.includes('Disable and clear custom route') && security.includes('cPanel recovery') && !seo.includes('admin_access_secret_path')],
 ];
 
 let failed = 0;

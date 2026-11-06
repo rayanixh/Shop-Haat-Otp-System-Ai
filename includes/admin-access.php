@@ -291,6 +291,44 @@ function sh_admin_access_record_verification(string $path, int $adminId): bool
     ]);
 }
 
+/**
+ * Request origin (scheme + validated Host header) without the install subfolder.
+ * Only ever used while rendering an authenticated admin page, so the secret
+ * never reaches storefront HTML/JS. A malformed Host falls back to localhost.
+ */
+function sh_admin_access_origin(): string
+{
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    // Whitelist a plain host / host:port (IPv6 brackets included). Anything
+    // with whitespace, a slash, an @ or another delimiter is Host-header
+    // injection material and must never become a copyable admin URL.
+    if ($host === '' || strlen($host) > 253 || preg_match('/^[A-Za-z0-9.\[\]:_-]+$/D', $host) !== 1) {
+        $host = 'localhost';
+    }
+    $scheme = function_exists('sh_request_is_https') && sh_request_is_https() ? 'https' : 'http';
+    return $scheme . '://' . $host;
+}
+
+/**
+ * Absolute, browser-ready Admin URL INCLUDING the domain and install subfolder.
+ * sh_admin_access_route_url() already contains sh_base_url(), so only the
+ * origin is prepended here — never the base path a second time.
+ */
+function sh_admin_access_full_url(string $secretPath, string $route = ''): string
+{
+    $normalized = sh_admin_access_normalize_path($secretPath) ?? '';
+    if ($normalized === '') { return ''; }
+    return sh_admin_access_origin() . sh_admin_access_route_url($normalized, $route);
+}
+
+/** Absolute URL of the ordinary /admin/ login route (used when the feature is off). */
+function sh_admin_access_standard_url(): string
+{
+    // Deliberately bypass sh_url(): no secret-route mapping may leak into the
+    // "standard route" label while an authenticated admin page is rendering.
+    return sh_admin_access_origin() . rtrim(sh_base_url(), '/') . '/admin/login.php';
+}
+
 /** Relative URL used by the authenticated Admin Access page and dispatcher. */
 function sh_admin_access_route_url(string $secretPath, string $route = ''): string
 {

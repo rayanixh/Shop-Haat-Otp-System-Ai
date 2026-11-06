@@ -3170,19 +3170,25 @@ sh_t('the AI navigation is a wrapping tab bar in page flow and the card test are
     return true;
 });
 
-sh_t('only navigation drawers own internal scroll containers; AI content stays in page flow', function () {
+sh_t('only navigation drawers and the fixed support message log own internal scroll containers; AI content stays in page flow', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
-    // Nested scrolling is allowed only inside the navigation menus and the
-    // mobile filter drawer. AI Auto Work output and ordinary page content keep
-    // the document as their scroller.
+    // Nested scrolling is allowed only inside the navigation menus, the mobile
+    // filter drawer and the viewport-fixed support popup's message log. AI
+    // Auto Work output and ordinary page content keep the document as their
+    // scroller.
     preg_match_all('/([^{}]+)\{([^{}]*\boverflow(?:-[xy])?\s*:\s*(?:auto|scroll)\b[^{}]*)\}/i', $css, $scrollRules, PREG_SET_ORDER);
     foreach ($scrollRules as $rule) {
         $selector = trim($rule[1]);
         if (!str_contains($selector, '.sh-drawer__body')
             && !str_contains($selector, '.sh-admin-sidebar__nav')
-            && !str_contains($selector, '.sh-filters__scroll')) {
+            && !str_contains($selector, '.sh-filters__scroll')
+            && !str_contains($selector, '.sh-schat-messages')) {
             return 'an ordinary content selector creates an internal scroll region: ' . $selector;
         }
+    }
+    if (!str_contains($css, '.sh-schat-sheet {') || !str_contains($css, 'position: fixed; right: 16px; left: auto; top: auto;')
+        || !str_contains($css, 'overscroll-behavior: contain;')) {
+        return 'the viewport-fixed support popup lost its bottom anchor or contained message log';
     }
     foreach (['.sh-drawer__body', '.sh-admin-sidebar__nav', '.sh-filters__scroll'] as $selector) {
         if (!preg_match_all('/' . preg_quote($selector, '/') . '\\s*\\{([^}]*)\\}/', $css, $matches) || !$matches[1]) {

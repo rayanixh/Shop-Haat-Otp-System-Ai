@@ -2,9 +2,10 @@
  * ShopHaat support chat widget.
  *
  * Plain fetch + bounded polling (5s, only while the panel is open). The
- * panel is part of the page flow — there is no inner scroll box; the page
- * itself scrolls through long conversations. Sends are idempotent: every
- * message carries a client_msg_id the server dedupes, so retries are safe.
+ * panel is viewport-fixed and bottom-anchored: document scrolling never moves
+ * it and never gets locked. Only the message log scrolls internally; the
+ * website outside the chat keeps its own independent scroll. Sends are
+ * idempotent: every message carries a client_msg_id the server dedupes.
  */
 (function () {
   'use strict';
@@ -12,6 +13,15 @@
   var fab = document.getElementById('sh-schat-fab');
   var sheet = document.getElementById('sh-schat-sheet');
   if (!fab || !sheet) { return; }
+
+  // A position:fixed element is only viewport-fixed when no ancestor creates
+  // a containing block (transform/filter/perspective/contain) or clips it.
+  // Keep both nodes direct children of <body> regardless of where the theme
+  // mounted the widget partial.
+  if (document.body) {
+    if (fab.parentNode !== document.body) { document.body.appendChild(fab); }
+    if (sheet.parentNode !== document.body) { document.body.appendChild(sheet); }
+  }
 
   var cfg = { endpoint: '', max: 2000 };
   try { cfg = Object.assign(cfg, JSON.parse(sheet.getAttribute('data-config') || '{}')); } catch (e) {}
@@ -171,8 +181,42 @@
   }
 
   function keepInputVisible() {
-    // The page scrolls (no inner chat scroller) — keep the composer in view.
-    try { form.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    // Scroll ONLY the message log to its newest message. Never call
+    // scrollIntoView() on a child of a fixed panel: that would scroll the
+    // website behind the chat and make the whole page jump on every reply.
+    try {
+      if (typeof listEl.scrollTo === 'function') {
+        listEl.scrollTo({ top: listEl.scrollHeight, block: 'end' });
+      } else {
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  /**
+   * Bottom-anchor the panel to the *visible* viewport. The mobile bottom nav
+   * height is measured (minus its safe-area padding, which CSS re-adds via
+   * env()), and visualViewport.height follows address-bar collapse and the
+   * on-screen keyboard. No document scroll offset is ever read or written.
+   */
+  function syncViewport() {
+    var bottom = 16;
+    var nav = document.querySelector('.sh-bottomnav');
+    if (nav) {
+      var cs = window.getComputedStyle ? window.getComputedStyle(nav) : null;
+      if (!cs || cs.display !== 'none') {
+        var h = nav.getBoundingClientRect ? nav.getBoundingClientRect().height : 0;
+        var pad = cs ? (parseFloat(cs.paddingBottom) || 0) : 0;
+        if (h > 0) { bottom = Math.ceil(Math.max(0, h - pad)) + 8; }
+      }
+    }
+    try {
+      sheet.style.setProperty('--sh-schat-bottom', bottom + 'px');
+      var vv = window.visualViewport;
+      if (vv && typeof vv.height === 'number' && vv.height > 0) {
+        sheet.style.setProperty('--sh-schat-vh', Math.floor(vv.height) + 'px');
+      }
+    } catch (e) {}
   }
 
   function showTyping() {
@@ -230,7 +274,8 @@
   function open() {
     isOpen = true;
     unread = 0; setBadge();
-    sheet.style.top = (window.scrollY + 10) + 'px';
+    syncViewport();
+    // No inline top/left/bottom is written: CSS owns the fixed bottom anchor.
     sheet.hidden = false;
     fab.setAttribute('aria-expanded', 'true');
     start();
@@ -320,6 +365,14 @@
 
   fab.addEventListener('click', function () { isOpen ? close() : open(); });
   document.getElementById('sh-schat-close').addEventListener('click', close);
+  // Re-measure when the viewport changes. Plain page scrolling is deliberately
+  // NOT listened to: a fixed panel must not move with the document.
+  window.addEventListener('resize', function () { if (isOpen) { syncViewport(); } }, { passive: true });
+  window.addEventListener('orientationchange', function () { if (isOpen) { syncViewport(); } }, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { if (isOpen) { syncViewport(); } });
+    window.visualViewport.addEventListener('scroll', function () { if (isOpen) { syncViewport(); } });
+  }
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && isOpen) { close(); }
   });

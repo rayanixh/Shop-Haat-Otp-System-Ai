@@ -119,6 +119,8 @@ $collisionDir = '';
     $ok(!sh_admin_access_enabled(), 'old route still active after a refused apply');
     $ok(sh_admin_access_begin_verification(), 'same-session verification ticket issued');
     $ok(!empty($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]), 'verification ticket lives in the server session, not a public query parameter');
+    $ok(!sh_admin_access_pending_is_verified() && !sh_admin_access_enabled(),
+        'issuing/opening a verification ticket alone neither verifies nor activates the route');
     $ok(sh_admin_access_record_verification($path, 1), 'superadmin verification is recorded');
     $ok(sh_admin_access_pending_is_verified(), 'state reports the route as verified');
     $ok(sh_admin_access_apply_pending(), 'apply succeeds only after verification');
@@ -132,6 +134,10 @@ $collisionDir = '';
     /* --- 5. Route URL, link mapping and include allowlist ---------------- */
     $url = sh_admin_access_route_url($path, 'security.php');
     $ok(str_contains($url, '/' . $path), 'current admin URL contains the configured path');
+    $eq('http://localhost/' . $path, sh_admin_access_full_url($path), 'full Admin URL includes scheme, domain and path exactly once');
+    $eq('http://localhost/' . $path . '?__admin_route=security.php', sh_admin_access_full_url($path, 'security.php'), 'full Admin URL preserves a validated internal route');
+    $eq('', sh_admin_access_full_url('short'), 'an invalid path never produces a copyable URL');
+    $eq('http://localhost/admin/login.php', sh_admin_access_standard_url(), 'standard route URL includes the domain');
     $ok(str_contains($url, '__admin_route=security.php'), 'internal admin route is encoded as a validated route key');
     $ok(!str_contains($url, 'admin.php'), 'current admin URL is not the predictable default');
     $eq(null, sh_admin_access_map_url('admin/security.php'), 'public storefront rendering never maps to the secret route');
@@ -208,12 +214,29 @@ $collisionDir = '';
         $ok(!str_contains($src($publicFile), 'admin_access_secret_path') && !str_contains($src($publicFile), 'sh_admin_access_state()'),
             'no custom route secret in public file: ' . $publicFile);
     }
-    $ok(str_contains($src('admin/security.php'), 'data-copy='), 'copy URL action is present in the admin UI');
-    $ok(str_contains($src('admin/security.php'), 'Generate secure suggestion') && str_contains($src('admin/security.php'), 'Apply verified route'), 'generate / save / verify / apply controls are present');
-    $ok(str_contains($src('admin/security.php'), "sh_post('admin_access_confirm_works') !== '1'")
-        && str_contains($src('admin/security.php'), 'name="admin_access_confirm_works"'),
-        'the final switch requires an explicit server-side confirmation that the new URL works');
-    $ok(str_contains($src('admin/security.php'), 'sh-alert--warning'), 'clear warning is shown before changing the URL');
+    $securitySrc = $src('admin/security.php');
+    $dispatcherSrc = $src('admin/custom-route.php');
+    $ok(str_contains($securitySrc, 'data-copy=') && str_contains($securitySrc, 'Copy full URL'), 'Copy full URL actions are present in the admin UI');
+    foreach (['Current active Admin URL', 'New proposed Admin URL', 'Saved — verification required',
+              'Verify and activate', 'New Admin URL is active', 'Open Admin Panel',
+              'Save proposed route', 'Generate secure suggestion', 'Verify and activate new Admin URL'] as $label) {
+        $ok(str_contains($securitySrc, $label), 'Admin URL UX label present: ' . $label);
+    }
+    $ok(str_contains($securitySrc, 'sh-aau-steps') && str_contains($securitySrc, 'sh-aau-step'), 'three-step status indicator is rendered');
+    $ok(str_contains($src('includes/admin-access.php'), 'function sh_admin_access_full_url(')
+        && str_contains($securitySrc, 'sh_admin_access_full_url(')
+        && str_contains($src('assets/css/app.css'), '.sh-aau-urlbox'),
+        'complete absolute URL (domain included) is shown and wraps on mobile');
+    $ok(str_contains($securitySrc, "if (!\$adminAccessVerifyScreen)")
+        && str_contains($securitySrc, "\$form === 'admin_access_verify_activate'")
+        && str_contains($securitySrc, "hash_equals(hash('sha256', \$pending), \$ticket)")
+        && str_contains($securitySrc, 'sh_csrf_require()'),
+        'activation is an explicit CSRF-protected POST served only from the pending URL with a matching session ticket');
+    $ok(!str_contains($dispatcherSrc, 'sh_admin_access_record_verification(')
+        && str_contains($dispatcherSrc, "define('SH_ADMIN_ACCESS_VERIFY_SCREEN', true)"),
+        'visiting the proposed URL only shows a verification screen and never records verification or activates');
+    $ok(str_contains($securitySrc, 'sh-alert--warning'), 'clear warning is shown before changing the URL');
+    $ok(str_contains($securitySrc, 'sh_admin_access_standard_url()'), 'the standard route is still shown as the current active URL while the feature is off');
 
     /* --- 10. Independent endpoint / asset / internal-file audit ----------- */
     // No admin PHP page is reachable without its own server-side check, even
