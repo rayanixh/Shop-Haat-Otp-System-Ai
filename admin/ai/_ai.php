@@ -55,9 +55,9 @@ function sh_ai_subnav(string $current): void
         'models'    => ['models.php',     'list',     'Models'],
         'settings'  => ['settings.php',   'settings', 'AI Settings'],
     ];
-    // One compact tab bar at every width: a single scrollable row instead of
-    // several wrapped rows, so the navigation never pushes the actual screen
-    // down on a phone. All eleven sections stay one tap away.
+    // One wrapping navigation grid at every width: consistently sized links
+    // use the available columns and stack naturally instead of being squeezed
+    // into a single tiny row. All eleven sections stay one tap away.
     echo '<nav class="sh-aisubnav" aria-label="AI Auto Work sections">';
     foreach ($items as $key => [$file, $icon, $label]) {
         $active = $key === $current;

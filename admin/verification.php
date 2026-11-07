@@ -166,7 +166,7 @@ require __DIR__ . '/_layout.php';
     </div>
   </section>
 
-  <section class="sh-panel" id="sh-verify-providers">
+  <section class="sh-panel sh-panel--compact" id="sh-verify-providers">
     <div class="sh-panel__head sh-cv__head">
       <h2 class="sh-panel__title"><?= sh_icon('truck', 17) ?> Courier verification providers</h2>
       <div class="sh-cv__tools">
@@ -175,7 +175,13 @@ require __DIR__ . '/_layout.php';
     </div>
     <div class="sh-panel__body">
       <?php if (!$providers): ?>
-        <p class="sh-panel__note">No courier verification provider yet. Add the courier's phone-history API (Pathao, Steadfast, RedX or any other service that reports delivered / returned counts per phone number). Each provider has its own URL, authentication, phone format and status mapping.</p>
+        <div class="sh-empty sh-empty--compact">
+          <span class="sh-empty__icon"><?= sh_icon('truck', 18) ?></span>
+          <div class="sh-empty__copy">
+            <h3 class="sh-empty__title">No providers yet</h3>
+            <p class="sh-empty__text">Add a courier phone-history API to show delivered and returned counts on orders.</p>
+          </div>
+        </div>
       <?php else: ?>
         <div class="sh-vp-grid">
           <?php foreach ($providers as $p): $k = sh_verify_mask(sh_verify_decrypt($p['api_key'])); ?>

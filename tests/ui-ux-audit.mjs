@@ -108,6 +108,40 @@ ok(/Do not put customer data, passwords, API keys/.test(supportSettings), 'FAQ d
 ok(/Success means the provider accepted the request, not handset delivery/.test(supportSettings), 'SMS acceptance-vs-delivery warning remains');
 ok(/sh-field__label/.test(guideFiles) && /sh-field__error/.test(guideFiles), 'field labels and validation errors remain');
 
+// 5. Professional admin refinement: compact courier panel, bounded provider
+// grid, wrapping AI subnav and the original provider form/action contract.
+const verification = read('admin/verification.php');
+const providers = read('admin/ai/providers.php');
+const aiShared = read('admin/ai/_ai.php');
+const actionBlock = providers.match(/<div class="sh-actions sh-aiprov-actions">([\s\S]*?)<\/div>/);
+ok(/<section class="sh-panel sh-panel--compact" id="sh-verify-providers">/.test(verification), 'courier panel uses the compact modifier');
+ok(/<div class="sh-empty sh-empty--compact">/.test(verification), 'courier empty state is compact');
+ok(/<h3 class="sh-empty__title">No providers yet<\/h3>/.test(verification), 'courier empty state has a concise title');
+ok(/Add a courier phone-history API to show delivered and returned counts on orders\./.test(verification), 'courier empty state keeps one short explanation');
+ok(/<div class="sh-vp-grid">/.test(verification), 'courier provider cards use the bounded grid');
+ok(/\.sh-vp-grid \{[^}]*minmax\(min\(100%, 300px\), 1fr\)/.test(appCss), 'courier grid columns are bounded by the viewport');
+ok(/\.sh-admin-body \.sh-panel__head > \.sh-panel__title \{ flex: 1 1 auto; min-width: 0; \}/.test(appCss), 'shared panel title no longer forces a 160px flex basis');
+ok(/^#sh-verify-providers\.sh-panel--compact \.sh-cv__head \{[\s\S]*?display: grid/m.test(appCss), 'courier head is a content-based grid');
+ok(/^\.sh-panel--compact \{ min-height: 0; height: auto; \}/m.test(appCss), 'compact panel uses auto height, not a fixed card height');
+ok(/^\.sh-empty--compact \{[\s\S]*?display: flex; flex-direction: row/m.test(appCss), 'compact empty state is a horizontal icon-and-copy row');
+ok(/^\.sh-empty--compact \.sh-empty__icon \{[\s\S]*?width: 34px; height: 34px/m.test(appCss), 'compact empty icon is 34px');
+ok(/^\.sh-aisubnav \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 148px\), 1fr\)\)/m.test(appCss), 'AI subnav wraps in a bounded grid');
+ok(/^\.sh-aisubnav__link \{[\s\S]*?min-height: 40px/m.test(appCss), 'AI subnav links are at least 40px tall');
+ok(/@media \(max-width: 620px\) \{[\s\S]*?\.sh-aisubnav__link \{ min-height: 42px/.test(appCss), 'mobile AI subnav links are at least 42px tall');
+ok(!/single[\s-]+scrollable[\s-]+row/i.test(aiShared), 'stale single-scrollable-row subnav comment is gone');
+ok((providers.match(/<div class="sh-aiprov-formsec">/g) || []).length === 4, 'provider form keeps four sections');
+ok((providers.match(/<h3 class="sh-aiprov-formsec__title">/g) || []).length === 4, 'provider form sections use real headings');
+ok(actionBlock !== null && (actionBlock[1].match(/<(?:button|a)\b/g) || []).length === 3, 'provider form keeps exactly three actions');
+ok(/<button class="sh-btn sh-btn--primary" type="submit">[\s\S]*?Save provider<\/button>/.test(providers), 'Save provider is the single primary submit');
+ok(/<button class="sh-btn sh-btn--ghost" type="submit" name="save_action" value="test"/.test(providers), 'Save & test keeps its original submit name/value');
+ok(/<a class="sh-btn sh-btn--ghost" href="<\?= e\(sh_url\('admin\/ai\/providers\.php'\)\) \?>">Cancel<\/a>/.test(providers), 'Cancel keeps its original link');
+ok(/\$wantsTest = sh_post\('save_action'\) === 'test';/.test(providers), 'POST handler still reads save_action=test');
+ok(/sh_ai_provider_save\(\[/.test(providers), 'provider save path remains intact');
+ok(/^\.sh-admin-body \.sh-aiprov-actions \{/m.test(appCss), 'provider actions are scoped with admin-body specificity');
+ok(/^\.sh-admin-body \.sh-aiprov-actions \.sh-btn--primary \{ background: var\(--sh-brand\)/m.test(appCss), 'primary action styling is scoped to provider actions');
+ok(/@media \(max-width: 420px\) \{[\s\S]*?\.sh-admin-body \.sh-aiprov-actions \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(appCss), 'mobile actions use a specificity-safe two-column grid');
+ok((appCss.match(/^\.sh-aiprov-actions \{/gm) || []).length === 0, 'no low-specificity action selector can be overridden by global sh-actions rules');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
   console.log('UI/UX STATIC AUDIT: FAILED');
