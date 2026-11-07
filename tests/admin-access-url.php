@@ -131,6 +131,136 @@ $collisionDir = '';
     $ok(!sh_admin_access_save_pending($path), 're-saving the already-active path is rejected');
     $eq(0, (int)sh_val("SELECT COUNT(*) FROM settings WHERE setting_key = 'admin_access_pending_secret' AND setting_value <> ''", [], 0), 'no stale pending secret remains');
 
+    /* --- 4b. Root-cause regression: timezone-independent verification ---- */
+    // The deployed failure was gmdate() (UTC wall clock) written by
+    // record_verification() but strtotime() read under Asia/Dhaka (UTC+6).
+    // Every supported timezone must now see the same freshness result.
+    $zones = ['UTC', 'Asia/Dhaka', 'America/New_York', 'Pacific/Auckland', 'Europe/London'];
+    $originalZone = date_default_timezone_get();
+    $freshnessByZone = [];
+    foreach ($zones as $zone) {
+        date_default_timezone_set($zone);
+        sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, $path);
+        sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_KEY, $path);
+        sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_BY_KEY, '1');
+        sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_AT_KEY, (string)time());
+        $freshnessByZone[$zone] = sh_admin_access_pending_is_verified();
+        // Legacy UTC datetime strings from earlier installs must be accepted too.
+        sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_AT_KEY, gmdate('Y-m-d H:i:s'));
+        $ok(sh_admin_access_pending_is_verified(), 'legacy UTC datetime marker stays fresh under ' . $zone);
+    }
+    // Exact deployed reproduction: the whole save -> verify -> activate flow
+    // on a UTC+6 server. Before the fix, record_verification() wrote a UTC
+    // wall-clock string and the freshness check under Asia/Dhaka rejected it.
+    date_default_timezone_set('Asia/Dhaka');
+    $tzPath = 'dhaka-route-' . bin2hex(random_bytes(12));
+    foreach ([SH_ADMIN_ACCESS_ENABLED_KEY, SH_ADMIN_ACCESS_ACTIVE_KEY, SH_ADMIN_ACCESS_PENDING_KEY,
+              SH_ADMIN_ACCESS_VERIFIED_KEY, SH_ADMIN_ACCESS_VERIFIED_AT_KEY, SH_ADMIN_ACCESS_VERIFIED_BY_KEY] as $k) {
+        sh_setting_save($k, '');
+    }
+    $ok(sh_admin_access_save_pending($tzPath), 'Asia/Dhaka: proposed route is saved');
+    $ok(sh_admin_access_begin_verification(), 'Asia/Dhaka: same-session ticket is issued');
+    $ok(sh_admin_access_record_verification($tzPath, 1), 'Asia/Dhaka: superadmin verification is recorded');
+    $ok(sh_admin_access_pending_is_verified(), 'Asia/Dhaka: verification is still fresh (the reported bug)');
+    $ok(sh_admin_access_apply_pending(), 'Asia/Dhaka: legacy two-step apply still works');
+    $eq($tzPath, sh_admin_access_state()['active_path'], 'Asia/Dhaka: proposed route becomes active');
+    date_default_timezone_set($originalZone);
+    $ok(count(array_filter($freshnessByZone)) === count($zones),
+        'epoch verification marker is fresh in UTC, Asia/Dhaka and three other timezones');
+    $eq(false, sh_admin_access_verified_at_parse(''), 'empty verification marker is not fresh');
+    $ok(sh_admin_access_verified_at_parse(gmdate('Y-m-d H:i:s')) !== false,
+        'UTC datetime markers parse without depending on the server timezone');
+    $ok(sh_admin_access_verified_at_parse((string)(time() - 7200)) < time() - 3600,
+        'a genuinely stale marker is still rejected');
+    sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_KEY, '');
+    sh_setting_save(SH_ADMIN_ACCESS_VERIFIED_AT_KEY, '');
+    sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, '');
+
+    /* --- 4c. Atomic activation, rollback and reason codes ---------------- */
+    $reset = static function (string $active = '', bool $enabled = false): void {
+        foreach ([SH_ADMIN_ACCESS_ENABLED_KEY, SH_ADMIN_ACCESS_ACTIVE_KEY, SH_ADMIN_ACCESS_PENDING_KEY,
+                  SH_ADMIN_ACCESS_VERIFIED_KEY, SH_ADMIN_ACCESS_VERIFIED_AT_KEY, SH_ADMIN_ACCESS_VERIFIED_BY_KEY] as $k) {
+            sh_setting_save($k, '');
+        }
+        sh_setting_save(SH_ADMIN_ACCESS_ENABLED_KEY, $enabled ? '1' : '0');
+        sh_setting_save(SH_ADMIN_ACCESS_ACTIVE_KEY, $active);
+        unset($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]);
+    };
+    $newPath = 'verified-route-' . bin2hex(random_bytes(12));
+    $oldPath = 'previous-route-' . bin2hex(random_bytes(12));
+    $readActive = static fn(): string => (string)sh_val(
+        'SELECT setting_value FROM settings WHERE setting_key = ?', [SH_ADMIN_ACCESS_ACTIVE_KEY], '');
+
+    // Missing admin / ticket / pending route all fail closed without touching
+    // the previously active route.
+    $reset($oldPath, true);
+    $r = sh_admin_access_activate_verified($newPath, 0);
+    $ok(empty($r['ok']) && $r['reason'] === 'admin_session_missing', 'activation refuses an unauthenticated caller');
+    $eq($oldPath, $readActive(), 'old active route unchanged after an unauthenticated activation attempt');
+
+    $reset($oldPath, true);
+    sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, $newPath);
+    $r = sh_admin_access_activate_verified($newPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'verification_ticket_missing', 'activation refuses a missing session ticket');
+    $eq($oldPath, $readActive(), 'old active route unchanged after a missing-ticket activation attempt');
+
+    $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] = hash('sha256', $newPath);
+    $r = sh_admin_access_activate_verified($oldPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'verification_ticket_mismatch', 'activation refuses a ticket for a different URL');
+    $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] = hash('sha256', $oldPath);
+    $r = sh_admin_access_activate_verified($oldPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'route_mismatch',
+        'a ticket for the OLD route cannot activate a different staged route');
+    $eq($oldPath, $readActive(), 'old-route ticket does not alter the active route');
+    sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, $oldPath);
+    $r = sh_admin_access_activate_verified($oldPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'already_active', 'already-active URL is not re-applied');
+    $eq($oldPath, $readActive(), 'already-active refusal leaves the active route unchanged');
+    sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, $newPath);
+    $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] = hash('sha256', 'unrelated-' . bin2hex(random_bytes(12)));
+    $r = sh_admin_access_activate_verified($newPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'verification_ticket_mismatch', 'ticket must match the deployed request path');
+    $eq($oldPath, $readActive(), 'route mismatch does not change the old active route');
+    $reset($oldPath, true);
+    $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] = hash('sha256', $newPath);
+    $r = sh_admin_access_activate_verified($newPath, 7);
+    $ok(empty($r['ok']) && $r['reason'] === 'no_pending_route', 'activation refuses when nothing is staged');
+    $eq($oldPath, $readActive(), 'no-pending failure leaves the old active route untouched');
+
+    // Full success: one transaction, DB read-back, ticket consumed.
+    $reset('', false);
+    $ok(sh_admin_access_save_pending($newPath), 'staging a new route for the atomic activation succeeds');
+    $ok(sh_admin_access_begin_verification(), 'same-session ticket issued before activation');
+    $r = sh_admin_access_activate_verified($newPath, 7);
+    $ok(!empty($r['ok']) && $r['reason'] === 'activated', 'atomic activation succeeds with a matching ticket, admin and deployed path');
+    $eq($newPath, $readActive(), 'database now holds the new active route');
+    $eq('1', (string)sh_val('SELECT setting_value FROM settings WHERE setting_key = ?', [SH_ADMIN_ACCESS_ENABLED_KEY], ''),
+        'database confirms the custom route is enabled');
+    $eq('', (string)sh_val('SELECT setting_value FROM settings WHERE setting_key = ?', [SH_ADMIN_ACCESS_PENDING_KEY], ''),
+        'database confirms the staged route was consumed');
+    $ok(sh_admin_access_enabled() && sh_admin_access_state()['active_path'] === $newPath,
+        'post-commit settings read used by every admin request confirms activation');
+    $ok(empty($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]), 'one-use ticket is consumed after success');
+    $ok(!empty(sh_admin_access_activation_message('activated')),
+        'success is only reported through the confirmed-activation message');
+    foreach (['database_error', 'database_readback_failed', 'post_commit_verification_failed',
+              'route_mismatch', 'verification_ticket_missing', 'no_pending_route'] as $reason) {
+        $msg = sh_admin_access_activation_message($reason);
+        $ok($msg !== sh_admin_access_activation_message('__unknown__') && $msg !== '',
+            'useful admin-facing explanation exists for ' . $reason);
+    }
+    $ok(str_contains($src('includes/admin-access.php'), "strtotime(\$raw . ' UTC')")
+        && str_contains($src('includes/admin-access.php'), 'sh_admin_access_verified_at_write()'),
+        'verification timestamps no longer depend on the PHP default timezone');
+    $ok(str_contains($src('includes/admin-access.php'), '$restored = sh_admin_access_write($previous);'),
+        'post-commit mismatch triggers compensating restore of the previous route');
+    $ok(str_contains($src('admin/security.php'), 'sh_security_log(\'admin_access_activation_failed\'')
+        || str_contains($src('admin/security.php'), 'sh_security_log("admin_access_activation_failed"'),
+        'failed activation reason is written to the secure admin log');
+
+    // Restore the state section 4 left behind for the URL-mapping assertions.
+    $reset($path, true);
+
     /* --- 5. Route URL, link mapping and include allowlist ---------------- */
     $url = sh_admin_access_route_url($path, 'security.php');
     $ok(str_contains($url, '/' . $path), 'current admin URL contains the configured path');
@@ -229,9 +359,15 @@ $collisionDir = '';
         'complete absolute URL (domain included) is shown and wraps on mobile');
     $ok(str_contains($securitySrc, "if (!\$adminAccessVerifyScreen)")
         && str_contains($securitySrc, "\$form === 'admin_access_verify_activate'")
-        && str_contains($securitySrc, "hash_equals(hash('sha256', \$pending), \$ticket)")
+        && str_contains($securitySrc, 'sh_admin_access_activate_verified(')
+        && str_contains($securitySrc, 'sh_admin_access_request_path()')
+        && str_contains($src('includes/admin-access.php'), "hash_equals(hash('sha256', \$requestedPath), \$ticket)")
         && str_contains($securitySrc, 'sh_csrf_require()'),
         'activation is an explicit CSRF-protected POST served only from the pending URL with a matching session ticket');
+    $ok(str_contains($src('includes/admin-access.php'), 'sh_admin_access_verified_at_parse(')
+        && str_contains($src('includes/admin-access.php'), 'sh_admin_access_verified_at_write()')
+        && str_contains($src('includes/admin-access.php'), 'sh_admin_access_activation_message('),
+        'UTC/local-timezone mismatch, atomic activation and useful error messages are implemented');
     $ok(!str_contains($dispatcherSrc, 'sh_admin_access_record_verification(')
         && str_contains($dispatcherSrc, "define('SH_ADMIN_ACCESS_VERIFY_SCREEN', true)"),
         'visiting the proposed URL only shows a verification screen and never records verification or activates');
@@ -280,6 +416,43 @@ $collisionDir = '';
         $body = $src($public);
         $ok(!str_contains($body, 'admin_access_secret_path') && !str_contains($body, 'sh_admin_access_state('), 'no route secret in public entry point: ' . $public);
     }
+
+    /* --- 10b. New-route navigation / forms / AJAX / upload source audit --- */
+    // After activation, every admin POST/GET target must be produced by
+    // sh_url() (which maps admin/ targets through the dispatcher) or be a
+    // non-admin api/ endpoint. A hardcoded /admin/... literal in a form or a
+    // shipped JS file would be blocked by the bootstrap guard.
+    $hardcodedForms = [];
+    foreach (glob(SH_ROOT . '/admin/*.php') as $file) {
+        $body = (string)file_get_contents($file);
+        if (preg_match_all('/<form[^>]*\baction="([^"]*)"/i', $body, $matches) > 0) {
+            foreach ($matches[1] as $action) {
+                if ($action === '' || str_contains($action, 'sh_url(') || str_contains($action, 'sh_admin_access_route_url(')) { continue; }
+                $hardcodedForms[] = basename($file) . ': ' . $action;
+            }
+        }
+    }
+    $ok($hardcodedForms === [], 'all admin form actions are route-mapped through sh_url() (no hardcoded /admin/ target)');
+    $hardcodedJs = [];
+    foreach (glob(SH_ROOT . '/assets/js/*.js') as $file) {
+        if (preg_match('~["\']/admin/~', (string)file_get_contents($file)) === 1) { $hardcodedJs[] = basename($file); }
+    }
+    $ok($hardcodedJs === [], 'shipped admin JS has no hardcoded /admin/ AJAX or upload URL');
+    // The disable lifecycle test above turned the feature off; restore the
+    // verified active route for the post-activation link-mapping audit.
+    sh_setting_save(SH_ADMIN_ACCESS_ENABLED_KEY, '1');
+    sh_setting_save(SH_ADMIN_ACCESS_ACTIVE_KEY, $path);
+    sh_setting_save(SH_ADMIN_ACCESS_PENDING_KEY, '');
+    foreach (['security.php', 'support.php', 'support-settings.php', 'ai/settings.php', 'guides/smtp.php'] as $target) {
+        $ok(sh_admin_access_normalize_target($target) === $target, 'post-activation dispatcher accepts admin target: ' . $target);
+        $mapped = sh_admin_access_map_url('admin/' . $target);
+        $ok(is_string($mapped) && str_contains($mapped, '/' . $path)
+            && str_contains($mapped, '__admin_route=' . rawurlencode($target)),
+            'post-activation internal link is rewritten to the new route: ' . $target);
+    }
+    $ok(str_contains($src('api/support.php'), "sh_url('api/support.php')")
+        || str_contains($src('admin/support.php'), "sh_url('api/support.php')"),
+        'admin AJAX uses the public api/ endpoint that stays reachable after activation');
 });
 
 if ($collisionDir !== '' && is_dir($collisionDir)) { @rmdir($collisionDir); }

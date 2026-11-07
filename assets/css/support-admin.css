@@ -137,3 +137,39 @@
   .sh-support-settings__test { align-items: flex-start; flex-direction: column; }
   .sh-support-settings__faq-actions { width: 100%; }
 }
+
+/* Human-support ownership workflow: every requested conversation shows its
+   request/last-message times, assignment, human state, AI state and unread
+   count. Actions are plain buttons with a comfortable touch target. */
+.sh-support-admin__conversation-times { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--sh-muted, #667085); font-size: 10.5px; }
+.sh-support-admin__conversation-times span { min-width: 0; overflow-wrap: anywhere; }
+.sh-support-admin__badge--in-progress { color: #0b6b4f; background: #e4f7ef; }
+.sh-support-admin__badge--paused { color: #7a3b00; background: #fff1dd; }
+.sh-support-admin__state-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 14px 0 0;
+  border: 1px solid var(--sh-line, #e5e7eb);
+  border-radius: 10px;
+  background: var(--sh-line, #e5e7eb);
+  overflow: hidden;
+}
+.sh-support-admin__state-grid > div { display: grid; gap: 3px; min-width: 0; padding: 9px 11px; background: var(--sh-surface, #fff); }
+.sh-support-admin__state-grid span { color: var(--sh-muted, #667085); font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.sh-support-admin__state-grid strong { color: var(--sh-ink, #172033); font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+.sh-support-admin__human-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid var(--sh-line, #e5e7eb); border-radius: 10px; background: #fffaf7; }
+.sh-support-admin__human-actions .sh-btn { min-height: 38px; }
+.sh-support-admin__human-actions [data-join] { border-color: var(--sh-primary, #e8501b); }
+.sh-support-admin__reply.is-human-owned { border-top: 2px solid var(--sh-primary, #e8501b); }
+@media (max-width: 720px) {
+  .sh-support-admin__state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sh-support-admin__human-actions .sh-btn { flex: 1 1 auto; }
+}
+
+/* Human Support Notifications: connection/test result panel. */
+.sh-support-settings__alert.is-good { border-color: #badbcc; color: #174b32; background: #f1fbf5; }
+.sh-support-settings__alert.is-bad { border-color: #f1b9b5; color: #8d2722; background: #fff4f2; }
+.sh-support-settings__alert.is-warn { border-color: #f1c7a7; color: #71400e; background: #fff8ef; }
+.sh-support-settings__alert:has(> form) { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.sh-support-settings__alert:has(> form) > div { flex: 1 1 260px; display: grid; gap: 5px; min-width: 0; }

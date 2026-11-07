@@ -222,7 +222,7 @@ function sh_otp_find_latest(string $phone, string $purpose, ?int $userId): ?arra
  * `code` is only ever populated for the offline driver and MUST be treated as
  * test-only — never displayed in production UI.
  */
-function sh_otp_issue(string $phone, string $purpose, ?int $userId, string $ip = null): array
+function sh_otp_issue(string $phone, string $purpose, ?int $userId, ?string $ip = null): array
 {
     $ip = $ip ?: sh_client_ip();
     if (!sh_otp_enabled()) {
@@ -393,30 +393,52 @@ function sh_otp_register_driver(string $name, callable $fn): void
     $drivers[$name] = $fn;
 }
 
-function sh_otp_send(string $provider, string $phone, string $message): array
+/**
+ * Read an SMS driver option. An explicit override set (used by the dedicated
+ * Human Support Notifications configuration) wins; otherwise the shared OTP
+ * settings are used. This keeps ONE driver implementation per carrier instead
+ * of a second, parallel notification system.
+ */
+function sh_otp_setting_value(string $key, array $cfg, string $default = ''): string
+{
+    if (array_key_exists($key, $cfg)) { return (string)$cfg[$key]; }
+    return (string)sh_setting($key, $default);
+}
+
+/**
+ * One transport for both OTP codes and human-support SMS.
+ * $cfg is an optional set of per-channel credential overrides keyed by the
+ * SAME setting names the shipped drivers already use, so no credentials are
+ * ever duplicated in code and nothing new is exposed to frontend JavaScript.
+ *
+ * @return array{ok:bool,error:?string}
+ */
+function sh_sms_deliver(string $provider, string $phone, string $message, array $cfg = []): array
 {
     $drivers = sh_otp_driver_registry();
     if (isset($drivers[$provider])) {
         try {
             return $drivers[$provider]($phone, $message);
         } catch (Throwable $e) {
-            sh_log_exception($e, 'otp-provider');
+            sh_log_exception($e, 'sms-provider');
             return ['ok' => false, 'error' => 'SMS provider error.'];
         }
     }
-    if ($provider === 'offline') {
-        return sh_otp_provider_offline($phone, $message);
-    }
-    if ($provider === 'textbee') {
-        return sh_otp_provider_textbee($phone, $message);
-    }
-    if ($provider === 'firebase') {
-        return sh_otp_provider_firebase($phone, $message);
-    }
-    if ($provider === 'generic_http') {
-        return sh_otp_provider_generic($phone, $message);
+    try {
+        if ($provider === 'offline') { return sh_otp_provider_offline($phone, $message); }
+        if ($provider === 'textbee') { return sh_otp_provider_textbee($phone, $message, $cfg); }
+        if ($provider === 'firebase') { return sh_otp_provider_firebase($phone, $message); }
+        if ($provider === 'generic_http') { return sh_otp_provider_generic($phone, $message, $cfg); }
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'sms-provider');
+        return ['ok' => false, 'error' => 'SMS provider error.'];
     }
     return ['ok' => false, 'error' => 'SMS provider is not configured.'];
+}
+
+function sh_otp_send(string $provider, string $phone, string $message): array
+{
+    return sh_sms_deliver($provider, $phone, $message);
 }
 
 /** Test driver: never delivered anywhere; only for confirming the flow works. */
@@ -436,10 +458,10 @@ function sh_otp_e164(string $phone): string
  * TextBee driver — https://api.textbee.dev/api/v1/gateway/devices/{device_id}/send-sms
  * JSON body { recipients: [E.164], message }, header `x-api-key: <api key>`.
  */
-function sh_otp_provider_textbee(string $phone, string $message): array
+function sh_otp_provider_textbee(string $phone, string $message, array $cfg = []): array
 {
-    $apiKey = trim((string)sh_setting('otp_textbee_api_key', ''));
-    $deviceId = trim((string)sh_setting('otp_textbee_device_id', ''));
+    $apiKey = trim(sh_otp_setting_value('otp_textbee_api_key', $cfg));
+    $deviceId = trim(sh_otp_setting_value('otp_textbee_device_id', $cfg));
     if ($apiKey === '' || $deviceId === '') {
         return ['ok' => false, 'error' => 'TextBee API key and Device ID are both required.'];
     }
@@ -492,34 +514,34 @@ function sh_otp_provider_firebase(string $phone, string $message): array
  * response, optional bearer/basic auth, and a simple phone/message param
  * fallback when no body template is supplied.
  */
-function sh_otp_provider_generic(string $phone, string $message): array
+function sh_otp_provider_generic(string $phone, string $message, array $cfg = []): array
 {
-    $url = trim((string)sh_setting('otp_api_url', ''));
+    $url = trim((string)sh_otp_setting_value('otp_api_url', $cfg, ''));
     if ($url === '') {
         return ['ok' => false, 'error' => 'SMS API URL is not configured.'];
     }
-    $method = strtolower((string)sh_setting('otp_api_method', 'post_json'));
-    $bodyTpl = (string)sh_setting('otp_api_body', '');
-    $headersTpl = (string)sh_setting('otp_api_headers', '');
-    $successField = (string)sh_setting('otp_success_field', '');
-    $successValue = (string)sh_setting('otp_success_value', '');
-    $sender = (string)sh_setting('otp_sender_id', 'ShopHaat');
+    $method = strtolower((string)sh_otp_setting_value('otp_api_method', $cfg, 'post_json'));
+    $bodyTpl = (string)sh_otp_setting_value('otp_api_body', $cfg, '');
+    $headersTpl = (string)sh_otp_setting_value('otp_api_headers', $cfg, '');
+    $successField = (string)sh_otp_setting_value('otp_success_field', $cfg, '');
+    $successValue = (string)sh_otp_setting_value('otp_success_value', $cfg, '');
+    $sender = (string)sh_otp_setting_value('otp_sender_id', $cfg, 'ShopHaat');
 
     $placeholders = [
         '{phone}'     => $phone,
         '{message}'   => $message,
         '{sender}'    => $sender,
-        '{api_key}'   => (string)sh_setting('otp_api_key', ''),
-        '{api_secret}' => (string)sh_setting('otp_api_secret', ''),
-        '{token}'     => (string)sh_setting('otp_api_token', ''),
-        '{username}'  => (string)sh_setting('otp_api_username', ''),
-        '{password}'  => (string)sh_setting('otp_api_password', ''),
+        '{api_key}'   => (string)sh_otp_setting_value('otp_api_key', $cfg, ''),
+        '{api_secret}' => (string)sh_otp_setting_value('otp_api_secret', $cfg, ''),
+        '{token}'     => (string)sh_otp_setting_value('otp_api_token', $cfg, ''),
+        '{username}'  => (string)sh_otp_setting_value('otp_api_username', $cfg, ''),
+        '{password}'  => (string)sh_otp_setting_value('otp_api_password', $cfg, ''),
     ];
 
     // Fallback: no body template => build from the phone/message param names.
     if (trim($bodyTpl) === '') {
-        $phoneParam = (string)sh_setting('otp_phone_param', 'phone');
-        $messageParam = (string)sh_setting('otp_message_param', 'message');
+        $phoneParam = (string)sh_otp_setting_value('otp_phone_param', $cfg, 'phone');
+        $messageParam = (string)sh_otp_setting_value('otp_message_param', $cfg, 'message');
         $pairs = [$phoneParam => $phone, $messageParam => $message];
         $body = $method === 'post_json' ? json_encode($pairs) : http_build_query($pairs);
     } else {
@@ -548,14 +570,14 @@ function sh_otp_provider_generic(string $phone, string $message): array
     $httpHeaders = [];
     foreach ($headers as $k => $v) { $httpHeaders[] = "$k: $v"; }
     // Optional auth: bearer token header, or HTTP basic auth.
-    $auth = strtolower((string)sh_setting('otp_api_auth', ''));
-    $token = (string)sh_setting('otp_api_token', '');
+    $auth = strtolower((string)sh_otp_setting_value('otp_api_auth', $cfg, ''));
+    $token = (string)sh_otp_setting_value('otp_api_token', $cfg, '');
     if ($auth === 'bearer' && $token !== '') {
         $httpHeaders[] = 'Authorization: Bearer ' . $token;
     }
-    if ($auth === 'basic' && (string)sh_setting('otp_api_username', '') !== '') {
+    if ($auth === 'basic' && (string)sh_otp_setting_value('otp_api_username', $cfg, '') !== '') {
         $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-        $options[CURLOPT_USERPWD] = (string)sh_setting('otp_api_username', '') . ':' . (string)sh_setting('otp_api_password', '');
+        $options[CURLOPT_USERPWD] = (string)sh_otp_setting_value('otp_api_username', $cfg, '') . ':' . (string)sh_otp_setting_value('otp_api_password', $cfg, '');
     }
     if ($httpHeaders) { $options[CURLOPT_HTTPHEADER] = $httpHeaders; }
     curl_setopt_array($ch, $options);

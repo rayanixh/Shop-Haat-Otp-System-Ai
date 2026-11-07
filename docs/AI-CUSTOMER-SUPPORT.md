@@ -44,6 +44,35 @@ No new conversation columns and no new migration were added. The four requested 
 
 The secondary **Contact Support** section on `support.php` (heading, explanatory copy, name/email/subject/message form, "Send message" button and its server-side POST mail handler) was removed, along with the trailing empty layout space (`.sh-support-chat { margin: 0 }`). The conversation, the **Request human support** button, the admin support inbox and customer-to-agent messaging are untouched. The three "saved for support" strings were removed from `assets/js/support.js`; the only notice a customer sees during handoff is the one server-side confirmation.
 
+### Admin inbox: explicit join / ownership workflow
+
+The shipped inbox already had a state machine but the actions were effectively invisible: `admin/support.php` did **not** emit `data-can-reply`, while `assets/js/support-admin.js` read `root.dataset.canReply === '1'` and hid the whole action bar, assignment controls and reply form whenever it was absent. That bug is fixed. On top of it:
+
+* Every human-requested row now shows customer name (or **Guest customer**), latest-message preview, **request time** (the real `support_handoff_events.requested` timestamp, falling back to `created_at`), **last message time**, assignment status, human-support status, AI status (`Paused` / `Active`) and unread count. These are derived server-side by `sh_support_inbox_display()` and returned by both `admin_list` and `admin_thread`/`admin_poll`.
+* The status labels are derived from the existing `status` / `ai_paused` / `assigned_admin_id` columns: `Pending human support` → **`In progress`** once an agent is assigned → `Closed / resolved`. No ENUM change or migration is needed, so existing installs are unaffected.
+* Explicit actions: **Join Conversation**, **Assign to Me**, **Reply as Human**, **Leave Conversation**, **Close Conversation**, **Reopen Conversation**, plus the existing **Resume AI** (the **only** way AI resumes), Assign, Unassign and Take over.
+* `join` / `assign_to_me` is an **atomic ownership claim**: the conversation row is locked with `SELECT ... FOR UPDATE`, then a conditional `UPDATE ... WHERE id = ? AND (assigned_admin_id IS NULL OR assigned_admin_id = 0) AND status NOT IN ('resolved','closed')` must change exactly one row. A second agent (even a superadmin) gets an honest 409 instead of silently taking over. `assign` now also refuses to overwrite a colleague's ownership for non-superadmins.
+* Joining assigns the agent, sets `status = 'assigned'`, keeps `ai_paused = 1`, displays the agent name, and enables the human composer. **Reply as Human** claims an unowned pending thread first, then focuses a public reply. Agent replies append to the existing conversation with the correct sender name and timestamp; customer follow-ups are saved once, are delivered to the assigned inbox (`unread_for_admin = 1`), and never trigger AI, FAQ, fallback or a second handoff confirmation.
+* `leave` releases ownership back to the pending queue with AI still paused; `close` sets `status = 'closed'`; `reopen` reopens with AI still paused. `api/support.php` has an explicit allowlist for all browser-driven transitions, still requires `sh_require_admin()`, `sh_admin_can(...)`, POST and CSRF, and every write uses prepared SQL.
+
+### Human Support Notifications (SMS)
+
+A dedicated **Human Support Notifications (SMS)** section lives in **Admin → Support Settings & FAQs**. It is settings-backed: **no new table, column or migration**. It reuses the shipped SMS drivers (`sh_sms_deliver()` in `includes/phone-otp.php`), the existing `settings` table, the existing `support_handoff_events` unique `event_key` index for idempotency, and the existing `notification_logs` / `sh_notify_log()` logging when available. There is no second notification engine.
+
+* Admin can enable/disable, set a support mobile number, choose a provider, enter credentials, **Save settings**, **Test SMS**, and **Clear result** — entirely from the UI, without editing PHP.
+* Provider choices are limited to carriers this shared-hosting stack can actually call: **Offline / test mode**, **Use the store's configured SMS provider** (reuses `Security → SMS/OTP Provider` credentials), **TextBee** (dedicated API key + device ID), and **Custom SMS API** (dedicated HTTPS GET/POST JSON or form gateway with optional success marker). **Firebase is deliberately excluded** because Firebase Auth issues its own codes and cannot carry server-generated text.
+* Secret fields are write-only: a saved value is never echoed into admin HTML and never reaches frontend JavaScript. A blank secret field keeps the stored value. Logs contain a redacted outcome only; `sh_support_sms_scrub()` removes keys, tokens and long credential-like strings.
+* The message is short and contains only a conversation reference plus a "customer waiting" note: `ShopHaat: a customer is waiting for human support. Conversation #N. Sign in to your Admin Inbox to reply.` No customer name, phone, email, message text, order, payment data, password, API key or private Admin URL is included.
+* **One SMS per genuinely new request.** The claim key is derived from the AI → human ownership *cycle* (the same `resume_ai` counter as the one handoff confirmation), so the "Talk to a human" button and a message whose text asks for a human converge on the same claim. Retries, refreshes, later customer messages, join, reply, leave and close never notify again; a new request after the previous one was closed requires an explicit **Resume AI** and then produces exactly one new SMS.
+* **Nothing is claimed as "SMS sent" without provider acceptance.** Offline mode, a disabled/incomplete configuration, a missing transport, an HTTP error and a provider rejection are all reported as *NOT sent* with the provider's (redacted) error. A disabled or broken SMS channel never affects customer chat, the admin inbox, conversation history or AI state.
+* Saving configuration clears the previous connection/test result so a stale "connected" badge is never shown for credentials no longer in use.
+
+**Provider configuration still required from the store owner:** real credentials for TextBee or a custom HTTPS SMS gateway (or a real store SMS provider under Security), and a successful **Test SMS** plus a handset check on staging. No real provider credential, carrier acceptance or handset delivery was available or claimed in this environment.
+
+### Chat composer sizing
+
+The input type/padding and Send button text/icon/padding were reduced subtly (`13.5px` input, `12.8px` Send, 14px icons, `min-height: 40px` on both), keeping a comfortable touch target, one horizontal input + Send row on mobile, the orange focus/brand colour, the Bangla/Banglish/English placeholder and a balanced **Talk to a human** button. The viewport-fixed, bottom-anchored sheet, safe-area spacing and the rule that **only `.sh-schat-messages` scrolls** are unchanged; the page still scrolls normally.
+
 ### Admin URL
 
 The Custom Admin Access URL is settings-backed (no new table/column), staged → verified → applied, and guarded server-side on every request. Full routing, recovery and `.htaccess` limitations are in [ADMIN-ACCESS-URL.md](ADMIN-ACCESS-URL.md).
@@ -54,11 +83,19 @@ The Custom Admin Access URL is settings-backed (no new table/column), staged →
 
 **Admin URL / hardening:** `includes/admin-access.php` (dispatcher exception, pending/active recognition, wider reserved prefixes), `config/config.php` (bootstrap guard), `admin/security.php` (proposed URL copy control + runbook pointer), `includes/admin-auth.php` and `includes/admin-perms.php` (security logging of unauthenticated and RBAC denials), `admin/_layout.php` (guarded support badge), `docs/ADMIN-ACCESS-URL.md`.
 
+**Admin inbox / human ownership:** `includes/ai-support.php` (derived inbox fields, `join`/`assign_to_me`/`leave`/`close` transitions, atomic ownership claim, SMS hook on both handoff paths), `api/support.php` (transition allowlist), `admin/support.php` (`data-can-reply` fix + explicit actions + state grid), `assets/js/support-admin.js` (inbox fields, action wiring, human composer), `assets/css/support-admin.css` (state grid, action bar, mobile layout).
+
+**Human Support Notifications:** `includes/support-sms.php` (new; settings, credential mapping, idempotent claim, secure logging, test), `includes/phone-otp.php` (`sh_sms_deliver()` with credential overrides, shared `sh_otp_setting_value()` for the existing drivers, PHP 8.4+ nullable-parameter fix), `admin/support-settings.php` (dedicated settings section + CSRF-protected save/test/clear handlers), `tests/support-sms-notifications.php` (new).
+
+**Chat composer:** `assets/css/app.css`, `includes/support-widget.php`, `tests/support-chat-behavior.mjs`.
+
+**Admin URL activation:** `includes/admin-access.php` (timezone-independent verification marker, single atomic activation with DB read-back, compensating rollback, reason codes, secure logging), `admin/security.php` (useful activation errors), `docs/ADMIN-ACCESS-URL.md`, `tests/admin-access-url.php`, `tests/admin-access-regression.mjs`.
+
 **Schema / tests:** `install/schema.php` (aligned legacy `support_conversations.last_message_at` and `support_faqs` defaults with the additive upgrader), `tests/_support_db_bootstrap.php`, `tests/human-support-handoff.php`, `tests/admin-access-url.php`, `tests/security-regression.php`, `tests/support-unit.php`, `tests/support-chat-optimistic-behavior.mjs`, `docs/AI-CUSTOMER-SUPPORT.md`, and `.github/workflows/reporting-integration.yml` (new suites wired into the security job).
 
 ## Migration and rollback
 
-* **No migration is required for this change.** The custom URL reuses the existing `settings` keys (`admin_access_enabled`, `admin_access_secret_path`, `admin_access_pending_secret`, `admin_access_verified_secret/_at/_by`). The support state machine reuses `support_conversations.status`, `ai_paused`, `assigned_admin_id`, `unread_for_admin/_customer` and the existing `support_handoff_events` unique `event_key`/`legacy_event_id` indexes.
+* **No migration is required for this change.** The admin inbox, ownership actions and the entire Human Support Notifications feature reuse existing tables (`settings`, `support_conversations`, `support_messages`, `support_handoff_events`, `notification_logs`) and existing columns; no ENUM value, table or index was added. The custom URL reuses the existing `settings` keys (`admin_access_enabled`, `admin_access_secret_path`, `admin_access_pending_secret`, `admin_access_verified_secret/_at/_by`). The support state machine reuses `support_conversations.status`, `ai_paused`, `assigned_admin_id`, `unread_for_admin/_customer` and the existing `support_handoff_events` unique `event_key`/`legacy_event_id` indexes.
 * Existing stores still need the previously shipped additive support upgrader (`ai/support-schema.php` / `install/migrations/2026-10-ai-customer-support.sql`) if they have not run it. It only adds columns/indexes and backfills; it never drops rows. `install/schema.php` was aligned so a fresh install and an upgraded install produce the same nullable/default definitions.
 * **Rollback for admin URL:** an authenticated Super Admin presses **Disable and clear custom route**, or the hosting owner runs the documented phpMyAdmin SQL. No password, token or unauthenticated recovery endpoint is created. See the runbook.
 * **Rollback for support:** `install/migrations/2026-10-ai-customer-support-rollback.sql` remains non-destructive; it disables chat/AI without deleting conversations, messages, events, FAQs or metrics. Do not `DROP TABLE` support tables.
@@ -70,16 +107,18 @@ Run in this session with the PHP 8.5 WASM CLI (`@php-wasm/cli 3.1.62`), Node.js 
 | Command | Result |
 | --- | --- |
 | `php -l` on every PHP file (WASM CLI) | No syntax errors. PHP 8.5 emits pre-existing `http_response_header` deprecation notices in unrelated files. |
-| `php tools/security-scan.php --fail-on=high` | `critical 0 high 0 medium 0 low 0`, 179 files. |
+| `php tools/security-scan.php --fail-on=high` | `critical 0 high 0 medium 0 low 0`, 180 files. |
 | `php tests/security-regression.php` | `passed 185 failed 0 skipped 1` (header-emission check not applicable in CLI). |
 | `php tests/support-unit.php` | `Passed: 58 Failed: 0`. |
-| `php tests/human-support-handoff.php` | `passed 117 failed 0`, real PHP service functions + real PDO SQL on **SQLite** with MySQL SQL translated. |
-| `SH_TEST_PHP_BIN=… php tests/admin-access-url.php` | `passed 164 failed 0`, real PDO + 9 isolated PHP subprocesses for 404/auth guards. |
+| `php tests/human-support-handoff.php` | `passed 184 failed 0`, real PHP service functions + real PDO SQL on **SQLite** with MySQL SQL translated. |
+| `SH_TEST_PHP_BIN=… php tests/admin-access-url.php` | `passed 224 failed 0`, real PDO + 9 isolated PHP subprocesses for 404/auth guards. |
+| `php tests/support-sms-notifications.php` | `passed 97 failed 0` — one SMS per request (both handoff paths), provider acceptance/rejection, disabled/misconfigured channel never breaking chat, secret-free body/logs, no duplicate after close/reopen/Resume AI. **Explicit test transport; no real carrier.** |
+| `node tests/support-admin-inbox-behavior.mjs` | `51 passed, 0 failed` — real admin inbox JS in jsdom: all inbox fields, Join → In progress, agent name, human composer, Leave/Close/Reopen, CSRF and polling. |
 | `node --check assets/js/support.js` | OK. |
-| `node tests/admin-access-regression.mjs` | `11 passed, 0 failed`. |
+| `node tests/admin-access-regression.mjs` | `13 passed, 0 failed`. |
 | `node tests/admin-notification-regression.mjs` | `5 passed, 0 failed`. |
 | `node tests/provider-identity-assets.mjs` | `5 passed`. |
-| `node tests/support-chat-behavior.mjs` | All checks passed. |
+| `node tests/support-chat-behavior.mjs` | `58 passed, 0 failed`. |
 | `node tests/support-chat-optimistic-behavior.mjs` | `63 passed, 0 failed`. |
 | `node tests/page-transition-behavior.mjs` (jsdom + fixture renderer) | `passed 80 failed 0`. |
 | `node tests/slider-behavior.mjs` (jsdom + fixture renderer) | `passed 44 failed 0`. |
@@ -98,6 +137,8 @@ Run in this session with the PHP 8.5 WASM CLI (`@php-wasm/cli 3.1.62`), Node.js 
 * Storefront regression: product, cart, checkout, customer login/registration, orders, payments, AI support and admin panel over real HTTP.
 * cPanel hosts without `mod_rewrite` / `AllowOverride All` cannot use the custom URL; the standard route remains available. Static `.htaccess` cannot be DB-conditional, so the PHP bootstrap guard is mandatory.
 * Provider text-generation test with real credentials, which is deliberately never assumed working.
+* **Human-support SMS:** the store owner must enter real TextBee / custom HTTPS gateway credentials (or configure a real store SMS provider under Security), run **Test SMS** on staging, confirm handset delivery, and then verify one SMS for a real customer handoff with no duplicate on follow-up messages. No real provider credential, carrier acceptance or handset delivery was tested in this environment.
+* **Deployed Admin URL:** real MySQL/InnoDB transaction behaviour (`FOR UPDATE`, `ON DUPLICATE KEY UPDATE`) and a live cPanel/Apache/LiteSpeed GET → activation POST round trip with cookies/CSRF/ticket, phpMyAdmin DB read-back, and navigation/forms/AJAX/uploads/security settings through the new route are still untested. Local PHP-WASM/PDO-SQLite and source-level checks cannot prove those.
 
 ## Staging acceptance checklist
 

@@ -62,19 +62,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$adminAccessVerifyScreen) {
                 $errors[] = 'Open the complete proposed Admin URL in this browser before you can verify and activate it.';
             } else {
-                $pending = (string)sh_admin_access_state()['pending_path'];
-                $ticket = $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] ?? '';
-                if ($pending === '' || !is_string($ticket) || $ticket === ''
-                    || !hash_equals(hash('sha256', $pending), $ticket)) {
-                    $errors[] = 'This verification link is no longer valid. Return to Admin Access and save the route again.';
-                } elseif (!sh_admin_access_record_verification($pending, (int)($admin['id'] ?? 0))
-                          || !sh_admin_access_apply_pending()) {
-                    $errors[] = 'New Admin URL could not be activated. Your current Admin URL is unchanged.';
-                } else {
-                    sh_admin_access_mark_verified_audit($pending);
-                    sh_admin_access_mark_changed_audit('enabled', $pending);
+                // Use the REAL deployed request path, not just the staged DB
+                // value: a success message is only valid when both agree.
+                $requestedPath = sh_admin_access_request_path() ?? '';
+                $result = sh_admin_access_activate_verified($requestedPath, (int)($admin['id'] ?? 0));
+                if (!empty($result['ok'])) {
+                    sh_admin_access_mark_verified_audit((string)$result['path']);
+                    sh_admin_access_mark_changed_audit('enabled', (string)$result['path']);
                     $adminAccessActivated = true;
-                    $notice = 'New Admin URL is active. The old Admin URL is now disabled.';
+                    $notice = sh_admin_access_activation_message('activated');
+                } else {
+                    // Technical reason (tickets, DB error class, read-back
+                    // mismatch) is already written to the secure admin error
+                    // log by sh_admin_access_activate_verified(); the browser
+                    // gets a useful but secret-free explanation.
+                    $reason = (string)($result['reason'] ?? 'unknown');
+                    sh_security_log('admin_access_activation_failed', (int)($admin['id'] ?? 0), [
+                        'reason' => $reason,
+                        'result' => 'failed',
+                        'old_route_preserved' => true,
+                    ]);
+                    $errors[] = sh_admin_access_activation_message($reason);
                 }
             }
         } elseif ($form === 'admin_access_disable') {

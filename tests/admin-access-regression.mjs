@@ -26,7 +26,9 @@ const layout = read('admin/_layout.php');
 const seo = read('includes/seo.php');
 const aiApi = read('api/ai.php');
 const productStudio = read('ai/ProductStudio.php');
-const savePending = access.slice(access.indexOf('function sh_admin_access_save_pending'), access.indexOf('/** Start a CSRF-protected same-session visit', access.indexOf('function sh_admin_access_save_pending')));
+const saveStart = access.indexOf('function sh_admin_access_save_pending');
+const saveEnd = access.indexOf('\nfunction ', saveStart + 10);
+const savePending = access.slice(saveStart, saveEnd === -1 ? undefined : saveEnd);
 const aiSaveStart = aiApi.indexOf("case 'save_product':");
 const aiSaveEnd = aiApi.indexOf("case 'save':", aiSaveStart);
 const aiSaveCode = aiApi.slice(aiSaveStart, aiSaveEnd);
@@ -42,6 +44,17 @@ const cases = [
     access.includes('bin2hex(random_bytes(24))') && security.includes("$form === 'admin_access_suggest'") && security.includes('It is not saved or active yet.')],
   ['saving a proposal only changes pending verification metadata, not the active route',
     savePending.includes('SH_ADMIN_ACCESS_PENDING_KEY => $path') && savePending.includes("SH_ADMIN_ACCESS_VERIFIED_KEY => ''") && !savePending.includes('SH_ADMIN_ACCESS_ACTIVE_KEY =>')],
+  ['verification timestamps are timezone-independent (the deployed activation bug)',
+    access.includes("strtotime($raw . ' UTC')") && access.includes('sh_admin_access_verified_at_write()')
+    && access.includes('sh_admin_access_verified_at_parse($verifiedAt)')
+    && !/VERIFIED_AT_KEY\s*=>\s*gmdate\(/.test(access)],
+  ['activation is one atomic transaction with read-back, compensating rollback and reason codes',
+    access.includes('function sh_admin_access_activate_verified(')
+    && access.includes('$pdo->beginTransaction()') && access.includes('FOR UPDATE')
+    && access.includes('database_readback_failed') && access.includes('$restored = sh_admin_access_write($previous);')
+    && access.includes('sh_admin_access_activation_message(')
+    && security.includes('sh_admin_access_request_path()')
+    && security.includes('sh_security_log(\'admin_access_activation_failed\'')],
   ['a pending path requires a same-session ticket and shows a verification screen; a GET never verifies or activates',
     dispatcher.includes('sh_admin_access_request_path()') && dispatcher.includes('SH_ADMIN_ACCESS_VERIFY_SESSION_KEY')
     && dispatcher.includes("define('SH_ADMIN_ACCESS_VERIFY_SCREEN', true)")

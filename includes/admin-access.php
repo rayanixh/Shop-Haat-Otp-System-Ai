@@ -57,6 +57,34 @@ function sh_admin_access_normalize_path($value): ?string
     return $path;
 }
 
+/**
+ * Timezone-independent timestamp helpers for the one-hour verification marker.
+ *
+ * Root cause of the deployed activation failure: the marker used to be WRITTEN
+ * with gmdate() (UTC wall-clock text) but READ with strtotime(), which parses
+ * that text in PHP's local timezone. On a UTC+N server (for example
+ * Asia/Dhaka, UTC+6) the marker looked N hours old, so the one-hour freshness
+ * check rejected it and activation always failed. On a UTC server both agree,
+ * which is why the CI/SQLite suites passed while cPanel failed.
+ *
+ * New values are plain Unix timestamps (timezone-independent). Legacy datetime
+ * strings are still accepted by forcing UTC interpretation.
+ */
+function sh_admin_access_verified_at_parse(string $raw): int|false
+{
+    $raw = trim($raw);
+    if ($raw === '') { return false; }
+    if (preg_match('/^[0-9]{9,12}$/D', $raw) === 1) { return (int)$raw; }
+    $raw = preg_replace('/\s+UTC$/i', '', $raw) ?? $raw;
+    $time = strtotime($raw . ' UTC');
+    return $time === false ? false : $time;
+}
+
+function sh_admin_access_verified_at_write(): string
+{
+    return (string)time();
+}
+
 /** One source of truth for the route state; never sent to storefront responses. */
 function sh_admin_access_state(): array
 {
@@ -65,7 +93,7 @@ function sh_admin_access_state(): array
     $verified = sh_admin_access_normalize_path((string)sh_setting(SH_ADMIN_ACCESS_VERIFIED_KEY, '')) ?? '';
     $enabled = (string)sh_setting(SH_ADMIN_ACCESS_ENABLED_KEY, '0') === '1' && $active !== '';
     $verifiedAt = (string)sh_setting(SH_ADMIN_ACCESS_VERIFIED_AT_KEY, '');
-    $verifiedTime = $verifiedAt !== '' ? strtotime($verifiedAt) : false;
+    $verifiedTime = sh_admin_access_verified_at_parse($verifiedAt);
     $verifiedFresh = $pending !== '' && $verified !== '' && hash_equals($pending, $verified)
         && $verifiedTime !== false && $verifiedTime >= time() - 3600;
     return [
@@ -199,6 +227,162 @@ function sh_admin_access_save_pending(string $path): bool
     }
 }
 
+/**
+ * Human-readable, non-technical explanation for an activation result. Detailed
+ * causes go to the admin-only error log, never to the browser (and never with
+ * route secrets, tokens, credentials or raw SQL).
+ */
+function sh_admin_access_activation_message(string $reason): string
+{
+    return match ($reason) {
+        'activated' => 'New Admin URL is active. The old Admin URL is now disabled.',
+        'route_not_recognized' => 'This page was not opened through the proposed Admin URL. Open the full proposed URL in this browser, then activate it.',
+        'admin_session_missing' => 'Your admin session was not recognised. Sign in again as a superadmin and repeat the verification.',
+        'verification_ticket_missing' => 'This verification link has expired or was opened in a different browser session. Save the proposed URL again and reopen it.',
+        'verification_ticket_mismatch' => 'This verification ticket does not match the proposed Admin URL. Save the proposed URL again and reopen it.',
+        'no_pending_route' => 'There is no staged Admin URL waiting for activation. Save a new proposed URL first.',
+        'route_mismatch' => 'The staged Admin URL changed. Return to Admin Access, save the route again and reopen the full URL.',
+        'already_active' => 'This Admin URL is already active; no change was needed.',
+        'path_validation_failed' => 'The proposed Admin URL is not a valid, available one-segment path. Save a different URL.',
+        'database_readback_failed' => 'The database did not confirm the new Admin URL, so the old URL was kept. Check the admin error log and database permissions.',
+        'post_commit_verification_failed' => 'Activation could not be confirmed after saving, so the previous Admin URL was restored. Check the admin error log.',
+        'database_error' => 'The database rejected the activation and the old Admin URL was left unchanged. Check the admin error log and MySQL/MariaDB permissions.',
+        default => 'New Admin URL could not be activated. Your current Admin URL is unchanged. Check the admin error log for details.',
+    };
+}
+
+/**
+ * Atomically activate the staged Admin URL.
+ *
+ * Replaces the old two-transaction "record verification, then apply" sequence:
+ * that split could leave the verification marker in place while activation
+ * failed for an unrelated reason, with no useful diagnostics. This function
+ * keeps ALL writes in one transaction, verifies them by reading back from the
+ * database, and only then reports success. On any failure the transaction is
+ * rolled back (old route untouched); if the post-commit settings read does not
+ * confirm the switch, the exact previous values are restored (compensating
+ * rollback) so the old route keeps working.
+ *
+ * $requestedPath MUST be the real route segment the request arrived on, taken
+ * from sh_admin_access_request_path() by the dispatcher. The DB pending value
+ * and the deployed request path must agree, so a success message can never be
+ * shown for a URL that is not actually serving admin pages.
+ *
+ * @return array{ok:bool,reason:string,path:string}
+ */
+function sh_admin_access_activate_verified(string $requestedPath, ?int $adminId = null): array
+{
+    $requestedPath = sh_admin_access_normalize_path($requestedPath) ?? '';
+    $adminId = (int)($adminId ?? 0);
+    $fingerprint = $requestedPath !== '' ? substr(hash('sha256', $requestedPath), 0, 12) : 'none';
+
+    $fail = static function (string $reason, string $detail = '') use ($fingerprint): array {
+        sh_log_line('security', 'Admin URL activation refused: ' . $reason
+            . ($detail !== '' ? ' (' . $detail . ')' : '')
+            . ' fingerprint=' . $fingerprint . '. The previously active route was left unchanged.');
+        return ['ok' => false, 'reason' => $reason, 'path' => ''];
+    };
+
+    if ($requestedPath === '') { return $fail('route_not_recognized', 'request path did not resolve to a normalised route segment'); }
+    if ($adminId <= 0) { return $fail('admin_session_missing'); }
+
+    $ticket = $_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY] ?? '';
+    if (!is_string($ticket) || $ticket === '') { return $fail('verification_ticket_missing'); }
+    if (!hash_equals(hash('sha256', $requestedPath), $ticket)) { return $fail('verification_ticket_mismatch'); }
+
+    $keys = [
+        SH_ADMIN_ACCESS_ENABLED_KEY,
+        SH_ADMIN_ACCESS_ACTIVE_KEY,
+        SH_ADMIN_ACCESS_PENDING_KEY,
+        SH_ADMIN_ACCESS_VERIFIED_KEY,
+        SH_ADMIN_ACCESS_VERIFIED_AT_KEY,
+        SH_ADMIN_ACCESS_VERIFIED_BY_KEY,
+    ];
+
+    $pdo = null;
+    $previous = [];
+    try {
+        $pdo = sh_db();
+        $pdo->beginTransaction();
+        $marks = implode(',', array_fill(0, count($keys), '?'));
+        $read = $pdo->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ($marks) FOR UPDATE");
+        $read->execute($keys);
+        $current = [];
+        foreach ($read->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $current[(string)$row['setting_key']] = (string)($row['setting_value'] ?? '');
+        }
+        foreach ($keys as $key) { $previous[$key] = $current[$key] ?? ''; }
+
+        $pending = sh_admin_access_normalize_path($previous[SH_ADMIN_ACCESS_PENDING_KEY]) ?? '';
+        $active = sh_admin_access_normalize_path($previous[SH_ADMIN_ACCESS_ACTIVE_KEY]) ?? '';
+        $enabled = $previous[SH_ADMIN_ACCESS_ENABLED_KEY] === '1';
+
+        if ($pending === '') { $pdo->rollBack(); return $fail('no_pending_route'); }
+        if (!hash_equals($pending, $requestedPath)) { $pdo->rollBack(); return $fail('route_mismatch', 'staged and requested route differ'); }
+        if ($enabled && $active !== '' && hash_equals($active, $pending)) { $pdo->rollBack(); return $fail('already_active'); }
+
+        // Full filesystem/storefront-slug collision validation already ran when
+        // the route was staged (sh_admin_access_save_pending). Activation repeats
+        // only the cheap syntax check, so a product created in the meantime can
+        // never leave the store with no working admin route.
+        $syntax = sh_admin_access_normalize_path($pending);
+        if ($syntax === null || !hash_equals($syntax, $pending)) {
+            $pdo->rollBack();
+            return $fail('path_validation_failed');
+        }
+
+        // One statement per key, all inside the SAME transaction. No helper that
+        // could start a nested transaction or roll back the caller's work.
+        $write = $pdo->prepare('INSERT INTO settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW())
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = VALUES(updated_at)');
+        $next = [
+            SH_ADMIN_ACCESS_ENABLED_KEY => '1',
+            SH_ADMIN_ACCESS_ACTIVE_KEY => $pending,
+            SH_ADMIN_ACCESS_PENDING_KEY => '',
+            SH_ADMIN_ACCESS_VERIFIED_KEY => '',
+            SH_ADMIN_ACCESS_VERIFIED_AT_KEY => '',
+            SH_ADMIN_ACCESS_VERIFIED_BY_KEY => '0',
+        ];
+        foreach ($next as $key => $value) { $write->execute([$key, $value]); }
+
+        // Read the values back from inside the transaction before committing.
+        $verify = $pdo->prepare('SELECT setting_key, setting_value FROM settings WHERE setting_key IN (?, ?)');
+        $verify->execute([SH_ADMIN_ACCESS_ENABLED_KEY, SH_ADMIN_ACCESS_ACTIVE_KEY]);
+        $confirmed = [];
+        foreach ($verify->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $confirmed[(string)$row['setting_key']] = (string)($row['setting_value'] ?? '');
+        }
+        if (($confirmed[SH_ADMIN_ACCESS_ENABLED_KEY] ?? '') !== '1'
+            || !hash_equals((string)($confirmed[SH_ADMIN_ACCESS_ACTIVE_KEY] ?? ''), $pending)) {
+            $pdo->rollBack();
+            return $fail('database_readback_failed');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo instanceof PDO && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); } catch (Throwable $ignored) { /* leave old route intact */ }
+        }
+        sh_log_exception($e, 'admin-access-activation');
+        return $fail('database_error', get_class($e));
+    }
+
+    // Post-commit confirmation from the settings cache actually used by every
+    // admin request. If it does not agree, restore the exact previous values.
+    sh_settings(true);
+    $state = sh_admin_access_state();
+    if (!$state['enabled'] || $state['active_path'] === ''
+        || !hash_equals($state['active_path'], $requestedPath)
+        || $state['pending_path'] !== '') {
+        $restored = sh_admin_access_write($previous);
+        sh_settings(true);
+        return $fail('post_commit_verification_failed', $restored ? 'previous values restored' : 'RESTORE FAILED');
+    }
+
+    unset($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]);
+    sh_log_line('security', 'Admin URL activation confirmed by database read-back; fingerprint=' . $fingerprint . '.');
+    return ['ok' => true, 'reason' => 'activated', 'path' => $pending];
+}
+
 /** Start a CSRF-protected same-session visit to the pending route. */
 function sh_admin_access_begin_verification(): bool
 {
@@ -230,7 +414,8 @@ function sh_admin_access_apply_pending(): bool
         $active = sh_admin_access_normalize_path($current[SH_ADMIN_ACCESS_ACTIVE_KEY] ?? '') ?? '';
         $pending = sh_admin_access_normalize_path($current[SH_ADMIN_ACCESS_PENDING_KEY] ?? '') ?? '';
         $verified = sh_admin_access_normalize_path($current[SH_ADMIN_ACCESS_VERIFIED_KEY] ?? '') ?? '';
-        $verifiedAt = isset($current[SH_ADMIN_ACCESS_VERIFIED_AT_KEY]) ? strtotime($current[SH_ADMIN_ACCESS_VERIFIED_AT_KEY]) : false;
+        $verifiedAt = isset($current[SH_ADMIN_ACCESS_VERIFIED_AT_KEY])
+            ? sh_admin_access_verified_at_parse((string)$current[SH_ADMIN_ACCESS_VERIFIED_AT_KEY]) : false;
         $enabled = ($current[SH_ADMIN_ACCESS_ENABLED_KEY] ?? '0') === '1';
         if ($pending === '' || $verified === '' || !hash_equals($pending, $verified)
             || $verifiedAt === false || $verifiedAt < time() - 3600
@@ -286,7 +471,7 @@ function sh_admin_access_record_verification(string $path, int $adminId): bool
     if (empty($check['ok']) || !hash_equals($check['path'], $path)) { return false; }
     return sh_admin_access_write([
         SH_ADMIN_ACCESS_VERIFIED_KEY => $path,
-        SH_ADMIN_ACCESS_VERIFIED_AT_KEY => gmdate('Y-m-d H:i:s'),
+        SH_ADMIN_ACCESS_VERIFIED_AT_KEY => sh_admin_access_verified_at_write(),
         SH_ADMIN_ACCESS_VERIFIED_BY_KEY => (string)$adminId,
     ]);
 }

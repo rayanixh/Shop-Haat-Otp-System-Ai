@@ -85,6 +85,35 @@ const chatJs = readFileSync(join(ROOT, 'assets/js/support-chat.js'), 'utf8');
 check('widget JS never pins the panel to document scroll and re-measures the viewport',
 	!chatJs.includes('window.scrollY') && !chatJs.includes('form.scrollIntoView')
 	&& chatJs.includes('syncViewport()') && chatJs.includes('visualViewport'));
+/* Subtle composer sizing: smaller type/padding, but a comfortable touch
+ * target and one horizontal row on mobile. The fixed popup and the rule that
+ * only the message log scrolls are asserted above and must stay unchanged. */
+const composerRules = appCss.match(/\.sh-schat-(?:form|input|send|handoff)\s*\{[^}]*\}/g) || [];
+const inputRule = composerRules.find((r) => r.startsWith('.sh-schat-input')) || '';
+const sendRule = composerRules.find((r) => r.startsWith('.sh-schat-send')) || '';
+const formRule = composerRules.find((r) => r.startsWith('.sh-schat-form')) || '';
+const handoffRule = composerRules.find((r) => r.startsWith('.sh-schat-handoff')) || '';
+const inputFont = Number((inputRule.match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+const sendFont = Number((sendRule.match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+const bubbleFont = Number(((appCss.match(/\.sh-schat-bubble\s*\{[^}]*\}/) || [''])[0].match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+check('input type is subtly smaller than a message bubble but still readable',
+	inputFont > 0 && bubbleFont > 0 && inputFont < bubbleFont && inputFont >= 13,
+	`input ${inputFont}px / bubble ${bubbleFont}px`);
+check('Send button text and icon are subtly reduced, not removed',
+	sendFont > 0 && sendFont < 13.8 && /\.sh-schat-send svg\s*\{[^}]*width:\s*14px/.test(appCss)
+	&& widgetPhp.includes("sh_icon('send', 14)"));
+check('input padding is reduced without losing a comfortable touch target',
+	/padding:\s*8px 10px/.test(inputRule) && /min-height:\s*40px/.test(inputRule)
+	&& /min-height:\s*40px/.test(sendRule) && /padding:\s*8px 12px/.test(sendRule));
+check('Talk to a human stays visible and balanced with the smaller composer',
+	/font-size:\s*12\.5px/.test(handoffRule) && /min-height:\s*32px/.test(handoffRule)
+	&& widgetPhp.includes('Talk to a human') && widgetPhp.includes("sh_icon('user', 14)"));
+check('input and Send remain horizontally aligned on mobile',
+	/flex-wrap:\s*nowrap/.test(formRule) && /@media \(max-width: 420px\)[\s\S]{0,400}flex-wrap:\s*nowrap/.test(appCss)
+	&& /justify-content:\s*center/.test(sendRule));
+check('Bangla/Banglish/English placeholder and orange brand colour survive',
+	widgetPhp.includes('Write in বাংলা, Banglish or English') && /\.sh-schat-input:focus\s*\{[^}]*var\(--sh-brand\)/.test(appCss));
+
 check('legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service', supportApi.includes("$action === 'send'") && supportApi.includes("$input['client_msg_id']") && supportApi.includes('sh_support_customer_send(') && supportApi.includes('sh_support_customer_handoff(') && supportApi.includes("$input['after_id']"));
 check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 

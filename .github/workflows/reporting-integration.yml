@@ -41,6 +41,13 @@ jobs:
       # explicit Resume AI, takeover, assign/resolve/reopen idempotency.
       - name: Human support handoff integration
         run: php tests/human-support-handoff.php
+      # One SMS per genuinely new human-support request (both the button and
+      # the message-intent handoff paths), provider acceptance vs rejection,
+      # disabled/misconfigured provider never breaking chat, secret-free body
+      # and logs, and no duplicate after close/reopen/Resume AI. The outbound
+      # carrier is an explicit test transport: this is NOT a live SMS test.
+      - name: Human Support Notifications (SMS) integration
+        run: php tests/support-sms-notifications.php
       # Server-side custom URL validation, no-lockout staged -> verified ->
       # applied -> disabled lifecycle, generic 404s for legacy admin paths in
       # isolated PHP subprocesses, and independent endpoint/asset guards.
@@ -94,6 +101,7 @@ jobs:
           node tests/provider-test-behavior.mjs
           node tests/support-chat-behavior.mjs
           node tests/support-chat-optimistic-behavior.mjs
+          node tests/support-admin-inbox-behavior.mjs
           node tests/admin-access-regression.mjs
       - name: Confirm no live credentials are tracked
         run: |

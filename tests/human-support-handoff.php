@@ -289,6 +289,117 @@ $newConversation = static function (string $status = 'open', int $paused = 0) us
     $eq(2, $countConfirm($id4), 'new ownership cycle sends exactly one new confirmation');
     $adminTransition($id4, 'unassign');
     $eq(2, $countConfirm($id4), 'unassign does not repeat the confirmation');
+
+    /* --- Join / ownership / inbox fields / close / reopen ---------------- */
+    $agent2 = sh_insert('admins', [
+        'name' => 'Second Agent', 'email' => 'agent2@example.test',
+        'role' => 'support_agent', 'status' => 'active',
+    ]);
+    $id5 = $newConversation();
+    $ok(!empty($send($id5, 'I would like to speak with a person please')['ok']), 'customer opens one conversation for the join flow');
+    $conversationCountBefore = (int)sh_val('SELECT COUNT(*) FROM support_conversations', [], 0);
+    $ok(!empty($handoff($id5)['ok']), 'customer requests human support');
+    $ok(!empty($handoff($id5)['ok']), 'refresh/retry of the same request is a no-op');
+    $eq($conversationCountBefore, (int)sh_val('SELECT COUNT(*) FROM support_conversations', [], 0), 'no new conversation per handoff or retry');
+    $eq('pending', (string)$conv($id5)['status'], 'handoff stages the conversation as pending');
+
+    $row = sh_support_admin_conversation($id5);
+    $ok($row !== null, 'admin thread lookup returns the same conversation');
+    $eq('Guest customer', (string)$row['customer_label'], 'guest customer is labelled explicitly');
+    $eq('Pending human support', (string)$row['human_status_label'], 'inbox shows Pending human support before join');
+    $eq('Paused', (string)$row['ai_status'], 'inbox shows AI Paused after a human request');
+    $eq('Unassigned', (string)$row['assignment_status'], 'inbox shows Unassigned before join');
+    $ok((int)$row['unread_count'] >= 1, 'inbox shows the unread count');
+    $ok((string)$row['request_time'] !== '', 'inbox shows the real handoff request time');
+    $ok((string)$row['message_preview'] !== '', 'inbox shows a latest-message preview');
+
+    $list = sh_support_admin_conversations('pending', '', 1, 25);
+    $listRow = null;
+    foreach ($list['rows'] as $candidate) { if ((int)$candidate['id'] === $id5) { $listRow = $candidate; } }
+    $ok($listRow !== null, 'pending human-support conversation appears in the admin inbox list');
+    $eq('Pending human support', (string)($listRow['human_status_label'] ?? ''), 'list row shows human-support status');
+    $eq('Paused', (string)($listRow['ai_status'] ?? ''), 'list row shows AI status');
+    $eq('Unassigned', (string)($listRow['assignment_status'] ?? ''), 'list row shows assignment status');
+    $ok((string)($listRow['request_time'] ?? '') !== '', 'list row shows request time');
+    $ok((string)($listRow['last_message_time'] ?? '') !== '', 'list row shows last message time');
+    $ok((int)($listRow['unread_count'] ?? 0) >= 1, 'list row shows unread count');
+
+    $r = $adminTransition($id5, 'join');
+    $ok(!empty($r['ok']), 'Join Conversation claims the conversation');
+    $c = $conv($id5);
+    $eq($adminId, (int)$c['assigned_admin_id'], 'joining assigns the acting agent');
+    $eq('assigned', (string)$c['status'], 'joining moves the DB status to assigned');
+    $eq(1, (int)$c['ai_paused'], 'AI stays paused after join');
+    $row = sh_support_admin_conversation($id5);
+    $eq('In progress', (string)$row['human_status_label'], 'joining changes Pending human support to In progress');
+    $eq('Test Agent', (string)$row['assigned_agent_name'], 'agent name is shown after join');
+    $ok(str_contains((string)$row['assignment_label'], 'Test Agent'), 'assignment label names the agent');
+    $eq(1, $countConfirm($id5), 'joining never repeats the one handoff confirmation');
+
+    $r2 = sh_support_admin_transition($id5, $agent2, 'join', 0);
+    $ok(empty($r2['ok']) && (int)($r2['http_status'] ?? 0) === 409,
+        'a second agent cannot take simultaneous ownership');
+    $eq($adminId, (int)$conv($id5)['assigned_admin_id'], 'failed concurrent join leaves ownership unchanged');
+    $r2 = sh_support_admin_transition($id5, $agent2, 'assign', $agent2);
+    $ok(!empty($r2['ok']), 'a superadmin may deliberately reassign (explicit, not accidental)');
+    $r2 = $adminTransition($id5, 'join');
+    $ok(empty($r2['ok']), 'joining a conversation already owned by a colleague is refused');
+
+    // Subsequent customer messages go to the same inbox, never to AI/FAQ.
+    $beforeMessages = (int)sh_val('SELECT COUNT(*) FROM support_messages WHERE conversation_id = ?', [$id5], 0);
+    $aiCallsBefore = $GLOBALS['sh_test_ai_calls'];
+    $ok(!empty($send($id5, 'Here is my follow-up question')['ok']), 'follow-up customer message is saved');
+    $eq($beforeMessages + 1, (int)sh_val('SELECT COUNT(*) FROM support_messages WHERE conversation_id = ?', [$id5], 0),
+        'follow-up appends exactly one message to the existing history');
+    $eq($aiCallsBefore, $GLOBALS['sh_test_ai_calls'], 'no AI/FAQ/fallback inference after a human request');
+    $eq(1, $countConfirm($id5), 'no repeated handoff confirmation on follow-up');
+    $eq(1, (int)$conv($id5)['unread_for_admin'], 'follow-up is delivered to the assigned human inbox');
+    $eq($conversationCountBefore, (int)sh_val('SELECT COUNT(*) FROM support_conversations', [], 0),
+        'no new conversation is created for a follow-up message');
+
+    $ok(!empty($adminReply($id5, 'Hello, this is your support agent.')['ok']), 'agent replies as a human');
+    $snapshot = sh_support_customer_snapshot($id5, $owner);
+    $agentMessage = null;
+    foreach ($snapshot['messages'] as $m) { if ((string)($m['sender'] ?? '') === 'admin') { $agentMessage = $m; } }
+    $ok($agentMessage !== null, 'agent reply appears in the SAME customer chat');
+    $ok((string)($agentMessage['created_at'] ?? '') !== '', 'agent reply carries a timestamp');
+    $adminRows = sh_support_admin_messages($id5, 0, 30)['messages'];
+    $adminRow = null;
+    foreach ($adminRows as $m) { if ((string)($m['sender'] ?? '') === 'admin') { $adminRow = $m; } }
+    $ok($adminRow !== null, 'agent reply is in the same admin conversation history');
+    $eq('Test Agent', (string)($adminRow['admin_name'] ?? ''), 'agent reply carries the correct sender label');
+    $eq($adminId, (int)($adminRow['sender_admin_id'] ?? 0), 'agent reply records the acting support agent');
+    $ok((string)($adminRow['created_at'] ?? '') !== '', 'agent reply carries a timestamp in admin history');
+    $eq(1, $countConfirm($id5), 'agent reply never repeats the handoff confirmation');
+
+    $r = $adminTransition($id5, 'leave');
+    $ok(!empty($r['ok']), 'Leave Conversation releases ownership');
+    $c = $conv($id5);
+    $eq(0, (int)$c['assigned_admin_id'], 'leaving clears the assignee');
+    $eq('pending', (string)$c['status'], 'leaving returns the conversation to the queue');
+    $eq(1, (int)$c['ai_paused'], 'AI remains paused after leaving');
+    $eq('Pending human support', (string)sh_support_admin_conversation($id5)['human_status_label'],
+        'inbox shows Pending human support again after leaving');
+
+    $r = $adminTransition($id5, 'close');
+    $ok(!empty($r['ok']), 'Close Conversation closes the support request');
+    $eq('closed', (string)$conv($id5)['status'], 'close sets the closed state');
+    $eq('resolved', sh_support_human_state($conv($id5)), 'closed conversation is reported as resolved');
+    $r = $adminTransition($id5, 'reopen');
+    $ok(!empty($r['ok']), 'Reopen Conversation restores the thread');
+    $eq(1, (int)$conv($id5)['ai_paused'], 'AI is still paused after reopen');
+    $eq('human_requested', sh_support_human_state($conv($id5)), 'reopen never silently resumes AI');
+    $r = $adminTransition($id5, 'resume_ai');
+    $ok(!empty($r['ok']), 'only an explicit authorized Resume AI resumes AI');
+    $eq('ai_active', sh_support_human_state($conv($id5)), 'AI ownership returns after explicit Resume AI');
+    $eq(1, $countConfirm($id5), 'close/reopen/Resume AI never repeat the handoff confirmation');
+
+    // Server-side allowlist for every browser-driven transition.
+    $apiSrc = (string)file_get_contents(SH_ROOT . '/api/support.php');
+    foreach (['join', 'assign_to_me', 'leave', 'close', 'reopen', 'resume_ai'] as $t) {
+        $ok(str_contains($apiSrc, "'" . $t . "'"), 'API allowlist includes ' . $t);
+    }
+    $ok(str_contains($apiSrc, '$allowedTransitions'), 'browser cannot invent an ownership/AI transition');
 });
 
 exit($failed > 0 ? 1 : 0);

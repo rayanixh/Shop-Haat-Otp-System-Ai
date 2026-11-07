@@ -15,7 +15,19 @@ sh_require_perm('support.manage');
 if (!sh_support_schema_ensure()) {
     http_response_code(503);
     $adminTitle = 'Support Settings';
-    $adminPage = 'support_settings';
+    $sms = static fn(string $k, string $fb = ''): string => sh_support_sms_setting($k, $fb);
+$smsProviders = sh_support_sms_providers();
+$smsProvider = $sms('provider', 'offline');
+if (!sh_support_sms_provider_allowed($smsProvider)) { $smsProvider = 'offline'; }
+$smsReady = sh_support_sms_ready();
+$smsTestOk = $sms('test_ok');
+$smsTestAt = $sms('test_at');
+$smsTestMessage = $sms('test_message');
+/** True when a secret is already stored; its value is never rendered. */
+$smsHasSecret = static fn(string $k): bool => trim($sms($k)) !== '';
+$smsStoreProvider = function_exists('sh_otp_provider') ? (string)sh_otp_provider() : 'offline';
+
+$adminPage = 'support_settings';
     require __DIR__ . '/_layout.php';
     echo '<div class="sh-panel"><div class="sh-panel__body"><div class="sh-alert sh-alert--error"><span>Support tables are not available. Run the additive support migration in phpMyAdmin.</span></div></div></div>';
     require __DIR__ . '/_footer.php';
@@ -128,6 +140,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($test['next'])) { $message .= ' Next: ' . (string)$test['next']; }
         sh_flash(!empty($test['ok']) ? 'success' : 'error', $message);
         sh_redirect('admin/support-settings.php#ai');
+    }
+
+    if ($form === 'support_sms_save' || $form === 'support_sms_test') {
+        // The same CSRF-protected, RBAC-gated form saves the configuration.
+        // Test SMS deliberately saves first so it tests exactly what is shown.
+        $saved = sh_support_sms_save($_POST);
+        if (!empty($saved['errors'])) {
+            sh_flash('error', implode(' ', $saved['errors']));
+            sh_redirect('admin/support-settings.php#human-support-sms');
+        }
+        sh_audit('support_sms_settings_saved', 'settings', null, 'Human Support Notifications', null, [
+            'enabled' => isset($_POST['enabled']) && (string)$_POST['enabled'] === '1' ? '1' : '0',
+            'provider' => (string)($_POST['provider'] ?? ''),
+        ]);
+        if ($form === 'support_sms_save') {
+            sh_flash('success', 'Human-support SMS settings saved. Run “Test SMS” to confirm the provider actually accepts a message.');
+            sh_redirect('admin/support-settings.php#human-support-sms');
+        }
+        $test = sh_support_sms_test();
+        sh_audit('support_sms_tested', 'settings', null, 'Human Support Notifications test SMS', null, [
+            'ok' => !empty($test['ok']), 'code' => (string)($test['code'] ?? ''),
+        ]);
+        sh_flash(!empty($test['ok']) ? 'success' : 'error', (string)$test['message']);
+        sh_redirect('admin/support-settings.php#human-support-sms');
+    }
+
+    if ($form === 'support_sms_clear_test') {
+        sh_support_sms_clear_test();
+        sh_audit('support_sms_test_result_cleared', 'settings', null, 'Human Support Notifications test result');
+        sh_flash('success', 'The SMS connection/test result was cleared.');
+        sh_redirect('admin/support-settings.php#human-support-sms');
     }
 
     if ($form === 'faq_save') {
@@ -349,6 +392,132 @@ require __DIR__ . '/_layout.php';
           <button class="sh-btn" type="submit" name="form" value="save_settings"><?= sh_icon('check', 15) ?> Save support settings</button>
           <?php if ($canConfigureAi): ?><button class="sh-btn sh-btn--ghost" type="submit" name="form" value="save_ai_settings">Save AI configuration</button><?php endif; ?>
         </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Human Support Notifications: dedicated, secret-free configuration that
+       reuses the shipped SMS drivers and the unified notification logging. -->
+  <section class="sh-panel" id="human-support-sms">
+    <div class="sh-panel__head"><h3>Human Support Notifications (SMS)</h3></div>
+    <div class="sh-panel__body">
+      <p class="sh-formcard__note">When a customer asks for a human, one short SMS can be sent to the support mobile number. The message contains only a conversation reference and a “customer waiting” note — never a name, phone number, message text, order, payment detail, password, API key, or the private Admin URL. AI stays paused until an authorized admin chooses Resume AI.</p>
+      <p class="sh-formcard__note"><strong>Message:</strong> “<?= e(sh_support_sms_message(0)) ?>” (Conversation #0 is replaced by the real reference.)</p>
+
+      <?php
+        $smsStatusTone = $smsReady['ok'] ? 'is-good' : ($sms('enabled', '0') === '1' ? 'is-bad' : 'is-warn');
+        $smsStatusText = $smsReady['ok']
+            ? 'Configuration looks complete. A real test SMS is still required before claiming delivery.'
+            : sh_support_sms_ready_message($smsReady['reason']);
+      ?>
+      <div class="sh-support-settings__alert <?= $smsStatusTone ?>">
+        <div>
+          <strong>Connection / test result: <?= $smsReady['ok'] ? 'ready for a real test' : 'not confirmed' ?></strong>
+          <span><?= e($smsStatusText) ?></span>
+        </div>
+        <form method="post" style="margin:0"><?= sh_csrf_field() ?><input type="hidden" name="form" value="support_sms_clear_test">
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">Clear result</button>
+        </form>
+      </div>
+      <?php if ($smsTestMessage !== ''): ?>
+        <div class="sh-support-settings__test" style="margin-bottom:14px">
+          <div>
+            <strong>Last real test (<?= e($smsTestAt) ?> UTC):</strong>
+            <span class="sh-support-settings__state <?= $smsTestOk === '1' ? 'is-good' : 'is-bad' ?>"><?= $smsTestOk === '1' ? 'Provider accepted the test SMS' : 'Test SMS was NOT sent' ?></span>
+            <p><?= e($smsTestMessage) ?></p>
+            <small>Provider acceptance is not proof of handset delivery. No result is shown as “SMS sent” without provider acceptance.</small>
+          </div>
+          <span class="sh-formcard__note">Use “Clear result” above to remove this stored outcome.</span>
+        </div>
+      <?php endif; ?>
+
+      <form method="post" class="sh-support-settings__form">
+        <?= sh_csrf_field() ?><input type="hidden" name="form" value="support_sms_save">
+        <input type="hidden" name="enabled" value="0">
+        <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $sms('enabled', '0') === '1' ? 'checked' : '' ?>><span><strong>Enable human-support SMS notifications</strong><small>Disabled (the default) never contacts a provider and never affects customer chat or the admin inbox.</small></span></label>
+
+        <div class="sh-grid2">
+          <div class="sh-field">
+            <label class="sh-field__label" for="sms-phone">Support mobile number</label>
+            <input class="sh-input" id="sms-phone" name="phone" type="tel" maxlength="30" value="<?= e($sms('phone')) ?>" placeholder="e.g. +8801712345678">
+            <span class="sh-field__hint">Stored server-side. Digits only, optionally with a country code.</span>
+          </div>
+          <div class="sh-field">
+            <label class="sh-field__label" for="sms-provider">SMS provider</label>
+            <select class="sh-select" id="sms-provider" name="provider">
+              <?php foreach ($smsProviders as $key => $meta): ?>
+                <option value="<?= e($key) ?>" <?= $smsProvider === $key ? 'selected' : '' ?>><?= e($meta['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <span class="sh-field__hint">Only carriers this PHP/cURL install can actually call. Firebase is excluded because Firebase Auth issues its own codes and cannot carry this text. Select a provider and save to load its configuration fields.</span>
+          </div>
+        </div>
+
+        <?php if ($smsProvider === 'offline'): ?>
+          <div class="sh-alert sh-alert--warning" style="margin-top:12px"><span><strong>No real SMS will be sent.</strong> Offline / test mode never claims a delivery. Choose “Use the store’s configured SMS provider”, TextBee, or a Custom SMS API for real notifications.</span></div>
+        <?php elseif ($smsProvider === 'store'): ?>
+          <div class="sh-alert sh-alert--info" style="margin-top:12px"><span>This uses the existing store SMS provider (<strong><?= e($smsStoreProvider) ?></strong>) and its credentials from <a href="<?= e(sh_url('admin/security.php')) ?>">Security → SMS/OTP Provider</a>. No duplicate credentials are stored here. <?= $smsStoreProvider === 'offline' || $smsStoreProvider === 'firebase' ? 'That provider cannot deliver this message; choose a real carrier there or configure one here.' : 'Run Test SMS below to verify it accepts a live message.' ?></span></div>
+        <?php elseif ($smsProvider === 'textbee'): ?>
+          <p class="sh-formcard__note" style="margin-top:14px"><strong>TextBee configuration</strong> — <?= e($smsProviders['textbee']['note']) ?></p>
+          <div class="sh-grid2">
+            <div class="sh-field"><label class="sh-field__label" for="sms-tb-key">TextBee API key</label>
+              <input class="sh-input" id="sms-tb-key" name="textbee_api_key" type="password" autocomplete="new-password" value="" placeholder="<?= $smsHasSecret('textbee_api_key') ? 'Saved — leave blank to keep' : 'Required' ?>">
+              <span class="sh-field__hint">Never shown again after saving. Stored server-side only; never sent to browser JavaScript or logs.</span></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-tb-dev">TextBee Device ID</label>
+              <input class="sh-input" id="sms-tb-dev" name="textbee_device_id" type="password" autocomplete="new-password" value="" placeholder="<?= $smsHasSecret('textbee_device_id') ? 'Saved — leave blank to keep' : 'Required' ?>"></div>
+          </div>
+        <?php elseif ($smsProvider === 'generic_http'): ?>
+          <p class="sh-formcard__note" style="margin-top:14px"><strong>Custom SMS API configuration</strong> — <?= e($smsProviders['generic_http']['note']) ?></p>
+          <div class="sh-field"><label class="sh-field__label" for="sms-url">API URL (HTTPS only)</label>
+            <input class="sh-input" id="sms-url" name="api_url" type="url" maxlength="500" value="<?= e($sms('api_url')) ?>" placeholder="https://api.example.com/send-sms"></div>
+          <div class="sh-grid2">
+            <div class="sh-field"><label class="sh-field__label" for="sms-method">Request method</label>
+              <select class="sh-select" id="sms-method" name="api_method">
+                <?php foreach (['post_json' => 'POST (JSON)', 'post_form' => 'POST (form fields)', 'get' => 'GET (query string)'] as $k => $label): ?>
+                  <option value="<?= e($k) ?>" <?= $sms('api_method', 'post_json') === $k ? 'selected' : '' ?>><?= e($label) ?></option>
+                <?php endforeach; ?>
+              </select></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-auth">Auth type</label>
+              <select class="sh-select" id="sms-auth" name="api_auth">
+                <?php foreach (['' => 'None (via body/headers)', 'bearer' => 'Bearer token', 'basic' => 'HTTP Basic'] as $k => $label): ?>
+                  <option value="<?= e($k) ?>" <?= $sms('api_auth') === $k ? 'selected' : '' ?>><?= e($label) ?></option>
+                <?php endforeach; ?>
+              </select></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-sender">Sender ID</label>
+              <input class="sh-input" id="sms-sender" name="sender_id" maxlength="11" value="<?= e($sms('sender_id')) ?>" placeholder="ShopHaat"></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-pp">Phone parameter</label>
+              <input class="sh-input" id="sms-pp" name="phone_param" maxlength="60" value="<?= e($sms('phone_param')) ?>" placeholder="phone"></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-mp">Message parameter</label>
+              <input class="sh-input" id="sms-mp" name="message_param" maxlength="60" value="<?= e($sms('message_param')) ?>" placeholder="message"></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-sf">Success field (optional)</label>
+              <input class="sh-input" id="sms-sf" name="success_field" maxlength="60" value="<?= e($sms('success_field')) ?>" placeholder="status"></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-sv">Success value (optional)</label>
+              <input class="sh-input" id="sms-sv" name="success_value" maxlength="60" value="<?= e($sms('success_value')) ?>" placeholder="OK"></div>
+          </div>
+          <p class="sh-formcard__note">Credentials below are write-only. Leave a field blank to keep the saved value. If a success field/value is set, the provider response must contain it or no delivery is claimed.</p>
+          <div class="sh-grid2">
+            <?php foreach ([
+              'api_key' => 'API key', 'api_secret' => 'API secret', 'api_token' => 'Bearer token',
+              'api_username' => 'Username', 'api_password' => 'Password',
+            ] as $k => $label): ?>
+              <div class="sh-field"><label class="sh-field__label" for="sms-<?= e($k) ?>"><?= e($label) ?></label>
+                <input class="sh-input" id="sms-<?= e($k) ?>" name="<?= e($k) ?>" <?= $k === 'api_username' ? '' : 'type="password" autocomplete="new-password"' ?> value="<?= $k === 'api_username' ? e($sms($k)) : '' ?>" placeholder="<?= $k === 'api_username' ? 'Optional' : ($smsHasSecret($k) ? 'Saved — leave blank to keep' : 'Optional') ?>"></div>
+            <?php endforeach; ?>
+          </div>
+          <div class="sh-grid2">
+            <div class="sh-field"><label class="sh-field__label" for="sms-body">Request body template (optional)</label>
+              <textarea class="sh-textarea" id="sms-body" name="api_body" rows="3" placeholder='{"phone":"{phone}","message":"{message}","sender":"{sender}","api_key":"{api_key}"}'><?= e($sms('api_body')) ?></textarea>
+              <span class="sh-field__hint">Placeholders: {phone}, {message}, {sender}, {api_key}, {api_secret}, {token}, {username}, {password}.</span></div>
+            <div class="sh-field"><label class="sh-field__label" for="sms-headers">Extra headers (JSON, optional)</label>
+              <textarea class="sh-textarea" id="sms-headers" name="api_headers" rows="3" placeholder='{"Content-Type":"application/json"}'><?= e($sms('api_headers')) ?></textarea></div>
+          </div>
+        <?php endif; ?>
+
+        <div class="sh-support-settings__save">
+          <button class="sh-btn" type="submit" name="form" value="support_sms_save"><?= sh_icon('check', 15) ?> Save settings</button>
+          <button class="sh-btn sh-btn--ghost" type="submit" name="form" value="support_sms_test"><?= sh_icon('activity', 14) ?> Test SMS</button>
+        </div>
+        <p class="sh-formcard__note">Test SMS contacts the real provider with a harmless text. A result is only marked accepted when the provider explicitly confirms; offline/test mode, a missing provider and a provider error are reported as “NOT sent”. Saving new settings clears the previous result so a stale “connected” badge is never shown.</p>
       </form>
     </div>
   </section>
