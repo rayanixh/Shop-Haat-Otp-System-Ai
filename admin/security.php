@@ -24,6 +24,10 @@ $testCode = null;
 $adminAccessInput = '';
 $adminAccessSuggestion = '';
 $adminAccessState = sh_admin_access_state();
+$adminAccessReserved = sh_admin_access_reserved_paths();
+$adminAccessPreviewOrigin = sh_admin_access_origin() . rtrim(sh_base_url(), '/') . '/';
+$adminScripts = is_array($adminScripts ?? null) ? $adminScripts : [];
+$adminScripts['admin_access'] = 'assets/js/admin-access.js';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
@@ -34,13 +38,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $adminAccessSuggestion = sh_admin_access_suggest();
                 $adminAccessInput = $adminAccessSuggestion;
-                $notice = 'A new URL suggestion was generated. It is not saved or active yet.';
+                $notice = 'An optional random suggestion was placed in the field. It has not been saved; review it and choose Save Proposed Route.';
             } catch (Throwable $e) {
                 sh_log_line('security', 'Admin Access path suggestion failed.');
                 $errors[] = 'A secure suggestion could not be generated. Please try again.';
             }
         } elseif ($form === 'admin_access_save') {
-            $adminAccessInput = (string)($_POST['admin_access_path'] ?? '');
+            $adminAccessInput = sh_post('admin_access_path');
             $candidate = sh_admin_access_validate_path($adminAccessInput);
             if (empty($candidate['ok'])) {
                 $errors[] = (string)($candidate['error'] ?? 'That path is not valid.');
@@ -205,9 +209,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $adminAccessState = sh_admin_access_state();
 if ($adminAccessInput === '') { $adminAccessInput = $adminAccessState['pending_path'] ?: ''; }
-if ($adminAccessInput === '') {
-    try { $adminAccessInput = sh_admin_access_suggest(); } catch (Throwable $e) { $adminAccessInput = ''; }
-}
 $adminAccessEnabled = (bool)$adminAccessState['enabled'];
 $adminAccessPending = (string)$adminAccessState['pending_path'];
 // Absolute URLs INCLUDING the domain. Rendered only on this authenticated
@@ -216,6 +217,7 @@ $adminAccessActiveFull = $adminAccessEnabled ? sh_admin_access_full_url((string)
 $adminAccessCurrentFull = $adminAccessActiveFull !== '' ? $adminAccessActiveFull : sh_admin_access_standard_url();
 $adminAccessPendingFull = $adminAccessPending !== '' ? sh_admin_access_full_url($adminAccessPending) : '';
 $adminAccessPreviewFull = sh_admin_access_full_url($adminAccessInput);
+// The live preview uses this safe origin plus the normalized, admin-typed path.
 $adminAccessOpenPanelFull = $adminAccessActiveFull !== '' ? $adminAccessActiveFull : sh_admin_access_standard_url();
 $adminAccessStep2 = ($adminAccessEnabled || $adminAccessPending !== '') ? 'is-done' : 'is-current';
 $adminAccessStep3 = $adminAccessEnabled ? 'is-done' : ($adminAccessPending !== '' ? 'is-current' : 'is-todo');
@@ -329,7 +331,7 @@ endif;
     </div>
 
     <ol class="sh-aau-steps" aria-label="Admin URL setup steps">
-      <li class="sh-aau-step is-done"><span class="sh-aau-num">1</span><span class="sh-aau-label">Generate or enter a new URL</span></li>
+      <li class="sh-aau-step is-done"><span class="sh-aau-num">1</span><span class="sh-aau-label">Choose a new URL</span></li>
       <li class="sh-aau-step <?= $adminAccessStep2 ?>"><span class="sh-aau-num">2</span><span class="sh-aau-label">Save proposed route</span></li>
       <li class="sh-aau-step <?= $adminAccessStep3 ?>"><span class="sh-aau-num">3</span><span class="sh-aau-label">Verify and activate</span></li>
     </ol>
@@ -344,47 +346,39 @@ endif;
       <p class="sh-field__hint"><?= $adminAccessEnabled ? 'This route is active. The previous Admin URL is disabled.' : 'The standard admin route is active. It stays usable until a new route is verified and activated.' ?></p>
     </div>
 
-    <form method="post" novalidate>
+    <form method="post" data-admin-access-form
+      data-admin-access-origin="<?= e($adminAccessPreviewOrigin) ?>"
+      data-admin-access-reserved="<?= e(json_encode($adminAccessReserved, JSON_UNESCAPED_SLASHES)) ?>">
       <?= sh_csrf_field() ?>
       <input type="hidden" name="form" value="admin_access_save">
 
       <div class="sh-aau-block">
-        <p class="sh-aau-kicker">Step 1 · Generate or enter a new URL</p>
+        <p class="sh-aau-kicker">Step 1 · Choose a custom path</p>
         <div class="sh-field">
           <label class="sh-field__label" for="admin-access-path">New path</label>
-          <span class="sh-aau-origin"><?= e(sh_admin_access_origin() . rtrim(sh_base_url(), '/')) ?>/</span>
-          <input class="sh-input sh-input--mono" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="32" maxlength="64" pattern="[a-zA-Z0-9_-]{32,64}" required autocomplete="off" autocapitalize="none" spellcheck="false">
-          <p class="sh-field__hint">One URL-safe segment, 32–64 characters. A secure random suggestion is filled in. Domains, extra slashes, spaces, dots, query strings and encoded characters are rejected server-side.</p>
+          <span class="sh-aau-origin"><?= e(rtrim($adminAccessPreviewOrigin, '/')) ?>/</span>
+          <input class="sh-input sh-input--mono" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="3" maxlength="80" pattern="[A-Za-z0-9_-]{3,80}" required autocomplete="off" spellcheck="false" data-admin-access-path placeholder="my-admin or admin-access-2026">
+          <p class="sh-field__hint">One memorable URL-safe segment, 3–80 characters. Letters, numbers, hyphens and underscores are allowed; uppercase is normalized to lowercase. Domains, extra segments, queries, fragments and encoded traversal are rejected.</p>
         </div>
-        <?php if ($adminAccessPreviewFull !== ''): ?>
-          <div style="margin-top:10px">
-            <span class="sh-field__label">New proposed Admin URL</span>
-            <p class="sh-aau-urlbox sh-code-wrap"><?= e($adminAccessPreviewFull) ?></p>
-            <div class="sh-aau-actions">
-              <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessPreviewFull) ?>"><span data-copy-label>Copy full URL</span></button>
-              <button class="sh-btn sh-btn--ghost" type="submit" form="admin-access-suggest-form"><?= sh_icon('refresh', 14) ?> Generate secure suggestion</button>
-            </div>
-            <p class="sh-field__hint">The complete URL includes your domain. It is <strong>not active yet</strong> — save it in step 2 first.</p>
+        <div style="margin-top:10px" aria-live="polite">
+          <span class="sh-field__label">Complete proposed URL</span>
+          <p class="sh-aau-urlbox sh-code-wrap" data-admin-access-preview><?= e($adminAccessPreviewFull !== '' ? $adminAccessPreviewFull : 'Enter a path to preview the complete URL.') ?></p>
+          <div class="sh-aau-actions">
+            <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessPreviewFull) ?>" data-admin-access-preview-copy <?= $adminAccessPreviewFull === '' ? 'disabled' : '' ?>><span data-copy-label>Copy full URL</span></button>
+            <button class="sh-btn sh-btn--ghost" type="submit" name="form" value="admin_access_suggest" formnovalidate><?= sh_icon('refresh', 14) ?> Suggest random path</button>
           </div>
-        <?php else: ?>
-          <div class="sh-aau-actions" style="margin-top:10px">
-            <button class="sh-btn sh-btn--ghost" type="submit" form="admin-access-suggest-form"><?= sh_icon('refresh', 14) ?> Generate secure suggestion</button>
-          </div>
-        <?php endif; ?>
+          <p class="sh-field__hint" data-admin-access-hint>The final URL is shown here immediately, before saving. Saving only stages it; the current Admin URL keeps working.</p>
+        </div>
       </div>
 
       <div class="sh-aau-block">
         <p class="sh-aau-kicker">Step 2 · Save proposed route</p>
         <?php if ($adminAccessPending !== ''): ?><p class="sh-aau-status">Saved — verification required</p><?php endif; ?>
         <div class="sh-aau-actions">
-          <button class="sh-btn" type="submit"><?= sh_icon('check', 14) ?> Save proposed route</button>
+          <button class="sh-btn" type="submit" name="form" value="admin_access_save"><?= sh_icon('check', 14) ?> Save proposed route</button>
         </div>
         <p class="sh-field__hint">Saving only stages the URL. Nothing is activated and the current Admin URL keeps working.</p>
       </div>
-    </form>
-    <form method="post" id="admin-access-suggest-form" hidden>
-      <?= sh_csrf_field() ?>
-      <input type="hidden" name="form" value="admin_access_suggest">
     </form>
 
     <div class="sh-aau-block">

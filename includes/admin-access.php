@@ -17,7 +17,38 @@ const SH_ADMIN_ACCESS_VERIFIED_AT_KEY = 'admin_access_verified_at';
 const SH_ADMIN_ACCESS_VERIFIED_BY_KEY = 'admin_access_verified_by';
 const SH_ADMIN_ACCESS_VERIFY_SESSION_KEY = 'sh_admin_access_pending_verification';
 
-/** Accept exactly one normalized, URL-safe path segment with high entropy. */
+/** Exact route names that must never become an admin URL. Root PHP entry
+ * points and top-level directories are discovered at runtime, so adding a new
+ * storefront page cannot silently create a conflict. Uppercase input is
+ * normalized to lowercase before any of these checks. */
+function sh_admin_access_reserved_paths(): array
+{
+    static $reserved = null;
+    if ($reserved !== null) { return $reserved; }
+    $names = [
+        'admin', 'adminphp', 'admin-login', 'admin-login-php', 'administrator',
+        'wp-admin', 'cpanel', 'webmail', 'login', 'logout', 'api', 'assets',
+        'uploads', 'install', 'support', 'cart', 'checkout', 'account', 'orders',
+        'products', 'product', 'category', 'categories', 'robots', 'sitemap',
+        'health', 'status', 'security', 'cron', 'config', 'includes', 'lib',
+        'logs', 'tests', 'tools', 'docs', 'auth', 'installer', 'index', 'track',
+        'help', 'page', 'payment', 'password', 'otp', 'register',
+        'verify-email', 'forgot-password', 'reset-password', 'telegram-webhook',
+    ];
+    $root = defined('SH_ROOT') ? (string)SH_ROOT : dirname(__DIR__);
+    foreach ((glob($root . '/*.php') ?: []) as $file) {
+        $name = strtolower((string)pathinfo($file, PATHINFO_FILENAME));
+        if ($name !== '') { $names[] = $name; }
+    }
+    foreach ((glob($root . '/*', GLOB_ONLYDIR) ?: []) as $dir) {
+        $name = strtolower(basename($dir));
+        if ($name !== '') { $names[] = $name; }
+    }
+    $reserved = array_values(array_unique($names));
+    return $reserved;
+}
+
+/** Accept exactly one normalized, admin-chosen, URL-safe path segment. */
 function sh_admin_access_normalize_path($value): ?string
 {
     if (!is_string($value)) { return null; }
@@ -30,30 +61,14 @@ function sh_admin_access_normalize_path($value): ?string
         || str_contains($path, ':') || str_contains($path, '.') || preg_match('/\s/u', $path)) {
         return null;
     }
+    // A personally chosen path may be short or long and may be typed in any
+    // case. The deployed URL is always the lowercase form shown in the preview.
     $path = strtolower($path);
-    if (strlen($path) < 32 || strlen($path) > 64
+    if (strlen($path) < 3 || strlen($path) > 80
         || preg_match('/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/D', $path) !== 1) {
         return null;
     }
-    // Never let a custom secret shadow a conventional route or a familiar admin alias.
-    $reserved = [
-        'admin', 'adminphp', 'admin-login', 'admin-login-php', 'login', 'logout',
-        'api', 'assets', 'uploads', 'install', 'support', 'cart', 'checkout',
-        'account', 'orders', 'products', 'product', 'category', 'categories',
-        'robots', 'sitemap', 'health', 'status', 'security', 'cron', 'config',
-        'includes', 'lib', 'logs', 'tests', 'tools', 'docs', 'auth', 'installer',
-        'index', 'track', 'help', 'page', 'payment', 'password', 'otp', 'register',
-        'verify-email', 'forgot-password', 'reset-password', 'telegram-webhook',
-    ];
-    if (in_array($path, $reserved, true)) { return null; }
-    // Reject routes that share a prefix with a known application/endpoint
-    // namespace even when a long random suffix is attached. This keeps the
-    // custom secret away from customer routes, API routes, static assets and
-    // the SEO/robots rewrite rules in the root .htaccess.
-    foreach (['admin-', 'api-', 'assets-', 'uploads-', 'install-', 'config-',
-              'includes-', 'sitemap-', 'robots-', 'cron-', 'auth-', 'lib-'] as $prefix) {
-        if (str_starts_with($path, $prefix)) { return null; }
-    }
+    if (in_array($path, sh_admin_access_reserved_paths(), true)) { return null; }
     return $path;
 }
 
@@ -120,7 +135,7 @@ function sh_admin_access_current_path(): string
     return $state['enabled'] ? $state['active_path'] : '';
 }
 
-/** Generate 192 bits of entropy, hex-encoded to an Apache-safe path segment. */
+/** Optional 192-bit suggestion; never saved or used as the default workflow. */
 function sh_admin_access_suggest(): string
 {
     return bin2hex(random_bytes(24));
@@ -133,7 +148,7 @@ function sh_admin_access_suggest(): string
 function sh_admin_access_validate_path(string $input): array
 {
     $path = sh_admin_access_normalize_path($input);
-    if ($path === null) { return ['ok' => false, 'path' => '', 'error' => 'Use one lowercase URL-safe path segment containing 32–64 letters, numbers, hyphens or underscores. Do not include a domain, query, fragment, encoding or extra path segments.']; }
+    if ($path === null) { return ['ok' => false, 'path' => '', 'error' => 'Enter one URL-safe path of 3–80 letters, numbers, hyphens or underscores. Uppercase is shown in lowercase. Domains, queries, fragments, encoded traversal, extra segments and reserved routes are rejected.']; }
 
     $root = realpath(SH_ROOT);
     if ($root === false) { return ['ok' => false, 'path' => '', 'error' => 'The application root could not be checked.']; }
@@ -142,9 +157,14 @@ function sh_admin_access_validate_path(string $input): array
         return ['ok' => false, 'path' => '', 'error' => 'That path already exists in the application. Choose a different route.'];
     }
     try {
+        if (is_file($root . DIRECTORY_SEPARATOR . $path . '.php')) {
+            return ['ok' => false, 'path' => '', 'error' => 'That path collides with an existing application page. Choose a different route.'];
+        }
         foreach (new DirectoryIterator($root) as $entry) {
             if ($entry->isDot()) { continue; }
-            if (strtolower($entry->getFilename()) === $path) {
+            $filename = strtolower($entry->getFilename());
+            $basename = strtolower((string)pathinfo($filename, PATHINFO_FILENAME));
+            if ($filename === $path || $basename === $path) {
                 return ['ok' => false, 'path' => '', 'error' => 'That path collides with an existing application file or directory.'];
             }
         }
@@ -582,7 +602,7 @@ function sh_admin_access_request_path(): ?string
     if (str_ends_with($relative, '/')) { $relative = substr($relative, 0, -1); }
     if ($relative === '' || str_contains($relative, '/')) { return null; }
     $normalized = sh_admin_access_normalize_path($relative);
-    if ($normalized === null || !hash_equals($normalized, $relative)) { return null; }
+    if ($normalized === null || !hash_equals($normalized, strtolower($relative))) { return null; }
     return $normalized;
 }
 

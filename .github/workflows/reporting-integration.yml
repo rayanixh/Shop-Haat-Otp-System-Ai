@@ -48,6 +48,12 @@ jobs:
       # carrier is an explicit test transport: this is NOT a live SMS test.
       - name: Human Support Notifications (SMS) integration
         run: php tests/support-sms-notifications.php
+      # Real provider-driver code with outbound HTTP stubbed: current TextBee
+      # account endpoint, explicit data.success/smsBatchId acceptance, redacted
+      # diagnostics, cURL/SSL/HTTP error translation, HTTPS-only generic APIs,
+      # custom driver cfg passing and fail-closed offline/Firebase handling.
+      - name: SMS transport contract and diagnostics
+        run: php tests/support-sms-transport.php
       # Server-side custom URL validation, no-lockout staged -> verified ->
       # applied -> disabled lifecycle, generic 404s for legacy admin paths in
       # isolated PHP subprocesses, and independent endpoint/asset guards.
@@ -86,7 +92,7 @@ jobs:
       #     token limit, rejected key, server error, network failure, timeout)
       #     renders in the card and the button always resets.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat, Admin URL preview, compact Settings)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
@@ -103,6 +109,8 @@ jobs:
           node tests/support-chat-optimistic-behavior.mjs
           node tests/support-admin-inbox-behavior.mjs
           node tests/admin-access-regression.mjs
+          node tests/admin-access-preview-behavior.mjs
+          node tests/support-settings-ui-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then

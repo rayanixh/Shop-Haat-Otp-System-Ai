@@ -15,13 +15,15 @@ Knowing the secret URL never grants access. Hiding `/admin.php` also never repla
 
 ## How routing works on cPanel
 
-1. The root `.htaccess` contains a single-segment rewrite. A request for one 32–64 character URL-safe segment that is not an existing file or directory is internally rewritten to `admin/custom-route.php`:
+1. The root `.htaccess` contains a single-segment rewrite. A request for one admin-chosen 3–80 character URL-safe segment that is not an existing file, directory or reserved route is internally rewritten to `admin/custom-route.php`. Uppercase is accepted by the rewrite (`[NC]`) and normalized to lowercase by PHP; the UI always previews the final lowercase URL:
 
    ```apache
    RewriteCond %{REQUEST_FILENAME} !-f
    RewriteCond %{REQUEST_FILENAME} !-d
-   RewriteRule ^[a-z0-9_-]{32,64}/?$ admin/custom-route.php [L,QSA,NC]
+   RewriteRule ^(?!(?:admin|api|assets|...)(?:/|$))[A-Za-z0-9_-]{3,80}/?$ admin/custom-route.php [L,QSA,NC]
    ```
+
+   The shipped rule contains the complete reserved-name list. `router.php` uses the same 3–80 length and case-insensitive matching for PHP's built-in development server.
 
 2. `admin/custom-route.php` reads the raw request path, compares it in constant time with the stored active path (or with a staged pending path), and only then defines `SH_ADMIN_ROUTE_CONTEXT`. It validates `__admin_route` against a strict allowlist of real files inside `admin/` before including one. The included file always runs its normal authentication and permission guards.
 
@@ -33,11 +35,11 @@ Knowing the secret URL never grants access. Hiding `/admin.php` also never repla
 
 ## Safe configuration sequence (no lockout)
 
-The section is a three-step indicator: **1 Generate or enter a new URL → 2 Save proposed route → 3 Verify and activate**. Completed and remaining steps are shown separately on desktop and stacked on narrow screens.
+The section is a three-step indicator: **1 Choose a custom path → 2 Save proposed route → 3 Verify and activate**. Completed and remaining steps are shown separately on desktop and stacked on narrow screens.
 
 1. Sign in as the **Super Admin** through the current route.
 2. Open **Admin → Security & Admin Access → Admin Access URL**. The panel shows **Current active Admin URL** (the standard `/admin/login.php` when the feature is off).
-3. **Step 1.** Press **Generate secure suggestion** (192 bits from `random_bytes()`), or type your own path: one lowercase URL-safe segment of 32–64 characters. Domains, extra segments, slashes, spaces, dots, query strings, fragments, percent-encoding and reserved/colliding routes are still rejected server-side. The complete **New proposed Admin URL**, including the domain, is displayed and wraps on mobile; **Copy full URL** copies it. It is explicitly marked as *not active yet*.
+3. **Step 1.** Type a short or long memorable path yourself: `/my-admin`, `/RayAn-Admin/`, `/control-panel`, `/secret-dashboard`, `/myshop-control` and `/admin-access-2026` are all valid examples. Paths may be 3–80 characters and use letters, numbers, hyphens and underscores; uppercase is normalized to lowercase. **Suggest random path** is optional and is never filled in, saved or required by default. Domains, protocols, extra segments, queries, fragments, encoded traversal, reserved routes and filesystem/storefront-slug collisions are rejected on both frontend and backend. The complete **Complete proposed URL**, including the origin and install subfolder, updates immediately as you type and wraps on mobile; **Copy full URL** copies that exact final URL. It is explicitly marked as *not active yet*.
 4. **Step 2.** Press **Save proposed route**. This only stages the value in the existing `settings` table and issues a one-use same-session ticket. The page then reads **Saved — verification required**. The current Admin URL stays fully active.
 5. **Step 3.** Copy the complete proposed URL and open it in the same browser while still signed in as the Super Admin (the **Open proposed Admin URL** link does this too). The one-use ticket, the admin session and the superadmin role are checked; without them the request is a generic 404. A **GET** on that URL only renders a verification screen — it never records verification and never changes the active route.
 6. On that screen press **Verify and activate new Admin URL**. This is an explicit, CSRF-protected **POST** from the staged URL itself. The server re-checks the ticket, the authenticated superadmin session, the deployed request path, and the staged DB value. All settings writes now happen in **one transaction**, are read back from the database, and are confirmed again from the settings cache before success is reported. The response reads **New Admin URL is active**, shows the new **Current active Admin URL** with **Copy full URL**, and offers **Open Admin Panel**. It states that the old route is now disabled.
@@ -78,7 +80,7 @@ This is an out-of-band hosting-owner procedure. It uses the hosting account's ow
    ```
 
 4. Open the standard admin URL (`/admin/login.php`) and sign in normally with the existing administrator account. No password is reset and no account is created.
-5. In **Admin → Security & Admin Access**, generate and verify a new custom path before applying it again.
+5. In **Admin → Security & Admin Access**, choose and verify a new custom path before applying it again.
 
 If the `.htaccess` rewrite itself was damaged, restore the shipped root `.htaccess` from your deployment backup or release archive using cPanel File Manager. Keep `.htaccess` visible (File Manager → Settings → Show Hidden Files). Do not add a public "recovery" PHP file: that would reintroduce the predictable entry point the feature removes.
 
@@ -97,9 +99,9 @@ The feature reuses the existing `settings` table; **no migration, new table or n
 
 ## Validation rules (server-side)
 
-* One segment only; 32–64 characters; `a–z`, `0–9`, `-`, `_`; must start and end alphanumerically; normalized to lowercase.
-* Reject leading/trailing/multiple slashes, backslashes, whitespace, `.`, `:`, `%`, `?`, `#`, complete URLs, and encoded traversal.
-* Reject reserved admin/customer/API/asset namespaces and prefixes (`admin-`, `api-`, `assets-`, `sitemap-`, …).
+* One segment only; 3–80 characters; `A–Z`, `a–z`, `0–9`, `-`, `_`; must start and end alphanumerically; normalized to lowercase. No mandatory random length or random default workflow.
+* Reject leading/trailing/multiple slashes, backslashes, whitespace, `.`, `:`, `%`, `?`, `#`, complete URLs/domains, and encoded traversal.
+* Reject exact reserved admin/customer/API/asset route names, root PHP page basenames, and application file/directory collisions. Short names beginning with `admin-` such as `admin-access-2026` are allowed when they are not reserved and do not collide.
 * Reject a path that already exists as an application file/directory or as a live catalogue/category/brand/page slug.
 * Reject an empty, stale, unverified or expired candidate on apply; the active route is never removed before a verified replacement is stored. Opening a staged URL is a GET with no side effects; activation is a separate CSRF-protected POST from that URL.
 
@@ -115,6 +117,6 @@ The feature reuses the existing `settings` table; **no migration, new table or n
 
 `tests/admin-access-url.php` executes the real functions in `includes/admin-access.php` against a real PDO database and runs the routing guards in isolated PHP subprocesses (a blocked request terminates the process with a generic 404). With no MySQL DSN configured it uses in-memory SQLite with an explicit MySQL-SQL translation layer; set `SH_TEST_MYSQL_DSN`, `SH_TEST_MYSQL_USER` and `SH_TEST_MYSQL_PASS` to run the same suite against real MySQL/MariaDB. `SH_TEST_PHP_BIN` can point the subprocess checks at a specific PHP binary.
 
-The suite covers: path normalization/validation, filesystem and live-slug collisions, CSPRNG suggestions, the staged → verified → applied → disabled lifecycle, **timezone-independent verification markers (the deployed root cause) in five timezones**, **atomic activation with DB read-back, reason codes, ticket consumption, old-route-unchanged on every failure path, and compensating rollback**, link rewriting, include allowlist, generic 404s for `/admin.php` and direct admin PHP files, the dispatcher exception, unauthenticated `sh_require_admin()` redirect, independent auth/CSRF/RBAC on admin and customer APIs, secret-free public files, the three-step UX labels, the explicit activation gate and the cPanel recovery documentation. `tests/admin-access-regression.mjs` adds source-level checks for the UTC fix, the single transaction, read-back and compensating restore.
+The suite covers: flexible 3–80 path normalization and uppercase short paths, reserved/root-page/filesystem/live-slug collisions, optional CSPRNG suggestions with no automatic default, complete URL preview wiring, a short-path staged → verified → atomic activation lifecycle and a later path change, **timezone-independent verification markers (the deployed root cause) in five timezones**, **atomic activation with DB read-back, reason codes, ticket consumption, old-route-unchanged on every failure path, and compensating rollback**, link rewriting, include allowlist, generic 404s for `/admin.php` and direct admin PHP files, the dispatcher exception, unauthenticated `sh_require_admin()` redirect, independent auth/CSRF/RBAC on admin and customer APIs, secret-free public files, the three-step UX labels, the explicit activation gate and the cPanel recovery documentation. `tests/admin-access-regression.mjs` adds source-level checks for the UTC fix, the single transaction, read-back, compensating restore and removal of the 32–64 restriction. `tests/admin-access-preview-behavior.mjs` drives the real preview script inside jsdom: uppercase normalization, the complete origin + install-folder URL, Copy full URL, frontend rejection of domains/queries/fragments/traversal/reserved routes, and the optional suggestion button. The final local matrix ran `tests/admin-access-url.php` at `249 passed / 0 failed`, the regression suite at `13 / 0`, the preview suite at `31 / 0`, and `tools/security-scan.php --fail-on=high` with no findings.
 
 **Not validated here:** a live Apache/LiteSpeed/cPanel request, a real MySQL 8/MariaDB connection, an authenticated browser login and dashboard through the new URL, the actual GET → **Verify and activate new Admin URL** POST round trip over HTTP (CSRF, session ticket, cookies, redirect and old-route blocking), file uploads/exports over HTTP, and the phpMyAdmin recovery SQL on a live cPanel account. Those must be repeated on staging before enabling customer traffic.

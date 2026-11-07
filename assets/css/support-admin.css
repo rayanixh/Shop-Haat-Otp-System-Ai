@@ -138,6 +138,14 @@
   .sh-support-settings__faq-actions { width: 100%; }
 }
 
+/* Settings uses the existing guide accordion pattern. Content stays in normal
+   document flow: no nested scrolling boxes or new design-system primitives. */
+.sh-support-settings .sh-guide-accordion { margin: 0; }
+.sh-support-settings .sh-guide-accordion__content { display: grid; gap: 14px; min-width: 0; }
+.sh-support-settings .sh-guide-accordion__content > .sh-support-settings__form { gap: 14px; }
+.sh-support-settings .sh-guide-accordion__content .sh-formcard__note { margin: 0; }
+
+
 /* Human-support ownership workflow: every requested conversation shows its
    request/last-message times, assignment, human state, AI state and unread
    count. Actions are plain buttons with a comfortable touch target. */
@@ -166,10 +174,3 @@
   .sh-support-admin__state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-support-admin__human-actions .sh-btn { flex: 1 1 auto; }
 }
-
-/* Human Support Notifications: connection/test result panel. */
-.sh-support-settings__alert.is-good { border-color: #badbcc; color: #174b32; background: #f1fbf5; }
-.sh-support-settings__alert.is-bad { border-color: #f1b9b5; color: #8d2722; background: #fff4f2; }
-.sh-support-settings__alert.is-warn { border-color: #f1c7a7; color: #71400e; background: #fff8ef; }
-.sh-support-settings__alert:has(> form) { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-.sh-support-settings__alert:has(> form) > div { flex: 1 1 260px; display: grid; gap: 5px; min-width: 0; }

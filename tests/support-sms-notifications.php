@@ -121,6 +121,15 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
     $ok(str_contains($smsSrc, 'sh_support_sms_log(')
         && str_contains($smsSrc, 'sh_notify_log('),
         'delivery attempts use the existing notification log architecture');
+    $ok(str_contains($phoneOtpSrc, 'https://api.textbee.dev/api/v1/gateway/send-sms')
+        && !str_contains($phoneOtpSrc, '/gateway/devices/')
+        && str_contains($phoneOtpSrc, 'sh_sms_textbee_response_state(')
+        && str_contains($phoneOtpSrc, 'data.success=true'),
+        'TextBee uses the current documented account endpoint and explicit acceptance');
+    $ok(str_contains($smsSrc, 'sh_support_sms_log_provider_diagnostic(')
+        && str_contains($smsSrc, 'support_sms_diagnostic')
+        && str_contains($smsSrc, 'sh_support_sms_test_nonce('),
+        'redacted provider diagnostics and one-use Test SMS nonces are implemented');
 
     /* --- 3. Message content: short, reference only, no secrets ------------ */
     $msg = sh_support_sms_message(42);
@@ -172,11 +181,19 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
     sh_support_sms_save_setting('textbee_device_id', '');
     sh_support_sms_save(['enabled' => '1', 'phone' => '8801712345678', 'provider' => 'textbee']);
     $eq('credentials_missing', sh_support_sms_ready()['reason'], 'missing credentials are detected server-side');
+    sh_support_sms_save_setting('textbee_api_key', 'TEST-NEVER-A-REAL-KEY');
+    $eq('ready', sh_support_sms_ready()['reason'], 'TextBee device ID is optional with the current account endpoint');
     sh_support_sms_save(['enabled' => '1', 'phone' => '', 'provider' => 'textbee']);
     $eq('phone_missing', sh_support_sms_ready()['reason'], 'missing support number is detected server-side');
-    sh_support_sms_save(['enabled' => '1', 'phone' => '8801712345678', 'provider' => 'generic_http',
+    sh_support_sms_save_setting('api_url', '');
+    $insecureSave = sh_support_sms_save(['enabled' => '1', 'phone' => '8801712345678', 'provider' => 'generic_http',
         'api_url' => 'http://insecure.example.test/send']);
-    $eq('insecure_endpoint', sh_support_sms_ready()['reason'], 'plain-HTTP custom endpoint is refused');
+    $ok(empty($insecureSave['ok']) && str_contains(implode(' ', $insecureSave['errors']), 'https://'),
+        'plain-HTTP custom endpoint is refused at save time');
+    $eq('', sh_support_sms_setting('api_url'), 'insecure endpoint is never persisted');
+    sh_support_sms_save_setting('api_url', 'http://insecure.example.test/send');
+    $eq('insecure_endpoint', sh_support_sms_ready()['reason'], 'a legacy stored plain-HTTP endpoint is refused');
+    sh_support_sms_save_setting('api_url', '');
 
     /* --- 6. One SMS per genuinely new request ----------------------------- */
     $enable('textbee');
@@ -250,6 +267,8 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
 
     /* --- 9. Store provider mode reuses existing configuration ------------ */
     $GLOBALS['sh_test_otp_provider'] = 'generic_http';
+    sh_setting_save('otp_api_url', 'https://sms.example.test/send');
+    sh_setting_save('otp_textbee_api_key', 'SHARED-TEST-KEY');
     $enable('store');
     $eq('generic_http', sh_support_sms_resolved_provider(), 'store mode resolves the shared OTP provider');
     $eq('ready', sh_support_sms_ready()['reason'], 'store mode is ready when the shared carrier is real');
@@ -270,8 +289,26 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
     $ok(str_contains($settingsSrc, 'sh_csrf_field()'), 'settings form carries a CSRF token');
     $ok(str_contains($settingsSrc, 'Test SMS') && str_contains($settingsSrc, 'Save settings')
         && str_contains($settingsSrc, 'Clear result'), 'Test SMS, Save settings and clear result are present');
-    $ok(!str_contains($settingsSrc, 'value="<?= e($sms(\'textbee_api_key\')) ?>"'),
+    $secretEchoes = [
+        'value="<?= e($sms[\'textbee_api_key\']) ?>"',
+        'value="<?= e($sms[\'api_key\']) ?>"',
+        'value="<?= e($sms[\'api_token\']) ?>"',
+        'value="<?= e($sms[\'api_password\']) ?>"',
+        'value="<?= e($sms[\'api_body\']) ?>"',
+    ];
+    $noSecretEcho = true;
+    foreach ($secretEchoes as $echo) {
+        if (str_contains($settingsSrc, $echo)) { $noSecretEcho = false; break; }
+    }
+    $ok($noSecretEcho && str_contains($settingsSrc, 'type="password" value=""'),
         'saved provider secrets are never echoed into admin HTML');
+    $ok(str_contains($settingsSrc, 'data-sms-provider-select')
+        && str_contains($settingsSrc, 'data-sms-provider-panel="textbee"')
+        && str_contains($settingsSrc, 'data-sms-provider-panel="generic_http"'),
+        'provider-specific fields are hidden behind the existing accordion');
+    $ok(str_contains($settingsSrc, '<details class="sh-guide-accordion" id="human-support-sms"')
+        && !str_contains($settingsSrc, '<section class="sh-panel" id="human-support-sms"'),
+        'SMS lives in the compact existing accordion, not a separate expanded panel');
     $ok(str_contains($smsSrc, 'only an explicit ok=true') || str_contains($smsSrc, 'only an explicit ok=true from the live provider driver counts'),
         'success requires an explicit provider acceptance');
     $ok(str_contains($smsSrc, 'sh_support_sms_claim('), 'one-notification claim is enforced server-side');
@@ -279,6 +316,37 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
         'support API still separates state-changing POST actions');
     $ok(str_contains($smsSrc, 'no new tables') || str_contains($smsSrc, 'existing `settings` table'),
         'no duplicate database schema is introduced');
+
+    /* --- 10b. Redacted diagnostics and one-use Test SMS nonce ------------- */
+    $enable('textbee');
+    $GLOBALS['sh_test_security_logs'] = [];
+    $GLOBALS['sh_test_sms_result'] = [
+        'ok' => false,
+        'error' => 'TextBee rejected the request (HTTP 401). x-api-key: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd',
+        'code' => 'http_401',
+        'diagnostic' => [
+            'id' => 'SMS-TEST-DIAG', 'provider' => 'textbee', 'http_status' => 401,
+            'response' => '{"error":"invalid key","api_key":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"}',
+            'acceptance' => 'HTTP error; request not queued.',
+        ],
+    ];
+    $t = sh_support_sms_test();
+    $eq('http_401', $t['code'], 'provider-specific failure code is shown to the admin');
+    $eq('SMS-TEST-DIAG', $t['diagnostic_id'], 'admin receives a short secure diagnostic reference');
+    $events = array_column($GLOBALS['sh_test_security_logs'], 'event');
+    $ok(in_array('support_sms_diagnostic', $events, true), 'provider response is written to the secure Admin diagnostic log');
+    $diagnosticJson = (string)json_encode($GLOBALS['sh_test_security_logs']);
+    $ok(!str_contains($diagnosticJson, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd')
+        && str_contains($diagnosticJson, '401'), 'diagnostics are redacted but retain HTTP status');
+
+    sh_support_sms_clear_test_nonces();
+    $GLOBALS['sh_test_sms_result'] = ['ok' => true, 'error' => null];
+    $ui = sh_support_sms_ui_vars();
+    $firstTest = sh_support_sms_test(['test_nonce' => $ui['test_nonce']]);
+    $ok(!empty($firstTest['ok']), 'a fresh Test SMS nonce permits one real provider attempt');
+    $repeatTest = sh_support_sms_test(['test_nonce' => $ui['test_nonce']]);
+    $eq('test_nonce_invalid', $repeatTest['code'], 'refresh/back-button resubmission cannot send a duplicate SMS');
+    sh_support_sms_clear_test_nonces();
 
     /* --- 11. Saving new config clears a stale result ---------------------- */
     $enable('textbee');

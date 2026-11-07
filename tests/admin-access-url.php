@@ -50,40 +50,55 @@ $collisionDir = '';
     echo "Engine: " . (sh_db()->isMySql ? 'MySQL/MariaDB (production DDL)' : 'SQLite (MySQL SQL translated)') . "\n\n";
 
     /* --- 1. Server-side path validation ---------------------------------- */
-    $good = 'secure-control-7x9p-' . bin2hex(random_bytes(12)); // 48+ chars, URL safe
+    $accessSrc = $src('includes/admin-access.php');
+    $securitySrc = $src('admin/security.php');
+    $htaccessSrc = $src('.htaccess');
+    $routerSrc = $src('router.php');
+    $adminAccessJs = $src('assets/js/admin-access.js');
+    $good = 'secure-control-7x9p-' . bin2hex(random_bytes(12)); // long, URL safe
     $valid = sh_admin_access_validate_path($good);
-    $ok(!empty($valid['ok']) && $valid['path'] === strtolower($good), 'a normalized custom path is accepted');
+    $ok(!empty($valid['ok']) && $valid['path'] === strtolower($good), 'a normalized long custom path is accepted');
     $eq($good, sh_admin_access_normalize_path('/' . strtoupper($good) . '/') ?? '', 'leading/trailing slash and case are normalized');
+    foreach (['my-admin', 'RayAn-Admin', 'control-panel', 'secret-dashboard', 'myshop-control', 'admin-access-2026'] as $memorable) {
+        $eq(strtolower($memorable), sh_admin_access_normalize_path('/' . $memorable) ?? '', 'short memorable path accepted: ' . $memorable);
+    }
+    $eq(str_repeat('a', 80), sh_admin_access_normalize_path(str_repeat('A', 80)) ?? '', '80 uppercase characters normalize safely');
+    foreach (['admin', 'api', 'assets', 'uploads', 'install', 'config', 'includes', 'cron', 'index', 'product'] as $reserved) {
+        $ok(sh_admin_access_normalize_path($reserved) === null, 'reserved exact route rejected: ' . $reserved);
+    }
+    $rootPage = strtolower((string)pathinfo(SH_ROOT . '/index.php', PATHINFO_FILENAME));
+    $ok(sh_admin_access_normalize_path($rootPage) === null, 'root PHP basename is rejected as a route');
     foreach ([
         '' => 'empty path',
-        'short' => 'shorter than 32 characters',
-        str_repeat('a', 65) => 'longer than 64 characters',
-        'has space ' . str_repeat('a', 40) => 'whitespace',
-        str_repeat('a', 20) . '/' . str_repeat('b', 20) => 'extra path segment',
-        '//' . str_repeat('a', 40) . '//' => 'repeated slashes',
-        str_repeat('a', 40) . '?x=1' => 'query string',
-        str_repeat('a', 40) . '#top' => 'fragment',
-        '%2e%2e%2f' . str_repeat('a', 33) => 'encoded traversal',
-        'https://example.com/' . str_repeat('a', 33) => 'complete external URL',
-        str_repeat('a', 40) . '.php' => 'dot / file extension',
-        str_repeat('a', 40) . ':8080' => 'port / colon',
-        'admin-' . bin2hex(random_bytes(16)) => 'reserved admin- prefix',
-        'api-' . bin2hex(random_bytes(16)) => 'reserved api- prefix',
-        'assets-' . bin2hex(random_bytes(16)) => 'reserved assets- prefix',
-        'sitemap-' . bin2hex(random_bytes(16)) => 'reserved sitemap- prefix',
-        str_repeat('a', 31) => '31 characters (below minimum)',
-        '-' . str_repeat('a', 40) => 'invalid leading hyphen',
+        'ab' => 'shorter than 3 characters',
+        str_repeat('a', 81) => 'longer than 80 characters',
+        'my admin' => 'whitespace',
+        'my-admin/extra' => 'extra path segment',
+        '//my-admin//' => 'repeated slashes',
+        'my-admin?x=1' => 'query string',
+        'my-admin#top' => 'fragment',
+        '%2e%2e%2fmy-admin' => 'encoded traversal',
+        'example.com/my-admin' => 'bare domain',
+        'https://example.com/my-admin' => 'complete external URL',
+        'my-admin.php' => 'dot / file extension',
+        'my-admin:8080' => 'port / colon',
+        '../my-admin' => 'parent traversal',
+        '-my-admin' => 'invalid leading hyphen',
+        'my-admin-' => 'invalid trailing hyphen',
     ] as $candidate => $label) {
         $ok(sh_admin_access_normalize_path((string)$candidate) === null, 'rejects ' . $label);
     }
-    foreach (['admin', 'api', 'assets', 'uploads', 'install', 'config', 'includes', 'cron'] as $reserved) {
-        $padded = $reserved . str_repeat('-x', 20);
-        // Reserved exact names are shorter than the minimum length anyway; the
-        // prefix rules cover long lookalikes. Both must be rejected.
-        $ok(sh_admin_access_normalize_path($padded) === null || sh_admin_access_normalize_path($reserved) === null,
-            'reserved namespace rejected: ' . $reserved);
-    }
-
+    $ok(!str_contains($accessSrc, 'strlen($path) < 32') && !str_contains($accessSrc, 'strlen($path) > 64')
+        && str_contains($accessSrc, 'strlen($path) < 3') && str_contains($accessSrc, 'strlen($path) > 80')
+        && str_contains($accessSrc, 'strtolower($path)') && str_contains($accessSrc, 'sh_admin_access_reserved_paths()'),
+        'backend accepts flexible 3–80 character paths and normalizes uppercase');
+    $ok(!str_contains($securitySrc, 'minlength="32"') && str_contains($securitySrc, 'minlength="3"')
+        && str_contains($securitySrc, 'data-admin-access-preview') && str_contains($securitySrc, 'data-admin-access-origin')
+        && str_contains($adminAccessJs, 'setCustomValidity') && str_contains($adminAccessJs, 'const fullUrl = origin + state.path')
+        && str_contains($htaccessSrc, '{3,80}') && str_contains($routerSrc, '{3,80}'),
+        'frontend, Apache rewrite and built-in router use the same flexible path and live complete URL preview');
+    $ok(!preg_match('/if \(\$adminAccessInput === \'\'\)\s*\{\s*try\s*\{\s*\$adminAccessInput = sh_admin_access_suggest\(\);/', $securitySrc),
+        'no automatic random path is generated as the required/default workflow');
     /* --- 2. Filesystem and live-slug collision checks -------------------- */
     $collisionDir = SH_ROOT . '/' . strtolower(str_repeat('z', 20) . bin2hex(random_bytes(8)));
     if (!is_dir($collisionDir)) { mkdir($collisionDir, 0755, true); }
@@ -98,14 +113,15 @@ $collisionDir = '';
     $ok(empty($check['ok']) && str_contains((string)$check['error'], 'collides'), 'a path colliding with a live storefront slug is rejected');
     $GLOBALS['sh_test_tables']['products'] = false;
 
-    /* --- 3. Cryptographically secure suggestion ------------------------- */
+    /* --- 3. Optional cryptographic suggestion ------------------------- */
     $s1 = sh_admin_access_suggest();
     $s2 = sh_admin_access_suggest();
-    $ok(preg_match('/^[a-f0-9]{48}$/D', $s1) === 1, 'suggestion is 192 bits of hex entropy');
-    $ok($s1 !== $s2, 'two suggestions are different');
-    $ok(!empty(sh_admin_access_validate_path($s1)['ok']), 'generated suggestion passes server-side validation');
-    $ok(str_contains($src('includes/admin-access.php'), 'random_bytes('), 'suggestions use random_bytes(), not timestamps/ids');
-
+    $ok(preg_match('/^[a-f0-9]{48}$/D', $s1) === 1, 'optional suggestion is 192 bits of hex entropy');
+    $ok($s1 !== $s2, 'two optional suggestions are different');
+    $ok(!empty(sh_admin_access_validate_path($s1)['ok']), 'optional suggestion passes server-side validation');
+    $ok(str_contains($accessSrc, 'random_bytes('), 'optional suggestions use random_bytes(), not timestamps/ids');
+    $ok(str_contains($securitySrc, 'Suggest random path') && str_contains($securitySrc, 'It has not been saved'),
+        'random suggestion is an explicit optional action and is not saved automatically');
     /* --- 4. No-lockout state machine: pending -> verify -> apply --------- */
     $eq('disabled', sh_admin_access_state()['status'], 'feature starts disabled');
     $ok(!sh_admin_access_enabled(), 'custom route is off initially');
@@ -261,12 +277,28 @@ $collisionDir = '';
     // Restore the state section 4 left behind for the URL-mapping assertions.
     $reset($path, true);
 
+    /* --- 4d. Short, memorable paths use the same secure lifecycle -------- */
+    $reset($path, true);
+    $shortPath = 'my-admin';
+    $ok(sh_admin_access_save_pending($shortPath), 'a short memorable path can be staged');
+    $ok(sh_admin_access_begin_verification(), 'short path gets a fresh same-session ticket');
+    $shortResult = sh_admin_access_activate_verified($shortPath, 7);
+    $ok(!empty($shortResult['ok']) && $shortResult['reason'] === 'activated', 'short path activates only through explicit verified activation');
+    $eq($shortPath, $readActive(), 'database holds the lowercase short path after activation');
+    $ok(sh_admin_access_enabled(), 'old long route is replaced only after successful activation');
+    $_SERVER['REQUEST_URI'] = '/My-Admin';
+    $eq('my-admin', sh_admin_access_request_path() ?? '', 'uppercase deployed URL resolves to the lowercase active path');
+    $ok(sh_admin_access_save_pending('rayan-admin'), 'the path can be changed again through the same secure process');
+    $eq($shortPath, sh_admin_access_state()['active_path'], 'staging a later change does not disable the working short route');
+    $reset($path, true);
+
     /* --- 5. Route URL, link mapping and include allowlist ---------------- */
     $url = sh_admin_access_route_url($path, 'security.php');
     $ok(str_contains($url, '/' . $path), 'current admin URL contains the configured path');
     $eq('http://localhost/' . $path, sh_admin_access_full_url($path), 'full Admin URL includes scheme, domain and path exactly once');
     $eq('http://localhost/' . $path . '?__admin_route=security.php', sh_admin_access_full_url($path, 'security.php'), 'full Admin URL preserves a validated internal route');
-    $eq('', sh_admin_access_full_url('short'), 'an invalid path never produces a copyable URL');
+    $eq('', sh_admin_access_full_url('ab'), 'an invalid path never produces a copyable URL');
+    $eq('http://localhost/my-admin', sh_admin_access_full_url('My-Admin'), 'uppercase input produces the lowercase complete URL');
     $eq('http://localhost/admin/login.php', sh_admin_access_standard_url(), 'standard route URL includes the domain');
     $ok(str_contains($url, '__admin_route=security.php'), 'internal admin route is encoded as a validated route key');
     $ok(!str_contains($url, 'admin.php'), 'current admin URL is not the predictable default');
@@ -328,7 +360,7 @@ $collisionDir = '';
     /* --- 9. Static wiring / no secret leakage ---------------------------- */
     $htaccess = $src('.htaccess');
     $ok(str_contains($htaccess, 'RewriteRule ^admin\\.php$ - [F,L,NC]'), '.htaccess denies the predictable /admin.php entry point');
-    $ok(str_contains($htaccess, 'admin/custom-route.php'), '.htaccess rewrites one high-entropy segment to the dispatcher');
+    $ok(str_contains($htaccess, 'admin/custom-route.php') && str_contains($htaccess, '{3,80}') && str_contains($htaccess, '[NC]'), '.htaccess rewrites one flexible admin-chosen segment to the dispatcher');
     $ok(str_contains($src('config/config.php'), 'sh_admin_access_guard_request()'), 'bootstrap enforces the legacy-route block on every request');
     $ok(str_contains($src('admin/custom-route.php'), 'sh_admin()') && str_contains($src('admin/custom-route.php'), 'sh_admin_is_superadmin()'), 'dispatcher still requires an admin session and superadmin role');
     $ok(str_contains($src('admin/security.php'), 'sh_require_superadmin()') && str_contains($src('admin/security.php'), 'sh_csrf_require()'), 'Admin Access URL settings require superadmin + CSRF');
@@ -344,12 +376,12 @@ $collisionDir = '';
         $ok(!str_contains($src($publicFile), 'admin_access_secret_path') && !str_contains($src($publicFile), 'sh_admin_access_state()'),
             'no custom route secret in public file: ' . $publicFile);
     }
-    $securitySrc = $src('admin/security.php');
     $dispatcherSrc = $src('admin/custom-route.php');
     $ok(str_contains($securitySrc, 'data-copy=') && str_contains($securitySrc, 'Copy full URL'), 'Copy full URL actions are present in the admin UI');
-    foreach (['Current active Admin URL', 'New proposed Admin URL', 'Saved — verification required',
-              'Verify and activate', 'New Admin URL is active', 'Open Admin Panel',
-              'Save proposed route', 'Generate secure suggestion', 'Verify and activate new Admin URL'] as $label) {
+    foreach (['Current active Admin URL', 'New proposed Admin URL', 'Complete proposed URL',
+              'Choose a custom path', 'Saved — verification required', 'Verify and activate',
+              'New Admin URL is active', 'Open Admin Panel', 'Save proposed route',
+              'Suggest random path', 'Verify and activate new Admin URL'] as $label) {
         $ok(str_contains($securitySrc, $label), 'Admin URL UX label present: ' . $label);
     }
     $ok(str_contains($securitySrc, 'sh-aau-steps') && str_contains($securitySrc, 'sh-aau-step'), 'three-step status indicator is rendered');
@@ -357,6 +389,11 @@ $collisionDir = '';
         && str_contains($securitySrc, 'sh_admin_access_full_url(')
         && str_contains($src('assets/css/app.css'), '.sh-aau-urlbox'),
         'complete absolute URL (domain included) is shown and wraps on mobile');
+    $ok(str_contains($securitySrc, 'data-admin-access-preview-copy')
+        && str_contains($securitySrc, 'data-copy=') && str_contains($adminAccessJs, 'copy.setAttribute'),
+        'live preview updates the Copy full URL control with the complete URL');
+    $ok(!str_contains($securitySrc, 'minlength="32"') && !str_contains($accessSrc, 'strlen($path) < 32'),
+        'mandatory 32–64 character restriction is removed from both frontend and backend');
     $ok(str_contains($securitySrc, "if (!\$adminAccessVerifyScreen)")
         && str_contains($securitySrc, "\$form === 'admin_access_verify_activate'")
         && str_contains($securitySrc, 'sh_admin_access_activate_verified(')
@@ -409,7 +446,7 @@ $collisionDir = '';
         $ok(str_contains($deny, 'Require all denied') || str_contains($deny, 'Deny from all'), 'direct HTTP access denied for ' . $dir . '/');
     }
     $ok(str_contains($htaccess, '^(?:config|includes|ai)/') && str_contains($htaccess, 'database|installed|config'), 'root rewrite/deny also protects internal config and credential files');
-    $ok(str_contains($src('router.php'), 'admin/custom-route.php') && str_contains($src('router.php'), '404'), 'PHP built-in router mirrors the Apache rewrite and safe 404');
+    $ok(str_contains($routerSrc, 'admin/custom-route.php') && str_contains($routerSrc, '{3,80}') && str_contains($routerSrc, '404'), 'PHP built-in router mirrors the Apache flexible rewrite and safe 404');
     $ok(!is_file(SH_ROOT . '/config/database.php'), 'no database credentials are committed in the checkout');
     $ok(str_contains($src('config/database.example.php'), "'pass'"), 'only the example config template ships credentials placeholders');
     foreach (['index.php', 'product.php', 'cart.php', 'checkout.php', 'support.php', 'help.php', 'sitemap.php', 'robots.php'] as $public) {

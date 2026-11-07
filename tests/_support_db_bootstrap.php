@@ -160,7 +160,9 @@ function sh_table_exists(string $table): bool
 {
     return (bool)($GLOBALS['sh_test_tables'][$table] ?? false);
 }
-function sh_log_line(string $channel, string $message): void {}
+function sh_log_line(string $channel, string $message): void {
+    $GLOBALS['sh_test_app_logs'][] = ['channel' => $channel, 'message' => $message];
+}
 function sh_log_exception(Throwable $e, string $channel): void {}
 function sh_session_start(): void {}
 function sh_request_is_https(): bool { return false; }
@@ -177,7 +179,9 @@ if (getenv('SH_TEST_ADMIN_AUTH_MODE') !== '1') {
 }
 function sh_perms_superadmin_only(): array { return []; }
 function sh_ai_installed(): bool { $GLOBALS['sh_test_ai_calls']++; return false; }
-function sh_security_log(string $event, $userId = null, array $meta = []): void {}
+function sh_security_log(string $event, $userId = null, array $meta = []): void {
+    $GLOBALS['sh_test_security_logs'][] = ['event' => $event, 'user_id' => $userId, 'meta' => $meta];
+}
 function sh_audit(string $event, string $kind = 'setting', $id = null, string $label = '', $old = null, $new = null): void {}
 function sh_site_cookie_options(int $expires = 0): array { return ['path' => '/', 'httponly' => true, 'samesite' => 'Lax']; }
 

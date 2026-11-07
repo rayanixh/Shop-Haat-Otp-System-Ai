@@ -41,8 +41,10 @@ if ($path === '/robots.txt' || $path === '/sitemap.xml' || preg_match('~^/sitema
 }
 
 // Custom Admin Access mirrors the root .htaccess one-segment rewrite. The
-// dispatcher itself verifies that the route is currently configured.
-if (preg_match('~^/[a-z0-9_-]{32,64}/?$~i', $path) === 1) {
+// dispatcher itself verifies that the route is currently configured. Uppercase
+// input is accepted here and normalized to lowercase before comparison.
+$reserved = 'admin|adminphp|admin-login|admin-login-php|administrator|wp-admin|cpanel|webmail|login|logout|api|assets|uploads|install|support|cart|checkout|account|orders|products|product|category|categories|robots|sitemap|health|status|security|cron|config|includes|lib|logs|tests|tools|docs|auth|installer|index|track|help|page|payment|password|otp|register';
+if (preg_match('~^/(?!(?:' . $reserved . ')(?:/|$))[A-Za-z0-9_-]{3,80}/?$~i', $path) === 1) {
     $_SERVER['SCRIPT_NAME'] = '/admin/custom-route.php';
     require __DIR__ . '/admin/custom-route.php';
     return true;
