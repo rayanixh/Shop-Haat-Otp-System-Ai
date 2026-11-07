@@ -384,7 +384,7 @@ $counts = $audit['counts'];
         <label class="sh-field__label" for="seo-default-desc">Default meta description</label>
         <textarea class="sh-textarea" id="seo-default-desc" name="seo_default_description" rows="3"
                   placeholder="<?= e((string)sh_setting('site_description', 'Leave empty to use the store description from General Settings')) ?>"><?= e($s('seo_default_description')) ?></textarea>
-        <span class="sh-field__hint">No character limit. Search engines may shorten the snippet they show.</span>
+
       </div>
       <div class="sh-field">
         <label class="sh-field__label" for="seo-default-kw">Default keywords</label>

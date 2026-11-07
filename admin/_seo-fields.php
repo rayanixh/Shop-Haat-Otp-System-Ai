@@ -115,9 +115,6 @@ if ($seoPreviewImage === '') { $seoPreviewImage = $seoDefaultImage; }
       <textarea class="sh-textarea" id="<?= e($seoPrefix) ?>-desc" name="meta_description" rows="3"
                 data-seo-field="description"
                 placeholder="<?= e(sh_seo_clip($autoDesc, 158)) ?>"><?= e($seoDesc) ?></textarea>
-      <span class="sh-field__hint">
-        No character limit. Write it for a person deciding whether to click; Google may rewrite it.
-      </span>
     </div>
 
     <div class="sh-grid2">

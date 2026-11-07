@@ -150,7 +150,7 @@ require __DIR__ . '/_layout.php';
             <input class="sh-input" name="transition_custom" type="number" min="150" max="5000" step="50"
                    value="<?= !$isPreset ? (int)$cfg['duration'] : 750 ?>" placeholder="Milliseconds (150–5000)">
           </div>
-          <span class="sh-field__hint">How long the overlay stays visible in total. The next page keeps loading underneath, so navigation is never slowed down on purpose.</span>
+          <span class="sh-field__hint">Total overlay duration.</span>
         </div>
         <div class="sh-field">
           <label class="sh-field__label" for="tr-fade">Fade style</label>
@@ -162,7 +162,7 @@ require __DIR__ . '/_layout.php';
           <span class="sh-field__hint">Smooth: crisp ease-out. Soft: gentle overlapping fades. Cinematic: slower fades with a subtle scale.</span>
         </div>
       </div>
-      <p class="sh-panel__note">One global setting: applies to every customer-facing page (home, categories, products, cart, checkout, payment, order success, tracking, orders, profile, wallet, login, signup) and to every admin panel page.</p>
+      <p class="sh-panel__note">Applies to all customer-facing and admin pages.</p>
     </div>
   </section>
 

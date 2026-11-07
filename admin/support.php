@@ -38,6 +38,7 @@ require __DIR__ . '/_layout.php';
      data-csrf="<?= e($csrf) ?>"
      data-selected-id="<?= $selectedId ?>"
      data-admin-id="<?= (int)$admin['id'] ?>"
+     data-can-reply="<?= $canReply ? '1' : '0' ?>"
      data-superadmin="<?= sh_admin_is_superadmin() ? '1' : '0' ?>"
      data-status="<?= e($statusFilter) ?>"
      data-query="<?= e($queryFilter) ?>">
@@ -61,7 +62,7 @@ require __DIR__ . '/_layout.php';
     <label class="sh-field"><span class="sh-field__label">Status</span>
       <select class="sh-select" name="status" data-filter-status>
         <option value="">All conversations</option>
-        <?php foreach (['open' => 'Open', 'pending' => 'Pending human support', 'assigned' => 'Assigned', 'resolved' => 'Resolved', 'closed' => 'Closed'] as $key => $label): ?>
+        <?php foreach (['open' => 'Open / AI active', 'pending' => 'Pending human support', 'assigned' => 'In progress', 'resolved' => 'Resolved', 'closed' => 'Closed'] as $key => $label): ?>
           <option value="<?= e($key) ?>" <?= $statusFilter === $key ? 'selected' : '' ?>><?= e($label) ?></option>
         <?php endforeach; ?>
       </select>
@@ -105,8 +106,28 @@ require __DIR__ . '/_layout.php';
           </div>
         </div>
 
+        <div class="sh-support-admin__state-grid" data-state-grid>
+          <div><span>Human support</span><strong data-state-human>—</strong></div>
+          <div><span>Assignment</span><strong data-state-assignment>—</strong></div>
+          <div><span>AI</span><strong data-state-ai>—</strong></div>
+          <div><span>Unread</span><strong data-state-unread>0</strong></div>
+          <div><span>Requested</span><strong data-state-requested>—</strong></div>
+          <div><span>Last message</span><strong data-state-last>—</strong></div>
+        </div>
+
+        <!-- Explicit, human-readable ownership actions. Each one maps to an
+             allowlisted, CSRF-protected admin_transition handled server-side. -->
+        <div class="sh-support-admin__human-actions" data-human-actions>
+          <button class="sh-btn sh-btn--sm" type="button" data-join><?= sh_icon('user-plus', 14) ?> Join Conversation</button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-assign-me>Assign to Me</button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-reply-human><?= sh_icon('message', 14) ?> Reply as Human</button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-leave>Leave Conversation</button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-close>Close Conversation</button>
+          <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-reopen>Reopen Conversation</button>
+        </div>
+
         <div class="sh-support-admin__assignment">
-          <label class="sh-field"><span class="sh-field__label">Assign to support agent</span>
+          <label class="sh-field"><span class="sh-field__label">Assign to another support agent</span>
             <select class="sh-select" data-agent-select><option value="">Unassigned</option></select>
           </label>
           <button class="sh-btn sh-btn--sm" type="button" data-assign>Assign</button>

@@ -93,7 +93,6 @@ body {
   color: var(--sh-ink);
   background: var(--sh-bg);
   accent-color: var(--sh-brand);
-  overflow-x: hidden;
 }
 .sh-wrap { width: 100%; max-width: var(--sh-wrap); margin: 0 auto; padding: 0 14px; }
 .sh-main { min-height: 50vh; padding-bottom: 34px; }
@@ -445,10 +444,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-trust__text { font-size: 12px; color: var(--sh-muted); overflow-wrap: anywhere; }
 
 /* Banner strip */
-.sh-banner { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
+.sh-banner { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 /* One real offer (a store with no coupon yet) gets the full width instead of
    a half-empty row. */
-.sh-banner--single { grid-template-columns: 1fr; }
+.sh-banner--single { grid-template-columns: minmax(0, 1fr); }
 .sh-banner__item { border-radius: var(--sh-radius); padding: 20px; color: #fff; min-height: 118px; display: flex; flex-direction: column; justify-content: center; box-shadow: var(--sh-shadow); }
 .sh-banner__title { color: #fff; font-size: 17px; font-weight: 800; }
 .sh-banner__text { color: rgba(255,255,255,.98); font-size: 12.5px; opacity: 1; margin-top: 4px; }
@@ -548,7 +547,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-cart-item__name { font-size: 13.8px; font-weight: 600; line-height: 1.4; color: var(--sh-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sh-cart-item__price { font-size: 15px; font-weight: 800; color: var(--sh-brand); margin-top: 6px; }
 .sh-cart-item__side { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 9px; }
-.sh-cart-item__total { font-size: 15px; font-weight: 800; white-space: nowrap; }
+.sh-cart-item__total { font-size: 15px; font-weight: 800; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .sh-cart-item__remove { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--sh-muted); }
 .sh-cart-item__remove:hover { color: var(--sh-bad); }
 
@@ -593,7 +592,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-mini-item__img { width: 44px; height: 44px; object-fit: contain; background: #f7f8fa; border-radius: 5px; padding: 3px; flex: none; }
 .sh-mini-item__name { font-size: 12.8px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; flex: 1 1 auto; min-width: 0; }
 .sh-mini-item__qty { font-size: 12px; color: var(--sh-muted); }
-.sh-mini-item__price { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.sh-mini-item__price { font-size: 13px; font-weight: 700; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 
 /* 13. PAYMENT ------------------------------------------------------------- */
 .sh-paylayout { display: grid; grid-template-columns: minmax(0, 1fr) 348px; gap: 14px; align-items: start; }
@@ -1345,7 +1344,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 
 /* 20. FOOTER -------------------------------------------------------------- */
 .sh-footer { background: var(--sh-footer-bg); color: var(--sh-footer-text); padding: 30px 0 0; margin-top: 22px; }
-.sh-footer__grid { display: grid; grid-template-columns: 1.7fr repeat(4, 1fr); gap: 26px; padding-bottom: 24px; }
+.sh-footer__grid { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(4, minmax(0, 1fr)); gap: 26px; padding-bottom: 24px; }
 .sh-brand--footer { margin-bottom: 11px; color: var(--sh-footer-heading); }
 .sh-footer__about { font-size: 12.8px; line-height: 1.7; margin-bottom: 13px; }
 .sh-footer__contact li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; padding: 3px 0; }
@@ -1430,8 +1429,8 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
     border: 0; background: rgba(20,24,36,.5); cursor: pointer; }
   .sh-mobile-tools { display: flex; }
   .sh-toolbar { display: none; }
-  .sh-pdp { grid-template-columns: 1fr; padding: 13px; }
-  .sh-cartlayout, .sh-paylayout, .sh-account { grid-template-columns: 1fr; }
+  .sh-pdp { grid-template-columns: minmax(0, 1fr); padding: 13px; }
+  .sh-cartlayout, .sh-paylayout, .sh-account { grid-template-columns: minmax(0, 1fr); }
   .sh-summary { position: static; }
   /* Static tile grid — no horizontal swiping, every link visible at once. */
   .sh-account__nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1445,7 +1444,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
     background: var(--sh-brand-soft); color: var(--sh-brand); font-weight: 700; }
   .sh-trust { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-banner { grid-template-columns: 1fr; }
-  .sh-footer__grid { grid-template-columns: repeat(2, 1fr); }
+  .sh-footer__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-footer { padding-bottom: 56px; }
 }
 @media (max-width: 720px) {
@@ -2984,12 +2983,16 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 
 /* ==========================================================================
    38. SUPPORT CHAT (storefront widget)
-   The launcher is fixed, but the panel itself is absolutely positioned in
-   the page flow (JS pins it to the current scroll offset) and grows with
-   the conversation — the page scrolls, never an inner box.
+   Launcher and panel are both viewport-fixed. The panel is bottom/right
+   anchored to the visible viewport (never to document scroll), clears the
+   mobile bottom navigation plus safe-area insets, and only its message log
+   scrolls internally. The website keeps its own independent page scroll.
+   Both nodes are direct children of <body>, so no transformed/overflow
+   parent can create a containing block or clip the fixed panel.
    ========================================================================== */
 .sh-schat-fab {
-  position: fixed; right: 16px; bottom: 16px; z-index: 180;
+  position: fixed; right: 16px; bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 1000;
   display: inline-flex; align-items: center; gap: 8px;
   background: var(--sh-brand); color: #fff; border: 0; border-radius: 999px;
   padding: 11px 18px; font: inherit; font-weight: 600; font-size: 14px;
@@ -3003,21 +3006,39 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
 }
 .sh-schat-sheet {
-  position: absolute; right: 16px; z-index: 190; width: min(400px, calc(100vw - 24px));
+  --sh-schat-vh: 100vh;
+  --sh-schat-bottom: 16px;
+  --sh-schat-gap: 16px;
+  position: fixed; right: 16px; left: auto; top: auto;
+  bottom: 16px;
+  bottom: calc(var(--sh-schat-bottom) + env(safe-area-inset-bottom, 0px));
+  z-index: 1001; width: min(400px, calc(100vw - 32px));
+  max-height: 70vh;
+  max-height: calc(var(--sh-schat-vh) - var(--sh-schat-bottom) - var(--sh-schat-gap) - env(safe-area-inset-bottom, 0px));
+  max-height: min(620px, calc(var(--sh-schat-vh) - var(--sh-schat-bottom) - var(--sh-schat-gap) - env(safe-area-inset-bottom, 0px)));
+  display: flex; flex-direction: column; min-height: 0;
   background: var(--sh-surface); border: 1px solid var(--sh-line); border-radius: 14px;
   box-shadow: 0 18px 48px rgba(20, 26, 40, .28); padding: 14px;
+  overflow: hidden;
 }
-.sh-schat-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+/* dvh tracks the collapsing mobile address bar; the JS visualViewport
+   override below is used where available and is even more precise. */
+@supports (height: 100dvh) { .sh-schat-sheet { --sh-schat-vh: 100dvh; } }
+.sh-schat-sheet[hidden] { display: none; }
+.sh-schat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex: none; }
 .sh-schat-headmain { flex: 1 1 auto; min-width: 0; }
-.sh-schat-headmain h2 { display: flex; align-items: center; gap: 7px; font-size: 17px; margin: 0 0 3px; color: var(--sh-heading); }
-.sh-schat-sub { margin: 0; font-size: 12.5px; color: var(--sh-muted); line-height: 1.45; }
-.sh-schat-headactions { display: flex; gap: 6px; }
+.sh-schat-headmain h2 { display: flex; align-items: center; gap: 7px; font-size: 17px; margin: 0; color: var(--sh-heading); }
+.sh-schat-headactions { display: flex; flex: none; min-width: 0; gap: 6px; }
 .sh-schat-iconbtn {
   display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
   background: var(--sh-bg-2); border: 1px solid var(--sh-line); border-radius: 9px; color: var(--sh-ink-2); cursor: pointer;
 }
 .sh-schat-iconbtn:hover, .sh-schat-iconbtn:focus-visible { background: var(--sh-line-2); }
-.sh-schat-messages { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 10px; }
+.sh-schat-messages {
+  display: flex; flex-direction: column; gap: 10px; margin: 6px 0 10px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+}
 .sh-schat-msg { max-width: 88%; }
 .sh-schat-msg.is-customer { align-self: flex-end; }
 .sh-schat-msg.is-assistant, .sh-schat-msg.is-agent { align-self: flex-start; }
@@ -3043,31 +3064,223 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   background: var(--sh-warn-soft); border: 1px solid #f0dfba; border-radius: 10px; padding: 8px 12px; max-width: 95%;
 }
 .sh-schat-dots { letter-spacing: 3px; font-weight: 700; color: var(--sh-muted); }
-.sh-schat-suggest { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.sh-schat-suggest { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; flex: none; }
 .sh-schat-chip {
   font: inherit; font-size: 13px; background: #fff; color: var(--sh-accent);
   border: 1px solid var(--sh-line); border-radius: 999px; padding: 6px 13px; cursor: pointer;
 }
 .sh-schat-chip:hover, .sh-schat-chip:focus-visible { border-color: var(--sh-accent); background: var(--sh-accent-soft); }
-.sh-schat-form { display: flex; gap: 8px; align-items: stretch; }
+/* Composer: subtly smaller type/padding than the message bubbles, while the
+   input and Send stay on one horizontal row with a >=40px touch target.
+   No change to the viewport-anchored sheet or the scrollable message log. */
+.sh-schat-form { display: flex; gap: 7px; align-items: stretch; flex: none; flex-wrap: nowrap; }
 .sh-schat-input {
-  flex: 1 1 auto; min-width: 0; font: inherit; font-size: 14px; color: var(--sh-ink);
-  border: 1px solid var(--sh-line); border-radius: 10px; padding: 9px 11px; background: #fff; resize: vertical;
+  flex: 1 1 auto; min-width: 0; min-height: 40px; box-sizing: border-box;
+  font: inherit; font-size: 13.5px; line-height: 1.5; color: var(--sh-ink);
+  border: 1px solid var(--sh-line); border-radius: 10px; padding: 8px 10px; background: #fff; resize: vertical;
 }
 .sh-schat-input:focus { border-color: var(--sh-brand); outline: 2px solid var(--sh-brand-soft); }
-.sh-schat-send { flex: 0 0 auto; align-self: stretch; display: inline-flex; align-items: center; gap: 6px; }
-.sh-schat-status { min-height: 18px; margin: 7px 2px 0; font-size: 12.5px; color: var(--sh-muted); }
-.sh-schat-status.is-error { color: var(--sh-bad); }
-.sh-schat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
-.sh-schat-handoff {
-  display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 600;
-  color: var(--sh-accent); background: var(--sh-accent-soft); border: 1px solid #d5e1f2;
-  border-radius: 999px; padding: 6px 13px; cursor: pointer;
+.sh-schat-send {
+  flex: 0 0 auto; align-self: stretch; display: inline-flex; align-items: center; justify-content: center;
+  gap: 5px; min-height: 40px; padding: 8px 12px; font-size: 12.8px; line-height: 1.3; white-space: nowrap;
 }
+.sh-schat-send svg { width: 14px; height: 14px; flex: none; }
+.sh-schat-status { min-height: 18px; margin: 7px 2px 0; font-size: 12.5px; color: var(--sh-muted); flex: none; }
+.sh-schat-status.is-error { color: var(--sh-bad); }
+.sh-schat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; flex: none; }
+.sh-schat-handoff {
+  display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--sh-accent); background: var(--sh-accent-soft); border: 1px solid #d5e1f2;
+  border-radius: 999px; padding: 5px 11px; min-height: 32px; cursor: pointer;
+}
+.sh-schat-handoff svg { width: 14px; height: 14px; flex: none; }
 .sh-schat-handoff:hover, .sh-schat-handoff:focus-visible { border-color: var(--sh-accent); }
-.sh-schat-avail { font-size: 12.5px; color: var(--sh-muted); }
+.sh-schat-avail { min-width: 0; font-size: 12.5px; color: var(--sh-muted); overflow-wrap: anywhere; }
 @media (max-width: 900px) {
-  /* Clear the mobile bottom navigation bar. */
-  .sh-schat-fab { bottom: 74px; right: 12px; padding: 10px 15px; }
+  /* Clear the mobile bottom navigation bar and its safe-area padding. */
+  .sh-schat-fab { bottom: 74px; bottom: calc(74px + env(safe-area-inset-bottom, 0px)); right: 12px; padding: 10px 15px; }
   .sh-schat-sheet { right: 8px; left: 8px; width: auto; }
+}
+@media (max-width: 420px) {
+  /* Keep input + Send aligned horizontally; only the message log scrolls. */
+  .sh-schat-form { gap: 6px; flex-wrap: nowrap; }
+  .sh-schat-input { font-size: 13.5px; padding: 8px 9px; }
+  .sh-schat-send { padding: 8px 10px; font-size: 12.5px; }
+}
+
+/* ==========================================================================
+   ADMIN ACCESS URL — three-step, mobile-friendly setup
+   No nested scroll boxes and no horizontal overflow: long URLs wrap.
+   ========================================================================== */
+.sh-aau-steps {
+  list-style: none; margin: 0 0 16px; padding: 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+}
+.sh-aau-step {
+  min-width: 0; display: flex; align-items: center; gap: 8px; padding: 10px;
+  border: 1px solid var(--sh-line); border-radius: 10px; background: #fff;
+  font-size: 12.5px; line-height: 1.35; color: var(--sh-muted);
+}
+.sh-aau-step.is-current { border-color: var(--sh-brand); color: var(--sh-ink); font-weight: 700; }
+.sh-aau-step.is-done { border-color: #bfe3cd; background: var(--sh-ok-soft); color: #14603a; }
+.sh-aau-num {
+  flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 11.5px; font-weight: 700; background: var(--sh-line-2); color: var(--sh-muted);
+}
+.sh-aau-step.is-current .sh-aau-num { background: var(--sh-brand); color: #fff; }
+.sh-aau-step.is-done .sh-aau-num { background: var(--sh-ok); color: #fff; }
+.sh-aau-label { min-width: 0; overflow-wrap: anywhere; }
+.sh-aau-block { border: 1px solid var(--sh-line); border-radius: 10px; padding: 14px; margin-bottom: 12px; min-width: 0; }
+.sh-aau-kicker { margin: 0 0 10px; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--sh-ink-2); }
+.sh-aau-urlbox {
+  margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--sh-line-2); border-radius: 8px;
+  background: var(--sh-bg-2); font-size: 12.5px; line-height: 1.55; color: var(--sh-ink);
+  overflow-wrap: anywhere; word-break: break-word; min-width: 0;
+}
+.sh-aau-status { margin: 0 0 10px; font-size: 14px; font-weight: 700; color: #14603a; }
+.sh-aau-success { margin: 0 0 10px; font-size: 16px; font-weight: 800; color: #14603a; }
+.sh-aau-instructions { margin: 0 0 12px; padding-left: 20px; font-size: 13px; line-height: 1.7; color: var(--sh-ink-2); }
+.sh-aau-instructions li { min-width: 0; overflow-wrap: anywhere; }
+.sh-aau-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+.sh-aau-actions .sh-btn { max-width: 100%; }
+.sh-aau-block .sh-field__hint, .sh-aau-block .sh-field__label { overflow-wrap: anywhere; }
+.sh-aau-origin { display: block; margin-bottom: 6px; font-size: 11.8px; color: var(--sh-muted); overflow-wrap: anywhere; }
+.sh-aau-block .sh-input--mono { font-size: 12.5px; }
+@media (max-width: 640px) {
+  .sh-aau-steps { grid-template-columns: minmax(0, 1fr); }
+  .sh-aau-block { padding: 12px; }
+  .sh-aau-actions .sh-btn { flex: 1 1 100%; justify-content: center; }
+}
+
+/* ==========================================================================
+   Long dynamic content — root-cause layout repair
+   Flex/grid children default to min-width:auto and long product names, URLs,
+   customer names and amounts have no natural break point. Constrain the tracks
+   and wrap that content; do not mask it with a page-level overflow rule.
+   ========================================================================== */
+:is(.sh-main, .sh-wrap, .sh-section, .sh-panel, .sh-field, .sh-support-chat,
+    .sh-support-settings, .sh-support-admin, .sh-product-card, .sh-cart-item,
+    .sh-summary, .sh-payment-card, .sh-payment-card__body, .sh-banner__item,
+    .sh-slide__inner, .sh-modal__card, .sh-toast, .sh-schat-sheet) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.sh-breadcrumb, .sh-section__head, .sh-panel__head, .sh-field, .sh-grid2,
+    .sh-grid3, .sh-trust__item, .sh-product-card__meta, .sh-product-card__price,
+    .sh-cart-item, .sh-cart-item__side, .sh-summary__row, .sh-summary__total,
+    .sh-pdp__buy, .sh-payment-card__head, .sh-merchant, .sh-account__link,
+    .sh-support-chat__heading, .sh-support-chat__thread-head,
+    .sh-support-chat__compose-foot, .sh-schat-head, .sh-schat-foot,
+    .sh-schat-form, .sh-footer__grid, .sh-footer__bar,
+    .sh-banner__item, .sh-aau-actions, .sh-modal__head, .sh-modal__foot) > * {
+  min-width: 0;
+}
+:is(.sh-breadcrumb, .sh-breadcrumb > *, .sh-section__title, .sh-slide__title,
+    .sh-slide__text, .sh-pdp__title, .sh-pdp__now, .sh-product-card__name,
+    .sh-product-card__meta, .sh-product-card__meta > *, .sh-product-card__price,
+    .sh-product-card__price > *, .sh-cart-item, .sh-cart-item > *,
+    .sh-summary__row, .sh-summary__total, .sh-payment-card__head h1,
+    .sh-payment-card__sub, .sh-amount-box, .sh-amount-box__value,
+    .sh-merchant, .sh-merchant__number, .sh-account__link span,
+    .sh-field__hint, .sh-field__error, .sh-panel__note, .sh-alert,
+    .sh-alert span, .sh-toast, .sh-schat-avail, .sh-schat-bubble,
+    .sh-aau-urlbox, .sh-aau-origin, .sh-url, .sh-mono, .sh-token,
+    .sh-email, .sh-hash, .sh-footer__about, .sh-footer__contact span,
+    .sh-footer__links a, .sh-footer__title) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* Header actions and long store names must shrink instead of widening 1024px. */
+.sh-main-header__inner,
+.sh-brand { min-width: 0; }
+.sh-brand { flex: 0 1 auto; }
+.sh-brand__text { min-width: 0; overflow-wrap: anywhere; }
+.sh-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.sh-action, .sh-action__label { min-width: 0; overflow-wrap: anywhere; }
+/* Hero copy keeps its designed max width but never exceeds its column. */
+.sh-slide__title { max-width: min(460px, 100%); min-width: 0; }
+.sh-slide__text { max-width: min(420px, 100%); min-width: 0; }
+/* Admin tables that opt out of card stacking keep their width inside the
+   container by distributing columns and wrapping cell content — not by
+   creating a nested horizontal scroll box. */
+.sh-admin-body .sh-tablewrap:has(> table[data-no-cards]) > .sh-table,
+.sh-admin-body .sh-table-wrap:has(> table[data-no-cards]) > .sh-table {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+.sh-admin-body .sh-tablewrap:has(> table[data-no-cards]) :is(th, td),
+.sh-admin-body .sh-table-wrap:has(> table[data-no-cards]) :is(th, td) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Min-content tracks and long labels in real page sections. */
+:is(.sh-account, .sh-account__nav, .sh-account__content, .sh-account__content > *,
+    .sh-listing, .sh-listing__main, .sh-toolbar, .sh-toolbar > *, .sh-filters__head,
+    .sh-filters__head > *, .sh-filters__scroll, .sh-section, .sh-section__head,
+    .sh-section__title, .sh-panel__body, .sh-panel__title, .sh-empty, .sh-empty__icon,
+    .sh-empty__title, .sh-empty__text, .sh-stat, .sh-stat__icon, .sh-stat__value,
+    .sh-stat__label, .sh-banner__item > *, .sh-field__label, .sh-modal__head h2,
+    .sh-modal__body p, .sh-pdp__info, .sh-cart-items, .sh-payment-card__body,
+    .sh-promo__panel, .sh-promo__side, .sh-sidecard, .sh-category-card,
+    .sh-category-card__name, .sh-product-grid, .sh-support-chat__heading,
+    .sh-support-chat__heading h1, .sh-support-chat__product-name) {
+  min-width: 0;
+}
+:is(.sh-section__title, .sh-panel__title, .sh-empty__icon, .sh-empty__title,
+    .sh-empty__text, .sh-stat__icon, .sh-stat__value, .sh-stat__label,
+    .sh-banner__item h3, .sh-banner__item p, .sh-filters__head strong,
+    .sh-filters__scroll, .sh-toolbar span, .sh-field__label, .sh-modal__head h2,
+    .sh-modal__body p, .sh-sidecard h3, .sh-sidecard span,
+    .sh-category-card__name, .sh-support-chat__heading h1) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* A customer table must distribute columns inside its own width. */
+.sh-main .sh-tablewrap > .sh-table {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+}
+.sh-main .sh-table th,
+.sh-main .sh-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+/* Compact cart/order totals and decorative marks under long dynamic values. */
+:is(.sh-cart-item, .sh-cart-item__side, .sh-cart-item__total, .sh-order-card,
+    .sh-order-card__body, .sh-mini-item, .sh-mini-item__name,
+    .sh-mini-item__qty, .sh-mini-item__price, .sh-auth__mark,
+    .sh-verify-card__badge, .sh-trust__icon, .sh-empty__icon,
+    .sh-stat__icon) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.sh-cart-item__total, .sh-order-card__body, .sh-mini-item__name,
+    .sh-mini-item__qty, .sh-mini-item__price, .sh-auth__mark,
+    .sh-verify-card__badge, .sh-trust__icon, .sh-empty__icon,
+    .sh-stat__icon) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Dynamic customer/store strings can appear in generic public-page text nodes
+   and in inline-admin-style fragments; keep their intrinsic width bounded. */
+.sh-main :is(div, span, strong, b, p, h1, h2, h3, h4, h5, h6, small, label,
+             a, li, td, th, form, blockquote) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.sh-main :is(.sh-stats, .sh-stat, .sh-stat > *, .sh-stat__value,
+             .sh-stat__label, .sh-panel__body > div, .sh-account__content > div) {
+  min-width: 0;
+  max-width: 100%;
 }

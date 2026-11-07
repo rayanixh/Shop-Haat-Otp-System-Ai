@@ -398,7 +398,6 @@ require_once SH_ROOT . '/includes/header.php';
               <input type="radio" name="delivery_zone" value="outside" <?= $form['delivery_zone'] === 'outside' ? 'checked' : '' ?>>
               <span>Outside city — <?= e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?> (2–4 working days)</span>
             </label>
-            <p class="sh-field__hint">Changing the zone updates the total after you place the order form submission.</p>
           </div>
           <div class="sh-field" style="margin-bottom:0">
             <label class="sh-field__label" for="ck-note">Order note (optional)</label>

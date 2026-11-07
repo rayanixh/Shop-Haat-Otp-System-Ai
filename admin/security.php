@@ -13,12 +13,21 @@ require_once SH_ROOT . '/includes/admin-auth.php';
 sh_session_start();
 $admin = sh_require_superadmin();
 
+// Only the pending-route dispatcher defines this. A POST on the ordinary
+// /admin/security.php URL can therefore never activate a new Admin URL.
+$adminAccessVerifyScreen = defined('SH_ADMIN_ACCESS_VERIFY_SCREEN');
+$adminAccessActivated = false;
+
 $errors = [];
 $notice = '';
 $testCode = null;
 $adminAccessInput = '';
 $adminAccessSuggestion = '';
 $adminAccessState = sh_admin_access_state();
+$adminAccessReserved = sh_admin_access_reserved_paths();
+$adminAccessPreviewOrigin = sh_admin_access_origin() . rtrim(sh_base_url(), '/') . '/';
+$adminScripts = is_array($adminScripts ?? null) ? $adminScripts : [];
+$adminScripts['admin_access'] = 'assets/js/admin-access.js';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
@@ -29,39 +38,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $adminAccessSuggestion = sh_admin_access_suggest();
                 $adminAccessInput = $adminAccessSuggestion;
-                $notice = 'A cryptographically secure path suggestion was generated. It has not been saved or activated.';
+                $notice = 'An optional random suggestion was placed in the field. It has not been saved; review it and choose Save Proposed Route.';
             } catch (Throwable $e) {
                 sh_log_line('security', 'Admin Access path suggestion failed.');
                 $errors[] = 'A secure suggestion could not be generated. Please try again.';
             }
         } elseif ($form === 'admin_access_save') {
-            $adminAccessInput = (string)($_POST['admin_access_path'] ?? '');
+            $adminAccessInput = sh_post('admin_access_path');
             $candidate = sh_admin_access_validate_path($adminAccessInput);
             if (empty($candidate['ok'])) {
                 $errors[] = (string)($candidate['error'] ?? 'That path is not valid.');
             } elseif (!sh_admin_access_save_pending((string)$candidate['path'])) {
                 $errors[] = 'That path is already active or could not be saved. Choose a different path and try again.';
             } else {
+                // Issue the one-use same-session ticket now, so the superadmin
+                // can copy the complete URL and open it in any tab of this browser.
+                sh_admin_access_begin_verification();
                 sh_admin_access_mark_changed_audit('pending', (string)$candidate['path']);
-                sh_flash('success', 'The proposed path is saved as pending. Your current admin route remains active until the new route is verified and explicitly applied.');
+                sh_flash('success', 'Saved — verification required. Your current Admin URL is still active.');
                 sh_redirect('admin/security.php');
             }
-        } elseif ($form === 'admin_access_verify') {
-            if (!sh_admin_access_begin_verification()) {
-                $errors[] = 'Save a valid pending path before verifying it.';
+        } elseif ($form === 'admin_access_verify_activate') {
+            // Visiting the proposed URL is only a GET and changes nothing. The
+            // switch requires this explicit CSRF-protected POST, served from
+            // the pending route itself, by an authenticated superadmin whose
+            // session still holds the one-use verification ticket.
+            if (!$adminAccessVerifyScreen) {
+                $errors[] = 'Open the complete proposed Admin URL in this browser before you can verify and activate it.';
             } else {
-                $pending = sh_admin_access_state()['pending_path'];
-                sh_redirect($pending);
-            }
-        } elseif ($form === 'admin_access_apply') {
-            $pending = sh_admin_access_state()['pending_path'];
-            if (!sh_admin_access_apply_pending()) {
-                $errors[] = 'The new route is not verified or no longer passes validation. Your current admin route is unchanged.';
-            } else {
-                sh_admin_access_mark_changed_audit('enabled', $pending);
-                sh_flash('success', 'The custom admin route is active. The previous route is now blocked.');
-                header('Location: ' . sh_admin_access_route_url($pending, 'security.php'));
-                exit;
+                // Use the REAL deployed request path, not just the staged DB
+                // value: a success message is only valid when both agree.
+                $requestedPath = sh_admin_access_request_path() ?? '';
+                $result = sh_admin_access_activate_verified($requestedPath, (int)($admin['id'] ?? 0));
+                if (!empty($result['ok'])) {
+                    sh_admin_access_mark_verified_audit((string)$result['path']);
+                    sh_admin_access_mark_changed_audit('enabled', (string)$result['path']);
+                    $adminAccessActivated = true;
+                    $notice = sh_admin_access_activation_message('activated');
+                } else {
+                    // Technical reason (tickets, DB error class, read-back
+                    // mismatch) is already written to the secure admin error
+                    // log by sh_admin_access_activate_verified(); the browser
+                    // gets a useful but secret-free explanation.
+                    $reason = (string)($result['reason'] ?? 'unknown');
+                    sh_security_log('admin_access_activation_failed', (int)($admin['id'] ?? 0), [
+                        'reason' => $reason,
+                        'result' => 'failed',
+                        'old_route_preserved' => true,
+                    ]);
+                    $errors[] = sh_admin_access_activation_message($reason);
+                }
             }
         } elseif ($form === 'admin_access_disable') {
             $oldPath = (string)(sh_admin_access_state()['active_path'] ?? '');
@@ -183,13 +209,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $adminAccessState = sh_admin_access_state();
 if ($adminAccessInput === '') { $adminAccessInput = $adminAccessState['pending_path'] ?: ''; }
-if ($adminAccessInput === '') {
-    try { $adminAccessInput = sh_admin_access_suggest(); } catch (Throwable $e) { $adminAccessInput = ''; }
-}
 $adminAccessEnabled = (bool)$adminAccessState['enabled'];
 $adminAccessPending = (string)$adminAccessState['pending_path'];
-$adminAccessVerified = (bool)$adminAccessState['verified'];
-$adminAccessActiveUrl = $adminAccessEnabled ? sh_admin_access_route_url((string)$adminAccessState['active_path'], 'dashboard.php') : '';
+// Absolute URLs INCLUDING the domain. Rendered only on this authenticated
+// superadmin page — never in storefront HTML, JS, sitemap or public APIs.
+$adminAccessActiveFull = $adminAccessEnabled ? sh_admin_access_full_url((string)$adminAccessState['active_path']) : '';
+$adminAccessCurrentFull = $adminAccessActiveFull !== '' ? $adminAccessActiveFull : sh_admin_access_standard_url();
+$adminAccessPendingFull = $adminAccessPending !== '' ? sh_admin_access_full_url($adminAccessPending) : '';
+$adminAccessPreviewFull = sh_admin_access_full_url($adminAccessInput);
+// The live preview uses this safe origin plus the normalized, admin-typed path.
+$adminAccessOpenPanelFull = $adminAccessActiveFull !== '' ? $adminAccessActiveFull : sh_admin_access_standard_url();
+$adminAccessStep2 = ($adminAccessEnabled || $adminAccessPending !== '') ? 'is-done' : 'is-current';
+$adminAccessStep3 = $adminAccessEnabled ? 'is-done' : ($adminAccessPending !== '' ? 'is-current' : 'is-todo');
+// Re-issue the same-session ticket for a superadmin returning to this page
+// (e.g. after signing in again). This is session state only, not activation.
+if (!$adminAccessVerifyScreen && $adminAccessPending !== '') { sh_admin_access_begin_verification(); }
 
 $s = static fn(string $k, string $fb = ''): string => (string)sh_setting($k, $fb);
 
@@ -219,8 +253,52 @@ if ($phoneVerificationOn) {
 }
 
 $adminPage = 'security';
-$adminTitle = 'Security & Admin Access';
+$adminTitle = $adminAccessVerifyScreen
+    ? ($adminAccessActivated ? 'New Admin URL is active' : 'Verify new Admin URL')
+    : 'Security & Admin Access';
 require __DIR__ . '/_layout.php';
+if ($adminAccessVerifyScreen):
+?>
+<!-- Verification screen served ONLY at the staged URL. A GET here never
+     changes state; activation is an explicit, CSRF-protected POST below. -->
+<section class="sh-panel" id="admin-access-verify">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('lock', 17) ?> <?= $adminAccessActivated ? 'New Admin URL is active' : 'Verify new Admin URL' ?></h2>
+  </div>
+  <div class="sh-panel__body">
+    <?php if ($errors): ?>
+      <div class="sh-alert sh-alert--error" style="margin:0 0 14px"><div><ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div>
+    <?php endif; ?>
+    <?php if ($adminAccessActivated): ?>
+      <p class="sh-aau-success">New Admin URL is active</p>
+      <div class="sh-aau-block">
+        <span class="sh-field__label">Current active Admin URL</span>
+        <p class="sh-aau-urlbox sh-code-wrap"><?= e($adminAccessCurrentFull) ?></p>
+        <div class="sh-aau-actions">
+          <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessCurrentFull) ?>"><span data-copy-label>Copy full URL</span></button>
+          <a class="sh-btn" href="<?= e($adminAccessOpenPanelFull) ?>"><?= sh_icon('external', 14) ?> Open Admin Panel</a>
+        </div>
+        <p class="sh-field__hint">The old Admin URL is now disabled. Keep this URL private. Admin login, role permissions and CSRF checks still apply.</p>
+      </div>
+    <?php else: ?>
+      <p class="sh-panel__note">You opened the proposed Admin URL while signed in as a Super Admin. Visiting it does not change anything yet.</p>
+      <div class="sh-aau-block">
+        <span class="sh-field__label">New proposed Admin URL</span>
+        <p class="sh-aau-urlbox sh-code-wrap"><?= e($adminAccessPendingFull) ?></p>
+        <form method="post">
+          <?= sh_csrf_field() ?>
+          <input type="hidden" name="form" value="admin_access_verify_activate">
+          <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 14) ?> Verify and activate new Admin URL</button>
+        </form>
+        <p class="sh-field__hint">Your current Admin URL stays active until you press this button. Only an authenticated Super Admin can activate the new route.</p>
+      </div>
+    <?php endif; ?>
+  </div>
+</section>
+<?php
+    require __DIR__ . '/_footer.php';
+    return;
+endif;
 ?>
 <?php if ($errors): ?>
   <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 17) ?>
@@ -239,86 +317,93 @@ require __DIR__ . '/_layout.php';
   <div class="sh-panel__head">
     <h2 class="sh-panel__title"><?= sh_icon('lock', 17) ?> Admin Access URL</h2>
     <?php if ($adminAccessEnabled): ?>
-      <span class="sh-badge sh-badge--ok">Custom route enabled</span>
-    <?php elseif ($adminAccessPending !== '' && $adminAccessVerified): ?>
-      <span class="sh-badge sh-badge--ok">Verified · ready to apply</span>
+      <span class="sh-badge sh-badge--ok">New Admin URL is active</span>
     <?php elseif ($adminAccessPending !== ''): ?>
-      <span class="sh-badge sh-badge--warn">Waiting for verification</span>
+      <span class="sh-badge sh-badge--warn">Saved — verification required</span>
     <?php else: ?>
-      <span class="sh-badge sh-badge--muted">Disabled</span>
+      <span class="sh-badge sh-badge--muted">Standard Admin URL active</span>
     <?php endif; ?>
   </div>
   <div class="sh-panel__body">
     <div class="sh-alert sh-alert--warning" style="margin:0 0 14px">
       <?= sh_icon('alert', 17) ?>
-      <span>This changes the admin route only. It is <strong>not authentication</strong>: a valid admin session, role permission and CSRF checks are still required. Keep the new URL private. The old route stays active until a proposed route is visited and explicitly applied.</span>
+      <span>Changing the Admin URL is <strong>not authentication</strong>. A valid admin session, role permission and CSRF check are still required. Keep the URL private. Your current Admin URL stays active until verification and activation succeed.</span>
     </div>
 
-    <?php if ($adminAccessEnabled): ?>
-      <div class="sh-grid2" style="align-items:end">
-        <div class="sh-field">
-          <label class="sh-field__label" for="admin-access-active">Current Admin URL</label>
-          <input class="sh-input" id="admin-access-active" type="text" readonly value="<?= e($adminAccessActiveUrl) ?>" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="sh-field">
-          <span class="sh-field__label">Copy for your records</span>
-          <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessActiveUrl) ?>"><span data-copy-label>Copy current admin URL</span></button>
-        </div>
-      </div>
-    <?php else: ?>
-      <p class="sh-panel__note">The standard <code>/admin/</code> route is active. It remains protected by the usual admin login and permissions.</p>
-    <?php endif; ?>
+    <ol class="sh-aau-steps" aria-label="Admin URL setup steps">
+      <li class="sh-aau-step is-done"><span class="sh-aau-num">1</span><span class="sh-aau-label">Choose a new URL</span></li>
+      <li class="sh-aau-step <?= $adminAccessStep2 ?>"><span class="sh-aau-num">2</span><span class="sh-aau-label">Save proposed route</span></li>
+      <li class="sh-aau-step <?= $adminAccessStep3 ?>"><span class="sh-aau-num">3</span><span class="sh-aau-label">Verify and activate</span></li>
+    </ol>
 
-    <?php if ($adminAccessEnabled && $adminAccessPending !== ''): ?>
-      <div class="sh-alert sh-alert--info" style="margin:12px 0">
-        <?= sh_icon('info', 17) ?>
-        <span>A different route is pending. Your current route is still active. Verify the new route in this browser, then explicitly apply it. Applying immediately blocks the old route.</span>
+    <div class="sh-aau-block">
+      <span class="sh-field__label">Current active Admin URL</span>
+      <p class="sh-aau-urlbox sh-code-wrap"><?= e($adminAccessCurrentFull) ?></p>
+      <div class="sh-aau-actions">
+        <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessCurrentFull) ?>"><span data-copy-label>Copy full URL</span></button>
+        <?php if ($adminAccessEnabled): ?><a class="sh-btn" href="<?= e($adminAccessOpenPanelFull) ?>"><?= sh_icon('external', 14) ?> Open Admin Panel</a><?php endif; ?>
       </div>
-    <?php endif; ?>
+      <p class="sh-field__hint"><?= $adminAccessEnabled ? 'This route is active. The previous Admin URL is disabled.' : 'The standard admin route is active. It stays usable until a new route is verified and activated.' ?></p>
+    </div>
 
-    <form method="post" novalidate style="margin-top:12px">
+    <form method="post" data-admin-access-form
+      data-admin-access-origin="<?= e($adminAccessPreviewOrigin) ?>"
+      data-admin-access-reserved="<?= e(json_encode($adminAccessReserved, JSON_UNESCAPED_SLASHES)) ?>">
       <?= sh_csrf_field() ?>
       <input type="hidden" name="form" value="admin_access_save">
-      <div class="sh-grid2" style="align-items:end">
+
+      <div class="sh-aau-block">
+        <p class="sh-aau-kicker">Step 1 · Choose a custom path</p>
         <div class="sh-field">
-          <label class="sh-field__label" for="admin-access-path">Proposed path</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <span class="sh-badge" aria-hidden="true">/</span>
-            <input class="sh-input" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="32" maxlength="64" pattern="[a-zA-Z0-9_-]{32,64}" required autocomplete="off" autocapitalize="none" spellcheck="false">
-          </div>
-          <span class="sh-field__hint">One path segment, 32–64 URL-safe characters. A secure 192-bit suggestion is provided. No domain, slash segments, query, fragment or encoded characters.</span>
+          <label class="sh-field__label" for="admin-access-path">New path</label>
+          <span class="sh-aau-origin"><?= e(rtrim($adminAccessPreviewOrigin, '/')) ?>/</span>
+          <input class="sh-input sh-input--mono" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="3" maxlength="80" pattern="[A-Za-z0-9_-]{3,80}" required autocomplete="off" spellcheck="false" data-admin-access-path placeholder="my-admin or admin-access-2026">
+          <p class="sh-field__hint">3–80 letters, numbers, hyphens or underscores.</p>
         </div>
-        <div class="sh-field">
-          <button class="sh-btn sh-btn--ghost" type="submit" form="admin-access-suggest-form"><?= sh_icon('refresh', 14) ?> Generate secure suggestion</button>
-          <button class="sh-btn" type="submit" style="margin-left:6px"><?= sh_icon('check', 14) ?> Save proposed route</button>
+        <div style="margin-top:10px" aria-live="polite">
+          <span class="sh-field__label">Complete proposed URL</span>
+          <p class="sh-aau-urlbox sh-code-wrap" data-admin-access-preview><?= e($adminAccessPreviewFull !== '' ? $adminAccessPreviewFull : 'Enter a path to preview the complete URL.') ?></p>
+          <div class="sh-aau-actions">
+            <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessPreviewFull) ?>" data-admin-access-preview-copy <?= $adminAccessPreviewFull === '' ? 'disabled' : '' ?>><span data-copy-label>Copy full URL</span></button>
+            <button class="sh-btn sh-btn--ghost" type="submit" name="form" value="admin_access_suggest" formnovalidate><?= sh_icon('refresh', 14) ?> Suggest random path</button>
+          </div>
+          <p class="sh-field__hint" data-admin-access-hint>The final URL is shown here immediately, before saving. Saving only stages it; the current Admin URL keeps working.</p>
         </div>
       </div>
-      <p class="sh-field__hint" style="margin:8px 0 0">Saving only stages a route. It does not replace the current URL or change authentication.</p>
-    </form>
-    <form method="post" id="admin-access-suggest-form" hidden>
-      <?= sh_csrf_field() ?>
-      <input type="hidden" name="form" value="admin_access_suggest">
+
+      <div class="sh-aau-block">
+        <p class="sh-aau-kicker">Step 2 · Save proposed route</p>
+        <?php if ($adminAccessPending !== ''): ?><p class="sh-aau-status">Saved — verification required</p><?php endif; ?>
+        <div class="sh-aau-actions">
+          <button class="sh-btn" type="submit" name="form" value="admin_access_save"><?= sh_icon('check', 14) ?> Save proposed route</button>
+        </div>
+        <p class="sh-field__hint">Saving only stages the URL. Nothing is activated and the current Admin URL keeps working.</p>
+      </div>
     </form>
 
-    <?php if ($adminAccessPending !== ''): ?>
-      <div class="sh-actions" style="margin-top:12px">
-        <?php if (!$adminAccessVerified): ?>
-          <form method="post" style="display:inline">
-            <?= sh_csrf_field() ?>
-            <input type="hidden" name="form" value="admin_access_verify">
-            <button class="sh-btn sh-btn--ghost" type="submit"><?= sh_icon('external', 14) ?> Verify proposed route</button>
-          </form>
-          <span class="sh-field__hint">Verification opens the proposed path in this authenticated browser; no query-string verification flag is used.</span>
-        <?php else: ?>
-          <form method="post" style="display:inline" data-confirm="Apply this route now? The old /admin.php and direct /admin/*.php routes will stop serving the panel immediately.">
-            <?= sh_csrf_field() ?>
-            <input type="hidden" name="form" value="admin_access_apply">
-            <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 14) ?> Apply verified route</button>
-          </form>
-          <span class="sh-field__hint">Verified in this browser within the last hour. Applying sends you to the new route.</span>
-        <?php endif; ?>
-      </div>
-    <?php endif; ?>
+    <div class="sh-aau-block">
+      <p class="sh-aau-kicker">Step 3 · Verify and activate</p>
+      <?php if ($adminAccessEnabled && $adminAccessPending === ''): ?>
+        <p class="sh-aau-success">New Admin URL is active</p>
+        <p class="sh-field__hint">The old route is disabled after successful activation.</p>
+      <?php elseif ($adminAccessPending !== ''): ?>
+        <p class="sh-aau-status">Saved — verification required</p>
+        <span class="sh-field__label">New proposed Admin URL</span>
+        <p class="sh-aau-urlbox sh-code-wrap"><?= e($adminAccessPendingFull) ?></p>
+        <ol class="sh-aau-instructions">
+          <li>Copy the complete proposed URL above.</li>
+          <li>Open it in this browser while signed in as a Super Admin.</li>
+          <li>On the verification screen, press <strong>Verify and activate new Admin URL</strong>.</li>
+        </ol>
+        <div class="sh-aau-actions">
+          <button class="sh-btn sh-btn--ghost" type="button" data-copy="<?= e($adminAccessPendingFull) ?>"><span data-copy-label>Copy full URL</span></button>
+          <a class="sh-btn" href="<?= e($adminAccessPendingFull) ?>" target="_blank" rel="noopener noreferrer"><?= sh_icon('external', 14) ?> Open proposed Admin URL</a>
+        </div>
+        <p class="sh-field__hint">Opening the URL alone does not activate anything. Your current Admin URL stays active until you confirm on that screen.<?= $adminAccessEnabled ? ' The currently active custom URL is disabled only after successful activation.' : '' ?></p>
+      <?php else: ?>
+        <p class="sh-field__hint">Save a proposed route in step 2 first. Then copy its full URL, open it while signed in and confirm activation there.</p>
+      <?php endif; ?>
+    </div>
 
     <?php if ($adminAccessEnabled || $adminAccessPending !== ''): ?>
       <form method="post" style="margin-top:12px" data-confirm="Disable and clear the custom admin route? Standard admin URLs will become active again, but authentication and permissions will still be required.">
@@ -331,11 +416,11 @@ require __DIR__ . '/_layout.php';
     <details style="margin-top:16px">
       <summary class="sh-field__label" style="cursor:pointer">cPanel recovery and rewrite requirements</summary>
       <div class="sh-panel__note" style="margin-top:10px">
-        <p>ShopHaat uses the root <code>.htaccess</code> rewrite to reach the dispatcher. On cPanel, keep hidden files visible in File Manager and confirm Apache/LiteSpeed rewrite support and that the directory permits the shipped <code>.htaccess</code> rules (typically <code>AllowOverride All</code>). If the proposed URL returns 404, do not apply it; the current route remains active. Restore the shipped <code>.htaccess</code> from your deployment/backup if rewrite rules were changed.</p>
+        <p>ShopHaat uses the root <code>.htaccess</code> rewrite to reach the dispatcher. On cPanel, keep hidden files visible in File Manager and confirm Apache/LiteSpeed rewrite support and that the directory permits the shipped <code>.htaccess</code> rules (typically <code>AllowOverride All</code>). If the proposed URL returns 404, do not activate it; the current route remains active. Restore the shipped <code>.htaccess</code> from your deployment/backup if rewrite rules were changed.</p>
         <p>If the owner has lost the route and cannot sign in, the hosting account owner can use cPanel phpMyAdmin to disable only this routing feature; this is an out-of-band hosting recovery, not an application backdoor. Run these statements against the ShopHaat database:</p>
         <pre class="sh-code-wrap"><code>UPDATE settings SET setting_value = '0' WHERE setting_key = 'admin_access_enabled';
 UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secret_path', 'admin_access_pending_secret', 'admin_access_verified_secret', 'admin_access_verified_at', 'admin_access_verified_by');</code></pre>
-        <p>Afterward, use the standard admin URL and sign in normally. No bypass token or unauthenticated recovery URL is created.</p>
+        <p>Afterward, use the standard admin URL and sign in normally. No bypass token or unauthenticated recovery URL is created. The full runbook (including the no-lockout verification sequence and the path rules) ships as <code>docs/ADMIN-ACCESS-URL.md</code> in the release archive; documentation is deliberately not served over HTTP.</p>
       </div>
     </details>
   </div>

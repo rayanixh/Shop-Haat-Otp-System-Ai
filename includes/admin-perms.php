@@ -163,6 +163,15 @@ function sh_admin_can(string ...$perms): bool
 /** Render the professional Access Denied page (HTTP 403) and stop. */
 function sh_admin_deny(string $message = ''): void
 {
+    // Record the denial without passwords, tokens, request bodies or paths.
+    if (function_exists('sh_log_line')) {
+        $deniedId = 0;
+        if (function_exists('sh_admin')) {
+            $denied = sh_admin();
+            $deniedId = (int)($denied['id'] ?? 0);
+        }
+        sh_log_line('security', 'Admin access denied by role check' . ($deniedId > 0 ? ' for administrator #' . $deniedId : '') . '.');
+    }
     if (sh_wants_json()) { sh_json(['success' => false, 'error' => 'You do not have permission to perform this action.'], 403); }
     http_response_code(403);
     $adminPage = '';

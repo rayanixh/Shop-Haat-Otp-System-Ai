@@ -121,7 +121,12 @@ su_ok(!array_key_exists('admin_id', $pub) && !array_key_exists('facts_json', $pu
 
 /* --- Static wiring ---------------------------------------------------------------- */
 su_ok(str_contains($src('api/support.php'), 'sh_csrf_require()'), 'Support API enforces CSRF');
-su_ok(str_contains($src('api/support.php'), 'sh_support_owns('), 'Support API checks conversation ownership');
+// The active AI-support API builds a server-side owner context (logged-in user
+// id + guest token) and every conversation lookup applies that owner clause.
+su_ok(str_contains($src('api/support.php'), 'sh_support_owner_context(')
+   && str_contains($src('includes/ai-support.php'), 'function sh_support_owner_clause(')
+   && str_contains($src('includes/ai-support.php'), 'function sh_support_conversation_for_owner('),
+   'Support API checks conversation ownership');
 su_ok(!str_contains($src('includes/support.php'), 'sh_ai_dispatch('), 'Support never uses sh_ai_dispatch (would log full conversations)');
 su_ok(str_contains($src('includes/support.php'), 'sh_support_ai_guard('), 'AI replies pass the factual guard');
 su_ok(str_contains($src('includes/support.php'), 'FOR UPDATE'), 'Pipeline uses row locks around state changes');
@@ -129,7 +134,11 @@ su_ok(str_contains($src('includes/footer.php'), 'support-widget.php'), 'Widget i
 $permsSrc = $src('includes/admin-perms.php');
 su_ok(str_contains($permsSrc, "'support.view'") && str_contains($permsSrc, "'support.reply'") && str_contains($permsSrc, "'support.manage'"), 'All support permissions are registered in the permission catalogue');
 $layoutSrc = $src('admin/_layout.php');
-su_ok(str_contains($layoutSrc, '$badgeSupport = 0;') && str_contains($layoutSrc, 'SUM(unread_admin)') && str_contains($layoutSrc, "'support.view'") && str_contains($layoutSrc, "'support.manage'"), 'Admin sidebar has a guarded support unread counter and permission-gated links');
+su_ok(str_contains($layoutSrc, '$badgeSupport = 0;')
+   && str_contains($layoutSrc, 'unread_for_admin')
+   && str_contains($layoutSrc, "sh_admin_can('support.view'")
+   && str_contains($layoutSrc, "'support.view'") && str_contains($layoutSrc, "'support.manage'"),
+   'Admin sidebar has a guarded support unread counter and permission-gated links');
 su_ok(str_contains($src('ai/ProviderManager.php'), "'support_chat'"), 'support_chat AI task registered');
 foreach (['ai/providers/OpenAICompatibleProvider.php', 'ai/providers/GeminiProvider.php', 'ai/providers/AnthropicProvider.php'] as $pf) {
     su_ok(str_contains($src($pf), "\$options['timeout']"), "Caller timeout honored in $pf");
@@ -139,11 +148,40 @@ su_ok(str_contains($schema, 'UNIQUE KEY uq_supmsg_client'), 'Client message id i
 su_ok(substr_count($schema, 'CREATE TABLE IF NOT EXISTS support_') === 6, 'Six additive support tables declared');
 $js = $src('assets/js/support-chat.js');
 su_ok(str_contains($js, 'textContent') && !str_contains($js, 'innerHTML'), 'Widget renders message text via textContent only (no HTML injection)');
+// The floating widget is viewport-fixed. Its message log is the ONLY support
+// rule allowed to own an internal scroll region; the dedicated support page
+// still grows with the document and must have no scroll box at all.
 $css = $src('assets/css/app.css');
-su_ok(preg_match('/\.sh-schat[^{]*\{[^}]*overflow\s*:\s*(auto|scroll)/', $css) !== 1
-   && preg_match('/overflow(-x|-y)?\s*:\s*(auto|scroll)/', $css) !== 1, 'No internal scroll box anywhere in CSS (support included)');
-su_ok(str_contains($src('admin/support-conversation.php'), "sh_require_perm('support.reply')"), 'Admin actions require support.reply');
-su_ok(str_contains($src('admin/support-settings.php'), 'sh_support_ai_probe'), 'Settings page has a real AI probe (never assumed working)');
+$supportCss = $src('assets/css/support.css');
+$supportScrollRules = static function (string $stylesheet): array {
+    preg_match_all('/\.(sh-schat[a-z0-9_-]*|sh-support-chat[a-z0-9_-]*)[^{]*\{([^}]*)\}/s', $stylesheet, $rules, PREG_SET_ORDER);
+    $offenders = [];
+    foreach ($rules as $rule) {
+        if (preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $rule[2]) === 1) { $offenders[] = $rule[1]; }
+    }
+    return $offenders;
+};
+$widgetScroll = $supportScrollRules($css);
+su_ok($widgetScroll === ['sh-schat-messages']
+   && $supportScrollRules($supportCss) === []
+   && preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $supportCss) !== 1,
+   'Only the fixed widget message log scrolls internally; support page CSS has no scroll box');
+su_ok(str_contains($css, '.sh-schat-sheet {') && str_contains($css, 'position: fixed; right: 16px; left: auto; top: auto;')
+   && str_contains($css, 'bottom: calc(var(--sh-schat-bottom) + env(safe-area-inset-bottom, 0px))')
+   && str_contains($css, 'overscroll-behavior: contain;')
+   && str_contains($src('assets/js/support-chat.js'), 'syncViewport()')
+   && !str_contains($src('assets/js/support-chat.js'), 'window.scrollY'),
+   'Widget panel is fixed/bottom-anchored with safe-area support and no document-scroll pinning');
+// The old per-conversation page is now a permission-gated redirect into the
+// guarded inbox; both endpoints require support.reply (directly or via manage).
+su_ok(str_contains($src('admin/support-conversation.php'), "sh_require_perm('support.view', 'support.reply', 'support.manage')")
+   && str_contains($src('admin/support.php'), "sh_admin_can('support.reply', 'support.manage')"),
+   'Admin actions require support.reply');
+// A real selected-model text test replaces the old assumed-working probe.
+su_ok(str_contains($src('admin/support-settings.php'), 'sh_support_provider_test(')
+   && str_contains($src('includes/ai-support.php'), 'function sh_support_provider_test(')
+   && str_contains($src('admin/support-settings.php'), 'Not tested for this exact configuration'),
+   'Settings page has a real AI probe (never assumed working)');
 
 echo "\nPassed: $passed · Failed: $failed\n";
 if ($failed > 0) { foreach ($failures as $f) { echo "  - $f\n"; } exit(1); }

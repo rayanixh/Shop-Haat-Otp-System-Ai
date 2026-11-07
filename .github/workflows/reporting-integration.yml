@@ -7,6 +7,7 @@ on:
       - main
       - arena/9fe3cb2b-shop-haat-otp-system-ai
       - arena/403101d1-shop-haat-otp-system-ai
+      - arena/3066d658-shop-haat-otp-system-ai
   pull_request:
 
 permissions:
@@ -21,7 +22,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, dom, gd
+          extensions: mbstring, dom, gd, pdo_sqlite
           coverage: none
       - name: PHP syntax check every file
         run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
@@ -34,6 +35,32 @@ jobs:
       # message shapes and the static CSRF/permission/no-scroll-box wiring.
       - name: AI customer support unit suite
         run: php tests/support-unit.php
+      # Real PHP service functions against real PDO SQL (SQLite in this job,
+      # MySQL via SH_TEST_MYSQL_DSN elsewhere): one handoff confirmation,
+      # silent human-owned follow-ups, no AI/FAQ/fallback, admin reply,
+      # explicit Resume AI, takeover, assign/resolve/reopen idempotency.
+      - name: Human support handoff integration
+        run: php tests/human-support-handoff.php
+      # One SMS per genuinely new human-support request (both the button and
+      # the message-intent handoff paths), provider acceptance vs rejection,
+      # disabled/misconfigured provider never breaking chat, secret-free body
+      # and logs, and no duplicate after close/reopen/Resume AI. The outbound
+      # carrier is an explicit test transport: this is NOT a live SMS test.
+      - name: Human Support Notifications (SMS) integration
+        run: php tests/support-sms-notifications.php
+      # Real provider-driver code with outbound HTTP stubbed: current TextBee
+      # account endpoint, explicit data.success/smsBatchId acceptance, redacted
+      # diagnostics, cURL/SSL/HTTP error translation, HTTPS-only generic APIs,
+      # custom driver cfg passing and fail-closed offline/Firebase handling.
+      - name: SMS transport contract and diagnostics
+        run: php tests/support-sms-transport.php
+      # Server-side custom URL validation, no-lockout staged -> verified ->
+      # applied -> disabled lifecycle, generic 404s for legacy admin paths in
+      # isolated PHP subprocesses, and independent endpoint/asset guards.
+      - name: Custom Admin Access URL integration
+        env:
+          SH_TEST_PHP_BIN: php
+        run: php tests/admin-access-url.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -65,7 +92,7 @@ jobs:
       #     token limit, rejected key, server error, network failure, timeout)
       #     renders in the card and the button always resets.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat, Admin URL preview, compact Settings, UI/UX source audit)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
@@ -79,6 +106,12 @@ jobs:
           node tests/no-autosave-behavior.mjs
           node tests/provider-test-behavior.mjs
           node tests/support-chat-behavior.mjs
+          node tests/support-chat-optimistic-behavior.mjs
+          node tests/support-admin-inbox-behavior.mjs
+          node tests/admin-access-regression.mjs
+          node tests/admin-access-preview-behavior.mjs
+          node tests/support-settings-ui-behavior.mjs
+          node tests/ui-ux-audit.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then

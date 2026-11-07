@@ -142,7 +142,7 @@ require dirname(__DIR__) . '/_layout.php';
 <div class="sh-aihead">
   <div>
     <h2 class="sh-aihead__title"><?= sh_icon('cpu', 20) ?> AI Providers</h2>
-    <p class="sh-aihead__sub">Every AI screen uses one of these accounts. Keys are encrypted at rest and never sent to the browser.</p>
+    <p class="sh-aihead__sub">Keys are encrypted at rest and never sent to the browser.</p>
   </div>
   <?php if ($aiInstalled): ?>
   <div class="sh-aihead__actions">
@@ -423,6 +423,6 @@ foreach ($drivers as $key => $c) {
         . '<small>' . e($driverPitch[$key] ?? $c::helpText()) . '</small></span>'
         . '<span class="sh-aiprov-pick__go">' . sh_icon('chevron-right', 15) . '</span></a>';
 }
-echo sh_admin_modal('sh-aiprov-add', 'Add a provider', '<p class="sh-aiprov-pick__lead">Choose the API you want to connect. You can change the display name and models afterwards.</p>' . $pick, '', 'plus');
+echo sh_admin_modal('sh-aiprov-add', 'Add a provider', $pick, '', 'plus');
 ?>
 <?php require dirname(__DIR__) . '/_footer.php'; ?>

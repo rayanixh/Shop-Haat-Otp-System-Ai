@@ -642,7 +642,10 @@ function sh_support_schema_sql(): array
             context_summary TEXT NULL,
             unread_admin INT UNSIGNED NOT NULL DEFAULT 0,
             unread_customer INT UNSIGNED NOT NULL DEFAULT 0,
-            last_message_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- Nullable on purpose: a freshly created conversation has no last
+            -- message yet. The AI-support upgrader already normalizes older
+            -- installs to this exact definition (ai/support-schema.php).
+            last_message_at DATETIME DEFAULT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -685,8 +688,8 @@ function sh_support_schema_sql(): array
         ) $E",
         "CREATE TABLE IF NOT EXISTS support_faqs (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            title VARCHAR(160) NOT NULL,
-            keywords VARCHAR(500) NOT NULL DEFAULT '',
+            title VARCHAR(160) NOT NULL DEFAULT '',
+            keywords VARCHAR(500) DEFAULT NULL,
             answer_bn TEXT NULL,
             answer_banglish TEXT NULL,
             answer_en TEXT NULL,

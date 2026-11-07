@@ -206,9 +206,14 @@ Choose a provider appropriate for the store. Support conversation history is ret
 The footer includes the widget only when `support_enabled` is on.
 
 - The launcher is a real button with `aria-expanded`/`aria-controls`.
-- The panel is a labelled dialog, positioned absolutely at the current page
-  scroll offset and grows in normal page flow. There is no inner chat scroll
-  box; the browser page scrolls.
+- Both nodes are direct children of `<body>`. The launcher and the panel are
+  `position: fixed`; the panel is bottom/right anchored to the visible
+  viewport, clears the mobile bottom navigation and `env(safe-area-inset-*)`,
+  and never follows document scroll or locks page scrolling. Its maximum
+  height is computed from the visible viewport (including address-bar
+  collapse via `dvh`/`visualViewport`). Only the message log scrolls
+  internally (`overscroll-behavior: contain`); header, composer, Send and
+  **Talk to a human** stay fixed inside the panel.
 - Messages have sender labels and localized times. Model output is labelled
   “AI assistant”, deterministic output “Support”, and a human “Support agent”.
 - Message bodies render through text nodes. Only a standalone same-origin
@@ -484,8 +489,12 @@ storefront checks pass with that provider/model and the store's own account.
 Use staging or clearly identified test data. Do not run destructive experiments against real customer records.
 
 - [ ] On a narrow mobile viewport, open the storefront. The launcher does not
-      block the mobile navigation, the panel causes no horizontal page
-      overflow, and the page—not an inner panel—scrolls through a long thread.
+      block the mobile navigation; the panel is bottom-anchored above it with
+      safe-area spacing, causes no horizontal page overflow or blank space
+      near the footer, and does not move when the website is scrolled. Only
+      the message log scrolls internally; input, Send and **Talk to a human**
+      remain usable. Repeat with a short viewport and with the mobile address
+      bar expanded and collapsed.
 - [ ] Open the chat with keyboard only; send with Enter and close with Escape.
       Focus returns to the launcher.
 - [ ] Ask in Bengali script about a known in-stock product. Reply language,

@@ -6,6 +6,7 @@ require_once SH_ROOT . '/includes/admin-auth.php';
 require_once SH_ROOT . '/includes/admin-tools.php';
 require_once SH_ROOT . '/includes/admin-perms.php';
 require_once SH_ROOT . '/includes/ai-support.php';
+require_once SH_ROOT . '/includes/support-sms.php';
 require_once SH_ROOT . '/ai/AIManager.php';
 
 sh_session_start();
@@ -130,6 +131,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/support-settings.php#ai');
     }
 
+    if ($form === 'support_sms_save') {
+        try {
+            $saved = sh_support_sms_save($_POST);
+            if (!empty($saved['ok'])) {
+                sh_audit('support_sms_settings_saved', 'support', null, 'Human Support SMS settings', null, [
+                    'provider' => sh_post('provider'), 'enabled' => !empty($_POST['enabled']) ? '1' : '0',
+                ]);
+                sh_flash('success', 'Human Support SMS settings saved. The previous Test SMS result was cleared.');
+            } else {
+                sh_flash('error', $saved['errors'] ? implode(' ', $saved['errors']) : 'The SMS settings could not be saved.');
+            }
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'support-sms-settings');
+            sh_flash('error', 'SMS settings could not be saved because of an unexpected server error. See the secure Admin diagnostics.');
+        }
+        sh_redirect('admin/support-settings.php#human-support-sms');
+    }
+
+    if ($form === 'support_sms_test') {
+        try {
+            $test = sh_support_sms_test($_POST);
+            sh_audit('support_sms_tested', 'support', null, 'Human Support SMS test', null, [
+                'ok' => !empty($test['ok']), 'code' => (string)($test['code'] ?? ''),
+                'diagnostic_id' => (string)($test['diagnostic_id'] ?? ''),
+            ]);
+            sh_flash(!empty($test['ok']) ? 'success' : 'error', (string)($test['message'] ?? 'Test SMS was NOT sent.'));
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'support-sms-test-page');
+            sh_flash('error', 'Test SMS was NOT sent because of an unexpected server error. See the secure Admin diagnostics.');
+        }
+        sh_redirect('admin/support-settings.php#human-support-sms');
+    }
+
+    if ($form === 'support_sms_clear_test') {
+        try {
+            sh_support_sms_clear_test();
+            sh_flash('info', 'Last SMS test result cleared.');
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'support-sms-clear-test');
+            sh_flash('error', 'The last SMS test result could not be cleared.');
+        }
+        sh_redirect('admin/support-settings.php#human-support-sms');
+    }
+
     if ($form === 'faq_save') {
         $faqId = max(0, sh_int($_POST['faq_id'] ?? 0));
         $result = sh_support_faq_save($faqId, $adminId, $_POST);
@@ -238,6 +283,13 @@ $faqRows = sh_all('SELECT * FROM support_faqs ORDER BY status DESC, sort_order A
 $editFaqId = max(0, sh_int($_GET['faq'] ?? 0));
 $editFaq = $editFaqId > 0 ? sh_support_faq_get($editFaqId) : null;
 $faqForm = $editFaq ?? ['question_en' => '', 'question_bn' => '', 'question_banglish' => '', 'answer_en' => '', 'answer_bn' => '', 'answer_banglish' => '', 'keywords' => '', 'status' => 1, 'sort_order' => 0];
+$sms = sh_support_sms_ui_vars();
+$isOffline = $sms['selected'] === 'offline';
+$isStore = $sms['selected'] === 'store';
+$isTextbee = $sms['selected'] === 'textbee';
+$isGeneric = $sms['selected'] === 'generic_http';
+$disabledFor = static fn(string $provider): string => $sms['selected'] === $provider ? '' : 'disabled';
+$secretPlaceholder = static fn(string $value): string => trim($value) !== '' ? 'Saved — leave blank to keep' : 'Optional';
 
 $adminPage = 'support_settings';
 $adminTitle = 'Support Settings & FAQs';
@@ -250,7 +302,6 @@ require __DIR__ . '/_layout.php';
     <div>
       <p class="sh-support-admin__eyebrow">Customer support configuration</p>
       <h2>Settings, AI guardrails &amp; FAQs</h2>
-      <p>Keep contact and policy answers aligned with the live store. AI attempts only the configured existing provider/model; manual tests are diagnostic, and messages/orders remain read-only.</p>
     </div>
     <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support.php')) ?>"><?= sh_icon('message', 14) ?> Open inbox</a>
   </div>
@@ -266,7 +317,7 @@ require __DIR__ . '/_layout.php';
       <form method="post" class="sh-support-settings__form">
         <?= sh_csrf_field() ?><input type="hidden" name="form" value="save_settings">
         <input type="hidden" name="enabled" value="0">
-        <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $settings['enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable customer chat</strong><small>Turning this off does not delete saved conversations. The existing contact form remains available.</small></span></label>
+        <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $settings['enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable customer chat</strong></span></label>
         <input type="hidden" name="handoff_enabled" value="0">
         <label class="sh-support-settings__toggle"><input type="checkbox" name="handoff_enabled" value="1" <?= $settings['handoff_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Allow human-support handoff</strong><small>Requests appear in the authorized inbox. This is not a live-staff or response-time promise.</small></span></label>
 
@@ -279,122 +330,209 @@ require __DIR__ . '/_layout.php';
         <div class="sh-field"><label class="sh-field__label" for="support-personality">Assistant tone (style only)</label><textarea class="sh-textarea" id="support-personality" name="personality" rows="2" maxlength="500"><?= e($settings['personality']) ?></textarea></div>
         <div class="sh-field"><label class="sh-field__label" for="support-instructions">Additional store instructions</label><textarea class="sh-textarea" id="support-instructions" name="instructions" rows="4" maxlength="2500" placeholder="Do not enter credentials or private customer information."><?= e($settings['instructions']) ?></textarea><small class="sh-formcard__note">Instructions cannot override safety rules. Product/order data and customer messages are treated as untrusted content.</small></div>
 
-        <h4 class="sh-support-settings__subhead">Verified policy text (optional)</h4>
-        <p class="sh-formcard__note">If left blank, the system uses the enabled FAQs and the existing Help Centre facts. It will not invent delivery, payment or return rules.</p>
-        <?php foreach (['delivery' => 'Delivery', 'payment' => 'Payment', 'returns' => 'Returns & replacements'] as $kind => $label): ?>
-          <fieldset class="sh-support-settings__policy"><legend><?= e($label) ?></legend>
-            <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-en">English</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-en" name="policy_<?= e($kind) ?>_en" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_en']) ?></textarea></div>
-            <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-bn">বাংলা</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-bn" name="policy_<?= e($kind) ?>_bn" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_bn']) ?></textarea></div>
-            <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-banglish">Banglish</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-banglish" name="policy_<?= e($kind) ?>_banglish" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_banglish']) ?></textarea></div>
-          </fieldset>
-        <?php endforeach; ?>
+        <details class="sh-guide-accordion" data-section="policy">
+          <summary>Verified policy text (optional)</summary>
+          <div class="sh-guide-accordion__content sh-support-settings__form">
+            <p class="sh-formcard__note">If left blank, the system uses the enabled FAQs and the existing Help Centre facts. It will not invent delivery, payment or return rules.</p>
+            <?php foreach (['delivery' => 'Delivery', 'payment' => 'Payment', 'returns' => 'Returns & replacements'] as $kind => $label): ?>
+              <fieldset class="sh-support-settings__policy"><legend><?= e($label) ?></legend>
+                <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-en">English</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-en" name="policy_<?= e($kind) ?>_en" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_en']) ?></textarea></div>
+                <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-bn">বাংলা</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-bn" name="policy_<?= e($kind) ?>_bn" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_bn']) ?></textarea></div>
+                <div class="sh-field"><label class="sh-field__label" for="policy-<?= e($kind) ?>-banglish">Banglish</label><textarea class="sh-textarea" id="policy-<?= e($kind) ?>-banglish" name="policy_<?= e($kind) ?>_banglish" rows="3" maxlength="2500"><?= e($settings['policy_' . $kind . '_banglish']) ?></textarea></div>
+              </fieldset>
+            <?php endforeach; ?>
+          </div>
+        </details>
 
-        <div class="sh-support-settings__ai" id="ai">
-          <h4 class="sh-support-settings__subhead">Existing AI provider and usage limits</h4>
-          <?php if (!$aiInstalled): ?>
-            <div class="sh-alert sh-alert--info"><span>AI Auto Work is not installed. Customer messages can be saved, but ordinary replies require a configured model. The contact form remains available; install the existing AI module to configure support AI.</span></div>
-          <?php elseif (!$canConfigureAi): ?>
-            <div class="sh-alert sh-alert--info"><span>Your role can manage conversations and FAQs but does not have the AI tools permission. Ask the store owner to configure and test the provider.</span></div>
-          <?php else: ?>
-            <input type="hidden" name="ai_enabled" value="0">
-            <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>When enabled, each ordinary customer message is sent to this exact provider/model. FAQs are context only; a failed inference leaves the message saved and offers a retry.</small></span></label>
-            <div class="sh-grid2">
-              <div class="sh-field"><label class="sh-field__label" for="support-provider">Configured provider</label>
-                <select class="sh-select" id="support-provider" name="provider_id" data-provider-select data-default-provider-id="<?= (int)($defaultProvider['id'] ?? 0) ?>">
-                  <option value="0" <?= $savedProviderId === 0 ? 'selected' : '' ?>>Use AI module default<?= $defaultProvider ? ' — ' . e((string)$defaultProvider['name']) : '' ?></option>
-                  <?php foreach ($providers as $provider): ?>
-                    <option value="<?= (int)$provider['id'] ?>" <?= $savedProviderId === (int)$provider['id'] ? 'selected' : '' ?> <?= !$provider['secure'] ? 'disabled' : '' ?>><?= e($provider['name']) ?> · <?= e($provider['driver']) ?><?= !$provider['secure'] ? ' · HTTPS required' : '' ?></option>
-                  <?php endforeach; ?>
-                </select>
-                <small class="sh-formcard__note">Keys remain in AI Providers and are never displayed or sent to this page. <a href="<?= e(sh_url('admin/ai/providers.php')) ?>">Manage existing AI providers</a>.</small>
+        <details class="sh-guide-accordion" id="ai" data-section="ai">
+          <summary>Existing AI provider and usage limits</summary>
+          <div class="sh-guide-accordion__content sh-support-settings__form">
+            <?php if (!$aiInstalled): ?>
+              <div class="sh-alert sh-alert--info"><span>AI Auto Work is not installed. Customer messages can be saved, but ordinary replies require a configured model. The contact form remains available; install the existing AI module to configure support AI.</span></div>
+            <?php elseif (!$canConfigureAi): ?>
+              <div class="sh-alert sh-alert--info"><span>Your role can manage conversations and FAQs but does not have the AI tools permission. Ask the store owner to configure and test the provider.</span></div>
+            <?php else: ?>
+              <input type="hidden" name="ai_enabled" value="0">
+              <label class="sh-support-settings__toggle"><input type="checkbox" name="ai_enabled" value="1" <?= $settings['ai_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable AI replies</strong><small>When enabled, each ordinary customer message is sent to this exact provider/model. FAQs are context only; a failed inference leaves the message saved and offers a retry.</small></span></label>
+              <div class="sh-grid2">
+                <div class="sh-field"><label class="sh-field__label" for="support-provider">Configured provider</label>
+                  <select class="sh-select" id="support-provider" name="provider_id" data-provider-select data-default-provider-id="<?= (int)($defaultProvider['id'] ?? 0) ?>">
+                    <option value="0" <?= $savedProviderId === 0 ? 'selected' : '' ?>>Use AI module default<?= $defaultProvider ? ' — ' . e((string)$defaultProvider['name']) : '' ?></option>
+                    <?php foreach ($providers as $provider): ?>
+                      <option value="<?= (int)$provider['id'] ?>" <?= $savedProviderId === (int)$provider['id'] ? 'selected' : '' ?> <?= !$provider['secure'] ? 'disabled' : '' ?>><?= e($provider['name']) ?> · <?= e($provider['driver']) ?><?= !$provider['secure'] ? ' · HTTPS required' : '' ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                  <small class="sh-formcard__note">Keys remain in AI Providers and are never displayed or sent to this page. <a href="<?= e(sh_url('admin/ai/providers.php')) ?>">Manage existing AI providers</a>.</small>
+                </div>
+                <div class="sh-field"><label class="sh-field__label" for="support-model">Text model</label>
+                  <select class="sh-select" id="support-model" name="model" data-model-select>
+                    <option value="" data-provider-id="0">Use selected provider’s default model</option>
+                    <?php foreach ($providers as $provider):
+                      $pid = (int)$provider['id'];
+                      if (!$provider['secure']) { continue; }
+                      $allModels = sh_ai_models($pid, true);
+                      $byId = [];
+                      foreach ($allModels as $modelRow) {
+                          $mid = (string)$modelRow['model_id'];
+                          if (sh_ai_model_supports($pid, $mid, 'text')) { $byId[$mid] = (string)($modelRow['name'] ?? $mid); }
+                      }
+                      if ($provider['default_model'] !== '' && sh_ai_model_supports($pid, $provider['default_model'], 'text')) { $byId[$provider['default_model']] = $provider['default_model']; }
+                      foreach ($byId as $mid => $modelName): ?>
+                        <option value="<?= e($mid) ?>" data-provider-id="<?= $pid ?>" <?= $selectedProviderId === $pid && $savedModel === $mid ? 'selected' : '' ?>><?= e($modelName) ?> — <?= e($provider['name']) ?></option>
+                      <?php endforeach; endforeach; ?>
+                  </select>
+                </div>
+                <div class="sh-field"><label class="sh-field__label" for="support-timeout">Provider timeout (seconds, 5–20)</label><input class="sh-input" id="support-timeout" name="request_timeout" type="number" min="5" max="20" value="<?= (int)$settings['request_timeout'] ?>"></div>
+                <div class="sh-field"><label class="sh-field__label" for="support-output">Maximum output tokens (64–800)</label><input class="sh-input" id="support-output" name="output_tokens" type="number" min="64" max="800" value="<?= (int)$settings['output_tokens'] ?>"></div>
+                <div class="sh-field"><label class="sh-field__label" for="support-daily">Store-wide AI requests per day</label><input class="sh-input" id="support-daily" name="daily_limit" type="number" min="1" max="10000" value="<?= (int)$settings['daily_limit'] ?>"></div>
+                <div class="sh-field"><label class="sh-field__label" for="support-customer-daily">AI requests per customer/session per day</label><input class="sh-input" id="support-customer-daily" name="customer_daily_limit" type="number" min="1" max="100" value="<?= (int)$settings['customer_daily_limit'] ?>"></div>
+                <div class="sh-field"><label class="sh-field__label" for="support-context">Recent conversation turns (1–12)</label><input class="sh-input" id="support-context" name="context_limit" type="number" min="1" max="12" value="<?= (int)$settings['context_limit'] ?>"></div>
               </div>
-              <div class="sh-field"><label class="sh-field__label" for="support-model">Text model</label>
-                <select class="sh-select" id="support-model" name="model" data-model-select>
-                  <option value="" data-provider-id="0">Use selected provider’s default model</option>
-                  <?php foreach ($providers as $provider):
-                    $pid = (int)$provider['id'];
-                    if (!$provider['secure']) { continue; }
-                    $allModels = sh_ai_models($pid, true);
-                    $byId = [];
-                    foreach ($allModels as $modelRow) {
-                        $mid = (string)$modelRow['model_id'];
-                        if (sh_ai_model_supports($pid, $mid, 'text')) { $byId[$mid] = (string)($modelRow['name'] ?? $mid); }
-                    }
-                    if ($provider['default_model'] !== '' && sh_ai_model_supports($pid, $provider['default_model'], 'text')) { $byId[$provider['default_model']] = $provider['default_model']; }
-                    foreach ($byId as $mid => $modelName): ?>
-                      <option value="<?= e($mid) ?>" data-provider-id="<?= $pid ?>" <?= $selectedProviderId === $pid && $savedModel === $mid ? 'selected' : '' ?>><?= e($modelName) ?> — <?= e($provider['name']) ?></option>
-                    <?php endforeach; endforeach; ?>
-                </select>
+              <div class="sh-support-settings__test">
+                <div><strong>Selected-model text test status:</strong>
+                  <?php if (!empty($aiState['test_ok'])): ?><span class="sh-support-settings__state is-good">Selected model returned text in the latest test; live calls may still fail</span>
+                  <?php elseif ($testCode !== ''): ?><span class="sh-support-settings__state <?= $testTone === 'warn' ? 'is-warn' : 'is-bad' ?>"><?= e(sh_ai_test_state_label($testCode)) ?></span>
+                  <?php else: ?><span class="sh-support-settings__state">Not tested for this exact configuration (test is optional)</span><?php endif; ?>
+                  <?php if ($testMessage !== ''): ?><p><?= e($testMessage) ?></p><?php endif; ?>
+                  <?php if ($testAt !== ''): ?><small>Last test: <?= e($testAt) ?> UTC</small><?php endif; ?>
+                  <?php if ($lastLiveDiagnostic !== ''): ?><p class="sh-formcard__note"><strong>Last live inference diagnostic (redacted):</strong><br><?= e($lastLiveDiagnostic) ?></p><?php endif; ?>
+                </div>
+                <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="form" value="test_provider" formaction="<?= e(sh_url('admin/support-settings.php#ai')) ?>"><?= sh_icon('bar-chart', 14) ?> Save settings &amp; test selected model</button>
               </div>
-              <div class="sh-field"><label class="sh-field__label" for="support-timeout">Provider timeout (seconds, 5–20)</label><input class="sh-input" id="support-timeout" name="request_timeout" type="number" min="5" max="20" value="<?= (int)$settings['request_timeout'] ?>"></div>
-              <div class="sh-field"><label class="sh-field__label" for="support-output">Maximum output tokens (64–800)</label><input class="sh-input" id="support-output" name="output_tokens" type="number" min="64" max="800" value="<?= (int)$settings['output_tokens'] ?>"></div>
-              <div class="sh-field"><label class="sh-field__label" for="support-daily">Store-wide AI requests per day</label><input class="sh-input" id="support-daily" name="daily_limit" type="number" min="1" max="10000" value="<?= (int)$settings['daily_limit'] ?>"></div>
-              <div class="sh-field"><label class="sh-field__label" for="support-customer-daily">AI requests per customer/session per day</label><input class="sh-input" id="support-customer-daily" name="customer_daily_limit" type="number" min="1" max="100" value="<?= (int)$settings['customer_daily_limit'] ?>"></div>
-              <div class="sh-field"><label class="sh-field__label" for="support-context">Recent conversation turns (1–12)</label><input class="sh-input" id="support-context" name="context_limit" type="number" min="1" max="12" value="<?= (int)$settings['context_limit'] ?>"></div>
-            </div>
-            <div class="sh-support-settings__test">
-              <div><strong>Selected-model text test status:</strong>
-                <?php if (!empty($aiState['test_ok'])): ?><span class="sh-support-settings__state is-good">Selected model returned text in the latest test; live calls may still fail</span>
-                <?php elseif ($testCode !== ''): ?><span class="sh-support-settings__state <?= $testTone === 'warn' ? 'is-warn' : 'is-bad' ?>"><?= e(sh_ai_test_state_label($testCode)) ?></span>
-                <?php else: ?><span class="sh-support-settings__state">Not tested for this exact configuration (test is optional)</span><?php endif; ?>
-                <?php if ($testMessage !== ''): ?><p><?= e($testMessage) ?></p><?php endif; ?>
-                <?php if ($testAt !== ''): ?><small>Last test: <?= e($testAt) ?> UTC</small><?php endif; ?>
-                <?php if ($lastLiveDiagnostic !== ''): ?><p class="sh-formcard__note"><strong>Last live inference diagnostic (redacted):</strong><br><?= e($lastLiveDiagnostic) ?></p><?php endif; ?>
-              </div>
-              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit" name="form" value="test_provider" formaction="<?= e(sh_url('admin/support-settings.php#ai')) ?>"><?= sh_icon('activity', 14) ?> Save settings &amp; test selected model</button>
-            </div>
-          <?php endif; ?>
-        </div>
+            <?php endif; ?>
+          </div>
+        </details>
+
         <div class="sh-support-settings__save">
-          <button class="sh-btn" type="submit" name="form" value="save_settings"><?= sh_icon('check', 15) ?> Save support settings</button>
+          <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save support settings</button>
           <?php if ($canConfigureAi): ?><button class="sh-btn sh-btn--ghost" type="submit" name="form" value="save_ai_settings">Save AI configuration</button><?php endif; ?>
         </div>
       </form>
+
+      <details class="sh-guide-accordion" id="human-support-sms" data-section="human-support-sms" <?= $sms['test_message'] !== '' ? 'open' : '' ?>>
+        <summary>Human Support Notifications (SMS)</summary>
+        <div class="sh-guide-accordion__content sh-support-settings__form">
+          <form method="post" class="sh-support-settings__form" data-sms-form>
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="support_sms_save">
+            <input type="hidden" name="test_nonce" value="<?= e($sms['test_nonce']) ?>">
+            <input type="hidden" name="enabled" value="0">
+            <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $sms['enabled'] ? 'checked' : '' ?>><span><strong>Notify the support number when a customer requests human help</strong><small>Success means the provider accepted the request, not handset delivery.</small></span></label>
+            <div class="sh-grid2">
+              <div class="sh-field"><label class="sh-field__label" for="support-sms-phone">Support mobile number</label><input class="sh-input" id="support-sms-phone" name="phone" value="<?= e($sms['phone']) ?>" autocomplete="off" placeholder="+8801XXXXXXXXX"></div>
+              <div class="sh-field"><label class="sh-field__label" for="support-sms-provider">Provider</label>
+                <select class="sh-select" id="support-sms-provider" name="provider" data-sms-provider-select>
+                  <?php foreach ($sms['providers'] as $providerKey => $providerMeta): ?>
+                    <option value="<?= e($providerKey) ?>" <?= $sms['selected'] === $providerKey ? 'selected' : '' ?>><?= e($providerMeta['label']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+                <small class="sh-formcard__note"><?= e($sms['providers'][$sms['selected']]['note']) ?></small>
+              </div>
+            </div>
+
+            <div data-sms-provider-panel="offline" <?= $isOffline ? '' : 'hidden' ?>><div class="sh-alert sh-alert--info"><span>No provider is contacted in offline mode. Choose a real provider to send notifications.</span></div></div>
+            <div data-sms-provider-panel="store" <?= $isStore ? '' : 'hidden' ?>><div class="sh-alert sh-alert--info"><span>Uses the shared carrier from Security → SMS/OTP Provider (<strong><?= e($sms['store_provider']) ?></strong>). No dedicated credentials are shown here.</span></div></div>
+
+            <div class="sh-support-settings__form" data-sms-provider-panel="textbee" <?= $isTextbee ? '' : 'hidden' ?>>
+              <div class="sh-grid2">
+                <div class="sh-field"><label class="sh-field__label" for="sms-textbee-key">TextBee API key</label><input class="sh-input" id="sms-textbee-key" name="textbee_api_key" type="password" value="" autocomplete="new-password" placeholder="<?= e($secretPlaceholder($sms['textbee_api_key'])) ?>" <?= $disabledFor('textbee') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-textbee-device">Device ID (optional)</label><input class="sh-input" id="sms-textbee-device" name="textbee_device_id" type="password" value="" autocomplete="off" placeholder="<?= e($secretPlaceholder($sms['textbee_device_id'])) ?>" <?= $disabledFor('textbee') ?>></div>
+              </div>
+            </div>
+
+            <div class="sh-support-settings__form" data-sms-provider-panel="generic_http" <?= $isGeneric ? '' : 'hidden' ?>>
+              <div class="sh-grid2">
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-url">API URL (HTTPS)</label><input class="sh-input" id="sms-api-url" name="api_url" type="url" value="<?= e($sms['api_url']) ?>" placeholder="https://sms.example.test/send" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-method">Method</label><select class="sh-select" id="sms-api-method" name="api_method" <?= $disabledFor('generic_http') ?>><?php foreach (['post_json' => 'POST JSON', 'post_form' => 'POST form', 'get' => 'GET'] as $method => $label): ?><option value="<?= e($method) ?>" <?= $sms['api_method'] === $method ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-auth">Authentication</label><select class="sh-select" id="sms-api-auth" name="api_auth" <?= $disabledFor('generic_http') ?>><?php foreach (['' => 'None / in template', 'bearer' => 'Bearer token', 'basic' => 'HTTP Basic'] as $auth => $label): ?><option value="<?= e($auth) ?>" <?= $sms['api_auth'] === $auth ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-sender">Sender ID</label><input class="sh-input" id="sms-sender" name="sender_id" value="<?= e($sms['sender_id']) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-key">API key</label><input class="sh-input" id="sms-api-key" name="api_key" type="password" value="" autocomplete="new-password" placeholder="<?= e($secretPlaceholder($sms['api_key'])) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-secret">API secret</label><input class="sh-input" id="sms-api-secret" name="api_secret" type="password" value="" autocomplete="new-password" placeholder="<?= e($secretPlaceholder($sms['api_secret'])) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-token">Token</label><input class="sh-input" id="sms-api-token" name="api_token" type="password" value="" autocomplete="new-password" placeholder="<?= e($secretPlaceholder($sms['api_token'])) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-username">Username</label><input class="sh-input" id="sms-api-username" name="api_username" value="<?= e($sms['api_username']) ?>" autocomplete="off" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-api-password">Password</label><input class="sh-input" id="sms-api-password" name="api_password" type="password" value="" autocomplete="new-password" placeholder="<?= e($secretPlaceholder($sms['api_password'])) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-phone-param">Phone parameter</label><input class="sh-input" id="sms-phone-param" name="phone_param" value="<?= e($sms['phone_param']) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-message-param">Message parameter</label><input class="sh-input" id="sms-message-param" name="message_param" value="<?= e($sms['message_param']) ?>" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-success-field">Success field</label><input class="sh-input" id="sms-success-field" name="success_field" value="<?= e($sms['success_field']) ?>" placeholder="e.g. status" <?= $disabledFor('generic_http') ?>></div>
+                <div class="sh-field"><label class="sh-field__label" for="sms-success-value">Success value</label><input class="sh-input" id="sms-success-value" name="success_value" value="<?= e($sms['success_value']) ?>" placeholder="e.g. accepted" <?= $disabledFor('generic_http') ?>></div>
+              </div>
+              <div class="sh-field"><label class="sh-field__label" for="sms-api-body">Request body template</label><textarea class="sh-textarea" id="sms-api-body" name="api_body" rows="3" placeholder="Saved — leave blank to keep. Supports {phone}, {phone_e164}, {message} and credential placeholders." <?= $disabledFor('generic_http') ?>></textarea></div>
+              <div class="sh-field"><label class="sh-field__label" for="sms-api-headers">Extra headers (JSON)</label><textarea class="sh-textarea" id="sms-api-headers" name="api_headers" rows="2" placeholder="Saved — leave blank to keep." <?= $disabledFor('generic_http') ?>></textarea></div>
+            </div>
+
+            <div class="sh-support-settings__save">
+              <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save settings</button>
+              <button class="sh-btn sh-btn--ghost" type="submit" name="form" value="support_sms_test"><?= sh_icon('smartphone', 15) ?> Test SMS</button>
+            </div>
+          </form>
+
+          <div class="sh-support-settings__test">
+            <div><strong>Connection / test:</strong>
+              <span class="sh-support-settings__state <?= $sms['ready']['ok'] ? 'is-good' : '' ?>"><?= e($sms['ready_message']) ?></span>
+              <?php if ($sms['test_message'] !== ''): ?><p><?= e($sms['test_message']) ?></p><small>Last test: <?= e($sms['test_at']) ?> UTC · Code <?= e($sms['test_code']) ?><?= $sms['test_diagnostic_id'] !== '' ? ' · ' . e($sms['test_diagnostic_id']) : '' ?></small><?php endif; ?>
+            </div>
+            <div class="sh-support-settings__save">
+              <?php if (function_exists('sh_admin_is_superadmin') && sh_admin_is_superadmin()): ?><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/security-logs.php?event=support_sms_diagnostic')) ?>"><?= sh_icon('file-text', 14) ?> Secure diagnostics</a><?php endif; ?>
+              <?php if ($sms['test_message'] !== ''): ?><form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="support_sms_clear_test"><button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">Clear result</button></form><?php endif; ?>
+            </div>
+          </div>
+        </div>
+      </details>
     </div>
   </section>
 
   <section class="sh-panel" id="faqs">
     <div class="sh-panel__head"><h3>Saved FAQs <span class="sh-support-settings__count"><?= count($faqRows) ?></span></h3></div>
     <div class="sh-panel__body">
-      <p class="sh-formcard__note">Enabled English FAQs appear on the public Help Centre and may be used by chat. Do not put customer data, passwords, API keys or other private information in these answers.</p>
-      <?php if (!$faqRows): ?><p class="sh-support-admin__empty">No FAQs are saved yet.</p>
-      <?php else: ?><div class="sh-support-settings__faq-list">
-        <?php foreach ($faqRows as $faq): ?>
-          <article class="sh-support-settings__faq">
-            <div class="sh-support-settings__faq-copy"><strong><?= e($faq['question_en']) ?></strong><span><?= (int)$faq['status'] ? 'Enabled' : 'Disabled' ?> · Sort <?= (int)$faq['sort_order'] ?></span></div>
-            <div class="sh-support-settings__faq-actions">
-              <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php?faq=' . (int)$faq['id'] . '#faq-edit')) ?>">Edit</a>
-              <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_toggle"><input type="hidden" name="faq_id" value="<?= (int)$faq['id'] ?>"><input type="hidden" name="status" value="<?= (int)$faq['status'] ? '0' : '1' ?>"><button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= (int)$faq['status'] ? 'Disable' : 'Enable' ?></button></form>
-              <form method="post" data-confirm="Delete this FAQ permanently?"><?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_delete"><input type="hidden" name="faq_id" value="<?= (int)$faq['id'] ?>"><button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">Delete</button></form>
-            </div>
-          </article>
-        <?php endforeach; ?>
-      </div><?php endif; ?>
+      <details class="sh-guide-accordion" data-section="faqs">
+        <summary>Show saved FAQs</summary>
+        <div class="sh-guide-accordion__content">
+          <p class="sh-formcard__note">Enabled English FAQs appear on the public Help Centre and may be used by chat. Do not put customer data, passwords, API keys or other private information in these answers.</p>
+          <?php if (!$faqRows): ?><p class="sh-support-admin__empty">No FAQs are saved yet.</p>
+          <?php else: ?><div class="sh-support-settings__faq-list">
+            <?php foreach ($faqRows as $faq): ?>
+              <article class="sh-support-settings__faq">
+                <div class="sh-support-settings__faq-copy"><strong><?= e($faq['question_en']) ?></strong><span><?= (int)$faq['status'] ? 'Enabled' : 'Disabled' ?> · Sort <?= (int)$faq['sort_order'] ?></span></div>
+                <div class="sh-support-settings__faq-actions">
+                  <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php?faq=' . (int)$faq['id'] . '#faq-edit')) ?>">Edit</a>
+                  <form method="post"><?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_toggle"><input type="hidden" name="faq_id" value="<?= (int)$faq['id'] ?>"><input type="hidden" name="status" value="<?= (int)$faq['status'] ? '0' : '1' ?>"><button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit"><?= (int)$faq['status'] ? 'Disable' : 'Enable' ?></button></form>
+                  <form method="post" data-confirm="Delete this FAQ permanently?"><?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_delete"><input type="hidden" name="faq_id" value="<?= (int)$faq['id'] ?>"><button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">Delete</button></form>
+                </div>
+              </article>
+            <?php endforeach; ?>
+          </div><?php endif; ?>
+        </div>
+      </details>
     </div>
   </section>
 
   <section class="sh-panel" id="faq-edit">
     <div class="sh-panel__head"><h3><?= $editFaq ? 'Edit FAQ' : 'Add FAQ' ?></h3></div>
     <div class="sh-panel__body">
-      <form method="post" class="sh-support-settings__form">
-        <?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_save"><input type="hidden" name="faq_id" value="<?= $editFaq ? (int)$editFaq['id'] : 0 ?>">
-        <div class="sh-grid2">
-          <div class="sh-field"><label class="sh-field__label" for="faq-q-en">Question (English)</label><input class="sh-input" id="faq-q-en" name="question_en" maxlength="300" value="<?= e($faqForm['question_en']) ?>" required></div>
-          <div class="sh-field"><label class="sh-field__label" for="faq-q-bn">Question (বাংলা)</label><input class="sh-input" id="faq-q-bn" name="question_bn" maxlength="300" value="<?= e((string)($faqForm['question_bn'] ?? '')) ?>"></div>
-          <div class="sh-field"><label class="sh-field__label" for="faq-q-banglish">Question (Banglish)</label><input class="sh-input" id="faq-q-banglish" name="question_banglish" maxlength="300" value="<?= e((string)($faqForm['question_banglish'] ?? '')) ?>"></div>
-          <div class="sh-field"><label class="sh-field__label" for="faq-keywords">Keywords (comma-separated)</label><input class="sh-input" id="faq-keywords" name="keywords" maxlength="500" value="<?= e((string)($faqForm['keywords'] ?? '')) ?>"></div>
+      <details class="sh-guide-accordion" data-section="faq-edit" <?= $editFaq || !$faqRows ? 'open' : '' ?>>
+        <summary><?= $editFaq ? 'Edit FAQ' : 'Add FAQ' ?></summary>
+        <div class="sh-guide-accordion__content">
+          <form method="post" class="sh-support-settings__form">
+            <?= sh_csrf_field() ?><input type="hidden" name="form" value="faq_save"><input type="hidden" name="faq_id" value="<?= $editFaq ? (int)$editFaq['id'] : 0 ?>">
+            <div class="sh-grid2">
+              <div class="sh-field"><label class="sh-field__label" for="faq-q-en">Question (English)</label><input class="sh-input" id="faq-q-en" name="question_en" maxlength="300" value="<?= e($faqForm['question_en']) ?>" required></div>
+              <div class="sh-field"><label class="sh-field__label" for="faq-q-bn">Question (বাংলা)</label><input class="sh-input" id="faq-q-bn" name="question_bn" maxlength="300" value="<?= e((string)($faqForm['question_bn'] ?? '')) ?>"></div>
+              <div class="sh-field"><label class="sh-field__label" for="faq-q-banglish">Question (Banglish)</label><input class="sh-input" id="faq-q-banglish" name="question_banglish" maxlength="300" value="<?= e((string)($faqForm['question_banglish'] ?? '')) ?>"></div>
+              <div class="sh-field"><label class="sh-field__label" for="faq-keywords">Keywords (comma-separated)</label><input class="sh-input" id="faq-keywords" name="keywords" maxlength="500" value="<?= e((string)($faqForm['keywords'] ?? '')) ?>"></div>
+            </div>
+            <div class="sh-field"><label class="sh-field__label" for="faq-a-en">Answer (English)</label><textarea class="sh-textarea" id="faq-a-en" name="answer_en" rows="4" maxlength="5000" required><?= e($faqForm['answer_en']) ?></textarea></div>
+            <div class="sh-field"><label class="sh-field__label" for="faq-a-bn">Answer (বাংলা)</label><textarea class="sh-textarea" id="faq-a-bn" name="answer_bn" rows="4" maxlength="5000"><?= e((string)($faqForm['answer_bn'] ?? '')) ?></textarea></div>
+            <div class="sh-field"><label class="sh-field__label" for="faq-a-banglish">Answer (Banglish)</label><textarea class="sh-textarea" id="faq-a-banglish" name="answer_banglish" rows="4" maxlength="5000"><?= e((string)($faqForm['answer_banglish'] ?? '')) ?></textarea></div>
+            <div class="sh-grid2">
+              <div class="sh-field"><label class="sh-field__label" for="faq-sort">Sort order</label><input class="sh-input" id="faq-sort" name="sort_order" type="number" min="-10000" max="10000" value="<?= (int)($faqForm['sort_order'] ?? 0) ?>"></div>
+              <div class="sh-field"><input type="hidden" name="status" value="0"><label class="sh-support-settings__toggle"><input type="checkbox" name="status" value="1" <?= (int)($faqForm['status'] ?? 1) === 1 ? 'checked' : '' ?>><span><strong>Enable this FAQ</strong><small>Disabled answers are not used for customer replies.</small></span></label></div>
+            </div>
+            <div class="sh-support-settings__save"><button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save FAQ</button>
+              <?php if ($editFaq): ?><a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php#faq-edit')) ?>">Add a new FAQ</a><?php endif; ?>
+            </div>
+          </form>
         </div>
-        <div class="sh-field"><label class="sh-field__label" for="faq-a-en">Answer (English)</label><textarea class="sh-textarea" id="faq-a-en" name="answer_en" rows="4" maxlength="5000" required><?= e($faqForm['answer_en']) ?></textarea></div>
-        <div class="sh-field"><label class="sh-field__label" for="faq-a-bn">Answer (বাংলা)</label><textarea class="sh-textarea" id="faq-a-bn" name="answer_bn" rows="4" maxlength="5000"><?= e((string)($faqForm['answer_bn'] ?? '')) ?></textarea></div>
-        <div class="sh-field"><label class="sh-field__label" for="faq-a-banglish">Answer (Banglish)</label><textarea class="sh-textarea" id="faq-a-banglish" name="answer_banglish" rows="4" maxlength="5000"><?= e((string)($faqForm['answer_banglish'] ?? '')) ?></textarea></div>
-        <div class="sh-grid2">
-          <div class="sh-field"><label class="sh-field__label" for="faq-sort">Sort order</label><input class="sh-input" id="faq-sort" name="sort_order" type="number" min="-10000" max="10000" value="<?= (int)($faqForm['sort_order'] ?? 0) ?>"></div>
-          <div class="sh-field"><input type="hidden" name="status" value="0"><label class="sh-support-settings__toggle"><input type="checkbox" name="status" value="1" <?= (int)($faqForm['status'] ?? 1) === 1 ? 'checked' : '' ?>><span><strong>Enable this FAQ</strong><small>Disabled answers are not used for customer replies.</small></span></label></div>
-        </div>
-        <div class="sh-support-settings__save"><button class="sh-btn" type="submit"><?= sh_icon('check', 15) ?> Save FAQ</button>
-          <?php if ($editFaq): ?><a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('admin/support-settings.php#faq-edit')) ?>">Add a new FAQ</a><?php endif; ?>
-        </div>
-      </form>
+      </details>
     </div>
   </section>
 </div>
