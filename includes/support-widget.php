@@ -19,11 +19,10 @@ $schatCfg = ['endpoint' => sh_url('api/support.php'), 'max' => $schatMax];
   <span class="sh-schat-badge" id="sh-schat-badge" hidden>0</span>
 </button>
 
-<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-config="<?= e((string)json_encode($schatCfg)) ?>" hidden>
+<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config="<?= e((string)json_encode($schatCfg)) ?>" hidden>
   <header class="sh-schat-head">
     <div class="sh-schat-headmain">
       <h2 id="sh-schat-title"><?= sh_icon('headphones', 18) ?> Customer Support</h2>
-      <p class="sh-schat-sub" id="sh-schat-sub">Replies use live store data — prices &amp; order status are verified, never guessed.</p>
     </div>
     <div class="sh-schat-headactions">
       <button type="button" class="sh-schat-iconbtn" id="sh-schat-new" aria-label="Start a new conversation" title="New conversation"><?= sh_icon('plus', 18) ?></button>

@@ -33,10 +33,8 @@
   var input = document.getElementById('sh-schat-input');
   var sendBtn = document.getElementById('sh-schat-send');
   var statusEl = document.getElementById('sh-schat-status');
-  var subEl = document.getElementById('sh-schat-sub');
   var badgeEl = document.getElementById('sh-schat-badge');
   var handoffBtn = document.getElementById('sh-schat-handoff');
-  var defaultSub = subEl.textContent;
 
   var convId = 0, lastId = 0, started = false, isOpen = false, human = false;
   var pollTimer = null, seen = {}, unread = 0, sentOnce = false;
@@ -164,7 +162,7 @@
     if (data.conversation) {
       convId = data.conversation.id || convId;
       human = !!data.conversation.human;
-      subEl.textContent = human ? 'Our support team will reply here. The AI assistant is paused for this chat.' : defaultSub;
+      sheet.setAttribute('data-human', human ? '1' : '0');
       handoffBtn.hidden = human;
       var status = String(data.conversation.status || 'open');
       document.getElementById('sh-schat-new').hidden = !['resolved', 'closed'].includes(status);

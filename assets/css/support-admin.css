@@ -174,3 +174,28 @@
   .sh-support-admin__state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-support-admin__human-actions .sh-btn { flex: 1 1 auto; }
 }
+
+/* Long admin settings values and support names wrap instead of widening cards. */
+.sh-support-settings__toggle small,
+.sh-support-settings__test small,
+.sh-support-settings__faq-copy span,
+.sh-support-admin__stats span,
+.sh-support-admin__thread-meta p,
+.sh-support-admin__conversation strong,
+.sh-support-admin__event {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.sh-support-admin__filters .sh-field,
+.sh-support-settings__toggle > span,
+.sh-support-settings__test > div,
+.sh-support-settings__faq-actions > * {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 420px) {
+  .sh-support-admin__filters .sh-field { flex: 1 1 100%; min-width: 0; }
+  .sh-support-admin__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sh-support-settings__faq { flex-direction: column; align-items: stretch; }
+  .sh-support-settings__faq-actions { justify-content: flex-start; }
+}

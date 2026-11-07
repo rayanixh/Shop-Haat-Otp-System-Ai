@@ -200,3 +200,19 @@
   .sh-support-chat__thread-head { align-items: flex-start; flex-wrap: wrap; }
   .sh-support-chat__compose-foot { align-items: center; }
 }
+
+/* Long conversation names, URLs and error text stay inside normal flow. */
+.sh-support-chat__heading h1,
+.sh-support-chat__thread-head span,
+.sh-support-chat__counter,
+.sh-support-chat__disabled,
+.sh-support-chat__product-name {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.sh-support-chat__heading > *,
+.sh-support-chat__thread-head > *,
+.sh-support-chat__compose-foot > * {
+  min-width: 0;
+}
+.sh-support-chat__compose textarea { max-width: 100%; }

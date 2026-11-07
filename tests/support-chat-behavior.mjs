@@ -69,7 +69,7 @@ const appCss = readFileSync(join(ROOT, 'assets/css/app.css'), 'utf8');
 const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8');
 const supportApi = readFileSync(join(ROOT, 'api/support.php'), 'utf8');
 for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-schat-suggest', 'sh-schat-form',
-	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-sub', 'sh-schat-badge',
+	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-badge',
 	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close']) {
 	check('shipped widget markup has #' + id, widgetPhp.includes('id="' + id + '"'));
 }
@@ -114,6 +114,12 @@ check('input and Send remain horizontally aligned on mobile',
 check('Bangla/Banglish/English placeholder and orange brand colour survive',
 	widgetPhp.includes('Write in বাংলা, Banglish or English') && /\.sh-schat-input:focus\s*\{[^}]*var\(--sh-brand\)/.test(appCss));
 
+check('the Customer Support popup has no subtitle or explanatory replacement',
+	!widgetPhp.includes('sh-schat-sub') && !appCss.includes('.sh-schat-sub')
+	&& !chatJs.includes('defaultSub') && !/Replies use live store data|Our support team will reply here/.test(widgetPhp + chatJs));
+check('the title-only header is centered with no leftover subtitle gap',
+	/\.sh-schat-head\s*\{[^}]*align-items:\s*center[^}]*margin-bottom:\s*8px/.test(appCss)
+	&& /\.sh-schat-headmain h2\s*\{[^}]*margin:\s*0;/.test(appCss));
 check('legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service', supportApi.includes("$action === 'send'") && supportApi.includes("$input['client_msg_id']") && supportApi.includes('sh_support_customer_send(') && supportApi.includes('sh_support_customer_handoff(') && supportApi.includes("$input['after_id']"));
 check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 
@@ -121,10 +127,9 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-controls="sh-schat-sheet" aria-label="Open customer support chat">
   <span class="sh-schat-fab-label">Support</span><span class="sh-schat-badge" id="sh-schat-badge" hidden>0</span>
 </button>
-<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
+<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
   <header class="sh-schat-head"><div class="sh-schat-headmain">
-    <h2 id="sh-schat-title">Customer Support</h2>
-    <p class="sh-schat-sub" id="sh-schat-sub">Replies use live store data.</p></div>
+    <h2 id="sh-schat-title">Customer Support</h2></div>
     <div class="sh-schat-headactions">
       <button type="button" class="sh-schat-iconbtn" id="sh-schat-new" aria-label="Start a new conversation">+</button>
       <button type="button" class="sh-schat-iconbtn" id="sh-schat-close" aria-label="Close chat">×</button>
@@ -282,8 +287,9 @@ check('repeated polls never duplicate a message', $$('#sh-schat-messages .sh-sch
 $('#sh-schat-handoff').click();
 await sleep(30);
 check('handoff posts to the API', reqs('handoff').length === 1);
-check('handoff hides the button and updates the subtitle',
-	$('#sh-schat-handoff').hidden === true && $('#sh-schat-sub').textContent.includes('support team will reply'));
+check('handoff hides the button and records human mode without a replacement subtitle',
+	$('#sh-schat-handoff').hidden === true && $('#sh-schat-sheet').getAttribute('data-human') === '1'
+	&& !$('#sh-schat-sheet').querySelector('.sh-schat-sub'));
 check('handoff notice renders as a system line', !!$('.sh-schat-notice'));
 check('handoff uses a UUIDv4 idempotency key', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reqs('handoff')[0].p.get('client_msg_id') || ''));
 const noticeCountAtHandoff = $$('#sh-schat-messages .sh-schat-notice').length;

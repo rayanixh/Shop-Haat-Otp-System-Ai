@@ -291,7 +291,6 @@ require dirname(__DIR__) . '/_layout.php';
     <div class="sh-panel">
       <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('box', 17) ?> Migration</h2></div>
       <div class="sh-panel__body">
-        <p class="sh-panel__note" style="margin-bottom:10px">Safe to re-run after an update.</p>
         <form method="post"><?= sh_csrf_field() ?>
           <input type="hidden" name="form" value="install">
           <button class="sh-btn sh-btn--sm sh-btn--ghost" type="submit">Re-run migration</button>

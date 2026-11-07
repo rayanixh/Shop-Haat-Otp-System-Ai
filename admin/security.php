@@ -358,7 +358,7 @@ endif;
           <label class="sh-field__label" for="admin-access-path">New path</label>
           <span class="sh-aau-origin"><?= e(rtrim($adminAccessPreviewOrigin, '/')) ?>/</span>
           <input class="sh-input sh-input--mono" id="admin-access-path" name="admin_access_path" value="<?= e($adminAccessInput) ?>" minlength="3" maxlength="80" pattern="[A-Za-z0-9_-]{3,80}" required autocomplete="off" spellcheck="false" data-admin-access-path placeholder="my-admin or admin-access-2026">
-          <p class="sh-field__hint">One memorable URL-safe segment, 3–80 characters. Letters, numbers, hyphens and underscores are allowed; uppercase is normalized to lowercase. Domains, extra segments, queries, fragments and encoded traversal are rejected.</p>
+          <p class="sh-field__hint">3–80 letters, numbers, hyphens or underscores.</p>
         </div>
         <div style="margin-top:10px" aria-live="polite">
           <span class="sh-field__label">Complete proposed URL</span>
@@ -385,7 +385,7 @@ endif;
       <p class="sh-aau-kicker">Step 3 · Verify and activate</p>
       <?php if ($adminAccessEnabled && $adminAccessPending === ''): ?>
         <p class="sh-aau-success">New Admin URL is active</p>
-        <p class="sh-field__hint">You can change it again by generating a new proposal above. The old route is disabled; only the URL shown under “Current active Admin URL” works now.</p>
+        <p class="sh-field__hint">The old route is disabled after successful activation.</p>
       <?php elseif ($adminAccessPending !== ''): ?>
         <p class="sh-aau-status">Saved — verification required</p>
         <span class="sh-field__label">New proposed Admin URL</span>

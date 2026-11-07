@@ -65,7 +65,7 @@ require dirname(__DIR__) . '/_layout.php';
                   <option value="<?= (int)$t['provider_id'] ?>|<?= e($t['model']) ?>"><?= e($t['provider']) ?> · <?= e($t['model_name'] !== $t['model'] ? $t['model_name'] . ' (' . $t['model'] . ')' : $t['model']) ?></option>
                 <?php endforeach; ?>
               </select>
-              <span class="sh-field__hint">Only models flagged as image output are listed. Change the default route in AI Settings → Task routing.</span>
+
             </div>
             <div class="sh-field">
               <label class="sh-field__label" for="img-prompt">Image prompt</label>
@@ -102,13 +102,6 @@ require dirname(__DIR__) . '/_layout.php';
     </div>
   </div>
 
-  <div class="sh-panel" style="align-self:start">
-    <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('info', 17) ?> Notes</h2></div>
-    <div class="sh-panel__body">
-      <p class="sh-panel__note">Images are validated with <code>getimagesize()</code> before being written, so a
-        non-image response can never land in the uploads folder. Capability is checked before any request: a text-only
-        model is refused, not attempted. <?= count($imageTargets) ?> image-capable model<?= count($imageTargets) === 1 ? '' : 's' ?> configured.</p>
-    </div>
   </div>
 </div>
 <?php require dirname(__DIR__) . '/_footer.php'; ?>

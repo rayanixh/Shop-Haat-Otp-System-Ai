@@ -302,7 +302,6 @@ require __DIR__ . '/_layout.php';
     <div>
       <p class="sh-support-admin__eyebrow">Customer support configuration</p>
       <h2>Settings, AI guardrails &amp; FAQs</h2>
-      <p>Keep contact and policy answers aligned with the live store. AI attempts only the configured existing provider/model; manual tests are diagnostic, and messages/orders remain read-only.</p>
     </div>
     <a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/support.php')) ?>"><?= sh_icon('message', 14) ?> Open inbox</a>
   </div>
@@ -318,7 +317,7 @@ require __DIR__ . '/_layout.php';
       <form method="post" class="sh-support-settings__form">
         <?= sh_csrf_field() ?><input type="hidden" name="form" value="save_settings">
         <input type="hidden" name="enabled" value="0">
-        <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $settings['enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable customer chat</strong><small>Turning this off does not delete saved conversations. The existing contact form remains available.</small></span></label>
+        <label class="sh-support-settings__toggle"><input type="checkbox" name="enabled" value="1" <?= $settings['enabled'] === '1' ? 'checked' : '' ?>><span><strong>Enable customer chat</strong></span></label>
         <input type="hidden" name="handoff_enabled" value="0">
         <label class="sh-support-settings__toggle"><input type="checkbox" name="handoff_enabled" value="1" <?= $settings['handoff_enabled'] === '1' ? 'checked' : '' ?>><span><strong>Allow human-support handoff</strong><small>Requests appear in the authorized inbox. This is not a live-staff or response-time promise.</small></span></label>
 
@@ -413,7 +412,6 @@ require __DIR__ . '/_layout.php';
       <details class="sh-guide-accordion" id="human-support-sms" data-section="human-support-sms" <?= $sms['test_message'] !== '' ? 'open' : '' ?>>
         <summary>Human Support Notifications (SMS)</summary>
         <div class="sh-guide-accordion__content sh-support-settings__form">
-          <p class="sh-formcard__note">Optional. Human support keeps working without SMS.</p>
           <form method="post" class="sh-support-settings__form" data-sms-form>
             <?= sh_csrf_field() ?>
             <input type="hidden" name="form" value="support_sms_save">

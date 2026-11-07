@@ -50,7 +50,7 @@ require_once SH_ROOT . '/includes/header.php';
 
   <section class="sh-section" style="max-width:760px;margin:0 auto">
     <div class="sh-section__head"><h1 class="sh-section__title"><?= sh_icon('package', 18) ?> Track Your Order</h1></div>
-    <p class="sh-panel__note" style="margin:0 0 14px">Enter the order number and phone number used at checkout. Tracking always reflects the saved order and payment records.</p>
+    <p class="sh-panel__note" style="margin:0 0 14px">Enter the order number and phone number used at checkout.</p>
     <?php if ($lookupError !== ''): ?><div class="sh-alert sh-alert--error" style="margin-bottom:14px"><?= sh_icon('x-circle', 16) ?><span><?= e($lookupError) ?></span></div><?php endif; ?>
     <form class="sh-filterbar" method="post">
       <?= sh_csrf_field() ?>
