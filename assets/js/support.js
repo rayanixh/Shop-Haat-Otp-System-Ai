@@ -294,11 +294,16 @@
     messageList.replaceChildren(fragment);
   }
 
+  // Fixed-height composer: long drafts scroll inside the textarea. Only the
+  // character counter updates while typing; no inline dimensions are written.
+  if (chatInput) {
+    chatInput.style.removeProperty('height');
+    chatInput.style.removeProperty('overflow-y');
+  }
+
   function updateCharCount() {
     const n = Array.from(chatInput.value).length;
     charCount.textContent = `${n.toLocaleString(language === 'bn' ? 'bn-BD' : 'en-BD')} / 2,000 ${tr('chars')}`;
-    chatInput.style.height = 'auto';
-    chatInput.style.height = `${Math.max(chatInput.scrollHeight, 70)}px`;
   }
 
   function setLanguage(next) {

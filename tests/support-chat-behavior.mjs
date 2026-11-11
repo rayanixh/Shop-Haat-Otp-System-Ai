@@ -78,16 +78,18 @@ check('chat panel is viewport-fixed, bottom-anchored and safe-area aware',
 	&& !/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
 const chatRules = appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || [];
 const scrollingRules = chatRules.filter((r) => /overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(r));
-check('only the message log owns an internal scroll region',
-	scrollingRules.length === 1 && /^\.sh-schat-messages/.test(scrollingRules[0])
-	&& /overscroll-behavior:\s*contain/.test(scrollingRules[0]));
+const messageScrollRule = scrollingRules.find((r) => /^\.sh-schat-messages/.test(r)) || '';
+const composerScrollRule = scrollingRules.find((r) => /^\.sh-schat-input/.test(r)) || '';
+check('only the message log and fixed composer textarea own internal scroll regions',
+	scrollingRules.length === 2 && /overscroll-behavior:\s*contain/.test(messageScrollRule)
+	&& /overflow-y:\s*auto/.test(composerScrollRule) && /resize:\s*none/.test(composerScrollRule));
 const chatJs = readFileSync(join(ROOT, 'assets/js/support-chat.js'), 'utf8');
 check('widget JS never pins the panel to document scroll and re-measures the viewport',
 	!chatJs.includes('window.scrollY') && !chatJs.includes('form.scrollIntoView')
 	&& chatJs.includes('syncViewport()') && chatJs.includes('visualViewport'));
-/* Subtle composer sizing: smaller type/padding, but a comfortable touch
- * target and one horizontal row on mobile. The fixed popup and the rule that
- * only the message log scrolls are asserted above and must stay unchanged. */
+/* Subtle composer sizing: smaller type/padding, a comfortable touch target,
+ * fixed dimensions and one horizontal row on mobile. The fixed popup and the
+ * two intentional internal scroll regions are asserted above. */
 const composerRules = appCss.match(/\.sh-schat-(?:form|input|send|handoff)\s*\{[^}]*\}/g) || [];
 const inputRule = composerRules.find((r) => r.startsWith('.sh-schat-input')) || '';
 const sendRule = composerRules.find((r) => r.startsWith('.sh-schat-send')) || '';
@@ -138,7 +140,7 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
   <div class="sh-schat-suggest" id="sh-schat-suggest" aria-label="Quick questions"></div>
   <form class="sh-schat-form" id="sh-schat-form">
     <label class="sh-sr-only" for="sh-schat-input">Type your message</label>
-    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="2000"></textarea>
+    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="2000" data-sh-no-autogrow></textarea>
     <button type="submit" class="sh-btn sh-btn-primary sh-schat-send" id="sh-schat-send">Send</button>
   </form>
   <p class="sh-schat-status" id="sh-schat-status" role="status"></p>

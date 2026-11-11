@@ -92,7 +92,7 @@ jobs:
       #     token limit, rejected key, server error, network failure, timeout)
       #     renders in the card and the button always resets.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat, Admin URL preview, compact Settings, admin courier/AI provider UI/UX source audit)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat, fixed-height chat composer, Admin URL preview, compact Settings, admin courier/AI provider UI/UX source audit)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
@@ -107,6 +107,7 @@ jobs:
           node tests/provider-test-behavior.mjs
           node tests/support-chat-behavior.mjs
           node tests/support-chat-optimistic-behavior.mjs
+          node tests/support-chat-composer-behavior.mjs
           node tests/support-admin-inbox-behavior.mjs
           node tests/admin-access-regression.mjs
           node tests/admin-access-preview-behavior.mjs

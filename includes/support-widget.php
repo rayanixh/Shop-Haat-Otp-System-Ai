@@ -36,7 +36,7 @@ $schatCfg = ['endpoint' => sh_url('api/support.php'), 'max' => $schatMax];
 
   <form class="sh-schat-form" id="sh-schat-form">
     <label class="sh-sr-only" for="sh-schat-input">Type your message</label>
-    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="<?= (int)$schatMax ?>" placeholder="Write in বাংলা, Banglish or English…" autocomplete="off"></textarea>
+    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="<?= (int)$schatMax ?>" placeholder="Write in বাংলা, Banglish or English…" autocomplete="off" data-sh-no-autogrow></textarea>
     <button type="submit" class="sh-btn sh-btn-primary sh-schat-send" id="sh-schat-send"><?= sh_icon('send', 14) ?> Send</button>
   </form>
 

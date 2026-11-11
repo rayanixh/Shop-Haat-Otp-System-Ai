@@ -915,12 +915,13 @@
   })();
 
   /* ---------- Textareas grow with their content --------------------------
-     No field hides text behind an internal scrollbar: textareas are sized to
-     their content (CSS field-sizing does this natively where supported; this
-     is the fallback, and the hook programmatic fills call afterwards). The
-     page scrolls; fields do not. */
+     Ordinary fields are sized to their content (CSS field-sizing does this
+     natively where supported; this is the fallback). Fixed-height chat
+     composers are explicitly excluded: they keep one stable row and long
+     drafts scroll inside the textarea instead of resizing the popup. */
   function growTextarea(el) {
     if (!el || el.tagName !== 'TEXTAREA') return;
+    if (el.hasAttribute('data-sh-no-autogrow') || el.classList.contains('sh-schat-input')) return;
     if (!el.offsetParent && el.getClientRects().length === 0) return;
     el.style.overflowY = 'hidden';
     el.style.height = 'auto';

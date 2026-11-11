@@ -54,7 +54,7 @@ require_once SH_ROOT . '/includes/header.php';
       </div>
       <form class="sh-support-chat__compose" data-chat-form>
         <label class="sh-support-chat__message-label" for="sh-support-message">Your message</label>
-        <textarea class="sh-textarea" id="sh-support-message" data-chat-input rows="2" maxlength="2000" placeholder="Write a message…" required></textarea>
+        <textarea class="sh-textarea" id="sh-support-message" data-chat-input rows="2" maxlength="2000" placeholder="Write a message…" required data-sh-no-autogrow></textarea>
         <div class="sh-support-chat__compose-foot">
           <span class="sh-support-chat__counter" data-char-count>0 / 2,000</span>
           <button class="sh-btn" type="submit" data-chat-send><?= sh_icon('send', 15) ?> Send</button>

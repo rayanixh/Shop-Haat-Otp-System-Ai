@@ -148,9 +148,9 @@ su_ok(str_contains($schema, 'UNIQUE KEY uq_supmsg_client'), 'Client message id i
 su_ok(substr_count($schema, 'CREATE TABLE IF NOT EXISTS support_') === 6, 'Six additive support tables declared');
 $js = $src('assets/js/support-chat.js');
 su_ok(str_contains($js, 'textContent') && !str_contains($js, 'innerHTML'), 'Widget renders message text via textContent only (no HTML injection)');
-// The floating widget is viewport-fixed. Its message log is the ONLY support
-// rule allowed to own an internal scroll region; the dedicated support page
-// still grows with the document and must have no scroll box at all.
+// The floating widget is viewport-fixed. Its message log and both fixed-height
+// composer textareas are the only support rules allowed to own an internal
+// scroll region; long drafts scroll inside inputs instead of resizing the UI.
 $css = $src('assets/css/app.css');
 $supportCss = $src('assets/css/support.css');
 $supportScrollRules = static function (string $stylesheet): array {
@@ -162,10 +162,10 @@ $supportScrollRules = static function (string $stylesheet): array {
     return $offenders;
 };
 $widgetScroll = $supportScrollRules($css);
-su_ok($widgetScroll === ['sh-schat-messages']
-   && $supportScrollRules($supportCss) === []
-   && preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $supportCss) !== 1,
-   'Only the fixed widget message log scrolls internally; support page CSS has no scroll box');
+su_ok($widgetScroll === ['sh-schat-messages', 'sh-schat-input']
+   && $supportScrollRules($supportCss) === ['sh-support-chat__compose']
+   && preg_match('/overflow(?:-x|-y)?\s*:\s*(?:auto|scroll)/', $supportCss) === 1,
+   'Only the fixed widget message log and both composer textareas scroll internally; no other support CSS creates a scroll box');
 su_ok(str_contains($css, '.sh-schat-sheet {') && str_contains($css, 'position: fixed; right: 16px; left: auto; top: auto;')
    && str_contains($css, 'bottom: calc(var(--sh-schat-bottom) + env(safe-area-inset-bottom, 0px))')
    && str_contains($css, 'overscroll-behavior: contain;')

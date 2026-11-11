@@ -36,6 +36,14 @@
   var badgeEl = document.getElementById('sh-schat-badge');
   var handoffBtn = document.getElementById('sh-schat-handoff');
 
+  // The composer has a fixed CSS height and its own internal scrollbar.
+  // Clear any stale inline height/overflow written by an older cached script;
+  // no widget event listener changes those dimensions while the user types.
+  if (input) {
+    input.style.removeProperty('height');
+    input.style.removeProperty('overflow-y');
+  }
+
   var convId = 0, lastId = 0, started = false, isOpen = false, human = false;
   var pollTimer = null, seen = {}, unread = 0, sentOnce = false;
 

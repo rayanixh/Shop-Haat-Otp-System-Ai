@@ -381,13 +381,13 @@ check('storefront, admin and listing templates expose focusable drawers and expl
 });
 check('CSS confines overscroll to the drawer scrollers and the fixed support message log', () => {
   const allowedScrollers = ['.sh-drawer__body', '.sh-admin-sidebar__nav', '.sh-filters__scroll'];
-  const allowedInnerScrollers = [...allowedScrollers, '.sh-schat-messages'];
+  const allowedInnerScrollers = [...allowedScrollers, '.sh-schat-messages', '.sh-schat-input', '.sh-support-chat__compose'];
   const scrollRules = [...css.matchAll(/([^{}]+)\{([^{}]*\boverflow(?:-[xy])?\s*:\s*(?:auto|scroll)\b[^{}]*)\}/gi)];
   for (const rule of scrollRules) {
     assert.ok(allowedInnerScrollers.some((selector) => rule[1].includes(selector)), `ordinary content must not scroll inside ${rule[1].trim()}`);
   }
-  // The floating support popup is viewport-fixed; its message log is the one
-  // intentional exception to the "no nested page scroll box" rule.
+  // The floating support popup is viewport-fixed; its message log and the
+  // fixed-height composer textareas are intentional input scroll regions.
   assert.match(css, /\.sh-schat-sheet\s*\{[^}]*position:\s*fixed/);
   assert.match(css, /\.sh-schat-messages\s*\{[^}]*overscroll-behavior:\s*contain/);
   for (const selector of allowedScrollers) {

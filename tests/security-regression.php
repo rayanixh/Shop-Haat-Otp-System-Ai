@@ -3182,7 +3182,9 @@ sh_t('only navigation drawers and the fixed support message log own internal scr
         if (!str_contains($selector, '.sh-drawer__body')
             && !str_contains($selector, '.sh-admin-sidebar__nav')
             && !str_contains($selector, '.sh-filters__scroll')
-            && !str_contains($selector, '.sh-schat-messages')) {
+            && !str_contains($selector, '.sh-schat-messages')
+            && !str_contains($selector, '.sh-schat-input')
+            && !str_contains($selector, '.sh-support-chat__compose')) {
             return 'an ordinary content selector creates an internal scroll region: ' . $selector;
         }
     }
