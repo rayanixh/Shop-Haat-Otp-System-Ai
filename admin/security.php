@@ -108,6 +108,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($form === 'phone_verification') {
         $on = sh_post('phone_verification') === '1';
         $mode = $on ? 'phone_otp' : 'email_password';
+        // Validate the provider before switching customers onto phone OTP:
+        // enabling it with an unusable driver would leave every customer on a
+        // code screen that can never complete.
+        if ($on && !sh_otp_provider_ready()) {
+            $problems = sh_otp_provider_config_errors();
+            sh_flash('error', 'Phone verification was not enabled: ' . implode(' ', array_slice($problems, 0, 2))
+                . ' Configure a working SMS provider below first.');
+            sh_redirect('admin/security.php');
+        }
         if ($mode !== sh_auth_mode()) {
             sh_setting_save('authentication_mode', $mode);
             sh_security_log('authentication_mode_changed', null, ['mode' => $mode]);
@@ -172,6 +181,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($form === 'sms') {
+        // The offline driver is a development tool: it reports success without
+        // contacting a carrier. Refuse to save it on a production install so a
+        // live store can never be left "verifying" numbers that never received
+        // a code.
+        $requestedProvider = (string)sh_post('otp_provider');
+        if ($requestedProvider === 'offline' && !sh_is_development()) {
+            sh_flash('error', 'Offline / test mode is only available on a development installation. '
+                . 'Choose TextBee or a Custom SMS API so customers can receive codes.');
+            sh_redirect('admin/security.php');
+        }
+        if (!in_array($requestedProvider, sh_otp_providers(), true)) {
+            sh_flash('error', 'Please choose a supported SMS provider.');
+            sh_redirect('admin/security.php');
+        }
         $keys = ['otp_provider', 'otp_sender_id', 'otp_message',
                  'otp_api_url', 'otp_api_method', 'otp_api_body', 'otp_api_headers',
                  'otp_api_auth', 'otp_api_key', 'otp_api_secret', 'otp_api_token',
@@ -197,8 +220,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $res = sh_otp_issue($phone, 'test', null);
             if ($res['ok']) {
                 $notice = 'Test message sent to ' . sh_phone_display($phone) . ' via ' . sh_otp_provider() . '.';
-                if (sh_otp_provider() === 'offline' && !empty($res['code'])) {
-                    $testCode = $res['code']; // test driver only — never a real SMS
+                if (sh_otp_allow_code_echo() && !empty($res['code'])) {
+                    // Development installations only (offline driver). On a
+                    // production store this branch cannot run, so the code is
+                    // never rendered into HTML.
+                    $testCode = (string)$res['code'];
                 }
             } else {
                 $errors['test_phone'] = $res['error'] ?? 'The test message could not be sent.';
@@ -237,6 +263,8 @@ if (!in_array($provider, $allowedProviders, true)) {
 }
 
 $phoneVerificationOn = sh_otp_enabled();
+// Readiness of the *saved* provider (the page can also preview another one).
+$providerReady = sh_otp_provider_ready($s('otp_provider', 'offline'));
 
 // Quick stats for the top of the page (only needed while verification is on).
 $stats = ['today' => 0, 'login' => 0, 'signup' => 0, 'verified' => 0, 'failed' => 0, 'expired' => 0, 'rate_limited' => 0];
@@ -309,7 +337,7 @@ endif;
 <?php endif; ?>
 <?php if ($testCode !== null): ?>
   <div class="sh-alert sh-alert--info"><?= sh_icon('key', 17) ?>
-    <span>Test mode code (shown because the provider is “offline”): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
+    <span>Development test code (offline driver — no SMS was sent): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
 <?php endif; ?>
 
 <!-- Custom Admin URL: route discovery reduction only; the normal admin login and permissions remain required. -->
@@ -596,17 +624,33 @@ UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secre
       <h2 class="sh-panel__title"><?= sh_icon('send', 17) ?> SMS / OTP Provider</h2>
     </div>
     <div class="sh-panel__body">
-      <?php if ($provider === 'offline'): ?>
-        <div class="sh-alert sh-alert--warning"><?= sh_icon('alert', 17) ?>
-          <span><strong>No real SMS provider is selected.</strong> Customers cannot receive verification codes while the
-            provider is “Offline / test mode”. Choose TextBee, Firebase or a Custom SMS API below and save your credentials.</span></div>
+      <?php if (!$providerReady): ?>
+        <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 17) ?>
+          <div>
+            <strong><?= $provider === 'offline' ? 'Offline / test mode is selected.' : 'This SMS provider is not ready.' ?></strong>
+            <?php if ($provider === 'offline'): ?>
+              No SMS is sent in this mode, so it is refused on a production installation and cannot be used to verify customers.
+              Choose TextBee or a Custom SMS API below, save your credentials, then run <em>Send test message</em>.
+            <?php else: ?>
+              <?= e(implode(' ', sh_otp_provider_config_errors($provider))) ?>
+            <?php endif; ?>
+            <?php if (sh_otp_enabled()): ?>
+              <br><strong>Phone sign-in is currently ON, so customers cannot complete verification until this is fixed.</strong>
+              Either repair the provider or switch to Email + Password below.
+            <?php endif; ?>
+          </div>
+        </div>
+      <?php elseif (sh_otp_enabled()): ?>
+        <div class="sh-alert sh-alert--success"><?= sh_icon('check-circle', 17) ?>
+          <span><strong>Provider ready.</strong> Phone verification requests will be delivered with
+            <strong><?= e($provider) ?></strong>. Failed deliveries still count towards the request limits.</span></div>
       <?php endif; ?>
 
       <div class="sh-grid2">
         <div class="sh-field">
           <label class="sh-field__label" for="sc-provider">SMS/OTP Provider</label>
           <select class="sh-select" id="sc-provider" name="otp_provider" data-provider-select>
-            <option value="offline" <?= $provider === 'offline' ? 'selected' : '' ?>>Offline / test mode (no real SMS)</option>
+            <option value="offline" <?= $provider === 'offline' ? 'selected' : '' ?>>Offline / test mode — DEVELOPMENT ONLY (no real SMS)</option>
             <option value="textbee" <?= $provider === 'textbee' ? 'selected' : '' ?>>TextBee</option>
             <option value="firebase" <?= $provider === 'firebase' ? 'selected' : '' ?>>Firebase</option>
             <option value="generic_http" <?= $provider === 'generic_http' ? 'selected' : '' ?>>Custom SMS API</option>

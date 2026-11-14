@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/compat.php';
+require_once __DIR__ . '/environment.php';
 /**
  * Shared helpers: settings, escaping, money, slugs, icons, uploads, pagination.
  */
@@ -304,6 +306,102 @@ function sh_unique_slug(string $table, string $base, int $ignoreId = 0): string
 }
 
 /**
+ * HTML allow-list tokenizer used when the DOM extension is unavailable (or the
+ * document cannot be parsed).
+ *
+ * This is a real sanitizer, not "strip everything": it walks the string, emits
+ * an element ONLY when its name is on the allow-list and always reconstructed
+ * without attributes, and escapes every other character as text. An element
+ * that is not allow-listed keeps its inner text (matching the DOM path, which
+ * unwraps non-allowed elements) except for script/style-like containers, whose
+ * contents are dropped entirely.
+ *
+ * Nothing from the source tag (attributes, casing, slashes) is ever copied
+ * into the output, so constructs such as `<p/onmouseover=alert(1)>` — which a
+ * naive tag regex accepts but browsers treat as an attribute — cannot become
+ * an attribute here.
+ *
+ * @param array<int,string> $allowed element names, lower case
+ */
+function sh_sanitize_html_fallback(string $html, array $allowed = ['p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'h2', 'h3', 'h4']): string
+{
+    $allow = [];
+    foreach ($allowed as $name) { $allow[strtolower((string)$name)] = true; }
+    $void = ['br' => true, 'hr' => true, 'img' => true];
+    $drop = ['script' => true, 'style' => true, 'iframe' => true, 'object' => true, 'embed' => true, 'svg' => true, 'math' => true];
+
+    $escape = static fn(string $text): string
+        => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    $out = '';
+    $stack = [];
+    $len = strlen($html);
+    $offset = 0;
+    $dropDepth = 0;
+    while ($offset < $len) {
+        $lt = strpos($html, '<', $offset);
+        if ($lt === false) {
+            if ($dropDepth === 0) { $out .= $escape(substr($html, $offset)); }
+            break;
+        }
+        if ($dropDepth === 0 && $lt > $offset) { $out .= $escape(substr($html, $offset, $lt - $offset)); }
+        $gt = strpos($html, '>', $lt);
+        if ($gt === false) {
+            // Unterminated tag: everything left is text.
+            if ($dropDepth === 0) { $out .= $escape(substr($html, $lt)); }
+            break;
+        }
+        $raw = substr($html, $lt, $gt - $lt + 1);
+        $offset = $gt + 1;
+
+        // Comments / doctypes / processing instructions are discarded.
+        if (str_starts_with($raw, '<!--') || str_starts_with($raw, '<!') || str_starts_with($raw, '<?')) {
+            continue;
+        }
+        // No whitespace is allowed between "<" and the tag name: real markup
+        // never has it, while prose such as "a < b and 1 > 0" always does, so
+        // ordinary comparisons survive as escaped text instead of being eaten.
+        if (preg_match('~^<(/?)([A-Za-z][A-Za-z0-9]*)\b[^>]*>$~', $raw, $m) !== 1) {
+            if ($dropDepth === 0) { $out .= $escape($raw); }
+            continue;
+        }
+        $closing = $m[1] === '/';
+        $tag = strtolower($m[2]);
+
+        if (isset($drop[$tag])) {
+            if ($closing) { $dropDepth = max(0, $dropDepth - 1); }
+            elseif (!str_ends_with(rtrim($raw), '/>')) { $dropDepth++; }
+            continue;
+        }
+        if ($dropDepth > 0) { continue; }
+
+        if (!isset($allow[$tag])) {
+            // Unwrap: the element itself is dropped and its inner text is kept
+            // by the text branch above (matching the DOM path).
+            continue;
+        }
+        if (isset($void[$tag])) {
+            $out .= '<' . $tag . '>';
+            continue;
+        }
+        if ($closing) {
+            // Only close what we opened, so the output cannot be unbalanced.
+            $pos = array_search($tag, $stack, true);
+            if ($pos === false) { continue; }
+            while (count($stack) > (int)$pos) {
+                $out .= '</' . array_pop($stack) . '>';
+            }
+            continue;
+        }
+        if (str_ends_with(rtrim($raw), '/>')) { continue; }
+        $stack[] = $tag;
+        $out .= '<' . $tag . '>';
+    }
+    while ($stack !== []) { $out .= '</' . array_pop($stack) . '>'; }
+    return trim($out);
+}
+
+/**
  * Allowlist HTML sanitizer for the few places where markup is intentional
  * (AI-generated article drafts).
  *
@@ -321,8 +419,11 @@ function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', '
     $html = trim($html);
     if ($html === '') { return ''; }
     if (!class_exists('DOMDocument')) {
-        // Conservative fallback: text only, no markup at all.
-        return trim(strip_tags($html));
+        // No DOM extension on this host: use the allow-list tokenizer below.
+        // It emits only bare, attribute-free tags from the allow-list and
+        // escapes everything else, so formatting survives without ever
+        // passing raw HTML through.
+        return sh_sanitize_html_fallback($html, $allowed);
     }
 
     $allow = array_flip(array_map('strtolower', $allowed));
@@ -348,7 +449,10 @@ function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', '
         libxml_use_internal_errors($prev);
     }
     if (!$loaded || $fatal || $doc->documentElement === null) {
-        return trim(strip_tags($html));
+        // The tree cannot be trusted (parse error / nesting limit). Keep the
+        // words and the simple formatting through the same safe tokenizer
+        // instead of discarding the markup or passing it through unfiltered.
+        return sh_sanitize_html_fallback($html, $allowed);
     }
 
     // Collect first, then modify: mutating a live DOMNodeList skips siblings.
@@ -546,14 +650,23 @@ function sh_uploads_reachable(string $subdir = 'products'): array
         $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
     } else {
+        // No cURL: read the status from the stream wrapper's response headers.
+        // $http_response_header is deprecated in PHP 8.4+, and wrapper_data is
+        // available on every supported version.
         set_error_handler(static fn(): bool => true);
         try {
-            $body = file_get_contents($url, false, stream_context_create(
+            $fp = fopen($url, 'rb', false, stream_context_create(
                 ['http' => ['timeout' => 10, 'ignore_errors' => true]]));
+            if ($fp !== false) {
+                $meta = stream_get_meta_data($fp);
+                $body = stream_get_contents($fp);
+                fclose($fp);
+                $headers = is_array($meta['wrapper_data'] ?? null) ? $meta['wrapper_data'] : [];
+                if (isset($headers[0]) && preg_match('/\s(\d{3})\s/', (string)$headers[0], $m)) {
+                    $status = (int)$m[1];
+                }
+            }
         } finally { restore_error_handler(); }
-        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
-            $status = (int)$m[1];
-        }
     }
 
     if ($status === 200 && $body !== false && $body !== '') {
@@ -906,7 +1019,11 @@ function sh_phone_normalize(?string $phone): string
 {
     $p = preg_replace('/[\s\-().]/', '', (string)$phone);
     if ($p === null || $p === '') { return ''; }
-    if (preg_match('/^(?:\+?880)?(1[3-9]\d{8})$/', $p, $m)) {
+    // The local "01XXXXXXXXX" form, the international "8801…" form and the
+    // "+8801…" form all describe one subscriber, so they must collapse onto the
+    // same canonical value. Otherwise the same number would occupy several
+    // rate-limit buckets and two different customer records.
+    if (preg_match('/^(?:\+?880|0)?(1[3-9]\d{8})$/', $p, $m)) {
         return '880' . $m[1];
     }
     $p = ltrim($p, '+');

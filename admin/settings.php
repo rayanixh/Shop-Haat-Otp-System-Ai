@@ -103,6 +103,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sh_flash('error', 'Please choose a valid authentication method.');
             sh_redirect('admin/settings.php');
         }
+        // Never move customers onto phone OTP while the SMS provider cannot
+        // deliver: every sign-in would end on a code screen that cannot work.
+        // (An existing mode is never changed automatically — this only blocks a
+        // manual switch to an unusable configuration.)
+        if ($mode === 'phone_otp' && !sh_otp_provider_ready()) {
+            $problems = sh_otp_provider_config_errors();
+            sh_flash('error', 'Phone + OTP was not enabled: ' . implode(' ', array_slice($problems, 0, 2))
+                . ' Configure the SMS provider in Security → SMS / OTP Provider first.');
+            sh_redirect('admin/settings.php');
+        }
         sh_setting_save('authentication_mode', $mode);
         sh_security_log('authentication_mode_changed', null, ['mode' => $mode]);
         sh_log_line('admin', 'Customer authentication mode set to ' . $mode . ' by ' . $admin['email']);

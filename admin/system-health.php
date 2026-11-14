@@ -51,8 +51,47 @@ function sh_health_collect(): array
     // PHP
     $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
     $items['php'] = sh_health_item('PHP version', PHP_VERSION, $phpOk ? 'healthy' : 'warning', $phpOk ? '' : 'PHP 8.0 or newer is recommended.');
-    $missing = array_values(array_filter(['pdo_mysql', 'mbstring', 'curl', 'openssl', 'json', 'gd'], static fn($x) => !extension_loaded($x)));
-    $items['ext'] = sh_health_item('PHP extensions', $missing ? 'Missing: ' . implode(', ', $missing) : 'All required extensions loaded', $missing ? (in_array('pdo_mysql', $missing, true) ? 'error' : 'warning') : 'healthy', 'Checked: pdo_mysql, mbstring, curl, openssl, json, gd');
+    // Required extensions block the application; optional ones degrade to a
+    // documented fallback (includes/compat.php). The two are reported apart so
+    // an operator can tell "this host cannot run ShopHaat" from "thumbnails
+    // will be skipped".
+    $extSummary = sh_extension_summary();
+    $missingRequired = $extSummary['required_missing'];
+    $missingOptional = $extSummary['optional_missing'];
+    if ($missingRequired !== []) {
+        $items['ext'] = sh_health_item('Required PHP extensions', 'Missing: ' . implode(', ', $missingRequired), 'error',
+            'Install these extensions in cPanel → Select PHP Version → Extensions before the store can run.');
+    } elseif ($missingOptional !== []) {
+        $items['ext'] = sh_health_item('Required PHP extensions', 'All loaded', 'healthy',
+            'Optional, using the built-in fallback: ' . implode(', ', $missingOptional));
+    } else {
+        $items['ext'] = sh_health_item('Required PHP extensions', 'All loaded', 'healthy', 'No optional extension is missing either.');
+    }
+    $fallbacks = [];
+    foreach (sh_extension_requirements() as $ext) {
+        if (!$ext['required'] && !$ext['ok']) {
+            $fallbacks[] = $ext['label'] . ' → ' . ($ext['fallback'] !== '' ? $ext['fallback'] : 'feature unavailable');
+        }
+    }
+    if ($fallbacks !== []) {
+        $items['extopt'] = sh_health_item('Optional PHP extensions', $missingOptional ? 'Using fallback: ' . implode(', ', $missingOptional) : 'All loaded',
+            'warning', implode(' · ', $fallbacks));
+    }
+
+    // OTP delivery configuration: a production store with phone sign-in on and
+    // no usable SMS provider cannot verify a single customer.
+    if (sh_otp_enabled()) {
+        if (sh_otp_provider_ready()) {
+            $items['otp'] = sh_health_item('Customer phone OTP', 'Ready — ' . sh_otp_provider(), 'healthy',
+                'Provider readiness is checked on every request; failed deliveries still count towards rate limits.');
+        } else {
+            $items['otp'] = sh_health_item('Customer phone OTP', 'Configured but not deliverable', 'error',
+                implode(' ', sh_otp_provider_config_errors()));
+        }
+    } else {
+        $items['otp'] = sh_health_item('Customer phone OTP', 'Off (email + password)', 'healthy',
+            'No SMS provider is contacted while phone OTP is disabled.');
+    }
     // Storage (disk)
     $total = @disk_total_space(SH_ROOT); $free = @disk_free_space(SH_ROOT);
     if ($total && $free !== false) {

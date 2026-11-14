@@ -45,6 +45,35 @@ if ($purpose === 'test') {
     }
 }
 
+/**
+ * HTTP status for a failed sh_otp_issue() call.
+ *
+ * Rate limiting and cooldowns are client errors (429); a missing or unusable
+ * SMS provider is a server-side configuration problem (503) and a provider
+ * rejection is a bad gateway (502). The message itself never reveals which
+ * provider or credential is at fault.
+ */
+function sh_otp_http_status(array $result): int
+{
+    switch ((string)($result['reason'] ?? '')) {
+        case 'rate_limited':
+        case 'throttled':
+        case 'cooldown':
+            return 429;
+        case 'config':
+        case 'unavailable':
+        case 'disabled':
+            return 503;
+        case 'delivery':
+            return 502;
+        case 'invalid':
+        case 'invalid_phone':
+            return 422;
+        default:
+            return 400;
+    }
+}
+
 /** Resolve the phone + user id this purpose is allowed to verify (server-side). */
 function sh_otp_resolve(string $purpose): ?array
 {
@@ -101,7 +130,7 @@ try {
         $issue = sh_otp_issue($phone, 'signup', null);
         if (!$issue['ok']) {
             sh_pending_signup_clear();
-            sh_json(['success' => false, 'error' => $issue['error'] ?? 'Could not send the code. Please try again.'], 429);
+            sh_json(['success' => false, 'error' => $issue['error'] ?? 'Could not send the code. Please try again.'], sh_otp_http_status($issue));
         }
         sh_json([
             'success' => true,
@@ -124,7 +153,7 @@ try {
         }
         $res = sh_otp_issue($phone, $purpose, $otpUserId);
         if (!$res['ok']) {
-            sh_json(['success' => false, 'error' => $res['error'] ?? 'Could not send the code.'], 429);
+            sh_json(['success' => false, 'error' => $res['error'] ?? 'Could not send the code.'], sh_otp_http_status($res));
         }
         $out = [
             'success' => true,
@@ -132,11 +161,12 @@ try {
             'expires_in' => sh_otp_expiry_seconds(),
             'cooldown' => sh_otp_resend_cooldown(),
         ];
-        // The offline/test driver returns a code so the admin can exercise the
-        // flow without an SMS provider. It is ONLY ever surfaced for the admin
-        // "test" purpose — never to customers.
-        if ($purpose === 'test' && !empty($res['code'])) {
-            $out['code'] = $res['code'];
+        // A code may only be echoed on a development installation using the
+        // offline driver, and only to the superadmin running a Test SMS. On a
+        // production store sh_otp_allow_code_echo() is false, so no response —
+        // customer or admin — can ever carry a live code.
+        if ($purpose === 'test' && !empty($res['code']) && sh_otp_allow_code_echo()) {
+            $out['code'] = (string)$res['code'];
         }
         sh_json($out);
     }

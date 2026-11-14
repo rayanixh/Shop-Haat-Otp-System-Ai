@@ -31,6 +31,15 @@ ini_set('error_log', SH_LOG_DIR . '/php-error.log');
 require_once SH_ROOT . '/includes/errors.php';
 sh_register_error_handlers();
 
+// Optional-extension fallbacks (mbstring shims, extension inventory). Loaded
+// before anything else so no module can call a helper that is unavailable on
+// this host. See includes/compat.php.
+require_once SH_ROOT . '/includes/compat.php';
+
+// Deployment environment ('production' by default). Drives the offline-OTP
+// guard, code-exposure rules and staging-only admin affordances.
+require_once SH_ROOT . '/includes/environment.php';
+
 // Security response headers (CSP, nosniff, clickjacking, Referrer-Policy, HSTS).
 // Applied before any page logic runs so no route can forget them; the module
 // degrades to safe defaults when the database is unavailable.
