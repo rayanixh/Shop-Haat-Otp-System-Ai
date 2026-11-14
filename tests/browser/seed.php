@@ -53,12 +53,21 @@ $tables = (int)$pdo->query('SELECT COUNT(*) FROM information_schema.tables WHERE
 $say($errors === [] ? 'PASS' : 'FAIL', 'schema created: ' . $tables . ' tables' . ($errors === [] ? '' : ' — ' . substr($errors[0], 0, 160)));
 if ($errors !== []) { exit(1); }
 
-$report = sh_install_create_store($pdo, [
-    'site_name'      => 'Shop Haat Test Store',
-    'admin_email'    => 'admin@example.test',
-    'admin_password' => 'AdminTest!2026',
-    'demo_data'      => '1',
-], '', 'http://' . (string)(getenv('SH_BROWSER_HOST') ?: '127.0.0.1:8080'));
+// The installer throws when it cannot finish. Uncaught, the application's own
+// error page is printed instead and the process still looks finished, which is
+// exactly how an empty storefront was mistaken for a rendering bug.
+try {
+    $report = sh_install_create_store($pdo, [
+        'site_name'      => 'Shop Haat Test Store',
+        'admin_email'    => 'admin@example.test',
+        'admin_password' => 'AdminTest!2026',
+        'demo_data'      => '1',
+    ], '', 'http://' . (string)(getenv('SH_BROWSER_HOST') ?: '127.0.0.1:8080'));
+} catch (Throwable $e) {
+    fwrite(STDERR, "ERROR: the installer refused to finish: " . $e->getMessage()
+        . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ")\n");
+    exit(1);
+}
 
 $admin = (int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn();
 $products = (int)$pdo->query('SELECT COUNT(*) FROM products WHERE status = 1')->fetchColumn();
@@ -88,4 +97,6 @@ echo "admin@example.test / AdminTest!2026 · customer@example.test / Customer!20
 echo json_encode(['admin' => 'admin@example.test', 'customer' => 'customer@example.test',
     'password' => 'Customer!2026', 'admin_password' => 'AdminTest!2026',
     'products' => $products, 'categories' => $categories]) . "\n";
-exit(0);
+// A seed that produced no catalogue cannot support a browser run: say so here
+// rather than letting eight browser checks fail for one cause.
+exit($products > 0 && $admin === 1 && $methods > 0 ? 0 : 1);

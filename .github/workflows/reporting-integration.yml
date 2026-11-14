@@ -478,11 +478,11 @@ jobs:
           rc=0
           php -d display_errors=1 -d error_reporting=E_ALL tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            msg=$( { grep -E "FAIL|ERROR|EXCEPTION|REFUSED|SQLSTATE" /tmp/seed.log | head -n 6; tail -n 5 /tmp/seed.log; } \
+            msg=$( { grep -E "FAIL|ERROR|EXCEPTION|REFUSED|SQLSTATE" /tmp/seed.log | grep -v "^<" | head -n 6; tail -n 5 /tmp/seed.log; } \
               | tr "\n" "|" | cut -c1-1400 )
             echo "::error::seed: ${msg//\%/\%25}"
           else
-            grep -E "PASS|FAIL|\{" /tmp/seed.log | head -n 10 \
+            grep -E "^  (PASS|FAIL)" /tmp/seed.log | head -n 10 \
               | while IFS= read -r line; do echo "::notice::seed: ${line//\%/\%25}"; done
           fi
           exit "$rc"
