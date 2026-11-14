@@ -19,7 +19,7 @@ plan, a screenshot or a previous report.
 | 1 | Does the secrets migration survive real permission semantics and real failure modes? | **PASSED** — no application defect | `tests/secrets-migration.php` 68/0/0 here, 51/0/13 with `SH_TEST_ASSUME_NO_PERM_ENFORCEMENT=1`; both modes are required CI steps and are green (run `43631797400`) |
 | 2 | Does the schema, migration, unique TrxID, concurrency, rollback, locking, OTP replay and idempotency work on real engines? | **PASSED on MySQL 8.0.46 and MariaDB 10.6.28** | `tests/mysql-integration.php` with `SH_TEST_REQUIRE_ENGINE=1` in both CI engine jobs (run `43631797400`), server versions quoted below |
 | 3 | Can a real backup actually be restored and does the application read it? | **PASSED** — 23 checks, 0 failures, on MySQL 8.0.46 | rehearsal step of run `43631797400`; refusal matrix 10/0/2 here |
-| 4 | Does the storefront and admin panel work in a real browser against a real database? | **PASSED** — 50 checks, 0 failures | Chromium 131.0.6778.33 against MySQL 8.0.46 + `php -S`, run `43631797400` |
+| 4 | Does the storefront and admin panel work in a real browser against a real database? | **PASSED** — 105 checks, 0 failures | Chromium 131.0.6778.33 against MySQL 8.0.46 + `php -S`, run `43632937440` (17 areas: fifteen storefront steps, twelve admin steps, mobile, security) |
 
 **Verdict of this pass: READY, with the four previously-open blockers closed.** The
 conditions that kept the project at CONDITIONALLY READY in report 16 no longer exist as
@@ -190,11 +190,15 @@ output, not `mysqldump`'s.
 
 ```bash
 # CI job: mysql:8.0 service + php -S 127.0.0.1:8080 + Playwright 1.49.1 Chromium
-php tests/browser/seed.php                  # the application's own installer path
+php -d display_errors=1 tests/browser/seed.php   # the application's own installer path
 node tests/browser/smoke.mjs
-→ Browser regression: 50 passed, 0 failed
+→ Browser regression: 105 passed, 0 failed
 → Base URL: http://127.0.0.1:8080 · Chromium 131.0.6778.33
 ```
+
+The suite is organised in seventeen areas, and each area is wrapped: an exception
+records one named failure and the run continues, so a single broken flow cannot hide the
+rest of the report.
 
 The seeded store is a real install: `schema created: 50 tables`, `storefront products: 29`,
 `categories: 7`, `active payment methods: 4`, `administrator account: 1`, two customer
@@ -202,16 +206,24 @@ accounts.
 
 | Area | What the browser proved | Status |
 |---|---|---|
-| Storefront home | 200, product cards rendered from the seeded catalogue, every `<img>` decoded (`naturalWidth > 0`), no console errors, no JS exceptions, no failed requests | PASSED |
-| Shop listing | 200, cards rendered | PASSED |
-| Product page | 200, main image decoded, thumbnails present for the seeded multi-image product, "next" changes **both** the counter and the main image; a single-image product hides the navigation | PASSED |
-| Add to cart → cart | The control exists, the cart lists the added line | PASSED |
-| Customer sign-in | The password form (scoped to the form that owns the password field) signs in and `/account.php` still knows the customer on the next request | PASSED |
-| Checkout → confirmation | The cart still holds the item, checkout renders its form and `order_token`, "Place Order" lands on `order-success.php` with an order number | PASSED |
-| Admin sign-in | Admin shell renders with its navigation | PASSED |
-| Admin guard without a session | `/admin/orders.php` shows no order data and answers with a login page or 403 | PASSED |
-| Mobile 390×844 | Home, product and cart: no horizontal overflow; header visible; no button off-screen | PASSED |
-| CSP | Zero violation reports collected from the browser on every page visited | PASSED |
+| 1. Storefront home | 200, product cards rendered from the seeded catalogue, every `<img>` decodes (`naturalWidth > 0`) | PASSED |
+| 2. Listing and search | 200 with cards; a search for a word from a real product name returns cards that contain that word | PASSED |
+| 3. Category page | The home page links to a category; that page answers 200 and lists its products | PASSED |
+| 4. Product page and gallery | 200; main image decodes; the seeded multi-image product shows thumbnails and its "next" control changes **both** the counter and the main image; a single-image product hides the navigation | PASSED |
+| 5. Add to cart and cart | The control exists, the cart lists the line, and the summary shows a subtotal | PASSED |
+| 6. Customer sign-in and session | The password form signs in; `/account.php` still knows the customer on the next request and shows their address | PASSED |
+| 7. Wishlist | The wishlist control saves the product and `/wishlist.php` lists it | PASSED |
+| 8. Checkout form | The cart survives sign-in, checkout renders its form and `order_token` | PASSED |
+| 9. Place the order | "Place Order" lands on `order-success.php` with an order number; **replaying the captured POST creates no second order** | PASSED |
+| 10. Order tracking | `/track.php` with the order number and phone finds the order and shows its status | PASSED |
+| 11. Unknown product | `/product.php?slug=…` answers **404** with a readable page, not an error page | PASSED |
+| 12. Admin sign-in | The admin shell renders with its navigation | PASSED |
+| 13. Admin dashboard and orders | Dashboard 200; orders list contains the order the browser placed; the order detail shows the customer and the item bought | PASSED |
+| 14. Admin catalogue | Products list, a product edit form with saved values, a **real save that is re-read after a reload**, categories, and the manual bKash route | PASSED |
+| 15. Admin customers and settings | The customers screen lists the seeded customer; settings shows the store name it was installed with | PASSED |
+| 16. Admin guard without a session | `/admin/orders.php` shows no order data and answers with a login page or 403 | PASSED |
+| 17. Mobile 390×844 | Home, listing, product and cart: no horizontal overflow; header visible; no button off-screen; no console errors or failed requests | PASSED |
+| CSP | Zero violation reports on every page visited, desktop and mobile | PASSED |
 | Console / requests | No console errors, no JS exceptions, no 4xx/5xx responses on any area | PASSED |
 
 Test defects this pass found and fixed — all three had produced *plausible* results:
@@ -227,7 +239,11 @@ Test defects this pass found and fixed — all three had produced *plausible* re
 3. The checkout check accepted any URL containing `checkout.php`, which includes
    `login.php?redirect=checkout.php`. It now requires the real checkout page and reports the
    landing URL, the `<h1>` and the cart count when it is not.
-4. `tests/browser/seed.php` did not `require install/demo-data.php`, so a demo install died
+4. The mobile pass counted three SVG images as "failed requests". They were cancelled by
+   navigation while lazy-loading — a `net::ERR_ABORTED` is not a broken resource, and the
+   harness was reporting its own timing. Aborted requests are now excluded and the mobile
+   pages are given a moment to settle.
+5. `tests/browser/seed.php` did not `require install/demo-data.php`, so a demo install died
    on `Call to undefined function sh_install_demo_data()`, the application printed its error
    page, and the process still exited 0 — the storefront came up empty and eight browser
    checks failed for one cause. The seed now loads the module the installer loads, catches
@@ -311,12 +327,14 @@ The blocked rows above are named individually, with what would unblock them.
 | `af02164` | 43629688406 | browser red | 29 products seeded; gallery and checkout failures |
 | `1db1c64` | 43631165563 | all four green | browser 50/0, rehearsal 23/0 |
 | `81205f7` | 43631797400 | all four green, engines named | MySQL 8.0.46, MariaDB 10.6.28, browser 50/0, rehearsal 23/0 |
+| `5ed42d2` | 43632389258 | browser red — one false positive | mobile pass counted navigation-cancelled images as failed requests |
+| `b5d4d3c` | 43632937440 | **all four green, final** | browser **105/0**, rehearsal 23/0, MySQL 8.0.46, MariaDB 10.6.28 |
 
 The two "green, wrongly" rows are kept deliberately: they are the reason the pipeline now
 runs under `pipefail` and the reason `SH_TEST_REQUIRE_ENGINE=1` exists. A report that only
 lists the final green run would hide exactly the failure mode this pass was created to fix.
 
-## 8. What is still not verified (residual, unchanged by this pass)
+## 8. What is still not verified (residual)
 
 | # | Item | Status | Why |
 |---|---|---|---|
@@ -327,16 +345,68 @@ lists the final green run would hide exactly the failure mode this pass was crea
 | 5 | Restore onto a different engine version (8.0 → 10.6) | NOT TESTED | The rehearsal restores within one server |
 | 6 | Payment proof upload in a browser | NOT TESTED in the browser | Covered at suite level by `tests/payment-security.php`; the browser run used Cash on Delivery |
 
-## 9. Verdict
+## 9. Delivery
+
+| Artefact | Path / value |
+|---|---|
+| Updated package | `dist/shophaat-complete-20261114.zip` — 2.5 MB, **387 files** (`git archive HEAD`; `dist/` is git-ignored, so this is a build output, not a commit) |
+| Phase report | `reports/17-final-four-blockers.md` (this file) |
+| Updated reports | `reports/00-INDEX.md`, `reports/03`, `reports/06`, `reports/07`, `reports/13`, `reports/14` |
+| Updated root documents | `SHOP_HAAT_PRODUCTION_READINESS_REPORT.md`, `SHOP_HAAT_REMAINING_RISKS.md`, `SHOP_HAAT_DEPLOYMENT_CHECKLIST.md` |
+| Secrets suite | `tests/secrets-migration.php` (both modes; no change to `includes/secrets.php`) |
+| MySQL suite | `tests/mysql-integration.php` — `$dbPass` fix, `SH_TEST_REQUIRE_ENGINE` |
+| Restore | `tools/restore-rehearsal.php`, `tests/restore-rehearsal.php` |
+| Browser | `tests/browser/seed.php`, `tests/browser/smoke.mjs` |
+| CI | `.github/workflows/reporting-integration.yml` — two new jobs, three new steps, honest exit codes |
+
+Files changed in this pass (`git diff --name-status 53433f5..HEAD`):
+
+```
+M  .github/workflows/reporting-integration.yml
+M  SHOP_HAAT_DEPLOYMENT_CHECKLIST.md
+M  SHOP_HAAT_PRODUCTION_READINESS_REPORT.md
+M  SHOP_HAAT_REMAINING_RISKS.md
+M  reports/00-INDEX.md
+M  reports/03-real-mysql-execution.md
+M  reports/06-restore-rehearsal.md
+M  reports/07-csp-browser-verification.md
+M  reports/13-secret-migration-write-failure.md
+M  reports/14-browser-regression.md
+A  reports/17-final-four-blockers.md
+A  tests/browser/seed.php
+A  tests/browser/smoke.mjs
+M  tests/mysql-integration.php
+A  tests/restore-rehearsal.php
+M  tests/secrets-migration.php
+M  tools/restore-rehearsal.php
+```
+
+No application file (`admin/`, `api/`, `includes/`, `install/`, storefront pages,
+`assets/`) was modified in this pass. The four blockers were verification gaps; the only
+behaviour that changed is in tests, tools and the CI workflow.
+
+Rebuild the package:
+
+```bash
+mkdir -p dist && git archive --format=zip --prefix=shophaat/ HEAD -o dist/shophaat-complete-20261114.zip
+```
+
+## 10. Verdict
 
 **READY** for the four areas this pass targeted: secrets migration, MySQL 8.0.46,
-MariaDB 10.6.28, backup→restore rehearsal, and a 50-check browser regression against a
-real database. The two dishonest greens and the false "MySQL passed" claim of report 16 are
-corrected above, and the harness that produced them can no longer produce them silently:
-`pipefail` propagates a suite's exit code, and a blocked engine on a provisioned runner
-fails the job.
+MariaDB 10.6.28, backup→restore rehearsal, and a **105-check** browser regression against a
+real database (run `43632937440`, all four CI jobs green). The two dishonest greens and the
+false "MySQL passed" claim of report 16 are corrected above, and the harness that produced
+them can no longer produce them silently: `pipefail` propagates a suite's exit code, and a
+blocked engine on a provisioned runner fails the job.
 
-R-01 (payment concurrency), R-02 (IDOR over HTTP), R-03/R-14 (engines), R-06 (restore),
-R-07 (CSP in a browser) and R-08 (browser regression) are closed or narrowed as recorded in
-`SHOP_HAAT_REMAINING_RISKS.md`. The residual list in §8 is unchanged and is not a defect
-list — it is the set of things this hardware cannot prove.
+One thing is worth saying plainly, because it is the lesson of this pass: **four of the
+seven defects found here were in tests that had been reporting success**, and every one of
+them was found by making the harness print its own evidence (a run annotation, an exit code,
+a named BLOCKED row) rather than by reading the code. The application itself needed no
+change in any of the four phases.
+
+Risk register after this pass: R-03, R-06, R-08 and R-14 are **closed**; R-01, R-02 and R-07
+are **narrowed** with the exact statement of what remains in `SHOP_HAAT_REMAINING_RISKS.md`.
+The residual list in §8 is not a defect list — it is the set of things this hardware cannot
+prove.
