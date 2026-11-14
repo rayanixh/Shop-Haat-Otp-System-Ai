@@ -385,7 +385,7 @@ function sh_schema_sql(): array
         PRIMARY KEY (id),
         KEY idx_payments_order (order_id),
         KEY idx_payments_status (status),
-        KEY idx_payments_transaction_id (transaction_id),
+        UNIQUE KEY uq_payments_transaction_id (transaction_id),
         UNIQUE KEY uq_payments_gwref (gateway_id, gateway_reference),
         CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways (id) ON DELETE SET NULL

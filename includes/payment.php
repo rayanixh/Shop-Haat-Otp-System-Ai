@@ -719,15 +719,51 @@ function sh_payment_submission_schema_ensure(): bool
             $pdo->exec('ALTER TABLE payments ADD COLUMN submission_version INT UNSIGNED NOT NULL DEFAULT 0 AFTER submitted_at');
         }
 
-        $idx = $pdo->prepare(
-            'SELECT COUNT(*) FROM information_schema.STATISTICS
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
-        );
-        $idx->execute(['payments', 'idx_payments_transaction_id']);
-        if ((int)$idx->fetchColumn() === 0) {
+        $indexExists = static function (PDO $pdo, string $name): bool {
+            $st = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+            );
+            $st->execute(['payments', $name]);
+            return (int)$st->fetchColumn() > 0;
+        };
+        $hasUnique = $indexExists($pdo, 'uq_payments_transaction_id');
+        $hasPlain = $indexExists($pdo, 'idx_payments_transaction_id');
+        if (!$hasPlain && !$hasUnique) {
             // Supports a locking duplicate-TrxID lookup; a customer can still
             // correct and resubmit their own rejected order record.
             $pdo->exec('ALTER TABLE payments ADD KEY idx_payments_transaction_id (transaction_id)');
+            $hasPlain = true;
+        }
+
+        // Promote the lookup index to a UNIQUE one when the data allows it.
+        //
+        // The duplicate check in sh_submit_manual_payment() holds a row lock on
+        // the *existing* payments rows, which cannot see a row another request is
+        // about to insert. Only a unique index closes that window, so two orders
+        // can never end up sharing one bKash/Nagad TrxID. A store that already
+        // contains duplicates keeps the application check (nothing breaks) and
+        // the retry is postponed instead of failing an ALTER on every request.
+        if (!$hasUnique) {
+            $postponed = (string)sh_setting('payment_txn_unique_retry_at', '');
+            if ($postponed === '' || strtotime($postponed) < time()) {
+                try {
+                    // '' is not a reference. Normalising it keeps historical rows
+                    // from colliding on the new constraint (NULL never does).
+                    $pdo->exec("UPDATE payments SET transaction_id = NULL WHERE transaction_id = ''");
+                    $pdo->exec('ALTER TABLE payments '
+                        . ($hasPlain ? 'DROP INDEX idx_payments_transaction_id, ' : '')
+                        . 'ADD UNIQUE KEY uq_payments_transaction_id (transaction_id)');
+                    sh_setting_save('payment_txn_unique_retry_at', '');
+                    sh_log_line('payment-schema', 'payments.transaction_id is now unique at the database level.');
+                } catch (Throwable $dupError) {
+                    // Duplicate TrxIDs already in the table. Leave a clear trace
+                    // and try again in a week; the operator fixes them with
+                    // install/migrations/2026-11-payment-transaction-unique.sql.
+                    sh_log_exception($dupError, 'payment-transaction-unique');
+                    sh_setting_save('payment_txn_unique_retry_at', date('Y-m-d H:i:s', time() + 7 * 86400));
+                }
+            }
         }
         $ok = true;
     } catch (Throwable $e) {
@@ -1151,6 +1187,15 @@ function sh_submit_manual_payment(int $orderId, string $transactionId, string $s
         }
         if ($e instanceof DomainException) {
             return ['ok' => false, 'error' => $e->getMessage()];
+        }
+        // A unique index on transaction_id (uq_payments_transaction_id) turns a
+        // simultaneous double submission into a constraint violation instead of
+        // two orders sharing one TrxID. Report it as what it is: the customer's
+        // transaction ID is already attached to another order.
+        if ($e instanceof PDOException && (string)$e->getCode() === '23000'
+            && stripos($e->getMessage(), 'uq_payments_transaction_id') !== false) {
+            sh_log_line('manual-payment', 'Blocked a duplicate TrxID by the unique index (concurrent submission).');
+            return ['ok' => false, 'error' => 'This transaction ID has already been submitted for another order.'];
         }
         sh_log_exception($e, 'manual-payment');
         return ['ok' => false, 'error' => 'Could not record your payment. Please try again.'];
