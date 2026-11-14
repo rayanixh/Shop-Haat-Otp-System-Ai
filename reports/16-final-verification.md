@@ -121,6 +121,13 @@ so the job failed at `e65b2a7` while the application was fine.
 with a real 1×1 PNG exactly at the limit, and separately asserts the write path delegates to
 that validator. `169 checks, 0 failures`.
 
+The same literal was hard-coded a second time, in `tests/product-management-behavior.mjs`
+(the jsdom suite in the same CI step), which is why the first fix alone left the job red. It now
+asserts the *facts* — the `$maxBytes > 0` guard, the `$file['size']` subject, the `> $maxBytes`
+comparison, `getimagesize()`, the dimension ceiling and `is_uploaded_file()` — instead of one
+exact spelling. Measured locally after installing `jsdom@26.1.0`:
+`Product management behavior: 27 checks, 0 failures, 16 cases`.
+
 ### D-16-4 · No executable MySQL/MariaDB suite existed
 
 Report 03 described the staging procedure in prose. `tests/mysql-integration.php` now runs it:

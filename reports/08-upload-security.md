@@ -107,4 +107,10 @@ replaced with the thing it was trying to describe:
   validator (`$checked = sh_upload_validate_image($file, $maxBytes, $maxDim)`), so no future
   refactor can bypass the check silently.
 
-Result: `Product management integration: 169 checks, 0 failures, 16 cases`.
+The identical literal was also pinned in `tests/product-management-behavior.mjs`, the jsdom
+half of the same CI step, so fixing only the PHP suite left the build red. It now asserts the
+facts (the `$maxBytes > 0` guard, `$file['size']`, `> $maxBytes`, `getimagesize()`, the
+dimension ceiling, `is_uploaded_file()`) rather than one spelling of them.
+
+Result: `Product management integration: 169 checks, 0 failures, 16 cases` and
+`Product management behavior: 27 checks, 0 failures, 16 cases`.

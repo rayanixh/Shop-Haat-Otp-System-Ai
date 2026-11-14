@@ -230,9 +230,18 @@ try {
   });
   await check('P05', 'production validator checks bytes, real MIME and dimensions', () => {
     const functions = src('includes/functions.php');
-    assert.match(functions, /\$file\['size'\] > \$maxBytes/);
+    // Assert the FACTS, not one exact expression: the size check may be written
+    // as `$file['size'] > $maxBytes`, `(int)($file['size'] ?? 0) > $maxBytes`, or
+    // through a helper, and pinning the literal turns a harmless refactor into a
+    // red build (which is exactly what happened once). The behavioural proof that
+    // the limit actually rejects a file lives in tests/product-management-
+    // integration.php, which calls the validator with an oversize upload.
+    assert.match(functions, /\$maxBytes\s*>\s*0/);
+    assert.match(functions, /\$file\['size'\]/);
+    assert.match(functions, />\s*\$maxBytes/);
     assert.match(functions, /getimagesize\(\$file\['tmp_name'\]\)/);
     assert.match(functions, /\$info\[0\] > \$maxDim \|\| \$info\[1\] > \$maxDim/);
+    assert.match(functions, /is_uploaded_file\(\$file\['tmp_name'\]\)/);
     assert.match(src('includes/product-catalog.php'), /SH_PRODUCT_MAX_IMAGE_BYTES/);
   });
 
