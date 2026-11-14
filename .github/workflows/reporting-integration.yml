@@ -70,6 +70,17 @@ jobs:
         env:
           SH_TEST_PHP_BIN: php
         run: php tests/cron-cli-auth.php
+      # The "move the OTP pepper out of the database" button. The first run is a
+      # normal account, so every permission check really executes; the second
+      # simulates a root-like host (where chmod 0555 does not deny a write) and
+      # proves the suite reports those checks BLOCKED by name instead of failing.
+      # Both must exit 0 — a blocked check is neither a pass nor a failure.
+      - name: Secret migration (permission-enforcing account)
+        run: php tests/secrets-migration.php
+      - name: "Secret migration (root-like host: BLOCKED classification)"
+        env:
+          SH_TEST_ASSUME_NO_PERM_ENFORCEMENT: '1'
+        run: php tests/secrets-migration.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -309,3 +320,141 @@ jobs:
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
         run: php tests/mysql-integration.php
+      # The rehearsal this project has never been able to run: the application
+      # creates a real backup of the disposable store, the tool imports it into a
+      # NEW scratch database, verifies tables/indexes/relationships/settings and a
+      # representative order, points the application at the restored copy and asks
+      # it to read the data, then drops the scratch database. The scratch database
+      # is created by root because the application account is granted its own
+      # database only — as on shared hosting. The refusal matrix (missing dump,
+      # empty dump, a .gz that is not gzip, a dump with no tables, a production
+      # name, the live name) runs in the same suite.
+      - name: Backup to restore rehearsal against a scratch database
+        env:
+          SH_TEST_PHP_BIN: php
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ROOT_USER: root
+          SH_TEST_MYSQL_ROOT_PASS: root_test_password
+        run: php tests/restore-rehearsal.php
+
+  # ========================================================================
+  # MariaDB is a different engine, not a different version of MySQL:
+  # information_schema details, index limits, NOWAIT support and duplicate-key
+  # behaviour after a rollback all differ. cPanel hosts ship either one, so the
+  # same eleven-scenario suite runs here against MariaDB 10.6.
+  # ========================================================================
+  mariadb-integration:
+    name: MariaDB 10.6 engine suite
+    needs: security-regression
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_DATABASE: shophaat_staging_test
+          MARIADB_USER: shophaat_test
+          MARIADB_PASSWORD: shophaat_test_password
+          MARIADB_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml
+      # Same suite, different engine: fresh install of all 50 tables, the
+      # upgrade path from a pre-migration store, the unique TrxID index (and the
+      # duplicate-history case that must postpone the ALTER), rollback, row
+      # locking, OTP replay/expiry, order ownership, notification idempotency and
+      # backup metadata. The engine and version are printed in the output, so a
+      # MariaDB result can never be quoted as a MySQL result or the reverse.
+      - name: MariaDB engine suite (schema, migration, locking, idempotency)
+        env:
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_staging_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ALLOW_DROP: '1'
+        run: php tests/mysql-integration.php
+
+  # ========================================================================
+  # The only environment in this project that has a real browser, a real web
+  # server and a real database at the same time. Chromium (Playwright) drives the
+  # storefront and the admin panel against `php -S` and a disposable MySQL store
+  # seeded through the application's own installer path.
+  #
+  # It checks what only a browser can: console errors, JavaScript exceptions,
+  # failed requests, CSP violation reports, whether gallery images really decode
+  # (naturalWidth > 0), whether the gallery controls actually change state, and
+  # horizontal overflow at a 390x844 phone viewport. Screenshots of each flow are
+  # uploaded as an artifact.
+  # ========================================================================
+  browser-regression:
+    name: Real browser regression (Chromium, MySQL, php -S)
+    needs: security-regression
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: shophaat_browser_test
+          MYSQL_USER: shophaat_test
+          MYSQL_PASSWORD: shophaat_test_password
+          MYSQL_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml, fileinfo, gd, curl
+      - name: Point the checkout at the disposable database
+        run: |
+          php -r 'file_put_contents("config/database.php", "<?php\nreturn " . var_export([            "host" => "127.0.0.1", "port" => 3306, "name" => "shophaat_browser_test",            "user" => "shophaat_test", "pass" => "shophaat_test_password",            "charset" => "utf8mb4"], true) . ";\n");'
+          php -l config/database.php
+      - name: Seed the store through the application installer path
+        env:
+          SH_BROWSER_SEED: '1'
+          SH_BROWSER_HOST: 127.0.0.1:8080
+        run: php tests/browser/seed.php
+      - name: Start the PHP web server
+        run: |
+          php -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/index.php >/tmp/home.html; then break; fi
+            sleep 1
+          done
+          head -c 300 /tmp/home.html; echo
+          ! grep -qi "fatal error\|uncaught" /tmp/home.html
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Browser regression (storefront, admin, mobile, CSP)
+        env:
+          SH_BROWSER_BASE_URL: http://127.0.0.1:8080
+          SH_BROWSER_ADMIN_PASSWORD: AdminTest!2026
+          SH_BROWSER_CUSTOMER_PASSWORD: Customer!2026
+        run: node tests/browser/smoke.mjs
+      - name: Upload screenshots and the PHP server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-artifacts
+          path: |
+            tests/browser/artifacts/
+            /tmp/php-server.log
+          if-no-files-found: warn

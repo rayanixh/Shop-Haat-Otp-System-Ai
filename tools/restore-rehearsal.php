@@ -57,8 +57,40 @@ $blocked = static function (string $why, string $how): void {
     exit(3);
 };
 
+$createBackup = $flag('create-backup');
 $dump = $opt('dump');
-if ($dump === '') { $refuse('--dump=FILE is required (the backup you want to rehearse).'); }
+if ($createBackup) {
+    // Phase 1 of the rehearsal as the checklist describes it: make a NEW backup
+    // from the store this checkout is installed against, then restore that. It
+    // must be an installed, disposable store — the app itself is asked to dump it.
+    $cfgFile = $root . '/config/database.php';
+    if (!is_file($cfgFile)) {
+        fwrite(STDERR, "REFUSED: --create-backup needs an installed checkout (config/database.php is missing).\n");
+        exit(2);
+    }
+    require_once $root . '/config/config.php';
+    require_once $root . '/includes/admin-tools.php';
+    $state = sh_db_state();
+    if (($state['status'] ?? '') !== 'ok') {
+        fwrite(STDERR, 'REFUSED: --create-backup needs a working database connection; state is '
+            . (string)($state['status'] ?? 'unknown') . ".\n");
+        exit(2);
+    }
+    $appDb = (string)(sh_db_config()['name'] ?? '');
+    if (preg_match('~(test|staging|scratch|ci|sandbox)~i', $appDb) !== 1) {
+        fwrite(STDERR, "REFUSED: --create-backup would dump \"{$appDb}\", which is not named like a test/staging database.\n");
+        exit(2);
+    }
+    sh_admin_schema_ensure();
+    $made = sh_backup_create('restore-rehearsal', 'rehearsal');
+    if (empty($made['ok'])) {
+        fwrite(STDERR, 'REFUSED: the backup could not be created: ' . (string)($made['error'] ?? 'unknown error') . "\n");
+        exit(2);
+    }
+    $dump = sh_backup_dir() . '/' . (string)$made['file'];
+    echo "created backup : {$dump}\n";
+}
+if ($dump === '') { $refuse('--dump=FILE (or --create-backup) is required — name the backup you want to rehearse.'); }
 if (!is_file($dump)) { $refuse("the dump file does not exist: {$dump}"); }
 if (!is_readable($dump)) { $refuse("the dump file is not readable: {$dump}"); }
 
@@ -124,7 +156,9 @@ if ($gzip) {
     $readable = $text !== '';
     $say($readable ? 'PASS' : 'FAIL', 'the file is readable');
 }
-if (!$readable) { exit(1 + ($fail > 0 ? 0 : 0)); }
+// Do not exit here: an empty or unreadable file still needs the same summary
+// line, otherwise a scripted caller sees a silent non-zero exit.
+if (!$readable) { $say('FAIL', 'the dump is empty or unreadable'); }
 
 $body = $gzip ? sh_gz_text($dump) : (string)file_get_contents($dump);
 $say(str_contains($body, 'CREATE TABLE') ? 'PASS' : 'FAIL', 'the dump contains CREATE TABLE statements');
@@ -195,8 +229,10 @@ $say(is_array($idx) && (int)$idx['NON_UNIQUE'] === 0 ? 'PASS' : 'FAIL', 'payment
 $count = static function (PDO $pdo, string $table): int {
     try { return (int)$pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn(); } catch (Throwable $e) { return -1; }
 };
+$productsRestored = 0;
 foreach (['settings', 'orders', 'products', 'users'] as $table) {
     $n = $count($pdo, $table);
+    if ($table === 'products') { $productsRestored = max(0, $n); }
     $say($n >= 0 ? 'PASS' : 'FAIL', "{$table}: " . ($n >= 0 ? $n . ' rows' : 'cannot be read'));
 }
 $settings = $count($pdo, 'settings');
@@ -221,8 +257,59 @@ if (is_array($sample)) {
 $orphans = (int)$pdo->query('SELECT COUNT(*) FROM order_items i LEFT JOIN orders o ON o.id = i.order_id WHERE o.id IS NULL')->fetchColumn();
 $say($orphans === 0 ? 'PASS' : 'FAIL', 'no order items point at a missing order (' . $orphans . ' orphans)');
 
-/* --- 5. How to check the application against the copy -------------------- */
+/* --- 5. The application itself reads the restored database --------------- */
 echo "\n5. Application access\n";
+if ($flag('app-check')) {
+    // Point THIS checkout at the restored copy for one command and ask the
+    // application's own bootstrap a real question. The original configuration is
+    // restored in a shutdown handler, so an interrupted run cannot leave the
+    // checkout pointing somewhere else.
+    $dbCfgFile = $root . '/config/database.php';
+    $original = is_file($dbCfgFile) ? (string)file_get_contents($dbCfgFile) : null;
+    $restore = static function () use ($dbCfgFile, $original): void {
+        if ($original !== null) { @file_put_contents($dbCfgFile, $original); }
+        else { @unlink($dbCfgFile); }
+    };
+    register_shutdown_function($restore);
+    $appCfg = "<?php\n// Written by tools/restore-rehearsal.php --app-check; removed automatically.\nreturn "
+        . var_export([
+            'host' => $host, 'port' => $port, 'name' => $scratch, 'user' => $user,
+            'pass' => $pass, 'charset' => 'utf8mb4',
+        ], true) . ";\n";
+    if (@file_put_contents($dbCfgFile, $appCfg) === false) {
+        $say('BLOCKED', 'the application check could not write config/database.php');
+    } else {
+        $probe = tempnam(sys_get_temp_dir(), 'sh-app-check-');
+        $rootPath = var_export($root, true);
+        file_put_contents($probe, "<?php\n"
+            . "\$_SERVER['SCRIPT_NAME'] = '/index.php';\n\$_SERVER['HTTP_HOST'] = 'localhost';\n"
+            . "require_once {$rootPath} . '/config/config.php';\n"
+            . "require_once SH_ROOT . '/includes/db.php';\n"
+            . "\$pdo = sh_db();\n"
+            . "\$out = ['products' => (int)sh_val('SELECT COUNT(*) FROM products'),\n"
+            . "        'orders' => (int)sh_val('SELECT COUNT(*) FROM orders'),\n"
+            . "        'settings' => (int)sh_val('SELECT COUNT(*) FROM settings'),\n"
+            . "        'site_name_type' => gettype(sh_setting('site_name', ''))];\n"
+            . "echo json_encode(\$out);\n");
+        $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg((string)$probe) . ' 2>&1';
+        $json = trim((string)@shell_exec($cmd));
+        @unlink((string)$probe);
+        $data = json_decode($json, true);
+        $restore();
+        if (is_array($data)) {
+            $say('PASS', 'the application bootstrapped against the restored database '
+                . '(products ' . $data['products'] . ', orders ' . $data['orders']
+                . ', settings ' . $data['settings'] . ', sh_setting() returns ' . $data['site_name_type'] . ')');
+            $say($data['products'] === $productsRestored ? 'PASS' : 'FAIL',
+                'the application sees the same product count as the restore check (' . $productsRestored . ')');
+        } else {
+            $say('FAIL', 'the application could not read the restored database: ' . substr($json, 0, 300));
+        }
+    }
+} else {
+    $say('NOT TESTED', 'application bootstrap against the restored copy (pass --app-check to run it)');
+}
+
 echo "  The database itself is verified above. To confirm the APP can use it, copy this\n"
     . "  checkout to a staging directory and point ONLY that copy at the restored database:\n\n"
     . "    cp -a " . escapeshellarg($root) . " /path/to/staging-copy\n"
@@ -233,6 +320,10 @@ echo "  The database itself is verified above. To confirm the APP can use it, co
 $say('NOT TESTED', 'a browser/HTTP run against the restored copy (needs a web server and a staging copy)');
 
 /* --- 6. Clean up ---------------------------------------------------------- */
+if ($createBackup && !$flag('keep-backup') && is_file($dump)) {
+    @unlink($dump);
+    echo "\nRemoved the backup this run generated (" . basename($dump) . ").\n";
+}
 if ($flag('keep')) {
     echo "\nKept {$scratch} for inspection (--keep).\n";
 } else {
