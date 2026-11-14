@@ -194,17 +194,21 @@ try {
   console.log('\n5. Customer sign-in');
   errors = await watch(page);
   await page.goto(BASE + '/login.php', { waitUntil: 'domcontentloaded' });
-  await page.fill('input[name="email"]', CUSTOMER.email);
-  await page.fill('input[name="password"]', CUSTOMER.password);
+  // Scope everything to the form that owns the password field. The first submit
+  // button on the page belongs to the header search box, and clicking that
+  // "signs in" to a products page with no session at all.
+  const loginForm = page.locator('form:has(input[name="password"])').first();
+  await loginForm.locator('input[name="email"]').fill(CUSTOMER.email);
+  await loginForm.locator('input[name="password"]').fill(CUSTOMER.password);
   await Promise.all([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-    page.locator('form button[type="submit"], form input[type="submit"]').first().click(),
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
+    loginForm.locator('button[type="submit"], input[type="submit"]').first().click(),
   ]);
   const afterLogin = page.url();
   const passwordField = await page.locator('input[name="password"]').count();
   check('a customer can sign in with email and password',
     !/\/login\.php/.test(afterLogin) && passwordField === 0,
-    `${afterLogin.replace(BASE, '')} · password field ${passwordField}`);
+    `landed on ${afterLogin.replace(BASE, '')} · password field ${passwordField}`);
   // The sign-in only counts when a second request still knows the customer: a
   // landing page that is not the login form can still be a verification gate
   // that created no session at all.
@@ -274,11 +278,12 @@ try {
   const admin = await adminCtx.newPage();
   const adminErrors = await watch(admin);
   await admin.goto(BASE + '/admin/login.php', { waitUntil: 'domcontentloaded' });
-  await admin.fill('input[name="email"]', ADMIN.email);
-  await admin.fill('input[name="password"]', ADMIN.password);
+  const adminForm = admin.locator('form:has(input[name="password"])').first();
+  await adminForm.locator('input[name="email"]').fill(ADMIN.email);
+  await adminForm.locator('input[name="password"]').fill(ADMIN.password);
   await Promise.all([
     admin.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
-    admin.locator('form button[type="submit"]').first().click(),
+    adminForm.locator('button[type="submit"], input[type="submit"]').first().click(),
   ]);
   const adminUrl = admin.url();
   check('an administrator can sign in', !adminUrl.includes('/admin/login.php'), adminUrl.replace(BASE, ''));
