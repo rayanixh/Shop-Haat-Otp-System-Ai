@@ -546,7 +546,7 @@ button, input { font: inherit; color: inherit; }
 .sprite { position: absolute; width: 0; height: 0; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
-  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 .ico { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .ico--sm { width: 13px; height: 13px; }
@@ -741,6 +741,7 @@ button, input { font: inherit; color: inherit; }
   .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .field-grid { grid-template-columns: 1fr; }
+  .opt-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .req { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; column-gap: 10px; }

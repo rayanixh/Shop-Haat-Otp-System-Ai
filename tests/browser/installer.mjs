@@ -142,6 +142,8 @@ async function phoneMatrix(browser, label, pathFor = () => '/install/') {
       return bad.slice(0, 5);
     });
     check(`${label} @${width}px: no label is squeezed into a sliver`, squeezed.length === 0, squeezed.join(' | '));
+    const optCols = await page.$eval('.opt-grid', (el) => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);
+    check(`${label} @${width}px: the optional extensions are a single column`, optCols === 1, `${optCols} column(s)`);
     await snap(page, `installer-${label}-${width}px`);
     await page.close();
   }
@@ -183,12 +185,18 @@ async function phaseFresh(browser) {
     const meta = (await page.textContent('.progress__meta') || '').replace(/\s+/g, ' ');
     check('the progress line names the current step', /Step 2 of 4 . Database configuration/.test(meta), meta.slice(0, 80));
 
-    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => ({
-      name: el.querySelector('.req__name').textContent.trim(),
-      value: el.querySelector('.req__value').textContent.trim(),
-      badge: el.querySelector('.req__badge').textContent.trim(),
-      badgeCls: el.querySelector('.req__badge').className,
-    })));
+    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => {
+      // The threshold that sits inside the name cell ("8.1 or newer") is not
+      // part of the name itself.
+      const name = el.querySelector('.req__name').cloneNode(true);
+      name.querySelectorAll('.req__need').forEach((node) => node.remove());
+      return {
+        name: name.textContent.trim(),
+        value: el.querySelector('.req__value').textContent.trim(),
+        badge: el.querySelector('.req__badge').textContent.trim(),
+        badgeCls: el.querySelector('.req__badge').className,
+      };
+    }));
     check('all seven required checks are listed', rows.length === 7, rows.map((r) => r.name).join(', '));
     check('the seven required checks are the documented ones', JSON.stringify(rows.map((r) => r.name)) === JSON.stringify(REQUIRED_NAMES),
       rows.map((r) => r.name).join(' | '));
@@ -255,6 +263,9 @@ async function phaseFresh(browser) {
     const inlineStyles = await page.$$eval('[style]', (els) => els.map((el) => el.tagName.toLowerCase()));
     check('only the dynamic progress width is an inline style', inlineStyles.length === 1 && inlineStyles[0] === 'div',
       `${inlineStyles.length}: ${inlineStyles.slice(0, 5).join(', ')}`);
+    const css = await page.$eval('style', (el) => el.textContent || '');
+    check('the stylesheet never hides content with overflow:hidden', !/overflow\s*:\s*hidden/i.test(css),
+      (css.match(/overflow\s*:\s*hidden[^;]*/i) || [''])[0]);
     const html = await page.content();
     check('no server path leaks into the page', !/\/home\/[a-z]|\/var\/www|C:\\\\inetpub/.test(html),
       (html.match(/\/home\/[a-z]|\/var\/www/g) || []).slice(0, 2).join(', '));
