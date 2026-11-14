@@ -59,3 +59,6 @@ vendor/
 
 # build artefacts (release ZIP)
 dist/
+
+# browser regression output: screenshots and the seed's state file
+tests/browser/artifacts/
