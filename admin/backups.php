@@ -19,12 +19,18 @@ if ($dl > 0) {
         sh_flash('error', 'That backup file is no longer available.'); sh_redirect('admin/backups.php');
     }
     sh_audit('backup_downloaded', 'backup', (int)$b['id'], (string)$b['file_name']);
+    // Lease the file so retention cannot delete it mid-transfer.
+    sh_backup_lease_start((int)$b['id']);
     header('Content-Type: application/octet-stream');
     header('Content-Disposition: attachment; filename="' . basename($path) . '"');
     header('Content-Length: ' . (string)filesize($path));
     header('X-Content-Type-Options: nosniff');
     while (ob_get_level()) { ob_end_clean(); }
-    readfile($path);
+    try {
+        readfile($path);
+    } finally {
+        sh_backup_lease_end((int)$b['id']);
+    }
     exit;
 }
 
@@ -103,9 +109,13 @@ require __DIR__ . '/_layout.php';
       <?php if ($schedule !== 'off'): ?>
         <div class="sh-form__hint" style="margin-top:12px">
           <?php if ($cronUrl !== ''): ?>
-            Add a cron job in your hosting panel (cPanel → Cron Jobs) that opens this URL once per day:<br>
-            <code class="sh-code-wrap"><?= e($cronUrl) ?></code><br>
-            Example command: <code class="sh-code-wrap">wget -q -O /dev/null "<?= e($cronUrl) ?>"</code><br>
+            Add a cron job in your hosting panel (cPanel → Cron Jobs). Both forms work:<br>
+            <strong>HTTP:</strong> <code class="sh-code-wrap">wget -q -O /dev/null "<?= e($cronUrl) ?>"</code><br>
+            <strong>PHP CLI</strong> (no web request, recommended on cPanel):
+            <code class="sh-code-wrap">php <?= e(SH_ROOT) ?>/cron/backup.php --token=YOUR_TOKEN</code><br>
+            <span class="sh-form__hint">PHP does not fill <code>$_GET</code> from a command line, so the CLI form needs
+            <code>--token=…</code> or the <code>SH_BACKUP_CRON_TOKEN</code> environment variable. The token is shown
+            only here; treat it like a password.</span><br>
             If your hosting does not provide cron, the schedule still runs when an admin opens the dashboard after the backup becomes due.
           <?php endif; ?>
           <?php if ($lastAuto !== ''): ?><br>Last automatic backup: <?= e(date('d M Y H:i', strtotime($lastAuto))) ?><?php endif; ?>

@@ -53,3 +53,6 @@ Thumbs.db
 # Build/dependency artifacts (this project needs neither).
 node_modules/
 vendor/
+
+# local PHP/npm test harness (not part of the app)
+.tmpharness/

@@ -109,9 +109,21 @@ never reset during that window.
 
 ## 9. Cron
 
-- [ ] Add the scheduled backup call from cPanel → Cron Jobs:
-      `php /home/USER/public_html/cron/backup.php?token=YOUR_TOKEN`
-      (token visible on Admin → Backups).
+- [ ] Add the scheduled backup call from cPanel → Cron Jobs. Use **one** of:
+
+      ```bash
+      # PHP CLI (recommended: no web request, no token in a URL)
+      php /home/USER/public_html/cron/backup.php --token=YOUR_TOKEN
+
+      # or, if your host prefers an HTTP call
+      wget -q -O /dev/null "https://your-domain/cron/backup.php?token=YOUR_TOKEN"
+      ```
+
+      `YOUR_TOKEN` is shown on Admin → Backups. **PHP does not read a query
+      string from the command line**, so `php cron/backup.php?token=…` never
+      authenticates — use `--token=…` or the `SH_BACKUP_CRON_TOKEN` environment
+      variable. Setting the token in `config/secrets.php`
+      (`'backup_cron_token' => '…'`) keeps it out of the database as well.
 - [ ] Confirm one run produced a file in Admin → Backups.
 
 ## 10. Post-deploy verification
