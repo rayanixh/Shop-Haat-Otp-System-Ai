@@ -81,7 +81,7 @@ require __DIR__ . '/_layout.php';
     <div class="sh-panel__head"><span class="sh-formcard__note"><?= (int)count($rows) ?> gateway<?= count($rows) === 1 ? '' : 's' ?> registered</span></div>
     <div class="sh-tablewrap sh-tablewrap--cards">
       <table class="sh-table">
-        <thead><tr><th>Gateway</th><th>Driver</th><th>Mode</th><th>Verification</th><th>Status</th><th data-label="" style="text-align:right">Actions</th></tr></thead>
+        <thead><tr><th>Gateway</th><th>Driver</th><th>Mode</th><th>Verification</th><th>Status</th><th data-label="">Actions</th></tr></thead>
         <tbody>
         <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="6">No gateways registered yet.</td></tr>
         <?php else: foreach ($rows as $g):

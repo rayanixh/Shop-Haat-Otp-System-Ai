@@ -197,7 +197,7 @@ $listQuery = sh_admin_keep_query(['edit', 'new']);
 <div class="sh-panel">
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
-      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?>
         <tr class="sh-table--empty"><td colspan="6">No products match these filters.</td></tr>

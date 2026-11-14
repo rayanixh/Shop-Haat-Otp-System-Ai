@@ -232,7 +232,7 @@ $otherRows = array_values(array_filter($rows, static fn($c) => !isset($providers
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
-      <thead><tr><th>Courier</th><th>Driver</th><th>Status</th><th>Tracking</th><th style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>Courier</th><th>Driver</th><th>Status</th><th>Tracking</th><th>Actions</th></tr></thead>
       <tbody>
       <?php if (!$otherRows): ?>
         <tr class="sh-table--empty"><td colspan="5">

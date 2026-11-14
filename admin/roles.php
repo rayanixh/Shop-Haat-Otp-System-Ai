@@ -76,7 +76,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
-      <thead><tr><th>Role</th><th>Permissions</th><th>Admins</th><th data-label="" style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>Role</th><th>Permissions</th><th>Admins</th><th data-label="">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($roles as $r): $isSystem = (int)$r['is_system'] === 1; $n = $isSystem ? count(sh_perms_all()) : count(sh_role_permissions($r)); ?>
         <tr>

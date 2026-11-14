@@ -354,14 +354,30 @@ require __DIR__ . '/_layout.php';
           <?php endif; ?>
         </div>
         <div class="sh-field">
-          <label class="sh-field__label">Product images</label>
           <div class="sh-pg" data-product-gallery-editor>
-            <div class="sh-pg__head"><strong>Gallery</strong><span class="sh-pg__count" data-pg-count><?= count($renderRows) ?> / <?= SH_PRODUCT_MAX_IMAGES ?> images</span></div>
-            <p class="sh-pg__hint">Upload 1–<?= SH_PRODUCT_MAX_IMAGES ?> real photos. The first image is primary; use the arrows to reorder. JPG, PNG, WebP or GIF, maximum <?= e(sh_bytes_label($galleryMaxBytes)) ?> each. Previews keep their own proportions.</p>
-            <div class="sh-pg__grid" data-pg-grid>
+            <div class="sh-pg__head">
+              <div class="sh-pg__heading">
+                <strong id="p-images-label">Product Images</strong>
+                <span class="sh-pg__count" data-pg-count><?= count($renderRows) ?> / <?= SH_PRODUCT_MAX_IMAGES ?> images</span>
+              </div>
+              <span class="sh-pg__limits">JPG, PNG, WebP or GIF · max <?= e(sh_bytes_label($galleryMaxBytes)) ?> each</span>
+            </div>
+            <div class="sh-pg__drop" data-pg-input-wrap>
+              <label class="sh-pg__dropzone">
+                <span class="sh-pg__dropicon" aria-hidden="true"><?= sh_icon('upload', 19) ?></span>
+                <span class="sh-pg__droptext">
+                  <strong data-pg-drop-title>Add images</strong>
+                  <small data-pg-drop-sub>Upload 1–<?= SH_PRODUCT_MAX_IMAGES ?> real photos. New previews appear before you save.</small>
+                </span>
+                <span class="sh-pg__dropbtn"><?= sh_icon('image', 14) ?> Browse files</span>
+                <input class="sh-pg__input" type="file" name="images[]" multiple data-pg-input
+                       accept="image/jpeg,image/png,image/webp,image/gif" aria-labelledby="p-images-label">
+              </label>
+            </div>
+            <div class="sh-pg__grid" data-pg-grid role="list" aria-label="Product image previews">
               <?php foreach ($renderRows as $i => $row): ?>
                 <?php $rid = (int)$row['id']; $removed = in_array($rid, $postedRemove, true); ?>
-                <div class="sh-pg__tile <?= $i === 0 ? 'is-primary' : '' ?><?= $removed ? ' is-removed' : '' ?>" data-pg-tile="existing" data-pg-token="e:<?= $rid ?>">
+                <div class="sh-pg__tile <?= $i === 0 ? 'is-primary' : '' ?><?= $removed ? ' is-removed' : '' ?>" data-pg-tile="existing" data-pg-token="e:<?= $rid ?>" role="listitem">
                   <span class="sh-pg__primary" data-pg-primary <?= $i === 0 ? '' : 'hidden' ?>>PRIMARY</span>
                   <div class="sh-pg__preview">
                     <?php if ($row['url'] !== ''): ?>
@@ -370,25 +386,23 @@ require __DIR__ . '/_layout.php';
                       <span class="sh-pg__hint">Image file missing</span>
                     <?php endif; ?>
                   </div>
-                  <input type="hidden" name="image_row[]" value="e:<?= $rid ?>" data-pg-token>
+                  <input type="hidden" name="image_row[]" value="e:<?= $rid ?>">
                   <div class="sh-pg__actions">
                     <button class="sh-pg__btn" type="button" data-pg-move="-1" aria-label="Move image <?= $i + 1 ?> earlier">←</button>
                     <button class="sh-pg__btn" type="button" data-pg-move="1" aria-label="Move image <?= $i + 1 ?> later">→</button>
                     <button class="sh-pg__btn sh-pg__btn--danger" type="button" data-pg-remove-btn aria-pressed="<?= $removed ? 'true' : 'false' ?>"><?= $removed ? 'Undo' : 'Remove' ?></button>
+                    <label class="sh-pg__replace" title="Replace this image">
+                      <?= sh_icon('refresh', 12) ?> Replace
+                      <input class="sh-pg__file" type="file" name="image_replace[<?= $rid ?>]" data-pg-replace
+                             accept="image/jpeg,image/png,image/webp,image/gif" aria-label="Replace saved image <?= $i + 1 ?>" <?= $removed ? 'disabled' : '' ?>>
+                    </label>
                     <input class="sh-pg__remove-label" type="checkbox" name="image_remove[<?= $rid ?>]" value="1" data-pg-remove <?= $removed ? 'checked' : '' ?>>
                   </div>
-                  <label class="sh-pg__hint">Replace
-                    <input class="sh-pg__file" type="file" name="image_replace[<?= $rid ?>]" data-pg-replace accept="image/jpeg,image/png,image/webp,image/gif" <?= $removed ? 'disabled' : '' ?>>
-                  </label>
                   <div class="sh-pg__removed">Will be removed</div>
                 </div>
               <?php endforeach; ?>
-              <div class="sh-pg__new" data-pg-input-wrap>
-                <label class="sh-field__label" for="p-images">Add images</label>
-                <input id="p-images" type="file" name="images[]" multiple data-pg-input accept="image/jpeg,image/png,image/webp,image/gif">
-                <span class="sh-pg__hint">Choose up to <?= SH_PRODUCT_MAX_IMAGES ?> images in total. New previews appear before you save.</span>
-              </div>
             </div>
+            <p class="sh-pg__note"><?= sh_icon('info', 13) ?> The first image is the primary image shown in listings. Use ← → to reorder.</p>
             <p class="sh-pg__error" data-pg-error hidden></p>
           </div>
         </div>

@@ -1521,11 +1521,16 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 /* The action bar under the top bar. The page title is rendered once by the
    layout (admin/_layout.php prints $adminTitle as the top bar's <h1>), so this
    row holds only a one-line note and the actions for the screen. */
-.sh-pagehead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-.sh-pagehead__desc { min-width: 0; flex: 1 1 260px; font-size: 13px; color: var(--sh-muted); max-width: 88ch; line-height: 1.5; }
-.sh-pagehead__actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* The action bar is a left-aligned toolbar. Screen actions (create, export,
+   back) start at the left edge of the content column instead of floating to
+   the far right and leaving an empty gap. Right-alignment is kept only where
+   a layout genuinely calls for it (see the intentional-exceptions note). */
+.sh-pagehead { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; margin-bottom: 14px; }
+.sh-pagehead__desc { min-width: 0; max-width: 88ch; font-size: 13px; color: var(--sh-muted); line-height: 1.5; }
+.sh-pagehead__actions { margin-left: 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; max-width: 100%; }
+.sh-pagehead__actions > * { min-width: 0; }
 @media (max-width: 640px) {
-  .sh-pagehead__actions { margin-left: 0; width: 100%; }
+  .sh-pagehead__actions { width: 100%; }
   .sh-pagehead__actions > * { flex: 1 1 auto; }
 }
 
@@ -1589,8 +1594,31 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-filterbar--top .sh-btn { flex: 0 0 auto; }
 @media (max-width: 640px) { .sh-filterbar--top .sh-field { min-width: 0; flex: 1 1 100%; } }
 
-/* On phones the records table becomes one card per row. The header row is
-   hidden and each cell shows the label held in data-label. */
+/* A records table becomes one card per row when there is genuinely no room for
+   its columns. The decision is made from the space the table actually has (its
+   own container), not the viewport: the admin sidebar appears at 1025px, so a
+   viewport breakpoint alone would leave a 9-12 column table crushed into ~790px.
+   The header row is hidden and each cell shows the label held in data-label. */
+.sh-tablewrap--cards { container-type: inline-size; }
+
+@container (max-width: 960px) {
+  .sh-tablewrap--cards .sh-table { min-width: 0; }
+  .sh-tablewrap--cards .sh-table thead { display: none; }
+  .sh-tablewrap--cards .sh-table tbody tr {
+    display: block; border: 1px solid var(--sh-line); border-radius: 8px; margin-bottom: 10px;
+    padding: 6px 10px; background: #fff;
+  }
+  .sh-tablewrap--cards .sh-table td {
+    display: flex; align-items: flex-start; gap: 10px; border-bottom: 0; padding: 6px 0;
+  }
+  .sh-tablewrap--cards .sh-table td::before {
+    content: attr(data-label); flex: 0 0 92px; font-size: 11.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .4px; color: var(--sh-muted); padding-top: 2px;
+  }
+  .sh-tablewrap--cards .sh-table td[data-label=""]::before { display: none; }
+  .sh-tablewrap--cards .sh-table__actions { justify-content: flex-start; width: 100%; }
+}
+/* Fallback for browsers without container queries: phones only. */
 @media (max-width: 760px) {
   .sh-tablewrap--cards .sh-table { min-width: 0; }
   .sh-tablewrap--cards .sh-table thead { display: none; }
@@ -1606,7 +1634,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
     text-transform: uppercase; letter-spacing: .4px; color: var(--sh-muted); padding-top: 2px;
   }
   .sh-tablewrap--cards .sh-table td[data-label=""]::before { display: none; }
-  .sh-tablewrap--cards .sh-table__actions { justify-content: flex-end; width: 100%; }
+  .sh-tablewrap--cards .sh-table__actions { justify-content: flex-start; width: 100%; }
 }
 /* Category image editor: preview on the left, upload controls on the right. */
 .sh-catimage { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -1781,7 +1809,10 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-panel__title { font-size: 14.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   min-width: 0; overflow-wrap: break-word; }
 .sh-panel__title svg { flex: 0 0 auto; }
-.sh-panel__actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* Panel actions sit beside the panel title, left to right, instead of being
+   pushed to the panel's right edge. They wrap onto their own line when the
+   title and the buttons cannot share one. */
+.sh-panel__actions { margin-left: 0; display: flex; gap: 8px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .sh-panel__body { padding: 15px; }
 .sh-panel__note { font-size: 12.5px; color: var(--sh-muted); line-height: 1.65; }
 
@@ -1797,7 +1828,15 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-table__cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sh-table__name { font-weight: 600; color: var(--sh-ink); line-height: 1.35; }
 .sh-table__meta { white-space: normal; font-size: 11.5px; color: var(--sh-muted); margin-top: 1px; }
-.sh-table__actions { display: flex; gap: 6px; justify-content: flex-end; }
+/* Wide admin tables shrink inside their panel: cell text may break mid-word
+   when a table has more columns than the viewport can give room to, so the
+   table never widens the page. */
+.sh-admin-body .sh-tablewrap > .sh-table :is(th, td) { overflow-wrap: anywhere; }
+.sh-admin-body .sh-tablewrap > .sh-table td { max-width: 100%; }
+/* Action cells read left to right from the start of the cell, matching the
+   left-aligned toolbar and panel actions. Numeric columns stay right-aligned
+   through their own inline alignment. */
+.sh-table__actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
 .sh-table--empty td { text-align: center; color: var(--sh-muted); padding: 30px 12px; font-size: 13px; }
 
 .sh-filterbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
@@ -2601,6 +2640,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   /* Panel headers: title row, then actions below at full width. */
   .sh-admin-body .sh-panel__head { padding: 11px 12px; }
   .sh-admin-body .sh-panel__actions { margin-left: 0; width: 100%; }
+  .sh-admin-body .sh-panel__actions > * { flex: 0 1 auto; }
   .sh-admin-body .sh-panel__head--wrap .sh-actions, .sh-admin-body .sh-panel__head .sh-seg { width: 100%; }
   .sh-admin-body .sh-seg__item { flex: 1 1 auto; text-align: center; }
   /* Forms and inline editors stack. */
@@ -3385,34 +3425,108 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-pdp__empty-tabs { display: none; }
 .sh-pdp--no-gallery { grid-template-columns: minmax(0, 1fr); }
 
-.sh-pa__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.sh-pa__quick { display: flex; align-items: flex-end; gap: 7px; margin-top: 7px; }
-.sh-pa__quick .sh-input { min-width: 0; }
-.sh-pa__link { font-size: 11.5px; color: var(--sh-brand); font-weight: 700; white-space: nowrap; }
-.sh-pg { border: 1px solid var(--sh-line); border-radius: var(--sh-radius); padding: 12px; background: #fff; }
-.sh-pg__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
-.sh-pg__head strong { font-size: 13px; }
-.sh-pg__count { font-size: 11.5px; color: var(--sh-muted); }
-.sh-pg__hint { font-size: 11.5px; color: var(--sh-muted); line-height: 1.45; margin: 5px 0 9px; }
-.sh-pg__error { font-size: 12px; color: #b42318; font-weight: 700; margin: 7px 0; }
-.sh-pg__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
-.sh-pg__tile { position: relative; min-width: 0; border: 1px solid var(--sh-line); border-radius: 9px; padding: 7px; background: var(--sh-bg-2); }
-.sh-pg__tile.is-removed { opacity: .48; }
+/* Brand / product-type quick add. The text input keeps the remaining width and
+   the manager link is a real control that can never leave its field: both are
+   flex items with an explicit shrink budget, and the row wraps instead of
+   pushing the link outside the card. */
+.sh-pa__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; align-items: start; }
+.sh-pa__quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 7px; min-width: 0; }
+.sh-pa__quick .sh-input { flex: 1 1 9rem; min-width: 0; }
+.sh-pa__link {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center;
+  min-height: 32px; padding: 4px 7px; margin: -2px 0;
+  border-radius: 6px;
+  font-size: 12px; font-weight: 700; line-height: 1.3;
+  color: var(--sh-brand); white-space: nowrap;
+}
+.sh-pa__link:hover { background: var(--sh-brand-soft); text-decoration: underline; }
+.sh-pa__link:focus-visible { outline: 2px solid var(--sh-brand); outline-offset: 1px; }
+@media (max-width: 480px) {
+  /* Narrow phones: the link drops below the input and keeps a full tap target.
+     flex-flow is stated explicitly — a column that inherits flex-wrap:wrap
+     would turn into side-by-side columns instead of stacking. */
+  .sh-pa__quick { flex-flow: column nowrap; align-items: stretch; gap: 2px; }
+  .sh-pa__quick .sh-input { flex: 1 1 auto; }
+  .sh-pa__link { align-self: flex-start; margin: 0; padding: 7px 8px 7px 0; min-height: 34px; }
+}
+
+/* Product image gallery. A compact e-commerce uploader: heading + count,
+   one clear upload area, then aspect-preserving previews with reorder and
+   remove controls. */
+.sh-pg { border: 1px solid var(--sh-line); border-radius: var(--sh-radius); padding: 13px; background: #fff; min-width: 0; }
+.sh-pg__head { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; margin-bottom: 10px; min-width: 0; }
+.sh-pg__heading { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
+.sh-pg__head strong { font-size: 13.5px; color: var(--sh-ink); }
+.sh-pg__count { display: inline-flex; align-items: center; padding: 2px 9px; border: 1px solid var(--sh-line);
+  border-radius: 999px; background: var(--sh-bg-2); font-size: 11.5px; font-weight: 700; color: var(--sh-ink-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sh-pg__limits { font-size: 11.5px; color: var(--sh-muted); overflow-wrap: anywhere; }
+.sh-pg__drop { min-width: 0; margin: 0 0 11px; }
+.sh-pg__dropzone {
+  display: flex; align-items: center; gap: 11px; flex-wrap: wrap; min-width: 0;
+  padding: 11px 13px; border: 1.5px dashed var(--sh-line); border-radius: 10px;
+  background: var(--sh-bg-2); cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.sh-pg__dropzone:hover,
+.sh-pg__dropzone:focus-within { border-color: var(--sh-brand); background: var(--sh-brand-soft); }
+.sh-pg__dropzone:focus-within { box-shadow: 0 0 0 3px var(--sh-focus-ring); }
+.sh-pg__dropicon { display: grid; place-items: center; width: 38px; height: 38px; flex: none;
+  border: 1px solid var(--sh-line); border-radius: 9px; background: #fff; color: var(--sh-brand); }
+.sh-pg__droptext { display: grid; gap: 2px; flex: 1 1 170px; min-width: 0; }
+.sh-pg__droptext strong { font-size: 13.2px; color: var(--sh-ink); }
+.sh-pg__droptext small { font-size: 11.5px; line-height: 1.45; color: var(--sh-muted); overflow-wrap: anywhere; }
+.sh-pg__dropbtn { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 13px;
+  border: 1.5px solid var(--sh-brand); border-radius: 6px; background: #fff; color: var(--sh-brand);
+  font-size: 12.5px; font-weight: 700; line-height: 1.2; }
+.sh-pg__dropzone:hover .sh-pg__dropbtn { background: var(--sh-brand); border-color: var(--sh-brand); color: #fff; }
+/* The real file input stays in the box, focusable, and is driven by the label. */
+.sh-pg__input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; opacity: 0; overflow: hidden; }
+.sh-pg__drop.is-full .sh-pg__dropzone { border-style: solid; }
+.sh-pg__drop.is-full .sh-pg__dropicon { color: var(--sh-muted); }
+.sh-pg__hint { font-size: 11.5px; color: var(--sh-muted); line-height: 1.45; margin: 5px 0 0; overflow-wrap: anywhere; }
+.sh-pg__error { font-size: 12px; color: #b42318; font-weight: 700; margin: 7px 0 0; overflow-wrap: anywhere; }
+.sh-pg__error[hidden] { display: none; }
+.sh-pg__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; min-width: 0; }
+.sh-pg__grid:empty { display: none; }
+.sh-pg__tile { position: relative; display: flex; flex-direction: column; gap: 7px; min-width: 0;
+  border: 1px solid var(--sh-line); border-radius: 10px; padding: 8px; background: #fff; }
+.sh-pg__tile.is-removed { opacity: .55; }
 .sh-pg__tile.is-primary { border-color: var(--sh-brand); box-shadow: 0 0 0 2px var(--sh-brand-soft); }
-.sh-pg__preview { display: grid; place-items: center; width: 100%; aspect-ratio: 1 / 1; background: #fff; border-radius: 6px; border: 1px solid var(--sh-line-2); overflow: visible; }
-.sh-pg__preview img { width: 100%; height: 100%; object-fit: contain; padding: 3px; display: block; }
-.sh-pg__primary { position: absolute; top: 10px; left: 10px; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; background: var(--sh-brand); color: #fff; padding: 2px 5px; border-radius: 4px; }
-.sh-pg__removed { position: absolute; inset: 0; display: none; place-items: center; text-align: center; background: rgba(255,255,255,.84); border-radius: 9px; font-size: 11px; font-weight: 800; color: #b42318; }
+/* The preview keeps the uploaded file's own proportions: a bounded media box
+   with object-fit:contain, never a cropped square. */
+.sh-pg__preview { display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0;
+  aspect-ratio: 4 / 3; border: 1px solid var(--sh-line-2); border-radius: 7px; background: var(--sh-bg-2); }
+/* The image keeps its intrinsic proportions inside the bounded media box; the
+   box itself is never stretched by a tall portrait file. */
+.sh-pg__preview img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; padding: 4px; display: block; }
+.sh-pg__preview .sh-pg__hint { margin: 0; padding: 6px; text-align: center; }
+.sh-pg__primary { position: absolute; top: 12px; left: 12px; z-index: 1; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .35px; background: var(--sh-brand); color: #fff; padding: 2px 6px; border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(15, 20, 30, .18); }
+.sh-pg__primary[hidden] { display: none; }
+.sh-pg__removed { position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+  background: rgba(255, 255, 255, .86); border-radius: 10px; font-size: 11px; font-weight: 800; color: #b42318; }
 .sh-pg__tile.is-removed .sh-pg__removed { display: grid; }
-.sh-pg__actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.sh-pg__btn { border: 1px solid var(--sh-line); background: #fff; color: var(--sh-ink-2); border-radius: 5px; font-size: 10.5px; font-weight: 700; padding: 4px 6px; cursor: pointer; }
+.sh-pg__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: auto; }
+.sh-pg__btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; min-height: 29px;
+  padding: 4px 7px; border: 1px solid var(--sh-line); border-radius: 6px; background: #fff;
+  color: var(--sh-ink-2); font-size: 11.5px; font-weight: 700; line-height: 1.2; cursor: pointer; }
 .sh-pg__btn:hover { border-color: var(--sh-brand); color: var(--sh-brand); }
 .sh-pg__btn--danger { color: #b42318; }
-.sh-pg__file { display: block; width: 100%; font-size: 10.5px; margin-top: 6px; min-width: 0; }
+.sh-pg__btn--danger:hover { border-color: #b42318; color: #b42318; background: #fff5f4; }
+.sh-pg__replace { display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  flex: 1 1 100%; min-height: 29px; padding: 4px 7px;
+  border: 1px dashed var(--sh-line); border-radius: 6px; color: var(--sh-ink-2);
+  font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.sh-pg__replace:hover { border-color: var(--sh-brand); color: var(--sh-brand); }
+.sh-pg__replace:focus-within { border-color: var(--sh-brand); box-shadow: 0 0 0 3px var(--sh-focus-ring); }
+.sh-pg__file { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; opacity: 0; overflow: hidden; }
 .sh-pg__remove-label { display: none; }
-.sh-pg__new { display: grid; place-items: center; border: 1px dashed var(--sh-line); border-radius: 9px; min-height: 120px; padding: 10px; background: var(--sh-bg-2); text-align: center; }
-.sh-pg__new input { display: block; width: 100%; font-size: 11px; }
-.sh-pg__input { display: none; }
+.sh-pg__note { display: flex; align-items: flex-start; gap: 5px; margin-top: 9px; font-size: 11.5px; line-height: 1.45; color: var(--sh-muted); }
+.sh-pg__note .sh-icon { flex: none; margin-top: 1px; }
+.sh-pg__note:empty { display: none; }
 
 .sh-pc { border: 1px solid var(--sh-line); border-radius: var(--sh-radius); padding: 12px; background: #fff; }
 .sh-pc__list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
@@ -3441,7 +3555,6 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-attrs__actions { display: flex; gap: 4px; }
 .sh-attrs__actions .sh-btn { padding: 6px 8px; }
 @media (max-width: 900px) {
-  .sh-pg__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-pc__list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sh-attrs__grid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -3449,7 +3562,12 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
   .sh-gallery__thumb { flex-basis: 52px; height: 52px; }
   .sh-gallery__nav-btn { width: 38px; height: 38px; }
   .sh-pa__row { grid-template-columns: minmax(0, 1fr); }
-  .sh-pg__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Previews reflow to one column when a phone cannot fit two readable tiles;
+     auto-fill keeps them at two columns from 375px up. */
+  .sh-pg { padding: 11px; }
+  .sh-pg__dropzone { padding: 10px 11px; }
+  .sh-pg__grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 8px; }
+  .sh-pg__btn, .sh-pg__replace { min-height: 32px; }
   .sh-pc__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sh-pc__row { grid-template-columns: minmax(0, 1fr) 42px 34px; }
   .sh-attrs__form { grid-template-columns: minmax(0, 1fr) 68px; }
