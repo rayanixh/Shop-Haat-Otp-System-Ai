@@ -56,3 +56,6 @@ vendor/
 
 # local PHP/npm test harness (not part of the app)
 .tmpharness/
+
+# build artefacts (release ZIP)
+dist/
