@@ -15,6 +15,11 @@ Date: 2026-11-14
 >
 > No other claim in reports 01–15 changed. Report 16 records the five defects found
 > and fixed in this pass, everything that was re-executed, and the final verdict.
+>
+> **New engine evidence:** `tests/mysql-integration.php` passed as a required CI step on the
+> real `mysql:8.0` service (run `43621578351`, commit `a11ffdf`) — see report 03. MySQL
+> concurrency, rollback, row locking and the unique-TrxID migration are therefore verified on
+> MySQL 8.0, not inferred. MariaDB remains untested (R-14).
 
 Every report states what was **executed** in this environment and what was **not**, and
 why. Nothing below is inferred from a screenshot, a plan, or an assumption: a claim is
@@ -38,7 +43,7 @@ either backed by a command whose output is quoted, by the shipped code, or it is
 | --- | --- | --- |
 | 01 | [Payment workflow security](01-payment-workflow-security.md) | **FIXED** — DB-level TrxID uniqueness added; app-level checks confirmed |
 | 02 | [IDOR / object authorisation](02-idor-object-authorisation.md) | **PASSED** — 42-check scan over every route |
-| 03 | [Real MySQL execution](03-real-mysql-execution.md) | **NOT EXECUTED here** — no MySQL/MariaDB server; `tests/mysql-integration.php` now runs the 11 engine scenarios on staging and in CI |
+| 03 | [Real MySQL execution](03-real-mysql-execution.md) | **PASSED on MySQL 8.0 in CI** (11 engine scenarios, run `43621578351`); not runnable in this sandbox, MariaDB untested |
 | 04 | [Backup scheduler](04-backup-scheduler.md) | **FIXED + PASSED** — 49 checks (lock, verify, prune, lease) |
 | 05 | [Cron authentication](05-cron-authentication.md) | **FIXED + CONFIRMED** — the shipped token parser is executed with real argv (32 checks); a CLI run without a database no longer exits silently |
 | 06 | [Restore rehearsal](06-restore-rehearsal.md) | **PARTLY EXECUTED** — inspector (24 checks) + the new `tools/restore-rehearsal.php`; the import itself needs a MySQL server |

@@ -37,7 +37,7 @@ start of the remediation work and is superseded). Static scan: 0 findings / 189 
 |---|---|---|
 | Payment integrity audit | Needs a live database for constraint/concurrency tests | Payment logic is unchanged and manual-verification based; risk is unchanged, not increased — but it is unverified |
 | IDOR sweep | Order ownership checks not exercised against a real session/DB | Same as above: unverified, not known-broken |
-| MySQL verification | No MySQL in the sandbox; suites ran on a SQLite shim | Locking semantics are approximated, not proven. `tests/mysql-integration.php` now runs the eleven engine scenarios on any staging server and in CI |
+| MySQL verification | The sandbox has no MySQL, but CI does | **Verified on MySQL 8.0**: `tests/mysql-integration.php` (eleven engine scenarios — schema, migration, unique TrxID, concurrent duplicate submission, rollback, row locking, OTP replay/expiry, ownership, idempotency, backup metadata) is a required CI step and passed at `a11ffdf`. **MariaDB is still untested** (R-14) |
 | Backup restore rehearsal | No isolated environment | Backups exist; `tools/restore-rehearsal.php` automates the rehearsal, but the import itself is untested here |
 | Browser/functional regression | No web server or browser here | UI rendering of the new admin panel was not visually inspected |
 

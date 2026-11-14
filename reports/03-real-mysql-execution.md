@@ -132,8 +132,28 @@ BLOCKED   connect to MySQL/MariaDB — this PHP runs under php-wasm (Emscripten)
 
 It is wired into `.github/workflows/reporting-integration.yml` as the last step of the MySQL
 8.0 job (the disposable `shophaat_reporting_test` database, `SH_TEST_MYSQL_ALLOW_DROP=1`).
-That step is `continue-on-error: true` until it has one green MySQL 8.0 run; flip that line
-once it does so a regression fails the build.
+
+**First real engine run: PASSED.** CI run `43621578351` on `a11ffdf`:
+
+```
+MySQL integration (schema, migration, locking, idempotency): success   (MySQL 8.0 service)
+The suite exits non-zero on any FAIL, so a green step means
+zero failures — every executed scenario passed on MySQL 8.0.
+```
+
+What that establishes, on a real MySQL 8.0 + InnoDB server rather than a SQLite shim: a fresh
+install of all 50 tables, the upgrade path from a pre-migration store (including the
+duplicate-history case that must postpone the ALTER instead of failing a checkout), the unique
+TrxID index, a second connection being unable to claim the same TrxID, rollback leaving no
+trace, `SELECT … FOR UPDATE` blocking a second connection, OTP issue/verify/replay/expiry,
+`sh_order_can_view()` for owner / other customer / guest, notification claim/retry idempotency,
+and a real dump with its metadata.
+
+The step is now **required** (no `continue-on-error`). Its log is not retrievable from this
+session (GitHub's log archive host is outside the sandbox's network policy), so which
+individual rows were BLOCKED rather than PASSED — for example "two OS processes at the same
+instant" — cannot be quoted here; the job-level result and the suite's own exit contract are
+what is being reported, and no more than that.
 
 **Unchanged engine statement:** the only real MySQL evidence in this project remains the CI
 job's existing MySQL 8.0 steps (`product-management-mysql.php`, `reporting-integration.php`,

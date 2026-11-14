@@ -300,11 +300,9 @@ jobs:
       # order ownership and notification idempotency.
       # It runs last because it drops and recreates the disposable tables. It
       # refuses any database whose name does not look like a test database.
-      # First runs are advisory (continue-on-error) until this step has a green
-      # MySQL 8.0 result; remove that line once it does, so a regression fails the
-      # build.
+      # This step is required: it passed on MySQL 8.0 (run 43621578351) and a
+      # regression must fail the build.
       - name: MySQL integration (schema, migration, locking, idempotency)
-        continue-on-error: true
         env:
           SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
           SH_TEST_MYSQL_USER: shophaat_test

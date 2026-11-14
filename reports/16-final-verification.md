@@ -142,8 +142,12 @@ outright, dropping needs `SH_TEST_MYSQL_ALLOW_DROP=1`, and an existing `config/d
 is only reused when it points at the same database *and* user. All four refusals were
 executed here and print `REFUSED: …`.
 
-Wired into the MySQL 8.0 CI job as its last step (`continue-on-error: true` until it has one
-green run, then flip that line so a regression fails the build).
+Wired into the MySQL 8.0 CI job as its last step, and it has since **passed there on a real
+engine** — CI run `43621578351` (`a11ffdf`), step *MySQL integration (schema, migration,
+locking, idempotency)*: **success** on the `mysql:8.0` service. The step is now required, so a
+regression fails the build. (Its log is not retrievable from this sandbox — GitHub's log archive
+host is outside the network policy — so the job result and the suite's exit contract are what is
+claimed, no more.)
 
 ### D-16-5 · The restore rehearsal was a checklist, not a procedure
 
@@ -165,11 +169,11 @@ checklist) and the BLOCKED category in `sh_test_run()`.
 | Phase | Status here | Evidence / why not |
 | --- | --- | --- |
 | 1. Report reconciliation | **DONE** | Corrected `admin-access-url` 240→249/0 and totals 1,528→1,738, lint 237→241; see §5 |
-| 2. Safe MySQL/MariaDB suite | **BLOCKED** (suite shipped, refusals executed) | No server; `pdo_mysql` traps under wasm. Real MySQL 8.0 evidence exists from CI's pre-existing steps |
-| 3. Session IDOR | **PARTLY EXECUTED** | 42-check route scan passes; ownership predicate executed against real rows in `mysql-integration` §9 *design*; HTTP-level A/B session test needs a server → NOT TESTED |
+| 2. Safe MySQL/MariaDB suite | **PASSED on MySQL 8.0 in CI**; BLOCKED here | No server in the sandbox (`pdo_mysql` traps under wasm), but the suite passed as a required step on the `mysql:8.0` service (run `43621578351`). MariaDB: not run |
+| 3. Session IDOR | **PARTLY EXECUTED** | 42-check route scan passes; the ownership predicate ran against real order rows in `mysql-integration` §9 on MySQL 8.0; the two-session HTTP matrix still needs a web server → NOT TESTED |
 | 4. Backup + restore rehearsal | **PARTLY EXECUTED** | Inspector 24/0, scheduler 49/0; real import into a scratch DB NOT TESTED (no client/server) |
 | 5. Cron / shared hosting | **EXECUTED** | 32/0 behavioural; CLI message fixed; HTTP surface NOT TESTED (no server) |
-| 6. Payment lifecycle | **PARTLY EXECUTED** | 53/0 contract suite; `reporting-integration.php` drives submit→approve→report on MySQL in CI; live concurrency BLOCKED |
+| 6. Payment lifecycle | **EXECUTED except live concurrency** | 53/0 contract suite; `reporting-integration.php` drives submit→approve→report on MySQL 8.0 in CI; `mysql-integration` §3–5 prove unique TrxID, a second connection being refused and rollback on that engine |
 | 7. Uploads | **EXECUTED** | 51/0 + the validator now executed by the product suite; re-encoding not applied (no GD/Imagick) and not mandatory |
 | 8. Webhooks / notifications | **PARTLY EXECUTED** | 39/0 with stubbed transports; no provider credentials → live verification NOT TESTED |
 | 9. Browser / mobile regression | **NOT TESTED** | No browser, no web server. 16 rendered-template cases are not a browser |
@@ -192,20 +196,22 @@ permissions, and "the error never contains the secret". No assertion was flipped
 
 ## 4. The database statement
 
-* **MySQL 8.0:** real evidence exists, from the CI job's own MySQL 8.0 service — fresh
-  schema, the additive migration, colour-variant keys, checkout/payment/reporting, email
-  codes, AI product save, SEO lengths, courier tests and the support system. Those steps were
-  green at `007357c`.
-* **MariaDB:** **never run.** MySQL and MariaDB differ in `information_schema` details, index
+* **MySQL 8.0: verified.** The CI job runs a real `mysql:8.0` service and every step is green
+  at `a11ffdf` — the eleven-scenario engine suite (schema, migration, unique TrxID, concurrent
+  duplicate submission, rollback, `SELECT … FOR UPDATE`, OTP replay/expiry, order ownership,
+  notification idempotency, backup metadata) plus the pre-existing fresh-schema, additive
+  migration, colour-variant, checkout/payment/reporting, email-code, AI-save, SEO, courier and
+  support-system steps.
+* **MariaDB: never run.** MySQL and MariaDB differ in `information_schema` details, index
   limits, `NOWAIT` support and duplicate-key behaviour after a rollback. No MariaDB claim is
-  made anywhere in these reports.
+  made anywhere in these reports; `SHOP_HAAT_REMAINING_RISKS.md` R-14 records it as open.
 * **SQLite mirrors** (used by most suites here) prove PHP logic, not engine behaviour. Every
   report that relies on them says so.
-* Two SQLite/MySQL differences are known and are why the engine suite exists: `FOR UPDATE`
-  locking and `information_schema`.
+* Two SQLite/MySQL differences are why the engine suite exists: `FOR UPDATE` locking and
+  `information_schema`.
 
-To close this: run `tests/mysql-integration.php` once on MySQL 8.0 and once on MariaDB 10.6+
-against disposable databases, and attach both outputs.
+To close the remaining gap: run `tests/mysql-integration.php` once on MariaDB 10.6+ against a
+disposable database and attach the output.
 
 ---
 
@@ -244,14 +250,14 @@ have hidden a failed scheduled backup, and it is fixed.
 
 Not ready — three conditions, in priority order:
 
-1. **Run `tests/mysql-integration.php` on a staging MySQL 8.0 and a MariaDB 10.6+ database**
-   and attach both outputs. Until then, concurrency, rollback, row locking and the unique-TrxID
-   migration are verified only by design and by CI's older MySQL steps.
-2. **Perform one real restore** with `tools/restore-rehearsal.php` into a scratch database, and
+1. **Run `tests/mysql-integration.php` once on MariaDB 10.6+** (MySQL 8.0 is already covered by
+   CI). cPanel hosts ship either engine, and no MariaDB server has ever been used here.
+2. **Perform one real restore** with `tools/restore-rehearsal.php` into a scratch database, then
    open the restored copy's admin and storefront in a browser.
 3. **Do one browser pass with CSP enforced** (customer flow and admin flow) — this is also the
    only thing that can close the responsive/mobile, console-error and broken-image rows.
 
-Until those three are done, the correct statement is: *the code is believed sound, its
-security properties are largely executed and measured, and the remaining risk is concentrated
-in engine- and browser-level behaviour that no environment in this session could exercise.*
+Until those three are done, the correct statement is: *the code is believed sound; its security
+and data-integrity properties are executed and measured on MySQL 8.0 and in 1,738 local
+assertions; the remaining risk is concentrated in MariaDB behaviour, the restore path and
+browser-level behaviour, none of which any environment in this session could exercise.*

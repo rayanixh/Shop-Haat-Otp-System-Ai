@@ -15,10 +15,12 @@ theoretical maximum.
   duplicate submission, ownership, the allowed status transitions and admin
   verification; `install/schema.php` carries `UNIQUE KEY uq_payments_transaction_id`
   and the migration that adds it to an existing store.
-* **Still not verified:** the same guarantees **under real concurrency on MySQL/
-  MariaDB** (two simultaneous submissions, `SELECT … FOR UPDATE`, rollback after a
-  duplicate key). `tests/mysql-integration.php` scenarios 3–5 exist for exactly
-  that and are BLOCKED without a server.
+* **Now verified on MySQL 8.0:** `tests/mysql-integration.php` scenarios 3–5 (a
+  duplicate TrxID rejected, a second connection unable to claim the same id,
+  rollback leaving no trace) passed as a required CI step at `a11ffdf`.
+* **Still not verified:** the same guarantees on **MariaDB** (see R-14), and two
+  OS processes submitting at the exact same instant (the suite proves it with two
+  connections, not two processes).
 * **Interim mitigation unchanged:** manual gateway verification stays
   admin-driven; no automated callback marks an order paid. Do not enable an
   automated gateway until the engine run is attached.
@@ -36,13 +38,13 @@ theoretical maximum.
 * **Interim mitigation:** none specific — run the HTTP matrix in
   `reports/02-idor-object-authorisation.md` on staging.
 
-## R-03 · MySQL-specific behaviour untested in this environment (Medium, open)
+## R-03 · MySQL 8.0 verified in CI; MariaDB still not run (Medium, open)
 
-All database work here ran on SQLite through a translating shim. Locking
-(`SELECT … FOR UPDATE`), `INSERT … ON DUPLICATE KEY`, and index behaviour are
-MySQL/MariaDB features that the shim approximates, not proves.
-**Action:** run `tests/mysql-integration.php` (eleven engine scenarios) against a
-disposable staging database, and then repeat it on MariaDB — see R-14.
+Everything in this sandbox runs on SQLite through a translating shim, which
+proves PHP logic and not engine behaviour. That gap is now closed for MySQL 8.0:
+`tests/mysql-integration.php` (eleven engine scenarios) is a required step of the
+CI job's real `mysql:8.0` service and passed at `a11ffdf`.
+**Remaining action:** run the same suite on MariaDB 10.6+ — see R-14.
 
 ## R-04 · `X-Forwarded-Proto` remains lenient when no proxy list is set (Low, open)
 

@@ -144,7 +144,9 @@ against the live store:
 SH_TEST_MYSQL_DSN='mysql:host=127.0.0.1;dbname=shophaat_staging_test;charset=utf8mb4' \
 SH_TEST_MYSQL_USER=test SH_TEST_MYSQL_PASS=test SH_TEST_MYSQL_ALLOW_DROP=1 \
       php tests/mysql-integration.php
-# repeat on MariaDB if that is what your host runs (see REMAINING_RISKS R-14)
+# MySQL 8.0 is already covered by CI (required step, green at a11ffdf), but run it
+# once on YOUR host too — hosting PHP/MySQL builds differ. If your host runs
+# MariaDB, this run is the only MariaDB evidence that will exist (REMAINING_RISKS R-14).
 
 # 2. Restore rehearsal: verify a real backup, import it into a scratch database,
 #    check tables/indexes/relationships, then drop the scratch database.
