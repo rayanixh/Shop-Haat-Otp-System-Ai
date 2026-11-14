@@ -1102,7 +1102,9 @@ sh_t('a legacy digital product cannot be sold', function () {
 
 sh_t('the storefront layout is balanced for two banner cards and no code box', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
-    if (preg_match('~\.sh-banner\s*\{[^}]*repeat\(2, 1fr\)~', $css) !== 1) {
+    // The bounded `minmax(0, 1fr)` form is the root-cause fix for long card
+    // copy; both spellings describe the same balanced two-card grid.
+    if (preg_match('~\.sh-banner\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*(?:1fr|minmax\(0,\s*1fr\))~', $css) !== 1) {
         return '.sh-banner is not a two-card grid';
     }
     foreach (['.sh-codebox', '.sh-cart-item__tag'] as $dead) {
@@ -3146,16 +3148,19 @@ sh_t('the redesigned provider cards have a responsive grid and no fixed heights'
     return true;
 });
 
-sh_t('the AI navigation is a wrapping tab bar in page flow and the card test area is flat', function () {
+sh_t('the AI navigation wraps in normal page flow and the card test area is flat', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
-    if (!preg_match('/\.sh-aisubnav\s*\{(?:[^}]*)flex-wrap:\s*wrap/', $css)) {
-        return 'the AI sub-navigation does not wrap in normal page flow';
-    }
+    // The refined provider screens use an auto-fit grid; the older flex-wrap
+    // tab bar is also valid. Both must stay in page flow without an inner
+    // scroller or a fixed multi-row mobile grid.
+    $wraps = preg_match('/\.sh-aisubnav\s*\{(?:[^}]*)flex-wrap:\s*wrap/', $css) === 1
+        || preg_match('/\.sh-aisubnav\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit/', $css) === 1;
+    if (!$wraps) { return 'the AI sub-navigation does not wrap in normal page flow'; }
     $at = strpos($css, '.sh-aisubnav {');
-    $rule = $at === false ? '' : substr($css, $at, 160);
+    $rule = $at === false ? '' : substr($css, $at, 260);
     if (str_contains($rule, 'overflow')) { return 'the AI tab bar scrolls inside its own box again'; }
-    if (str_contains($css, '.sh-aisubnav { display: grid;')) {
-        return 'the old multi-row mobile navigation grid is back';
+    if (preg_match('/\.sh-aisubnav\s*\{[^}]*grid-template-columns:\s*repeat\(\d+,/', $css) === 1) {
+        return 'the AI navigation is back to a fixed multi-row column count';
     }
     $start = strpos($css, '.sh-aiprov__test {');
     $rule = $start === false ? '' : substr($css, $start, 220);
@@ -3610,21 +3615,29 @@ sh_t('no admin button can submit a form by accident', function () {
     return sh_assert($bad === [], 'buttons without an explicit type: ' . implode('; ', $bad));
 });
 
-sh_section('Brand and features removed from product management');
+sh_section('Structured brand/type/colour dictionaries; retired features stay removed');
 
-sh_t('the brand workflow is gone from the admin', function () {
-    if (is_file(SH_ROOT . '/admin/brands.php')) { return 'the brand editor still exists'; }
+sh_t('brands, types and colours are managed as structured dictionaries', function () {
+    // The retired standalone brand editor and free-text AI brand field stay
+    // gone. The product upgrade adds one permission-guarded dictionary manager
+    // and relational selects instead.
+    if (is_file(SH_ROOT . '/admin/brands.php')) { return 'the retired standalone brand editor is back'; }
     $layout = (string)file_get_contents(SH_ROOT . '/admin/_layout.php');
-    if (str_contains($layout, "'brands.php'")) { return 'the brand editor is still in the navigation'; }
+    if (!str_contains($layout, 'product-attributes.php')) { return 'the attribute manager is not in the navigation'; }
+    $manager = (string)file_get_contents(SH_ROOT . '/admin/product-attributes.php');
+    foreach (["sh_require_perm('catalog.manage')", 'sh_csrf_require()', 'sh_attributes_usage_count', 'value="toggle"'] as $needle) {
+        if (!str_contains($manager, $needle)) { return 'the attribute manager is missing ' . $needle; }
+    }
     $edit = (string)file_get_contents(SH_ROOT . '/admin/product-edit.php');
-    if (str_contains($edit, 'name="brand_id"')) { return 'the product form still has a brand selector'; }
-    if (str_contains($edit, 'FROM brands')) { return 'the product form still reads the brands table'; }
+    foreach (['name="brand_id"', 'name="catalog_type_id"', 'name="colour_ids[]"', 'data-pc-add'] as $needle) {
+        if (!str_contains($edit, $needle)) { return 'the product form is missing ' . $needle; }
+    }
     $ai = (string)file_get_contents(SH_ROOT . '/admin/ai/products.php');
-    if (str_contains($ai, 'data-f="brand_id"')) { return 'the AI product review form still has a brand selector'; }
+    if (str_contains($ai, 'data-f="brand_id"')) { return 'the AI product review form still has the retired free-text brand field'; }
     return true;
 });
 
-sh_t('brand filters and badges are gone from the storefront', function () {
+sh_t('the storefront uses structured brand/type labels, not retired filters or badges', function () {
     $list = (string)file_get_contents(SH_ROOT . '/products.php');
     if (str_contains($list, 'name="brand[]"')) { return 'the product listing still offers a brand filter'; }
     if (str_contains($list, '$brandIds')) { return 'the listing still parses brand parameters'; }
@@ -3632,7 +3645,10 @@ sh_t('brand filters and badges are gone from the storefront', function () {
     if (str_contains($category, 'name="brand[]"')) { return 'the category page still offers a brand filter'; }
     if (str_contains($category, 'sh_brands(')) { return 'the category page still lists brands'; }
     $product = (string)file_get_contents(SH_ROOT . '/product.php');
-    if (str_contains($product, 'Brand:')) { return 'the product page still prints a brand line'; }
+    if (str_contains($product, 'Brand:')) { return 'the product page still prints the retired literal Brand: badge'; }
+    foreach (['$catalog[\'brand\']', '$catalog[\'type\']'] as $needle) {
+        if (!str_contains($product, $needle)) { return 'the PDP no longer resolves ' . $needle; }
+    }
     return true;
 });
 
@@ -3649,28 +3665,35 @@ sh_t('features and benefits are gone from every product form and page', function
     return true;
 });
 
-sh_t('brand and features are also gone from the AI, catalogue and demo layers', function () {
-    $manager = sh_source_without_comments(SH_ROOT . '/ai/AIManager.php');
+sh_t('retired free-text brand/features fields stay gone; structured dictionary joins are additive', function () {
+    $read = static fn(string $rel): string => sh_source_without_comments((string)file_get_contents(SH_ROOT . '/' . $rel));
+    $manager = $read('ai/AIManager.php');
     foreach (['FROM brands', 'brands b', 'brand_id', 'brand_name', "'features'"] as $gone) {
         if (str_contains($manager, $gone)) { return 'the AI draft layer still references ' . $gone; }
     }
-    $studio = sh_source_without_comments(SH_ROOT . '/ai/ProductStudio.php');
+    $studio = $read('ai/ProductStudio.php');
     foreach (['FROM brands', 'brand_id', "'brand_id' =>", "'features'", 'has_features'] as $gone) {
         if (str_contains($studio, $gone)) { return 'the AI save layer still references ' . $gone; }
     }
-    $api = sh_source_without_comments(SH_ROOT . '/api/ai.php');
+    $api = $read('api/ai.php');
     if (str_contains($api, "'category', 'brand'")) { return 'brand is still a regenerable field'; }
-    $prompts = sh_source_without_comments(SH_ROOT . '/ai/PromptManager.php');
+    $prompts = $read('ai/PromptManager.php');
     foreach (['Existing brands', '\"features\"', 'a real brand', 'at most 60 characters', 'at most 155 characters'] as $gone) {
         if (str_contains($prompts, $gone)) { return 'a default prompt still mentions ' . $gone; }
     }
-    $catalog = sh_source_without_comments(SH_ROOT . '/includes/catalog.php');
-    foreach (['sh_brands(', 'brand_ids', 'JOIN brands', 'brand_name'] as $gone) {
+    // The new catalogue layer resolves active dictionary rows by ID. The old
+    // free-text brand filter helpers and unscoped joins must not return.
+    $catalog = $read('includes/catalog.php');
+    foreach (['sh_brands(', 'brand_ids'] as $gone) {
         if (str_contains($catalog, $gone)) { return 'the catalogue helpers still reference ' . $gone; }
     }
-    $seo = sh_source_without_comments(SH_ROOT . '/includes/seo.php');
-    if (str_contains($seo, "'@type' => 'Brand'")) { return 'the product schema still advertises a brand'; }
-    $demo = sh_source_without_comments(SH_ROOT . '/install/demo-data.php');
+    foreach (['LEFT JOIN brands b ON b.id = p.brand_id AND b.status = 1',
+              'LEFT JOIN product_types pt ON pt.id = p.catalog_type_id AND pt.status = 1'] as $needle) {
+        if (!str_contains($catalog, $needle)) { return 'the catalogue is missing ' . $needle; }
+    }
+    $seo = $read('includes/seo.php');
+    if (str_contains($seo, "'@type' => 'Brand'")) { return 'the product schema still advertises the retired brand object'; }
+    $demo = $read('install/demo-data.php');
     foreach (['INSERT INTO brands', 'brand_id'] as $gone) {
         if (str_contains($demo, $gone)) { return 'the demo catalogue still writes ' . $gone; }
     }
@@ -3760,7 +3783,7 @@ sh_t('only generated SEO copy is excerpted, and the UI counts nothing', function
     ]);
     sh_assert(mb_strlen((string)$meta['description']) <= 160, 'a body-derived description is no longer excerpted');
     sh_assert(mb_strlen((string)$meta['title']) <= 70, 'a generated title is no longer excerpted');
-    $manager = sh_source_without_comments(SH_ROOT . '/admin/seo.php');
+    $manager = sh_source_without_comments((string)file_get_contents(SH_ROOT . '/admin/seo.php'));
     if (str_contains($manager, 'Title length') || str_contains($manager, 'Description length')) {
         return 'the SEO Manager still shows character counts';
     }
