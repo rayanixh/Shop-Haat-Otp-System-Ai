@@ -375,11 +375,15 @@ async function phaseRequirementsFail(browser) {
     const verdict = (await page.textContent('.verdict') || '').trim();
     check('the verdict asks for action', verdict === 'Action required', verdict);
 
-    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => ({
-      name: el.querySelector('.req__name').textContent.trim(),
-      value: el.querySelector('.req__value').textContent.trim(),
-      badge: el.querySelector('.req__badge').textContent.trim(),
-    })));
+    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => {
+      const name = el.querySelector('.req__name').cloneNode(true);
+      name.querySelectorAll('.req__need').forEach((node) => node.remove());
+      return {
+        name: name.textContent.trim(),
+        value: el.querySelector('.req__value').textContent.trim(),
+        badge: el.querySelector('.req__badge').textContent.trim(),
+      };
+    }));
     const failed = rows.filter((r) => r.badge === 'Failed');
     check('the unwritable directories are reported as failed', failed.length >= 3, failed.map((r) => `${r.name}=${r.value}`).join(', '));
     check('a failed row states what was detected', failed.every((r) => /Not writable/.test(r.value)), failed.map((r) => r.value).join(', '));
