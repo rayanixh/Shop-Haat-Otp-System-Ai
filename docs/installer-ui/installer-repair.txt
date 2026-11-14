@@ -1,0 +1,27 @@
+ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
+
+1. An installed store serves the restricted repair screen
+  PASS  the repair screen responds with HTTP 200 — status 200
+  PASS  the screen is titled Repair this store — Repair this store
+  PASS  the header names repair mode — Repair mode
+  PASS  the restricted panel is present
+  PASS  the unlock panel is still offered to the owner
+  PASS  store configuration is shown as not part of a repair — step step--skipped
+  FAIL  the saved connection host is pre-filled from config/database.php —  vs 127.0.0.1
+  PASS  no saved password is written into the repair form — n/a
+  PASS  the primary action repairs the database instead of installing
+  PASS  the repair action is enabled
+
+2. The repair runs over the saved connection
+  PASS  the repair completed
+  PASS  the repair reports what it did — Database repaired against shophaat_installer. The existing administrator account was left untouched 
+  PASS  the repair says the administrator was left untouched — Database repaired against shophaat_installer. The existing administrator account was left untouched — sign in with your usual credentials.
+  PASS  the store still loads after the repair — status 200
+  PASS  the repair session: no console errors
+  PASS  the repair session: no JavaScript exceptions
+  PASS  the repair session: no failed requests (4xx/5xx/network)
+
+Installer UI (repair): 16 passed, 1 failed
+Failures:
+  - the saved connection host is pre-filled from config/database.php —  vs 127.0.0.1
+Screenshots: installer
