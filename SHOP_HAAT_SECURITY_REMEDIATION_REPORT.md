@@ -164,7 +164,13 @@ passed 185   failed 0   skipped 1        (baseline unchanged; 1 skip = HTTP head
 
 $ php tests/support-unit.php
 Passed: 58 · Failed: 0                  (baseline unchanged)
+
+$ php tests/support-sms-transport.php
+SMS transport contract and diagnostics (no live provider): passed 25, failed 0
 ```
+
+(`tests/support-system.php` needs a live MySQL server and could not run here; it
+was not part of the baseline either.)
 
 `tests/otp-security.php` (new, 10 sections) covers:
 
