@@ -255,7 +255,48 @@ the order was placed with the manual Cash on Delivery route — the bKash/Nagad/
 
 ## 6. Local battery (this environment: PHP 8.5.12 php-wasm, no MySQL, no browser)
 
-<!-- BATTERY -->
+Environment: PHP 8.5.12 (php-wasm / Emscripten), uid 1001, **no MySQL server, no browser,
+no web server**. Every suite below was executed here; the counts are each suite's own
+summary line.
+
+| Suite | Result here |
+|---|---|
+| `tests/security-regression.php` | 185 passed, 0 failed, 1 skipped (header emission needs a web server) |
+| `tests/environment.php` | 61 / 0 |
+| `tests/trusted-proxy.php` | 58 / 0 |
+| `tests/otp-security.php` | 199 / 0 |
+| `tests/payment-security.php` | 53 / 0 |
+| `tests/idor-scan.php` | 42 / 0 |
+| `tests/uploads.php` | 51 / 0 |
+| `tests/backup-inspect.php` | 24 / 0 |
+| `tests/backup-scheduler.php` | 49 / 0 |
+| `tests/cron-cli-auth.php` | 32 / 0 |
+| `tests/csp-readiness.php` | 31 / 0 |
+| `tests/rate-limit-failsafe.php` | 34 / 0 |
+| `tests/webhooks-and-retries.php` | 39 / 0 |
+| `tests/secrets.php` | 36 / 0 |
+| `tests/secrets-migration.php` | 68 / 0 / 0 |
+| `tests/secrets-migration.php` (`SH_TEST_ASSUME_NO_PERM_ENFORCEMENT=1`) | 51 / 0 / **13 blocked, each named** |
+| `tests/admin-access-url.php` | 249 / 0 |
+| `tests/support-unit.php` | 58 / 0 |
+| `tests/human-support-handoff.php` | 184 / 0 |
+| `tests/support-sms-notifications.php` | 110 / 0 |
+| `tests/support-sms-transport.php` | 25 / 0 |
+| `tests/product-management-integration.php` | 169 checks / 0 failures / 16 cases |
+| `tests/product-management-render.php` | 16 rendered cases (fixtures) |
+| `tests/restore-rehearsal.php` | 10 passed, 0 failed, 2 blocked (see §3) |
+| `tests/mysql-integration.php` | **BLOCKED**: 13 scenarios, no engine on this machine (green on MySQL 8.0.46 and MariaDB 10.6.28 in CI) |
+| `tests/email-system.php`, `tests/support-system.php`, `tests/product-ai-save.php`, `tests/seo-content-length.php`, `tests/courier-connection-tests.php`, `tests/reporting-integration.php`, `tests/installer-demo-data.php` | need a database; they render the application's error page here and are executed in CI |
+
+**Total executed locally: 1,767 checks · 0 failures.** That is the sum of the 21 suites
+that print a numeric summary (1,598, including the secrets suite's 68) plus
+`tests/product-management-integration.php`'s 169. The secrets suite's second mode (51 with
+13 blocked) re-runs the same checks under a different host model and is not added again.
+The blocked rows above are named individually, with what would unblock them.
+
+`php -l`: **243/243 files clean**. The static scan runs in CI on every push
+(`tools/security-scan.php --fail-on=high`).
+
 
 ## 7. The runs, including the red ones
 

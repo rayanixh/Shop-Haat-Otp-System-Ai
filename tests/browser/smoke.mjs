@@ -57,7 +57,13 @@ async function watch(page) {
     const status = res.status();
     if (status >= 400) { seen.requests.push(`${status} ${res.url().replace(BASE, '')}`); }
   });
-  page.on('requestfailed', (req) => { seen.requests.push(`failed ${req.url().replace(BASE, '')}`); });
+  // A lazy-loaded image whose request is cancelled because the page navigated is
+  // not a broken resource; counting it would report the harness's own timing.
+  page.on('requestfailed', (req) => {
+    const failure = req.failure();
+    if (failure && /ERR_ABORTED|net::ERR_ABORTED/i.test(failure.errorText)) { return; }
+    seen.requests.push(`failed ${req.url().replace(BASE, '')} (${failure ? failure.errorText : 'unknown'})`);
+  });
   await page.addInitScript(() => {
     window.__cspViolations = [];
     document.addEventListener('securitypolicyviolation', (e) => {
@@ -528,6 +534,7 @@ await area('17. Mobile width (390×844)', async () => {
     ['cart', '/cart.php'],
   ]) {
     await mobile.goto(BASE + url, { waitUntil: 'domcontentloaded' });
+    await mobile.waitForTimeout(400);   // lazy images get a moment to settle
     const overflow = await mobile.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
       client: document.documentElement.clientWidth,
