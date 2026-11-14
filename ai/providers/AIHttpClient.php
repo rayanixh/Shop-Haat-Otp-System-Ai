@@ -1,3 +1,5 @@
+
+require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_status()
 <?php
 /**
  * AI Auto Work — shared HTTPS client for every provider adapter.
@@ -110,9 +112,7 @@ final class AIHttpClient
                 $streamError = is_array($lastError) ? (string)($lastError['message'] ?? '') : '';
                 $timedOut = preg_match('/timed?\s*out|timeout/i', $streamError) === 1;
             } finally { restore_error_handler(); }
-            if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
-                $status = (int)$m[1];
-            }
+            $status = sh_http_last_status();
         }
 
         if ($tooLarge) {

@@ -624,7 +624,7 @@ try {
     product_ok(str_contains($galleryJs, 'touchend') && str_contains($galleryJs, 'pointerup') && str_contains($galleryJs, 'data-gallery-next'), 'manual swipe and prev/next controls are present');
     $css = source('assets/css/app.css');
     product_ok(str_contains($css, '.sh-gallery__main img { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain;'), 'PDP gallery image is contained, never cropped or stretched');
-    product_ok(str_contains($css, '.sh-pg__preview img { width: 100%; height: 100%; object-fit: contain;'), 'admin gallery preview is contained');
+    product_ok(str_contains($css, '.sh-pg__preview img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain;'), 'admin gallery preview is contained');
     product_ok(str_contains($css, '.sh-product-card__img { width: 100%; height: 100%; object-fit: contain;'), 'product card preview is contained');
     product_ok(str_contains(source('admin/product-edit.php'), "\$adminScripts = ['product_form' => 'assets/js/product-form.js']"), 'product editor registers its compact gallery script');
     product_ok(str_contains(source('admin/_footer.php'), '($adminScripts ?? [])'), 'admin footer loads registered scripts');

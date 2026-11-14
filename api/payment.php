@@ -188,10 +188,7 @@ function sh_http_get(string $url, int $timeout = 20): array
     } finally {
         restore_error_handler();
     }
-    $code = 0;
-    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
-        $code = (int)$m[1];
-    }
+    $code = sh_http_last_status();
     if ($body === false) { return ['ok' => false, 'body' => '', 'error' => 'Connection failed.']; }
     return [
         'ok' => $code >= 200 && $code < 300,

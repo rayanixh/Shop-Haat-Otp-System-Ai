@@ -44,9 +44,12 @@ $shAccess = sh_install_access(
     sh_install_unlock_configured()
 );
 // Unlock attempts are rate limited per IP so the token cannot be brute forced
-// from the open internet.
+// from the open internet. The limiter fails CLOSED here: if the counter store is
+// unavailable (full disk, read-only logs/) we refuse the *wrong* token instead of
+// letting an attacker remove the throttle by breaking the store first. A correct
+// token never consults the limiter, so the owner can still get in and repair.
 $shUnlockThrottled = !$shUnlockOk && $shUnlockGiven !== ''
-    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900);
+    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900, '', true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_log_line('install', 'Installer accessed: mode=' . $shAccess['mode']
@@ -88,18 +91,32 @@ if ($savedCfg !== null && $_SERVER['REQUEST_METHOD'] !== 'POST') {
 // ---------------------------------------------------------------------------
 // Server requirement checks
 // ---------------------------------------------------------------------------
+// Required checks block the install. Optional extensions are reported with the
+// behaviour used instead — the application ships fallbacks for every one of
+// them (includes/compat.php), so a host without mbstring, DOM, cURL or GD still
+// installs and runs, it just loses the related convenience feature.
 $requirements = [
     ['label' => 'PHP 8.1 or newer',     'ok' => version_compare(PHP_VERSION, '8.1.0', '>='), 'value' => PHP_VERSION],
     ['label' => 'PDO extension',        'ok' => extension_loaded('pdo'), 'value' => extension_loaded('pdo') ? 'Enabled' : 'Missing'],
     ['label' => 'pdo_mysql driver',     'ok' => extension_loaded('pdo_mysql'), 'value' => extension_loaded('pdo_mysql') ? 'Enabled' : 'Missing'],
-    ['label' => 'mbstring extension',   'ok' => extension_loaded('mbstring'), 'value' => extension_loaded('mbstring') ? 'Enabled' : 'Missing'],
-    ['label' => 'GD or Imagick',        'ok' => extension_loaded('gd') || extension_loaded('imagick'), 'value' => extension_loaded('gd') ? 'GD' : (extension_loaded('imagick') ? 'Imagick' : 'Missing')],
+    ['label' => 'JSON extension',       'ok' => extension_loaded('json'), 'value' => extension_loaded('json') ? 'Enabled' : 'Missing'],
     ['label' => '/config writable',     'ok' => is_writable(SH_CONFIG_DIR), 'value' => is_writable(SH_CONFIG_DIR) ? 'Writable' : 'Not writable'],
     ['label' => '/uploads writable',    'ok' => is_writable(SH_UPLOAD_DIR), 'value' => is_writable(SH_UPLOAD_DIR) ? 'Writable' : 'Not writable'],
     ['label' => '/logs writable',       'ok' => is_writable(SH_LOG_DIR), 'value' => is_writable(SH_LOG_DIR) ? 'Writable' : 'Not writable'],
 ];
 $reqOk = true;
 foreach ($requirements as $r) { if (!$r['ok']) { $reqOk = false; } }
+
+// Optional extensions: never block installation, always reported.
+$optionalRequirements = [];
+foreach (sh_extension_requirements() as $ext) {
+    if ($ext['required']) { continue; }
+    $optionalRequirements[] = [
+        'label'    => $ext['label'] . ' — ' . $ext['purpose'],
+        'ok'       => $ext['ok'],
+        'value'    => $ext['ok'] ? 'Enabled' : ($ext['fallback'] !== '' ? 'Fallback: ' . $ext['fallback'] : 'Not enabled'),
+    ];
+}
 
 // ---------------------------------------------------------------------------
 // Handle submission
@@ -395,9 +412,9 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 .btn:hover{background:#cf4415}
 .btn[disabled]{background:#b9bec9;cursor:not-allowed}
 .req{list-style:none;margin:0;padding:0}
-.req li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.req li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13.5px;flex-wrap:wrap}
 .req li:last-child{border-bottom:0}
-.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}.warn{color:#a15c07;font-weight:600}
 .alert{border-radius:7px;padding:12px 14px;font-size:13.5px;margin-bottom:16px;border:1px solid}
 .alert--bad{background:#fdecea;border-color:#f5c2bd;color:#8c1d13}
 .alert--ok{background:#e8f6ee;border-color:#bfe3cd;color:#14603a}
@@ -450,6 +467,16 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
     <ul class="req">
       <?php foreach ($requirements as $r): ?>
         <li><span><?= e($r['label']) ?></span><span class="<?= $r['ok'] ? 'ok' : 'bad' ?>"><?= e($r['value']) ?></span></li>
+      <?php endforeach; ?>
+    </ul>
+    <h2 style="margin-top:18px">Optional extensions</h2>
+    <p style="margin:0 0 10px;font-size:12.5px;color:#5b6472">
+      These are recommended, not required. Each row shows the behaviour used when the
+      extension is missing; nothing is silently disabled.
+    </p>
+    <ul class="req">
+      <?php foreach ($optionalRequirements as $r): ?>
+        <li><span><?= e($r['label']) ?></span><span class="<?= $r['ok'] ? 'ok' : 'warn' ?>"><?= e($r['value']) ?></span></li>
       <?php endforeach; ?>
     </ul>
   </div>

@@ -247,7 +247,7 @@ require dirname(__DIR__) . '/_layout.php';
         </div>
         <div class="sh-tablewrap">
           <table class="sh-table">
-            <thead><tr><th>Product</th><th style="text-align:right">Action</th></tr></thead>
+            <thead><tr><th>Product</th><th>Action</th></tr></thead>
             <tbody>
             <?php if (!$list): ?>
               <tr class="sh-table--empty"><td colspan="2">No products found.</td></tr>
@@ -256,7 +256,7 @@ require dirname(__DIR__) . '/_layout.php';
                 <td><div class="sh-table__cell">
                   <img class="sh-table__thumb" src="<?= e(sh_product_image($p['image'])) ?>" alt="" loading="lazy">
                   <div class="sh-table__name"><?= e((string)$p['name']) ?></div></div></td>
-                <td style="text-align:right">
+                <td>
                   <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('admin/ai/products.php?id=' . (int)$p['id'])) ?>">Open</a></td>
               </tr>
             <?php endforeach; endif; ?>

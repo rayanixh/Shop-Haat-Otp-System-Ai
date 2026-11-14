@@ -116,7 +116,7 @@ if ($viewId > 0) {
         <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('package', 17) ?> Order history</h2></div>
         <div class="sh-tablewrap">
           <table class="sh-table">
-            <thead><tr><th>Order</th><th>Total</th><th>Payment</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
+            <thead><tr><th>Order</th><th>Total</th><th>Payment</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
             <?php if (!$orders): ?><tr class="sh-table--empty"><td colspan="5">No data available</td></tr>
             <?php else: foreach ($orders as $o): ?>
@@ -126,7 +126,7 @@ if ($viewId > 0) {
                 <td style="font-weight:700"><?= e(sh_money($o['total'])) ?></td>
                 <td><span class="sh-badge <?= e(sh_status_class($o['payment_status'])) ?>"><?= e(sh_status_label($o['payment_status'])) ?></span></td>
                 <td><span class="sh-badge <?= e(sh_status_class($o['status'])) ?>"><?= e(sh_status_label($o['status'])) ?></span></td>
-                <td style="text-align:right"><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/orders.php?id=' . (int)$o['id'])) ?>">Open</a></td>
+                <td><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/orders.php?id=' . (int)$o['id'])) ?>">Open</a></td>
               </tr>
             <?php endforeach; endif; ?>
             </tbody>
@@ -236,7 +236,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table">
-      <thead><tr><th>Customer</th><th>Contact</th><th>Orders</th><th>Net paid spend</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
+      <thead><tr><th>Customer</th><th>Contact</th><th>Orders</th><th>Net paid spend</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="6">No customers found.</td></tr>
       <?php else: foreach ($rows as $u): ?>
@@ -255,7 +255,7 @@ require __DIR__ . '/_layout.php';
           <td style="font-weight:700"><?= e(sh_money($u['spend'])) ?></td>
           <td><span class="sh-statuspill <?= $u['status'] === 'active' ? 'sh-statuspill--on' : 'sh-statuspill--off' ?>"><?= e(ucfirst($u['status'])) ?></span>
             <div class="sh-table__meta" style="margin-top:4px">Login: <?= e(sh_user_login_method($u)) ?></div></td>
-          <td style="text-align:right"><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/customers.php?id=' . (int)$u['id'])) ?>">View</a></td>
+          <td><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/customers.php?id=' . (int)$u['id'])) ?>">View</a></td>
         </tr>
       <?php endforeach; endif; ?>
       </tbody>

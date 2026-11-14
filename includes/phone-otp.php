@@ -23,6 +23,7 @@
 
 require_once SH_ROOT . '/includes/functions.php';
 require_once SH_ROOT . '/includes/errors.php';
+require_once SH_ROOT . '/includes/secrets.php';
 
 /** Allowed OTP purposes. Keep in sync with UI copy and admin filters. */
 function sh_otp_purposes(): array
@@ -113,6 +114,111 @@ function sh_otp_provider(): string
     return (string)sh_setting('otp_provider', 'offline');
 }
 
+/** Providers the admin UI can select. `offline` is a development-only driver. */
+function sh_otp_providers(): array
+{
+    return ['offline', 'textbee', 'firebase', 'generic_http'];
+}
+
+/**
+ * Configuration problems that would stop the selected driver from delivering a
+ * code. An empty array means the provider is ready to send.
+ *
+ * Messages are admin-safe: they never contain credentials or endpoints.
+ *
+ * @return array<int,string>
+ */
+function sh_otp_provider_config_errors(?string $provider = null): array
+{
+    $provider = $provider ?? sh_otp_provider();
+    $errors = [];
+    switch ($provider) {
+        case 'offline':
+            // The offline driver reports success without contacting a carrier.
+            // It exists to exercise the flow locally, so it must never run on a
+            // live store — enabling it there would silently "verify" numbers.
+            if (!sh_is_development()) {
+                $errors[] = 'Offline / test mode does not send SMS and is only allowed on a development installation.';
+            }
+            break;
+        case 'textbee':
+            if (trim((string)sh_setting('otp_textbee_api_key', '')) === '') {
+                $errors[] = 'TextBee API key is missing.';
+            }
+            if (!function_exists('curl_init')) {
+                $errors[] = 'PHP cURL is not enabled, so TextBee cannot be reached.';
+            }
+            break;
+        case 'firebase':
+            $errors[] = 'Firebase Auth issues its own codes and cannot deliver this store\'s verification code. Use TextBee or a custom HTTPS SMS gateway.';
+            break;
+        case 'generic_http':
+            $url = trim((string)sh_setting('otp_api_url', ''));
+            if ($url === '') {
+                $errors[] = 'Custom SMS API URL is not set.';
+            } elseif (preg_match('~^https://~i', $url) !== 1) {
+                $errors[] = 'Custom SMS API URL must use HTTPS.';
+            }
+            if (!function_exists('curl_init')) {
+                $errors[] = 'PHP cURL is not enabled, so the SMS gateway cannot be reached.';
+            }
+            break;
+        default:
+            // A transport registered from code via sh_otp_register_driver() is an
+            // application-level opt-in: it is not selectable in the admin UI and
+            // needs no settings, so it is never a misconfiguration.
+            if (array_key_exists($provider, sh_otp_driver_registry())) { break; }
+            $errors[] = 'Unknown SMS provider "' . mb_substr($provider, 0, 30) . '".';
+    }
+    return $errors;
+}
+
+/** True when the selected provider is fully configured and deliverable. */
+function sh_otp_provider_ready(?string $provider = null): bool
+{
+    return sh_otp_provider_config_errors($provider) === [];
+}
+
+/**
+ * Whether phone OTP can actually run right now: authentication mode is ON *and*
+ * the provider can deliver. Admin screens use this to warn before customers
+ * reach a login form that cannot complete.
+ */
+function sh_otp_operational(): bool
+{
+    return sh_otp_enabled() && sh_otp_provider_ready();
+}
+
+/**
+ * Customer-facing, secret-free explanation used when phone verification is
+ * switched on but cannot deliver. It never names the provider or the missing
+ * credential — that detail belongs in the admin screens and secure log.
+ */
+function sh_otp_configuration_error(?string $provider = null): string
+{
+    $provider = $provider ?? sh_otp_provider();
+    if (sh_otp_provider_ready($provider)) { return ''; }
+    if ($provider === 'firebase') {
+        return 'Phone verification is not available because the SMS provider cannot deliver this store\'s code. Please contact customer support.';
+    }
+    if ($provider === 'offline' || $provider === '') {
+        return 'Phone verification is not available because no SMS provider has been configured. Please contact customer support.';
+    }
+    return 'Phone verification is temporarily unavailable. Please contact customer support.';
+}
+
+/**
+ * May an OTP value be returned to a client?
+ *
+ * Only on an explicitly non-production installation that is using the offline
+ * driver. This single switch gates every code echo (API responses and the admin
+ * Test SMS screen) so no caller can leak a code by accident.
+ */
+function sh_otp_allow_code_echo(): bool
+{
+    return sh_is_development() && sh_otp_provider() === 'offline';
+}
+
 function sh_otp_message(string $code, int $minutes): string
 {
     $tpl = (string)sh_setting('otp_message', 'Your ShopHaat verification code is {code}. It expires in {minutes} minutes. Do not share it with anyone.');
@@ -171,7 +277,7 @@ function sh_otp_generate(int $length): string
     return str_pad($code, $length, '0', STR_PAD_LEFT);
 }
 
-function sh_otp_insert(string $phone, string $purpose, string $code, ?int $userId, string $provider): int
+function sh_otp_insert(string $phone, string $purpose, string $code, ?int $userId, string $provider, int $resendCount = 0): int
 {
     $hash = password_hash($code, PASSWORD_DEFAULT);
     // `expires_at` is computed with the DATABASE clock (NOW()) so the later
@@ -181,7 +287,7 @@ function sh_otp_insert(string $phone, string $purpose, string $code, ?int $userI
     sh_db()->prepare(
         'INSERT INTO otp_verifications
             (user_id, phone, purpose, otp_hash, provider, expires_at, attempts, max_attempts, resend_count, ip_address, user_agent)
-         VALUES (?,?,?,?,?, DATE_ADD(NOW(), INTERVAL ? SECOND), 0, ?, 0, ?, ?)'
+         VALUES (?,?,?,?,?, DATE_ADD(NOW(), INTERVAL ? SECOND), 0, ?, ?, ?, ?)'
     )->execute([
         $userId,
         $phone,
@@ -190,6 +296,7 @@ function sh_otp_insert(string $phone, string $purpose, string $code, ?int $userI
         $provider !== '' ? mb_substr($provider, 0, 30) : null,
         sh_otp_expiry_seconds(),
         sh_otp_max_attempts(),
+        max(0, $resendCount),
         mb_substr(sh_client_ip(), 0, 45),
         mb_substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
     ]);
@@ -217,62 +324,119 @@ function sh_otp_find_latest(string $phone, string $purpose, ?int $userId): ?arra
 }
 
 /**
+ * Newest record for the exact phone + purpose + user, whatever its state.
+ *
+ * Used for the resend chain and the cooldown: the previous code is expired (not
+ * deleted) when a new one is issued, so "latest unverified" cannot describe the
+ * chain. Age and freshness still come from the database clock.
+ */
+function sh_otp_last_issued(string $phone, string $purpose, ?int $userId): ?array
+{
+    $st = sh_db()->prepare(
+        'SELECT *,
+                (expires_at > NOW()) AS is_fresh,
+                GREATEST(0, TIMESTAMPDIFF(SECOND, created_at, NOW())) AS age_seconds
+         FROM otp_verifications
+         WHERE phone = ? AND purpose = ? AND (user_id <=> ?)
+         ORDER BY id DESC LIMIT 1'
+    );
+    $st->execute([$phone, $purpose, $userId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/** Re-read one verification record by id (post-race inspection). */
+function sh_otp_find_by_id(int $id): ?array
+{
+    $st = sh_db()->prepare('SELECT * FROM otp_verifications WHERE id = ? LIMIT 1');
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/**
  * Persist an OTP record and hand it to the configured provider driver.
  * Returns ['ok'=>bool, 'code'=>string|null, 'error'=>string|null].
- * `code` is only ever populated for the offline driver and MUST be treated as
- * test-only — never displayed in production UI.
+ * `code` is only ever populated for the offline driver on a development
+ * installation — see sh_otp_allow_code_echo().
  */
 function sh_otp_issue(string $phone, string $purpose, ?int $userId, ?string $ip = null): array
 {
     $ip = $ip ?: sh_client_ip();
     if (!sh_otp_enabled()) {
-        return ['ok' => false, 'code' => null, 'error' => 'Phone verification is disabled.'];
+        return ['ok' => false, 'code' => null, 'error' => 'Phone verification is disabled.', 'reason' => 'disabled'];
     }
     if (!in_array($purpose, ['signup', 'login', 'test'], true)) {
-        return ['ok' => false, 'code' => null, 'error' => 'Invalid verification purpose.'];
+        return ['ok' => false, 'code' => null, 'error' => 'Invalid verification purpose.', 'reason' => 'invalid'];
     }
     $phone = sh_phone_normalize($phone);
     if ($phone === '') {
-        return ['ok' => false, 'code' => null, 'error' => 'Please provide a valid mobile number.'];
+        return ['ok' => false, 'code' => null, 'error' => 'Please provide a valid mobile number.', 'reason' => 'invalid_phone'];
     }
 
-    // ---- Rate limits -----------------------------------------------------
-    try {
-        $limiter = sh_otp_limit_check($phone, $ip);
-    } catch (Throwable $e) {
-        sh_log_exception($e, 'otp-limit');
-        $limiter = 'Verification is temporarily unavailable. Please try again shortly.';
-    }
-    if ($limiter !== null) {
-        sh_otp_log($phone, $purpose, 'rate_limited', ['reason' => $limiter]);
-        return ['ok' => false, 'code' => null, 'error' => $limiter];
+    // ---- Provider readiness ----------------------------------------------
+    // Fail closed. A production store whose provider is offline / incomplete
+    // would otherwise "send" nothing and leave customers stuck on the code
+    // screen, so the request is refused with a clear configuration error and
+    // the reason is recorded for the administrator (never for the customer).
+    if (!sh_otp_provider_ready()) {
+        $providerName = sh_otp_provider();
+        $problems = sh_otp_provider_config_errors($providerName);
+        sh_otp_log($phone, $purpose, 'config_error', ['provider' => $providerName]);
+        sh_security_log('otp_provider_misconfigured', null, [
+            'provider' => mb_substr($providerName, 0, 30),
+            'problems' => array_map(static fn($m) => mb_substr((string)$m, 0, 160), $problems),
+        ]);
+        return ['ok' => false, 'code' => null, 'error' => sh_otp_configuration_error($providerName), 'reason' => 'config'];
     }
 
+    // ---- Rate limits (atomic, event based) -------------------------------
+    // A request event is recorded in otp_rate_limits before any SMS is
+    // attempted, inside the lock that serialises concurrent requests for this
+    // number/device. A later delivery failure only changes the outcome — it can
+    // never erase the request from the history.
+    $limit = sh_otp_rate_begin($phone, $ip, $purpose, $userId);
+    if (!$limit['ok']) {
+        $kind = (string)($limit['kind'] ?? 'rate_limited');
+        sh_otp_log($phone, $purpose, $kind === 'unavailable' ? 'failed' : 'rate_limited', ['reason' => $limit['error']]);
+        return ['ok' => false, 'code' => null, 'error' => (string)$limit['error'], 'reason' => $kind];
+    }
+    $eventId = $limit['event_id'] ?? null;
+    $provider = sh_otp_provider();
+
+    // ---- Resend cooldown / resend cap ------------------------------------
+    $previous = null;
     try {
-        $row = sh_otp_find_latest($phone, $purpose, $userId);
+        $previous = sh_otp_last_issued($phone, $purpose, $userId);
     } catch (Throwable $e) {
         sh_log_exception($e, 'otp-active');
-        return ['ok' => false, 'code' => null, 'error' => 'Verification is temporarily unavailable. Please try again shortly.'];
+        sh_otp_rate_finish($eventId, 'failed', $provider);
+        return ['ok' => false, 'code' => null, 'error' => 'Verification is temporarily unavailable. Please try again shortly.', 'reason' => 'unavailable'];
     }
-    if ($row) {
-        if ((int)$row['resend_count'] >= sh_otp_max_resends()) {
-            return ['ok' => false, 'code' => null, 'error' => 'Too many codes have been sent. Please try again later.'];
-        }
-        $cooldown = sh_otp_resend_cooldown();
-        if ($cooldown > 0) {
-            // age_seconds is measured with the database clock, consistent with
-            // the `created_at` value (CURRENT_TIMESTAMP) it is derived from.
-            $age = (int)($row['age_seconds'] ?? 0);
-            if ($age < $cooldown) {
+
+    $resendCount = 0;
+    if ($previous !== null) {
+        $age = (int)($previous['age_seconds'] ?? 0);
+        // The chain is alive while the previous code is still within its own
+        // validity window; after that the customer is starting a fresh attempt.
+        if ($age < sh_otp_expiry_seconds()) {
+            $resendCount = (int)$previous['resend_count'] + 1;
+            if ($resendCount > sh_otp_max_resends()) {
+                sh_otp_rate_finish($eventId, 'throttled', $provider);
+                sh_otp_log($phone, $purpose, 'rate_limited', ['reason' => 'max_resends']);
+                return ['ok' => false, 'code' => null, 'error' => 'Too many codes have been sent. Please try again later.', 'reason' => 'throttled'];
+            }
+            $cooldown = sh_otp_resend_cooldown();
+            if ($cooldown > 0 && $age < $cooldown) {
                 $wait = $cooldown - $age;
-                return ['ok' => false, 'code' => null, 'error' => "Please wait {$wait} seconds before requesting another code."];
+                sh_otp_rate_finish($eventId, 'throttled', $provider);
+                return ['ok' => false, 'code' => null, 'error' => "Please wait {$wait} seconds before requesting another code.", 'reason' => 'cooldown'];
             }
         }
     }
 
     // ---- Generate, store, send ------------------------------------------
     $code = sh_otp_generate(sh_otp_length());
-    $provider = sh_otp_provider();
     try {
         // A new code invalidates any previous, still-pending code for this
         // phone+purpose so an old code can never be replayed.
@@ -280,26 +444,67 @@ function sh_otp_issue(string $phone, string $purpose, ?int $userId, ?string $ip 
             'UPDATE otp_verifications SET expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)
              WHERE phone = ? AND purpose = ? AND verified_at IS NULL AND (user_id <=> ?)'
         )->execute([$phone, $purpose, $userId]);
-        $id = sh_otp_insert($phone, $purpose, $code, $userId, $provider);
+        $id = sh_otp_insert($phone, $purpose, $code, $userId, $provider, $resendCount);
     } catch (Throwable $e) {
         sh_log_exception($e, 'otp-insert');
-        return ['ok' => false, 'code' => null, 'error' => 'Could not prepare verification. Please try again.'];
+        sh_otp_rate_finish($eventId, 'failed', $provider);
+        return ['ok' => false, 'code' => null, 'error' => 'Could not prepare verification. Please try again.', 'reason' => 'unavailable'];
     }
 
     $minutes = (int)ceil(sh_otp_expiry_seconds() / 60);
     $result = sh_otp_send($provider, $phone, sh_otp_message($code, $minutes));
 
     if ($result['ok']) {
+        sh_otp_rate_finish($eventId, 'requested', $provider);
         sh_otp_log($phone, $purpose, 'requested', ['provider' => $provider, 'id' => $id]);
-        $out = ['ok' => true, 'code' => null, 'error' => null];
-        if ($provider === 'offline') { $out['code'] = $code; } // test driver only
+        $out = ['ok' => true, 'code' => null, 'error' => null, 'reason' => null];
+        // Development-only: the offline driver never touches a carrier, so the
+        // code is returned to let a developer/admin complete the flow.
+        if (sh_otp_allow_code_echo()) { $out['code'] = $code; }
         return $out;
     }
 
-    // Failed to deliver: destroy the record so no dead code lingers.
+    // Delivery failed. The unusable code is removed so it can never be
+    // verified, but the request event stays behind with a 'failed' outcome:
+    // the phone / IP / daily windows keep counting this attempt.
     try { sh_db()->prepare('DELETE FROM otp_verifications WHERE id = ?')->execute([$id]); } catch (Throwable $e) { sh_log_exception($e, 'otp-delete'); }
+    sh_otp_rate_finish($eventId, 'failed', $provider);
     sh_otp_log($phone, $purpose, 'failed', ['provider' => $provider, 'error' => $result['error']]);
-    return ['ok' => false, 'code' => null, 'error' => $result['error']];
+    return ['ok' => false, 'code' => null, 'error' => $result['error'], 'reason' => 'delivery'];
+}
+
+/**
+ * Consume a verification record atomically.
+ *
+ * The WHERE clause is the concurrency guard: only one caller can flip
+ * verified_at from NULL to a timestamp on a still-fresh, still-usable row. Two
+ * simultaneous requests holding the same correct code therefore produce exactly
+ * one success; the loser sees 0 affected rows and is rejected.
+ */
+function sh_otp_consume(int $id): bool
+{
+    $st = sh_db()->prepare(
+        'UPDATE otp_verifications
+            SET verified_at = NOW()
+          WHERE id = ? AND verified_at IS NULL AND expires_at > NOW() AND attempts < max_attempts'
+    );
+    $st->execute([$id]);
+    return $st->rowCount() === 1;
+}
+
+/** Count a failed attempt without ever exceeding max_attempts. */
+function sh_otp_attempt_bump(int $id): bool
+{
+    try {
+        $st = sh_db()->prepare(
+            'UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ? AND attempts < max_attempts'
+        );
+        $st->execute([$id]);
+        return $st->rowCount() === 1;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-attempt');
+        return false;
+    }
 }
 
 /**
@@ -311,65 +516,423 @@ function sh_otp_verify(string $phone, string $purpose, string $code, ?int $userI
     if (!sh_otp_enabled()) {
         return ['ok' => false, 'error' => 'Phone verification is disabled.'];
     }
+    if (!in_array($purpose, ['signup', 'login', 'test'], true)) {
+        return ['ok' => false, 'error' => 'Invalid verification purpose.'];
+    }
     $phone = sh_phone_normalize($phone);
     $code = trim($code);
     if ($phone === '' || $code === '') {
         return ['ok' => false, 'error' => 'Enter the code we sent you.'];
     }
-    $row = sh_otp_find_latest($phone, $purpose, $userId);
+    try {
+        $row = sh_otp_find_latest($phone, $purpose, $userId);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-verify-lookup');
+        return ['ok' => false, 'error' => 'Verification is temporarily unavailable. Please try again shortly.'];
+    }
     if (!$row) {
+        sh_otp_log($phone, $purpose, 'failed', ['reason' => 'no_active_code']);
         return ['ok' => false, 'error' => 'No active verification code found. Please request a new code.'];
     }
     // Expiry is decided by the database clock (is_fresh), never by comparing
     // PHP time() against a MySQL datetime string.
     if ((int)$row['is_fresh'] !== 1) {
-        $pdo = sh_db();
-        $pdo->prepare('UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ?')->execute([$row['id']]);
+        sh_otp_attempt_bump((int)$row['id']);
         sh_otp_log($phone, $purpose, 'expired', ['id' => $row['id']]);
         return ['ok' => false, 'error' => 'This verification code has expired. Please request a new code.'];
     }
     if ((int)$row['attempts'] >= (int)$row['max_attempts']) {
+        sh_otp_log($phone, $purpose, 'failed', ['reason' => 'attempts_exhausted', 'id' => $row['id']]);
         return ['ok' => false, 'error' => 'Too many incorrect attempts. Please request a new code.'];
     }
-    if (!password_verify($code, $row['otp_hash'])) {
-        $pdo = sh_db();
-        $pdo->prepare('UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ?')->execute([$row['id']]);
+    if (!password_verify($code, (string)$row['otp_hash'])) {
+        sh_otp_attempt_bump((int)$row['id']);
         sh_otp_log($phone, $purpose, 'failed', ['attempts' => (int)$row['attempts'] + 1, 'id' => $row['id']]);
         return ['ok' => false, 'error' => 'Invalid verification code.'];
     }
 
-    // Correct code: consume it so it cannot be replayed.
-    $pdo = sh_db();
-    $pdo->prepare('UPDATE otp_verifications SET verified_at = NOW() WHERE id = ?')->execute([$row['id']]);
+    // Correct code: consume it atomically so it cannot be replayed, and so two
+    // simultaneous requests can never both be accepted.
+    if (!sh_otp_consume((int)$row['id'])) {
+        $fresh = null;
+        try { $fresh = sh_otp_find_by_id((int)$row['id']); } catch (Throwable $e) { sh_log_exception($e, 'otp-consume-check'); }
+        sh_otp_log($phone, $purpose, 'replayed', ['id' => $row['id']]);
+        if ($fresh !== null && $fresh['verified_at'] !== null) {
+            return ['ok' => false, 'error' => 'This verification code has already been used. Please request a new code.'];
+        }
+        return ['ok' => false, 'error' => 'This verification code is no longer valid. Please request a new code.'];
+    }
     sh_otp_log($phone, $purpose, 'verified', ['id' => $row['id']]);
     return ['ok' => true, 'error' => null, 'method' => 'sms'];
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting (per phone + per IP + daily cap) — implemented in SQL so a
-// user cannot bypass it by clearing cookies or opening many sessions.
+// Rate limiting (per phone + per IP + daily cap)
+//
+// Counted from `otp_rate_limits`, an append-only request log that is completely
+// independent of `otp_verifications`. Deleting, expiring or replacing a code
+// therefore cannot reset a limit, and a failed SMS delivery — which removes the
+// unusable code — still counts towards every window.
+//
+// Phone numbers and IPs are stored as HMAC-SHA256 identifiers keyed by a
+// per-install secret, so the log can never be used to recover a number.
+//
+// Concurrency: the windows are checked and the request is recorded inside one
+// transaction that first takes a row lock on this number's and this device's
+// bucket in `otp_rate_locks`. Two simultaneous requests cannot both read
+// "below the limit" and both proceed.
 // ---------------------------------------------------------------------------
+
+/** Secret name of the per-install pepper used by every rate-limit identifier. */
+const SH_OTP_PEPPER_SECRET = 'otp_rate_pepper';
+
+/**
+ * Per-install secret used to key the rate-limit identifiers.
+ *
+ * Resolution order (see includes/secrets.php):
+ *   1. SH_SECRET_OTP_RATE_PEPPER constant;
+ *   2. SH_SECRET_OTP_RATE_PEPPER / SH_OTP_RATE_PEPPER environment variable;
+ *   3. config/secrets.php;
+ *   4. the value stored in `settings` (legacy, and the fallback for hosts with
+ *      no environment-variable support);
+ *   5. generated once and stored — only when $create is true.
+ *
+ * The value itself is never logged, rendered or returned to a client.
+ */
+function sh_otp_rate_pepper(bool $create = true): string
+{
+    if (!function_exists('sh_secret')) { require_once __DIR__ . '/secrets.php'; }
+
+    $secret = sh_secret(SH_OTP_PEPPER_SECRET, '');
+    if ($secret !== '') { return $secret; }
+
+    $stored = (string)sh_setting('otp_rate_pepper', '');
+    if ($stored !== '') { return $stored; }
+
+    if (!$create) { return ''; }
+    try {
+        $pepper = bin2hex(random_bytes(32));
+        sh_setting_save('otp_rate_pepper', $pepper);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-rate-pepper');
+        return '';
+    }
+    return $pepper;
+}
+
+/**
+ * Peppers that must still be recognised when counting limits.
+ *
+ * A rotation cannot re-key existing rows (the identifiers are one-way hashes and
+ * the plaintext is deliberately not stored), so the previous pepper is kept for
+ * reads: the window counts rows hashed with the old secret too, and history is
+ * preserved instead of silently resetting every limit. Supply it as
+ * SH_SECRET_OTP_RATE_PEPPER_PREVIOUS (comma or space separated).
+ *
+ * When a secret source is in use and the legacy `settings` value differs, the
+ * legacy value is added automatically — that is the migration path: copy the
+ * stored pepper into config/secrets.php (Admin → Security does it), and existing
+ * history keeps counting.
+ *
+ * @return array<int,string>
+ */
+function sh_otp_rate_previous_peppers(): array
+{
+    if (!function_exists('sh_secret')) { require_once __DIR__ . '/secrets.php'; }
+
+    $out = [];
+    $raw = sh_secret(SH_OTP_PEPPER_SECRET . '_previous', '');
+    foreach (preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $p) {
+        $p = trim($p);
+        if ($p !== '') { $out[] = $p; }
+    }
+
+    $stored = (string)sh_setting('otp_rate_pepper', '');
+    if ($stored !== '' && $stored !== sh_otp_rate_pepper(false)) { $out[] = $stored; }
+
+    return array_values(array_unique($out));
+}
+
+/**
+ * Every pepper a rate-limit lookup must accept, current first.
+ *
+ * @return array<int,string>
+ */
+function sh_otp_rate_peppers(): array
+{
+    $current = sh_otp_rate_pepper();
+    if ($current === '') { return []; }
+    return array_values(array_unique(array_merge([$current], sh_otp_rate_previous_peppers())));
+}
+
+/**
+ * Privacy-preserving identifier for a phone number or IP address.
+ *
+ * @param string|null $pepper explicit pepper (used when counting with a retired
+ *                            pepper); null means "the current pepper"
+ */
+function sh_otp_rate_key(string $kind, string $value, ?string $pepper = null): string
+{
+    $kind = strtolower(trim($kind));
+    $value = trim($value);
+    // Phone numbers are normalised before hashing so "+8801…", "8801…" and
+    // "08801…" cannot be used to reach three different buckets and thereby
+    // multiply the per-number allowance.
+    if ($kind === 'phone' && function_exists('sh_phone_normalize')) {
+        $normalised = sh_phone_normalize($value);
+        if ($normalised !== '') { $value = $normalised; }
+    }
+    if ($value === '') { return ''; }
+    $pepper = $pepper ?? sh_otp_rate_pepper();
+    if ($pepper === '') { return ''; }
+    return hash_hmac('sha256', $kind . ':' . $value, $pepper);
+}
+
+/**
+ * Identifier candidates for a value under every accepted pepper.
+ *
+ * @return array<int,string> current key first, empty when unusable
+ */
+function sh_otp_rate_key_candidates(string $kind, string $value): array
+{
+    $keys = [];
+    foreach (sh_otp_rate_peppers() as $pepper) {
+        $k = sh_otp_rate_key($kind, $value, $pepper);
+        if ($k !== '') { $keys[] = $k; }
+    }
+    return array_values(array_unique($keys));
+}
+
+/**
+ * COUNT(*) of rate rows for one column across one or more key candidates.
+ *
+ * Two things vary and both are fixed here, never by a caller: the column name
+ * (a strict allowlist) and the window (a closed enum). The only thing built at
+ * runtime is the list of `?` placeholders, so no value can reach the SQL text.
+ *
+ * @param array<int,string> $keys    key candidates from sh_otp_rate_key_candidates()
+ * @param string            $window  'rolling' (a window of $seconds) or 'today'
+ */
+function sh_otp_rate_count(PDO $pdo, string $column, array $keys, string $window = 'rolling', int $seconds = 60): int
+{
+    if ($column !== 'phone_key' && $column !== 'ip_key') { return 0; }
+    $keys = array_values(array_unique(array_filter($keys, static fn($k) => is_string($k) && $k !== '')));
+    if ($keys === []) { return 0; }
+
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
+    if ($window === 'today') {
+        $sql = sprintf(
+            'SELECT COUNT(*) FROM otp_rate_limits WHERE %s IN (%s) AND created_at >= CURDATE()',
+            $column,
+            $placeholders
+        );
+        $params = $keys;
+    } else {
+        $sql = sprintf(
+            'SELECT COUNT(*) FROM otp_rate_limits WHERE %s IN (%s) AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            $column,
+            $placeholders
+        );
+        $params = array_merge($keys, [max(1, $seconds)]);
+    }
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    return (int)$st->fetchColumn();
+}
+
+/**
+ * DDL for the rate-limit tables.
+ *
+ * install/schema.php is the canonical definition (the installer and the upgrade
+ * path use it). This wrapper lets CLI/cron/test contexts that only load
+ * phone-otp.php create the same tables; a regression test asserts both
+ * definitions stay identical.
+ */
+function sh_otp_rate_tables_sql(): array
+{
+    if (function_exists('sh_otp_rate_schema_sql')) { return sh_otp_rate_schema_sql(); }
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return [
+        "CREATE TABLE IF NOT EXISTS otp_rate_limits (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            phone_key CHAR(64) NOT NULL,
+            ip_key CHAR(64) DEFAULT NULL,
+            purpose VARCHAR(30) NOT NULL,
+            outcome VARCHAR(20) NOT NULL DEFAULT 'pending',
+            provider VARCHAR(30) DEFAULT NULL,
+            user_id INT UNSIGNED DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_orl_phone_time (phone_key, created_at),
+            KEY idx_orl_ip_time (ip_key, created_at),
+            KEY idx_orl_created (created_at)
+        ) $E",
+        "CREATE TABLE IF NOT EXISTS otp_rate_locks (
+            bucket_key CHAR(64) NOT NULL,
+            locked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (bucket_key),
+            KEY idx_orl_lock_age (locked_at)
+        ) $E",
+    ];
+}
+
+/**
+ * Create the rate-limit tables once per installation. Existing installs get
+ * them from sh_otp_schema_ensure(); this covers a request that arrives before
+ * any admin page has run the upgrader.
+ */
+function sh_otp_rate_ensure(): bool
+{
+    // Only a success is cached: if creating the tables fails (permissions, a
+    // transient database error) the next request tries again instead of
+    // refusing every OTP until the process ends.
+    static $ok = false;
+    if ($ok) { return true; }
+    try {
+        $ver = (int)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'otp_rate_schema_version' LIMIT 1", [], 0);
+        if ($ver >= 1) { return $ok = true; }
+        foreach (sh_otp_rate_tables_sql() as $ddl) { sh_db()->exec($ddl); }
+        sh_setting_save('otp_rate_schema_version', '1');
+        $ok = true;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-rate-schema');
+        return false;
+    }
+    return $ok;
+}
+
+/** Take (and hold until COMMIT) the row lock for one rate-limit bucket. */
+function sh_otp_rate_lock(PDO $pdo, string $bucket): void
+{
+    $pdo->prepare('INSERT IGNORE INTO otp_rate_locks (bucket_key, locked_at) VALUES (?, NOW())')->execute([$bucket]);
+    $st = $pdo->prepare('SELECT locked_at FROM otp_rate_locks WHERE bucket_key = ? FOR UPDATE');
+    $st->execute([$bucket]);
+    $st->fetch();
+}
+
+/**
+ * Atomically reserve one request slot.
+ *
+ * @return array{ok:bool,error:?string,event_id:?int,kind:string}
+ */
+function sh_otp_rate_begin(string $phone, string $ip, string $purpose, ?int $userId = null): array
+{
+    $fail = static fn(string $message, string $kind): array
+        => ['ok' => false, 'error' => $message, 'event_id' => null, 'kind' => $kind];
+
+    $phoneKey = sh_otp_rate_key('phone', $phone);
+    $ipKey = $ip !== '' ? sh_otp_rate_key('ip', $ip) : '';
+    // Rows written before a pepper rotation are still counted, so rotating the
+    // secret does not silently clear every limit.
+    $phoneKeys = sh_otp_rate_key_candidates('phone', $phone);
+    $ipKeys = $ip !== '' ? sh_otp_rate_key_candidates('ip', $ip) : [];
+    if ($phoneKey === '' || $phoneKeys === [] || !sh_otp_rate_ensure()) {
+        return $fail('Verification is temporarily unavailable. Please try again shortly.', 'unavailable');
+    }
+
+    $pdo = sh_db();
+    $ownTx = !$pdo->inTransaction();
+    try {
+        if ($ownTx) { $pdo->beginTransaction(); }
+        // Deterministic order (phone, then IP) avoids deadlocks between requests
+        // that share one bucket but not the other.
+        sh_otp_rate_lock($pdo, $phoneKey);
+        if ($ipKey !== '') { sh_otp_rate_lock($pdo, $ipKey); }
+
+        $error = null;
+        $phoneWindow = sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'rolling', sh_otp_phone_rate_window());
+        if ($phoneWindow >= sh_otp_phone_rate_limit()) {
+            $error = 'Too many verification requests for this number. Please wait a few minutes.';
+        }
+        if ($error === null && $ipKeys !== []) {
+            $ipWindow = sh_otp_rate_count($pdo, 'ip_key', $ipKeys, 'rolling', sh_otp_ip_rate_window());
+            if ($ipWindow >= sh_otp_ip_rate_limit()) {
+                $error = 'Too many verification requests from this device. Please try again later.';
+            }
+        }
+        if ($error === null) {
+            $daily = sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'today');
+            if ($daily >= sh_otp_daily_limit()) {
+                $error = 'Daily verification limit reached for this number. Please try again tomorrow.';
+            }
+        }
+        if ($error !== null) {
+            if ($ownTx) { $pdo->rollBack(); }
+            return $fail($error, 'rate_limited');
+        }
+
+        $pdo->prepare('INSERT INTO otp_rate_limits (phone_key, ip_key, purpose, outcome, user_id) VALUES (?,?,?,?,?)')
+            ->execute([$phoneKey, $ipKey !== '' ? $ipKey : null, mb_substr($purpose, 0, 30), 'pending', $userId]);
+        $eventId = (int)$pdo->lastInsertId();
+        if ($ownTx) { $pdo->commit(); }
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) { $pdo->rollBack(); }
+        sh_log_exception($e, 'otp-rate');
+        return $fail('Verification is temporarily unavailable. Please try again shortly.', 'unavailable');
+    }
+
+    // Housekeeping never blocks the request and never touches recent history.
+    try { if (random_int(1, 200) === 1) { sh_otp_rate_cleanup(); } } catch (Throwable $e) { sh_log_exception($e, 'otp-rate-housekeeping'); }
+
+    return ['ok' => true, 'error' => null, 'event_id' => $eventId, 'kind' => 'accepted'];
+}
+
+/** Record the final outcome of a reserved request ('requested', 'failed', …). */
+function sh_otp_rate_finish(?int $eventId, string $outcome, string $provider = ''): void
+{
+    if ($eventId === null || $eventId <= 0) { return; }
+    try {
+        sh_db()->prepare('UPDATE otp_rate_limits SET outcome = ?, provider = ? WHERE id = ?')
+            ->execute([
+                mb_substr($outcome, 0, 20),
+                $provider !== '' ? mb_substr($provider, 0, 30) : null,
+                $eventId,
+            ]);
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-rate-finish');
+    }
+}
+
+/**
+ * Delete rate-limit history older than the retention window. Safe to run at any
+ * time (also exposed to cron); it never deletes a row that a live window uses.
+ */
+function sh_otp_rate_cleanup(int $keepDays = 30): int
+{
+    $keepDays = max(1, $keepDays);
+    $deleted = 0;
+    try {
+        $st = sh_db()->prepare('DELETE FROM otp_rate_limits WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+        $st->execute([$keepDays]);
+        $deleted = (int)$st->rowCount();
+        sh_db()->prepare('DELETE FROM otp_rate_locks WHERE locked_at < DATE_SUB(NOW(), INTERVAL 1 DAY)')->execute();
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-rate-cleanup');
+    }
+    return $deleted;
+}
+
+/**
+ * Read-only limit check, kept for callers that only want to know whether a
+ * request would be allowed. It never records anything — issuance goes through
+ * sh_otp_rate_begin(), which reserves the slot atomically.
+ */
 function sh_otp_limit_check(string $phone, string $ip): ?string
 {
+    $phoneKey = sh_otp_rate_key('phone', $phone);
+    $phoneKeys = sh_otp_rate_key_candidates('phone', $phone);
+    $ipKeys = $ip !== '' ? sh_otp_rate_key_candidates('ip', $ip) : [];
+    if ($phoneKey === '' || $phoneKeys === [] || !sh_otp_rate_ensure()) {
+        return 'Verification is temporarily unavailable. Please try again shortly.';
+    }
     $pdo = sh_db();
-
-    // All windows are measured with the database clock so the limits hold
-    // regardless of any PHP/MySQL timezone difference.
-    $st = $pdo->prepare('SELECT COUNT(*) FROM otp_verifications WHERE phone = ? AND created_at > (NOW() - INTERVAL ? SECOND)');
-    $st->execute([$phone, sh_otp_phone_rate_window()]);
-    if ((int)$st->fetchColumn() >= sh_otp_phone_rate_limit()) {
+    if (sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'rolling', sh_otp_phone_rate_window()) >= sh_otp_phone_rate_limit()) {
         return 'Too many verification requests for this number. Please wait a few minutes.';
     }
-
-    $st = $pdo->prepare('SELECT COUNT(*) FROM otp_verifications WHERE ip_address = ? AND created_at > (NOW() - INTERVAL ? SECOND)');
-    $st->execute([$ip, sh_otp_ip_rate_window()]);
-    if ((int)$st->fetchColumn() >= sh_otp_ip_rate_limit()) {
+    if ($ipKeys !== [] && sh_otp_rate_count($pdo, 'ip_key', $ipKeys, 'rolling', sh_otp_ip_rate_window()) >= sh_otp_ip_rate_limit()) {
         return 'Too many verification requests from this device. Please try again later.';
     }
-
-    $st = $pdo->prepare('SELECT COUNT(*) FROM otp_verifications WHERE phone = ? AND created_at >= CURDATE()');
-    $st->execute([$phone]);
-    if ((int)$st->fetchColumn() >= sh_otp_daily_limit()) {
+    if (sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'today') >= sh_otp_daily_limit()) {
         return 'Daily verification limit reached for this number. Please try again tomorrow.';
     }
     return null;

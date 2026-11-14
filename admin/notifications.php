@@ -192,7 +192,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table sh-notif-log__table">
-      <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th><th style="text-align:right">Action</th></tr></thead>
+      <thead><tr><th>Order</th><th>Event</th><th>Channel</th><th>Status</th><th>Detail</th><th>Time</th><th>Action</th></tr></thead>
       <tbody>
       <?php if (!$logs): ?><tr class="sh-table--empty"><td colspan="7">No log entries.</td></tr>
       <?php else: foreach ($logs as $l): ?>
@@ -208,7 +208,7 @@ require __DIR__ . '/_layout.php';
             <?php if ((int)($l['attempts'] ?? 0) > 1): ?><div>Attempts: <?= (int)$l['attempts'] ?></div><?php endif; ?>
           </td>
           <td data-label="Time" class="sh-table__meta"><?= e(date('d M, H:i', strtotime($l['created_at']))) ?></td>
-          <td data-label="Action" style="text-align:right">
+          <td data-label="Action">
             <?php
               $retryableEvents = ['order_created', 'payment_submitted', 'order_created_image', 'payment_submitted_image'];
               $retryable = $l['status'] === 'failed'
