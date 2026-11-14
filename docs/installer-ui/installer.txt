@@ -41,7 +41,7 @@ ShopHaat installer UI — phase "fresh" against http://127.0.0.1:8080
   PASS  the form still contains #admin_email — 1 match(es)
   PASS  the form still contains #admin_password — 1 match(es)
   PASS  the form still contains #admin_password2 — 1 match(es)
-  PASS  the CSRF token is present in the form — e7825800dc7c…
+  PASS  the CSRF token is present in the form — 09a41436952a…
   PASS  every input is associated with a label
   PASS  only the dynamic progress width is an inline style — 1: div
   PASS  the stylesheet never hides content with overflow:hidden
@@ -51,7 +51,7 @@ ShopHaat installer UI — phase "fresh" against http://127.0.0.1:8080
   PASS  the action area has a Refresh requirements button
   PASS  the action area has the primary Continue button
   PASS  Continue is enabled because every required check passed
-  PASS  Refresh requirements re-runs the checks on the server — checked at 02:56 (server time)
+  PASS  Refresh requirements re-runs the checks on the server — checked at 03:05 (server time)
   PASS  the refreshed page still reports a ready server
   PASS  the requirements screen: no console errors
   PASS  the requirements screen: no JavaScript exceptions
@@ -100,7 +100,7 @@ ShopHaat installer UI — phase "fresh" against http://127.0.0.1:8080
   PASS  the completion screen still tells the owner to delete /install —  Delete the /install folder from your hosting account now The installation lock 
   PASS  the installer wrote config/database.php
   PASS  the installer wrote config/installed.lock
-  PASS  the lock file records the real installation — { "installed_at": "2026-11-15T02:56:59+06:00", "version": "1.0.0", "php": "8.2.35" }
+  PASS  the lock file records the real installation — { "installed_at": "2026-11-15T03:05:51+06:00", "version": "1.0.0", "php": "8.2.35" }
   PASS  a locked store no longer serves the installer — status 302 → /index.php
   PASS  the storefront it just installed loads — status 200
   PASS  the storefront shows the configured site name — Installer Test Store
