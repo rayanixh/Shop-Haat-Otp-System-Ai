@@ -126,11 +126,16 @@ $customer($pdo, 'Second Customer', 'customer2@example.test', '01700000002');
 $pdo->exec("UPDATE payment_methods SET account_number = '01711111111' WHERE code = 'bkash'");
 
 // The browser run needs to know which page has the gallery it should exercise.
+// The category with the most products is the one a shopper would land on from
+// the home page showcase, so the browser run uses the same page.
+$catRow = $pdo->query('SELECT c.slug FROM categories c JOIN products p ON p.category_id = c.id
+    WHERE p.status = 1 GROUP BY c.slug ORDER BY COUNT(*) DESC, c.slug ASC LIMIT 1')->fetch();
 $state = [
     'products'           => $products,
     'categories'         => $categories,
     'galleryImages'      => $galleryImages,
     'galleryProductUrl'  => is_array($first) ? '/product.php?slug=' . urlencode((string)$first['slug']) : '',
+    'categoryUrl'        => is_array($catRow) ? '/category.php?slug=' . urlencode((string)$catRow['slug']) : '',
 ];
 @mkdir(__DIR__ . '/artifacts', 0777, true);
 @file_put_contents(__DIR__ . '/artifacts/state.json', json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");

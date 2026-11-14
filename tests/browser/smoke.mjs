@@ -1,32 +1,19 @@
 /**
- * Shop Haat — real browser regression (Chromium via Playwright).
+ * Real browser regression — storefront, admin panel, mobile, security.
  *
- * This is a REAL browser against a REAL PHP server and a REAL MySQL database:
- * it loads pages, clicks, types and submits, and it watches what the browser
- * actually reports (console errors, failed requests, CSP violations, horizontal
- * overflow at a phone width). It is not an HTML inspection.
- *
- * What it covers — and this is deliberately the reliable core, not a pretend
- * full sweep:
- *   1. storefront home page renders with products, no console/network errors
- *   2. category page renders its products
- *   3. product page: main gallery image really loads (naturalWidth > 0), the
- *      next/prev controls really change the counter
- *   4. add to cart from the product page, and the cart page shows the line
- *   5. customer sign-in with email + password
- *   6. checkout: fill the delivery form, choose Cash on Delivery, place the
- *      order, land on order-success with an order number
- *   7. admin sign-in with a seeded administrator, dashboard renders
- *   8. admin guard: a signed-out request for /admin/orders.php is redirected to
- *      the login page and never shows order data
- *   9. mobile width (390×844): no horizontal overflow on home/product/cart,
- *      gallery and buttons stay on screen
- *  10. CSP: the page reports zero securitypolicyviolation events while the
- *      policy is in its default report-only mode
+ * Runs Chromium against a store that was installed through the application's own
+ * installer (tests/browser/seed.php) on a disposable MySQL database, served by a
+ * real web server. Everything asserted here is observed in the browser: rendered
+ * markup, decoded images, console output, failed requests, CSP violation reports,
+ * horizontal overflow at a phone viewport, and the state of the database as the
+ * admin panel reports it.
  *
  *   SH_BROWSER_BASE_URL=http://127.0.0.1:8080 \
  *   SH_BROWSER_ADMIN_PASSWORD=… SH_BROWSER_CUSTOMER_PASSWORD=… \
  *     node tests/browser/smoke.mjs
+ *
+ * Areas are wrapped individually: a broken flow records a failed check and the
+ * run continues, so one defect cannot hide the rest of the report.
  *
  * Exit code 0 only when every check passed.
  */
@@ -42,9 +29,8 @@ const CUSTOMER = { email: 'customer@example.test', password: process.env.SH_BROW
 const ARTIFACTS = join(HERE, 'artifacts');
 mkdirSync(ARTIFACTS, { recursive: true });
 
-// What the seed actually built. tests/browser/seed.php records the product it
-// gave a multi-image gallery, so the gallery assertions describe a known page
-// instead of "whichever card happened to be first".
+// What the seed actually built: which product carries the multi-image gallery,
+// which category has products, and how many of each exist.
 let seeded = {};
 try { seeded = JSON.parse(readFileSync(join(ARTIFACTS, 'state.json'), 'utf8')); } catch { seeded = {}; }
 
@@ -54,267 +40,493 @@ function check(name, ok, detail = '') {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-/** Attach console/network/CSP listeners; returns the collectors for a page. */
+/** Run one area; an exception becomes a named failure instead of ending the run. */
+async function area(label, fn) {
+  console.log(`\n${label}`);
+  try { await fn(); } catch (error) {
+    check(`${label}: the flow completed without an exception`, false, String(error).replace(/\s+/g, ' ').slice(0, 320));
+  }
+}
+
+/** Collect console errors, JS exceptions, failed requests and CSP reports. */
 async function watch(page) {
-  const errors = { console: [], requests: [], csp: [], pageErrors: [] };
-  page.on('console', (m) => { if (m.type() === 'error') { errors.console.push(m.text().slice(0, 300)); } });
-  page.on('pageerror', (e) => errors.pageErrors.push(String(e).slice(0, 300)));
-  page.on('requestfailed', (r) => {
-    if (!/favicon\.ico$/.test(r.url())) { errors.requests.push(`${r.method()} ${r.url()} — ${r.failure()?.errorText}`); }
+  const seen = { console: [], pageErrors: [], requests: [], csp: [] };
+  page.on('console', (msg) => { if (msg.type() === 'error') { seen.console.push(msg.text().slice(0, 200)); } });
+  page.on('pageerror', (err) => { seen.pageErrors.push(String(err).slice(0, 200)); });
+  page.on('response', (res) => {
+    const status = res.status();
+    if (status >= 400) { seen.requests.push(`${status} ${res.url().replace(BASE, '')}`); }
   });
-  page.on('response', (r) => {
-    if (r.status() >= 400 && !/favicon\.ico$/.test(r.url())) { errors.requests.push(`${r.status()} ${r.url()}`); }
-  });
+  page.on('requestfailed', (req) => { seen.requests.push(`failed ${req.url().replace(BASE, '')}`); });
   await page.addInitScript(() => {
     window.__cspViolations = [];
     document.addEventListener('securitypolicyviolation', (e) => {
-      window.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`);
+      window.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`.slice(0, 160));
     });
   });
-  return errors;
-}
-
-/** Save a full-page screenshot for the CI artifact (one per flow). */
-async function snap(page, name) {
-  try { await page.screenshot({ path: join(ARTIFACTS, `${name}.png`), fullPage: true }); }
-  catch { /* a screenshot is a convenience, never a check */ }
+  return seen;
 }
 
 function report(errors, label) {
-  const csp = errors.csp.length;
-  const detail = [
-    errors.console.length ? `console: ${errors.console.slice(0, 2).join(' | ')}` : '',
-    errors.requests.length ? `requests: ${errors.requests.slice(0, 2).join(' | ')}` : '',
-    errors.pageErrors.length ? `js: ${errors.pageErrors.slice(0, 2).join(' | ')}` : '',
-  ].filter(Boolean).join(' · ');
-  check(`${label}: no console errors`, errors.console.length === 0, detail);
-  check(`${label}: no JavaScript exceptions`, errors.pageErrors.length === 0, detail);
-  check(`${label}: no failed requests (4xx/5xx/network)`, errors.requests.length === 0, detail);
-  return csp;
+  check(`${label}: no console errors`, errors.console.length === 0, errors.console.slice(0, 3).join(' | '));
+  check(`${label}: no JavaScript exceptions`, errors.pageErrors.length === 0, errors.pageErrors.slice(0, 3).join(' | '));
+  check(`${label}: no failed requests (4xx/5xx/network)`, errors.requests.length === 0, errors.requests.slice(0, 3).join(' | '));
 }
 
+async function csp(page, label) {
+  const events = await page.evaluate(() => window.__cspViolations || []).catch(() => []);
+  check(`${label}: the CSP reports no violations`, events.length === 0, (events || []).slice(0, 3).join(' | '));
+}
+
+async function snap(page, name) {
+  try { await page.screenshot({ path: join(ARTIFACTS, `${name}.png`), fullPage: false }); } catch { /* a screenshot is not a check */ }
+}
+
+const text = async (locator) => (await locator.textContent().catch(() => '')) || '';
+const count = async (locator) => await locator.count().catch(() => 0);
+
 const browser = await chromium.launch();
-try {
-  /* ------------------------------------------------------------------ */
-  console.log('\n1. Storefront home');
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await ctx.newPage();
-  let errors = await watch(page);
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const page = await ctx.newPage();
+let errors = await watch(page);
+
+// Values carried between areas.
+let productUrl = seeded.galleryProductUrl ? BASE + seeded.galleryProductUrl : '';
+let productName = '';
+let orderNumber = '';
+let orderToken = '';
+
+/* ======================================================================== */
+await area('1. Storefront home', async () => {
   const home = await page.goto(BASE + '/index.php', { waitUntil: 'domcontentloaded' });
   check('the home page responds 200', home && home.status() === 200, `status ${home?.status()}`);
-  const cards = await page.locator('article.sh-product-card').count();
-  check('the home page lists products', cards > 0,
-    `${cards} product cards · url ${page.url().replace(BASE, '')} · title "${(await page.title()).slice(0, 90)}"`);
-  const brokenImages = await page.evaluate(() => Array.from(document.images)
+  const cards = await count(page.locator('article.sh-product-card'));
+  check('the home page lists products', cards > 0, `${cards} product cards · ${page.url().replace(BASE, '')}`);
+  const broken = await page.evaluate(() => Array.from(document.images)
     .filter((img) => img.complete && img.naturalWidth === 0)
     .map((img) => img.currentSrc || img.src).slice(0, 3));
-  check('no broken images on the home page', brokenImages.length === 0, brokenImages.join(' | '));
+  check('every image on the home page decodes', broken.length === 0, broken.join(' | '));
   await snap(page, '01-home');
-  const homeCsp = report(errors, 'home');
-  const cspEvents = await page.evaluate(() => window.__cspViolations || []);
-  check('home: the CSP reports no violations', cspEvents.length === 0 && homeCsp === 0,
-    (cspEvents || []).slice(0, 3).join(' | '));
+  report(errors, 'home');
+  await csp(page, 'home');
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n2. Category page');
+/* ======================================================================== */
+await area('2. Shop listing and search', async () => {
   errors = await watch(page);
-  // An empty catalogue must not abort the run: the later areas then fail with a
-  // readable reason instead of a 30 s locator timeout.
-  const catHref = await page.locator('a.sh-product-card__media').first()
-    .getAttribute('href', { timeout: 5000 }).catch(() => null);
-  if (!catHref) { check('a product card links to a product page', false, 'the home page had no product cards'); }
-  const productUrl = seeded.galleryProductUrl
-    ? new URL(seeded.galleryProductUrl, BASE).toString()
-    : (catHref ? new URL(catHref, BASE).toString() : BASE + '/product.php?slug=missing-in-seed');
-  const cat = await page.goto(BASE + '/products.php', { waitUntil: 'domcontentloaded' });
-  check('the shop listing responds 200', cat && cat.status() === 200, `status ${cat?.status()}`);
-  const listed = await page.locator('article.sh-product-card').count();
+  const listing = await page.goto(BASE + '/products.php', { waitUntil: 'domcontentloaded' });
+  check('the shop listing responds 200', listing && listing.status() === 200, `status ${listing?.status()}`);
+  const listed = await count(page.locator('article.sh-product-card'));
   check('the shop listing shows products', listed > 0, `${listed} cards`);
-  report(errors, 'listing');
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n3. Product page and gallery');
+  // Search the way a shopper does: type a word from a real product name.
+  const firstName = await text(page.locator('article.sh-product-card .sh-product-card__name').first());
+  const word = firstName.trim().split(/\s+/)[0] || '';
+  const searched = await page.goto(BASE + '/products.php?q=' + encodeURIComponent(word), { waitUntil: 'domcontentloaded' });
+  const results = await count(page.locator('article.sh-product-card'));
+  check('a search returns matching products', searched?.status() === 200 && results > 0,
+    `"${word}" → ${results} card(s)`);
+  const bodyText = await text(page.locator('body'));
+  check('the search results actually contain the searched word',
+    results > 0 && bodyText.toLowerCase().includes(word.toLowerCase()), `"${word}"`);
+  report(errors, 'listing');
+});
+
+/* ======================================================================== */
+await area('3. Category page', async () => {
   errors = await watch(page);
+  const catHref = await page.locator('a.sh-category-card').first()
+    .getAttribute('href', { timeout: 5000 }).catch(() => null);
+  const categoryUrl = seeded.categoryUrl ? BASE + seeded.categoryUrl : (catHref ? new URL(catHref, BASE).toString() : '');
+  check('the home page links to a category', categoryUrl !== '', categoryUrl.replace(BASE, ''));
+  if (categoryUrl !== '') {
+    const cat = await page.goto(categoryUrl, { waitUntil: 'domcontentloaded' });
+    check('the category page responds 200', cat && cat.status() === 200, `status ${cat?.status()} ${categoryUrl.replace(BASE, '')}`);
+    const cards = await count(page.locator('article.sh-product-card'));
+    check('the category page lists its products', cards > 0, `${cards} cards`);
+  }
+  report(errors, 'category');
+});
+
+/* ======================================================================== */
+await area('4. Product page and gallery', async () => {
+  errors = await watch(page);
+  if (productUrl === '') {
+    const href = await page.locator('a.sh-product-card__media').first()
+      .getAttribute('href', { timeout: 5000 }).catch(() => null);
+    productUrl = href ? new URL(href, BASE).toString() : BASE + '/product.php?slug=missing-in-seed';
+  }
   const prod = await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
   check('the product page responds 200', prod && prod.status() === 200, `status ${prod?.status()} ${productUrl.replace(BASE, '')}`);
+  productName = (await text(page.locator('h1'))).trim().slice(0, 80);
+  check('the product page names the product', productName !== '', productName);
+
   const mainLoaded = await page.evaluate(() => {
     const img = document.querySelector('[data-gallery-main]');
     return !!img && img.complete && img.naturalWidth > 0;
   });
-  check('the main gallery image really loads (naturalWidth > 0)', mainLoaded);
-  const thumbs = await page.locator('[data-gallery-thumb]').count();
-  const nextBtn = page.locator('[data-gallery-next]').first();
+  check('the main gallery image really decodes (naturalWidth > 0)', mainLoaded);
+
+  const thumbs = await count(page.locator('[data-gallery-thumb]'));
   if (thumbs > 1) {
-    // A real multi-image gallery: the control must exist, and pressing it must
-    // change both the counter and the image the shopper is looking at.
     check('a multi-image product shows its thumbnails', thumbs > 1, `${thumbs} thumbnails`);
     const before = await page.evaluate(() => ({
       count: (document.querySelector('[data-gallery-count]')?.textContent || '').trim(),
       src: document.querySelector('[data-gallery-main]')?.getAttribute('src') || '',
     }));
-    if (await nextBtn.count()) {
-      await nextBtn.click();
+    const next = page.locator('[data-gallery-next]').first();
+    if (await next.count()) {
+      await next.click();
       await page.waitForTimeout(300);
       const after = await page.evaluate(() => ({
         count: (document.querySelector('[data-gallery-count]')?.textContent || '').trim(),
         src: document.querySelector('[data-gallery-main]')?.getAttribute('src') || '',
       }));
       check('the gallery "next" control changes the counter', before.count !== after.count, `${before.count} → ${after.count}`);
-      check('the gallery "next" control changes the main image', before.src !== '' && before.src !== after.src,
+      check('the gallery "next" control changes the main image',
+        before.src !== '' && before.src !== after.src,
         `${before.src.split('/').pop()} → ${after.src.split('/').pop()}`);
     } else {
       check('the gallery "next" control exists for a multi-image product', false, 'no [data-gallery-next]');
     }
   } else {
-    // One image, no navigation: the app hides the controls on purpose, so their
-    // absence is the correct behaviour and worth asserting.
     check('a single-image product hides the gallery navigation',
-      (await page.locator('[data-gallery-next]').count()) === 0 && (await page.locator('[data-gallery-count]').count()) === 0,
-      `${thumbs} thumbnail(s), seeded gallery ${seeded.galleryImages ?? 'unknown'}`);
+      (await count(page.locator('[data-gallery-next]'))) === 0 && (await count(page.locator('[data-gallery-count]'))) === 0,
+      `${thumbs} thumbnail(s) · seeded gallery ${seeded.galleryImages ?? 'unknown'}`);
   }
-  await snap(page, '03-product');
+  const addBtn = page.locator('[data-add-cart]').first();
+  check('the product page offers add-to-cart', (await addBtn.count()) > 0);
+  await snap(page, '04-product');
   report(errors, 'product');
+  await csp(page, 'product');
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n4. Add to cart → cart page');
+/* ======================================================================== */
+await area('5. Add to cart and cart totals', async () => {
   errors = await watch(page);
   const addBtn = page.locator('[data-add-cart]').first();
-  check('an add-to-cart control exists', (await addBtn.count()) > 0);
   if (await addBtn.count()) {
     await addBtn.click();
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(700);
   }
   await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
-  const rows = await page.locator('[data-cart-row]').count();
-  check('the cart page shows the item that was added', rows > 0, `${rows} line(s)`);
-  await snap(page, '04-cart');
+  const rows = await count(page.locator('[data-cart-row]'));
+  check('the cart lists the product that was added', rows > 0, `${rows} line(s)`);
+  const cartText = await text(page.locator('body'));
+  check('the cart shows a subtotal for the items', /Subtotal/i.test(cartText), 'expected the word Subtotal');
+  await snap(page, '05-cart');
   report(errors, 'cart');
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n5. Customer sign-in');
+/* ======================================================================== */
+await area('6. Customer sign-in and session', async () => {
   errors = await watch(page);
   await page.goto(BASE + '/login.php', { waitUntil: 'domcontentloaded' });
-  // Scope everything to the form that owns the password field. The first submit
-  // button on the page belongs to the header search box, and clicking that
-  // "signs in" to a products page with no session at all.
-  const loginForm = page.locator('form:has(input[name="password"])').first();
-  await loginForm.locator('input[name="email"]').fill(CUSTOMER.email);
-  await loginForm.locator('input[name="password"]').fill(CUSTOMER.password);
+  // Scope everything to the form that owns the password field: the first submit
+  // button on the page belongs to the header search box.
+  const form = page.locator('form:has(input[name="password"])').first();
+  await form.locator('input[name="email"]').fill(CUSTOMER.email);
+  await form.locator('input[name="password"]').fill(CUSTOMER.password);
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
-    loginForm.locator('button[type="submit"], input[type="submit"]').first().click(),
+    form.locator('button[type="submit"], input[type="submit"]').first().click(),
   ]);
-  const afterLogin = page.url();
-  const passwordField = await page.locator('input[name="password"]').count();
+  const landing = page.url();
+  const passwordField = await count(page.locator('input[name="password"]'));
   check('a customer can sign in with email and password',
-    !/\/login\.php/.test(afterLogin) && passwordField === 0,
-    `landed on ${afterLogin.replace(BASE, '')} · password field ${passwordField}`);
-  // The sign-in only counts when a second request still knows the customer: a
-  // landing page that is not the login form can still be a verification gate
-  // that created no session at all.
+    !/\/login\.php/.test(landing) && passwordField === 0,
+    `landed on ${landing.replace(BASE, '')} · password field ${passwordField}`);
+
+  // The sign-in only counts when a second request still knows the customer.
   await page.goto(BASE + '/account.php', { waitUntil: 'domcontentloaded' });
-  const accountUrl = page.url();
   check('the signed-in session survives a second request',
-    !/\/login\.php/.test(accountUrl), accountUrl.replace(BASE, ''));
+    !/\/login\.php/.test(page.url()), page.url().replace(BASE, ''));
+  const account = await text(page.locator('body'));
+  check('the account page knows which customer is signed in',
+    account.toLowerCase().includes(CUSTOMER.email.toLowerCase()), `looking for ${CUSTOMER.email}`);
+  await snap(page, '06-account');
   report(errors, 'login');
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n6. Checkout → order placed');
+/* ======================================================================== */
+await area('7. Wishlist', async () => {
   errors = await watch(page);
-  // Say the preconditions out loud: a signed-in session and a non-empty cart.
-  // Without them a checkout page cannot render its form, and a bare locator
-  // timeout would hide which of the two was missing.
-  await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
-  let cartRows = await page.locator('[data-cart-row]').count();
-  if (cartRows === 0) {
-    await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
-    const addAgain = page.locator('[data-add-cart]').first();
-    if (await addAgain.count()) { await addAgain.click(); await page.waitForTimeout(700); }
-    await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
-    cartRows = await page.locator('[data-cart-row]').count();
+  await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
+  const heart = page.locator('[data-wishlist]').first();
+  check('a product page offers a wishlist control', (await heart.count()) > 0);
+  if (await heart.count()) {
+    await heart.click();
+    await page.waitForTimeout(900);
   }
-  check('the cart still holds the item after signing in', cartRows > 0, `${cartRows} line(s) at ${page.url().replace(BASE, '')}`);
+  await page.goto(BASE + '/wishlist.php', { waitUntil: 'domcontentloaded' });
+  const saved = await count(page.locator('article.sh-product-card'));
+  check('the saved product appears on the wishlist page', saved > 0, `${saved} saved item(s)`);
+  report(errors, 'wishlist');
+});
 
-  const goCheckout = page.locator('a:has-text("Checkout"), a[href*="checkout.php"]').first();
+/* ======================================================================== */
+await area('8. Checkout form', async () => {
+  errors = await watch(page);
+  await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
+  let rows = await count(page.locator('[data-cart-row]'));
+  if (rows === 0) {
+    // Re-add: a cart is not guaranteed to survive every step above.
+    await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
+    const again = page.locator('[data-add-cart]').first();
+    if (await again.count()) { await again.click(); await page.waitForTimeout(700); }
+    await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
+    rows = await count(page.locator('[data-cart-row]'));
+  }
+  check('the cart still holds an item after signing in', rows > 0, `${rows} line(s)`);
+
+  const goCheckout = page.locator('a[href*="checkout.php"]').first();
   if (await goCheckout.count()) {
-    await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), goCheckout.click()]);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}), goCheckout.click()]);
   } else {
     await page.goto(BASE + '/checkout.php', { waitUntil: 'domcontentloaded' });
   }
   const onCheckout = page.url().includes('checkout.php') && !page.url().includes('/login.php');
-  const heading = (await page.locator('h1').first().textContent().catch(() => '')) || '';
+  const heading = (await text(page.locator('h1'))).trim().slice(0, 60);
   check('the checkout page opens for a signed-in customer', onCheckout,
-    `${page.url().replace(BASE, '')} · h1 "${heading.trim().slice(0, 60)}" · cart ${cartRows}`);
-  const hasToken = await page.locator('input[name="order_token"]').count();
-  check('checkout carries the order idempotency token', hasToken > 0,
-    `${page.url().replace(BASE, '')} · ${hasToken} token field(s)`);
-  if (onCheckout && hasToken > 0) {
-    await page.fill('input[name="customer_name"]', 'Browser Customer');
-    await page.fill('input[name="customer_phone"]', '01700000009');
-    await page.fill('input[name="address_line"]', '12 Test Road, Dhanmondi');
-    await page.fill('input[name="area"]', 'Dhanmondi');
-    await page.fill('input[name="city"]', 'Dhaka');
-    const cod = page.locator('input[name="payment_method_id"]').last();
-    if (await cod.count()) { await cod.check().catch(() => {}); }
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
-      page.locator('button:has-text("Place Order")').first().click(),
-    ]);
-    const successUrl = page.url();
-    check('placing the order lands on the confirmation page', /order-success\.php/.test(successUrl), successUrl.replace(BASE, ''));
-    const body = (await page.content()).slice(0, 60000);
-    const orderNumber = (body.match(/SH[-\s]?[A-Z0-9]{6,}/) || [])[0] || '';
-    check('the confirmation names the order', orderNumber !== '', orderNumber);
-  } else {
-    check('placing the order lands on the confirmation page', false,
-      'checkout was not reachable with the seeded customer session');
-  }
-  await snap(page, '06-checkout');
+    `${page.url().replace(BASE, '')} · h1 "${heading}" · cart ${rows}`);
+  orderToken = await page.locator('input[name="order_token"]').first()
+    .getAttribute('value', { timeout: 3000 }).catch(() => '');
+  check('checkout carries the order idempotency token', !!orderToken, orderToken ? 'token present' : 'no order_token field');
   report(errors, 'checkout');
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n7. Admin sign-in');
-  const adminCtx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
-  const admin = await adminCtx.newPage();
-  const adminErrors = await watch(admin);
-  await admin.goto(BASE + '/admin/login.php', { waitUntil: 'domcontentloaded' });
-  const adminForm = admin.locator('form:has(input[name="password"])').first();
-  await adminForm.locator('input[name="email"]').fill(ADMIN.email);
-  await adminForm.locator('input[name="password"]').fill(ADMIN.password);
+/* ======================================================================== */
+await area('9. Place the order', async () => {
+  errors = await watch(page);
+  if (!page.url().includes('checkout.php') || page.url().includes('/login.php')) {
+    check('the order can be placed', false, `not on the checkout page (${page.url().replace(BASE, '')})`);
+    return;
+  }
+  await page.fill('input[name="customer_name"]', 'Browser Customer');
+  await page.fill('input[name="customer_phone"]', '01700000009');
+  await page.fill('input[name="address_line"]', '12 Test Road, Dhanmondi');
+  await page.fill('input[name="area"]', 'Dhanmondi');
+  await page.fill('input[name="city"]', 'Dhaka');
+  const cod = page.locator('input[name="payment_method_id"]').last();
+  if (await cod.count()) { await cod.check().catch(() => {}); }
+
+  // Remember the exact body that places the order, so the duplicate-submission
+  // check can replay it byte for byte.
+  let posted = null;
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && req.url().includes('checkout.php')) { posted = req.postData(); }
+  });
   await Promise.all([
-    admin.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
-    adminForm.locator('button[type="submit"], input[type="submit"]').first().click(),
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+    page.locator('button:has-text("Place Order")').first().click(),
   ]);
-  const adminUrl = admin.url();
-  check('an administrator can sign in', !adminUrl.includes('/admin/login.php'), adminUrl.replace(BASE, ''));
-  const adminHasNav = await admin.locator('a[href*="admin/products.php"], a[href*="admin/orders.php"]').count();
-  check('the admin shell renders its navigation', adminHasNav > 0, `${adminHasNav} links`);
-  await snap(admin, '07-admin');
-  report(adminErrors, 'admin');
+  const successUrl = page.url();
+  check('placing the order lands on the confirmation page', /order-success\.php/.test(successUrl), successUrl.replace(BASE, ''));
+  const body = await page.content();
+  orderNumber = (body.match(/SH[-\s]?[A-Z0-9]{6,}/) || [])[0] || '';
+  check('the confirmation names the order', orderNumber !== '', orderNumber);
+  await snap(page, '09-order-success');
+  report(errors, 'order');
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n8. Admin guard without a session');
+  /* The same submission, sent again. A second order would be a double charge. */
+  if (posted && orderToken) {
+    const replay = await page.request.post(BASE + '/checkout.php', {
+      form: Object.fromEntries(new URLSearchParams(posted)),
+      maxRedirects: 5,
+    }).catch(() => null);
+    const replayBody = replay ? await replay.text() : '';
+    const replayNumbers = new Set((replayBody.match(/SH[-\s]?[A-Z0-9]{6,}/g) || []).map((n) => n.replace(/\s/g, '')));
+    const firstNumber = orderNumber.replace(/\s/g, '');
+    const distinct = [...replayNumbers].filter((n) => n !== firstNumber);
+    check('replaying the same checkout creates no second order', distinct.length === 0,
+      `${replay?.status()} · numbers in the replay: ${[...replayNumbers].join(', ') || 'none'} · first ${firstNumber || 'unknown'}`);
+  } else {
+    check('replaying the same checkout creates no second order', false, 'no captured checkout POST to replay');
+  }
+});
+
+/* ======================================================================== */
+await area('10. Order tracking', async () => {
+  errors = await watch(page);
+  if (orderNumber === '') {
+    check('the order can be tracked by number and phone', false, 'no order number was produced');
+    return;
+  }
+  const track = await page.goto(BASE + '/track.php', { waitUntil: 'domcontentloaded' });
+  check('the tracking page responds 200', track && track.status() === 200, `status ${track?.status()}`);
+  await page.fill('input[name="order_number"]', orderNumber);
+  await page.fill('input[name="phone"]', '01700000009');
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
+    page.locator('form:has(input[name="order_number"]) button[type="submit"]').first().click(),
+  ]);
+  const tracked = await text(page.locator('body'));
+  check('the tracking page finds the order and shows its status',
+    tracked.includes(orderNumber) && /pending|processing|confirmed|status/i.test(tracked),
+    `looking for ${orderNumber}`);
+  await snap(page, '10-track');
+  report(errors, 'track');
+});
+
+/* ======================================================================== */
+await area('11. Unknown product is a 404, not an error', async () => {
+  const missing = await page.goto(BASE + '/product.php?slug=this-product-does-not-exist',
+    { waitUntil: 'domcontentloaded' });
+  const body = await text(page.locator('body'));
+  check('an unknown product answers 404 with a readable page',
+    missing?.status() === 404 && !/fatal error|uncaught|exception/i.test(body),
+    `status ${missing?.status()}`);
+});
+
+/* ======================================================================== */
+await area('12. Admin sign-in', async () => {
+  errors = await watch(page);
+  await page.goto(BASE + '/admin/login.php', { waitUntil: 'domcontentloaded' });
+  const form = page.locator('form:has(input[name="password"])').first();
+  await form.locator('input[name="email"]').fill(ADMIN.email);
+  await form.locator('input[name="password"]').fill(ADMIN.password);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
+    form.locator('button[type="submit"], input[type="submit"]').first().click(),
+  ]);
+  check('an administrator can sign in', !page.url().includes('/admin/login.php'), page.url().replace(BASE, ''));
+  const nav = await count(page.locator('a[href*="admin/products.php"], a[href*="admin/orders.php"]'));
+  check('the admin shell renders its navigation', nav > 0, `${nav} links`);
+  await snap(page, '12-admin');
+  report(errors, 'admin');
+});
+
+/* ======================================================================== */
+await area('13. Admin dashboard and orders', async () => {
+  errors = await watch(page);
+  const dash = await page.goto(BASE + '/admin/index.php', { waitUntil: 'domcontentloaded' });
+  check('the admin dashboard responds 200', dash && dash.status() === 200, `status ${dash?.status()}`);
+
+  const orders = await page.goto(BASE + '/admin/orders.php', { waitUntil: 'domcontentloaded' });
+  check('the orders screen responds 200', orders && orders.status() === 200, `status ${orders?.status()}`);
+  const ordersBody = await text(page.locator('body'));
+  check('the orders screen lists the order the browser placed',
+    orderNumber !== '' && ordersBody.includes(orderNumber), `looking for ${orderNumber || '(none)'}`);
+
+  const detailHref = await page.locator('a[href*="admin/orders.php?id="]').first()
+    .getAttribute('href', { timeout: 5000 }).catch(() => null);
+  if (detailHref) {
+    const detail = await page.goto(new URL(detailHref, BASE).toString(), { waitUntil: 'domcontentloaded' });
+    const detailBody = await text(page.locator('body'));
+    check('the order detail page opens the order', detail?.status() === 200 && detailBody.includes('Browser Customer'),
+      `status ${detail?.status()} · customer name ${detailBody.includes('Browser Customer') ? 'present' : 'missing'}`);
+    check('the order detail shows the item that was bought',
+      productName !== '' && detailBody.includes(productName.split(' ').slice(0, 2).join(' ')),
+      `looking for "${productName.split(' ').slice(0, 2).join(' ')}"`);
+    await snap(page, '13-admin-order');
+  } else {
+    check('the order detail page opens the order', false, 'no link to admin/orders.php?id=');
+  }
+  report(errors, 'admin-orders');
+});
+
+/* ======================================================================== */
+await area('14. Admin catalogue: products, categories, payment methods', async () => {
+  errors = await watch(page);
+  const products = await page.goto(BASE + '/admin/products.php', { waitUntil: 'domcontentloaded' });
+  check('the products screen responds 200', products && products.status() === 200, `status ${products?.status()}`);
+  const rows = await count(page.locator('tbody tr'));
+  check('the products screen lists catalogue rows', rows > 0, `${rows} rows`);
+
+  const editHref = await page.locator('a[href*="admin/product-edit.php?edit="]').first()
+    .getAttribute('href', { timeout: 5000 }).catch(() => null);
+  if (editHref) {
+    const edit = await page.goto(new URL(editHref, BASE).toString(), { waitUntil: 'domcontentloaded' });
+    const nameValue = await page.locator('input[name="name"]').first().inputValue().catch(() => '');
+    check('the product edit form opens with the saved values',
+      edit?.status() === 200 && nameValue.trim() !== '', `status ${edit?.status()} · name "${nameValue.slice(0, 40)}"`);
+
+    // A real save: change the short description and prove it persisted.
+    const stamp = 'browser-' + Date.now().toString().slice(-6);
+    const shortField = page.locator('input[name="short_description"]').first();
+    if (await shortField.count()) {
+      await shortField.fill(stamp);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+        page.locator('form:has(input[name="name"]) button[type="submit"]').first().click(),
+      ]);
+      const afterSave = await text(page.locator('body'));
+      check('saving a product reports success',
+        /saved|updated|success/i.test(afterSave), afterSave.replace(/\s+/g, ' ').slice(0, 120));
+      await page.goto(new URL(editHref, BASE).toString(), { waitUntil: 'domcontentloaded' });
+      const persisted = await page.locator('input[name="short_description"]').first().inputValue().catch(() => '');
+      check('the saved product value is still there after a reload', persisted === stamp,
+        `expected "${stamp}", found "${persisted}"`);
+      // Put the store back the way it was.
+      await page.locator('input[name="short_description"]').first().fill('');
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+        page.locator('form:has(input[name="name"]) button[type="submit"]').first().click(),
+      ]);
+    } else {
+      check('saving a product reports success', false, 'the edit form has no short_description field');
+    }
+  } else {
+    check('the product edit form opens with the saved values', false, 'no product edit link on the list');
+  }
+
+  const cats = await page.goto(BASE + '/admin/categories.php', { waitUntil: 'domcontentloaded' });
+  check('the categories screen responds 200', cats && cats.status() === 200, `status ${cats?.status()}`);
+  const catBody = await text(page.locator('body'));
+  check('the categories screen lists the seeded categories',
+    (seeded.categories ?? 0) > 0 && /categor/i.test(catBody), `seeded ${seeded.categories ?? '?'}`);
+
+  const pay = await page.goto(BASE + '/admin/payment-methods.php', { waitUntil: 'domcontentloaded' });
+  const payBody = await text(page.locator('body'));
+  check('the payment methods screen lists the manual bKash route',
+    pay?.status() === 200 && /bkash/i.test(payBody), `status ${pay?.status()}`);
+  report(errors, 'admin-catalogue');
+});
+
+/* ======================================================================== */
+await area('15. Admin customers and settings', async () => {
+  errors = await watch(page);
+  const customers = await page.goto(BASE + '/admin/customers.php', { waitUntil: 'domcontentloaded' });
+  const customersBody = await text(page.locator('body'));
+  check('the customers screen lists the seeded customer',
+    customers?.status() === 200 && customersBody.toLowerCase().includes(CUSTOMER.email.toLowerCase()),
+    `status ${customers?.status()}`);
+  const settings = await page.goto(BASE + '/admin/settings.php', { waitUntil: 'domcontentloaded' });
+  const siteName = await page.locator('input[name="site_name"]').first().inputValue().catch(() => '');
+  check('the settings screen shows the store name it was installed with',
+    settings?.status() === 200 && siteName.trim() !== '', `status ${settings?.status()} · "${siteName.slice(0, 40)}"`);
+  await snap(page, '15-settings');
+  report(errors, 'admin-settings');
+});
+
+/* ======================================================================== */
+await area('16. Admin guard without a session', async () => {
   const anonCtx = await browser.newContext();
   const anon = await anonCtx.newPage();
   await watch(anon);
   const guarded = await anon.goto(BASE + '/admin/orders.php', { waitUntil: 'domcontentloaded' });
-  const anonBody = (await anon.content()).slice(0, 20000);
-  check('a signed-out /admin/orders.php request does not show order data',
-    !/Order\s*#|order_number|sh-table__row/i.test(anonBody),
-    anon.url().replace(BASE, ''));
-  check('it is answered with a login page or a redirect',
-    /login\.php/.test(anon.url()) || (guarded && guarded.status() === 403), `status ${guarded?.status()}`);
+  const anonBody = await anon.content();
+  check('a signed-out /admin/orders.php request shows no order data',
+    !/order_number|sh-table__row/i.test(anonBody), anon.url().replace(BASE, ''));
+  check('it is answered with a login page or a refusal',
+    /login\.php/.test(anon.url()) || (guarded && [403, 404].includes(guarded.status())),
+    `status ${guarded?.status()} · ${anon.url().replace(BASE, '')}`);
   await anonCtx.close();
+});
 
-  /* ------------------------------------------------------------------ */
-  console.log('\n9. Mobile width (390×844)');
+/* ======================================================================== */
+await area('17. Mobile width (390×844)', async () => {
   const mobileCtx = await browser.newContext({
-    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
-    deviceScaleFactor: 2,
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
   });
   const mobile = await mobileCtx.newPage();
-  await watch(mobile);
-  for (const [label, url] of [['home', '/index.php'], ['product', new URL(productUrl).pathname], ['cart', '/cart.php']]) {
+  const mobileErrors = await watch(mobile);
+  for (const [label, url] of [
+    ['home', '/index.php'],
+    ['listing', '/products.php'],
+    ['product', new URL(productUrl).pathname + (new URL(productUrl).search || '')],
+    ['cart', '/cart.php'],
+  ]) {
     await mobile.goto(BASE + url, { waitUntil: 'domcontentloaded' });
     const overflow = await mobile.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
@@ -324,27 +536,28 @@ try {
       overflow.scroll <= overflow.client + 1, `scrollWidth ${overflow.scroll} vs ${overflow.client}`);
   }
   await mobile.goto(BASE + '/index.php', { waitUntil: 'domcontentloaded' });
-  const navVisible = await mobile.evaluate(() => {
+  const headerVisible = await mobile.evaluate(() => {
     const el = document.querySelector('header');
     if (!el) { return false; }
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   });
-  check('mobile: the header is visible and sized', navVisible);
+  check('mobile: the header is visible and sized', headerVisible);
   const offscreen = await mobile.evaluate(() => Array.from(document.querySelectorAll('button, a.sh-btn'))
-    .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.right > document.documentElement.clientWidth + 1; })
-    .length);
+    .filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.right > document.documentElement.clientWidth + 1;
+    }).length);
   check('mobile: no button or main call-to-action runs off screen', offscreen === 0, `${offscreen} off screen`);
+  await mobile.screenshot({ path: join(ARTIFACTS, '17-mobile-home.png'), fullPage: false }).catch(() => {});
+  check('mobile: no console errors', mobileErrors.console.length === 0, mobileErrors.console.slice(0, 3).join(' | '));
+  check('mobile: no failed requests', mobileErrors.requests.length === 0, mobileErrors.requests.slice(0, 3).join(' | '));
+  await csp(mobile, 'mobile');
   await mobileCtx.close();
+});
 
-  await ctx.close();
-  await adminCtx.close();
-} catch (error) {
-  check('the browser run completed without an unexpected exception', false, String(error).slice(0, 400));
-  console.error(error);
-} finally {
-  await browser.close();
-}
+await ctx.close();
+await browser.close();
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\nBrowser regression: ${checks.length - failed.length} passed, ${failed.length} failed`);

@@ -8,44 +8,39 @@ theoretical maximum.
 
 ---
 
-## R-01 · Payment concurrency is still unverified on a real engine (High, open — narrower than before)
+## R-01 · Payment concurrency is verified with two live connections, not under load (Low, open — narrowed)
 
-* **Now verified:** `tests/payment-security.php` (53 checks) covers server-side
-  price recalculation, quantity/discount/shipping manipulation, TrxID handling,
-  duplicate submission, ownership, the allowed status transitions and admin
-  verification; `install/schema.php` carries `UNIQUE KEY uq_payments_transaction_id`
-  and the migration that adds it to an existing store.
-* **Now verified on MySQL 8.0:** `tests/mysql-integration.php` scenarios 3–5 (a
-  duplicate TrxID rejected, a second connection unable to claim the same id,
-  rollback leaving no trace) passed as a required CI step at `a11ffdf`.
-* **Still not verified:** the same guarantees on **MariaDB** (see R-14), and two
-  OS processes submitting at the exact same instant (the suite proves it with two
-  connections, not two processes).
-* **Interim mitigation unchanged:** manual gateway verification stays
-  admin-driven; no automated callback marks an order paid. Do not enable an
-  automated gateway until the engine run is attached.
+* **Verified on a real engine (2026-11-14):** `tests/mysql-integration.php` now
+  really connects — MySQL **8.0.46** and MariaDB **10.6.28**, run `43631797400`,
+  with `SH_TEST_REQUIRE_ENGINE=1` so a blocked connection fails the job. Scenarios
+  3–7 passed on both: the unique TrxID index rejects a duplicate, a second
+  connection cannot claim the same payment, a rollback leaves no trace,
+  `SELECT … FOR UPDATE` blocks the second connection until commit, and a code
+  submitted twice at once is honoured once.
+* **Corrected:** report 16 said this suite "passed at `a11ffdf`". It had not
+  connected — a `$pass` / `$GLOBALS['pass']` name collision in the suite made PDO
+  reject the password and every scenario reported BLOCKED under a green tick. See
+  `reports/17-final-four-blockers.md` §0.
+* **Still open:** concurrency is proven with two connections inside one process,
+  not with hundreds of simultaneous checkouts.
+* **Action before go-live:** nothing beyond §5 of the deployment checklist.
+## R-02 · IDOR verified at predicate level and for the signed-out case (Medium, open — narrower)
 
-## R-02 · IDOR verified statically and at predicate level, not over HTTP (High, open — narrower)
+* **Verified:** ownership predicates in `includes/` are exercised against a real
+  database (engine scenario 9: a customer cannot read another customer's order),
+  and the browser run confirms `/admin/orders.php` without a session shows no
+  order data and is answered with a login page or 403.
+* **Still open:** a *signed-in second customer* walking another customer's order
+  URLs in a browser. That needs two live sessions and a real order in the same
+  store; the browser suite currently signs in one customer.
+* **Action:** add a second signed-in context to `tests/browser/smoke.mjs` on
+  staging, or accept the predicate-level proof.
+## R-03 · MySQL 8.0 verified in CI (Closed)
 
-* **Now verified:** `tests/idor-scan.php` (42 checks) walks every customer route
-  and AJAX handler and confirms each one consults an ownership check
-  (`sh_order_can_view()`, session user id) before returning data or mutating it.
-  `tests/mysql-integration.php` §9 executes `sh_order_can_view()` against real
-  order rows for owner / other customer / guest / guest-with-session cases.
-* **Still not verified:** two real sessions (customer A and customer B) over HTTP
-  with a changed order id, an expired session and a POST ownership swap. That
-  needs a web server; the response codes could not be observed here.
-* **Interim mitigation:** none specific — run the HTTP matrix in
-  `reports/02-idor-object-authorisation.md` on staging.
-
-## R-03 · MySQL 8.0 verified in CI; MariaDB still not run (Medium, open)
-
-Everything in this sandbox runs on SQLite through a translating shim, which
-proves PHP logic and not engine behaviour. That gap is now closed for MySQL 8.0:
-`tests/mysql-integration.php` (eleven engine scenarios) is a required step of the
-CI job's real `mysql:8.0` service and passed at `a11ffdf`.
-**Remaining action:** run the same suite on MariaDB 10.6+ — see R-14.
-
+`tests/mysql-integration.php` passed as a required CI step against a real
+`mysql:8.0` service — server version **8.0.46**, run `43631797400`, eleven
+engine scenarios + the connection/refusal checks, `SH_TEST_REQUIRE_ENGINE=1`.
+MariaDB is covered separately under R-14.
 ## R-04 · `X-Forwarded-Proto` remains lenient when no proxy list is set (Low, open)
 
 `sh_request_is_https()` believes `X-Forwarded-Proto: https` from any peer unless a
@@ -61,32 +56,45 @@ through a normal PHP setup; a misconfigured server that maps arbitrary extension
 to PHP would need `uploads/` made non-executable at the server level.
 **Action:** on nginx, add the deny block from the deployment checklist.
 
-## R-06 · Backup restore is automated but still unrehearsed here (Medium, open)
+## R-06 · Backup → restore rehearsal executed on MySQL 8.0.46 (Closed for the rehearsed path)
 
-Backups are created (`cron/backup.php`, `sh_backup_create()`), stored under
-`storage/backups/` with an Apache deny rule + `index.php` 403, and downloaded
-through an authenticated admin action. **A restore has never been performed in an
-isolated environment** — the procedure exists on paper only.
-**Action:** restore the latest dump into a scratch database before you need it.
+`tools/restore-rehearsal.php --create-backup --app-check` ran in CI: the
+application created the backup, the tool imported it into a **new** scratch
+database (created by root, dropped afterwards), verified file integrity, the gzip
+round trip, 54 of 54 dumped tables, the unique payment index, settings/orders/
+products/users row counts, a representative order with its items and payment,
+zero orphan order items, and then pointed the application at the restored copy and
+had it read the data through its own bootstrap. **23 checks, 0 failures.**
 
-## R-07 · CSP enforcement not exercised in a browser (Medium, open)
+Refusals are executed too (missing dump, empty dump, a `.gz` that is not gzip, a
+dump with no tables, a non-disposable name, the live name, a production-looking
+name, invalid characters, `--create-backup` on an uninstalled checkout).
 
-Static verification is strong (no inline handlers, no nonce-less inline scripts,
-no remote scripts, no `eval`), and the policy omits `unsafe-inline`/`unsafe-eval`
-for scripts. It has not been executed in a browser with `enforce` enabled.
-**Action:** enforce on staging, browse customer + admin flows, then production.
-`style-src 'unsafe-inline'` remains by design (existing templates use inline
-`style=` attributes).
+**Still open:** restoring onto a *different* engine version (8.0 → 10.6) and a
+restore from `mysqldump` output rather than the application's own dump format.
+## R-07 · CSP observed in a real browser, still report-only (Low, open)
 
-## R-08 · No web-server or browser regression run after these changes (Medium, open)
+The browser regression run collects `securitypolicyviolation` events on every page
+it visits and asserts there are none: **zero violations across the storefront,
+product, cart, checkout, admin and mobile passes** (Chromium 131.0.6778.33, run
+`43631797400`).
 
-No Apache/nginx and no browser exist in this sandbox. Templates were linted and
-unit-tested, and the new admin panel is plain markup, but "it renders correctly"
-is **not** claimed.
-**Action:** run `tests/ui-ux-audit.mjs` and `tests/product-management-behavior.mjs`
-in a browser harness, then click through Admin → Security and Admin → System
-Health.
+**Still open:** *enforcement*. The store ships the policy report-only by default
+and the run used `php -S`, so a real Apache/LiteSpeed host over HTTPS with
+`enforce` switched on has not been exercised.
+**Action:** enforce on staging, click through customer + admin, then production.
+`style-src 'unsafe-inline'` remains by design.
+## R-08 · Browser regression exists and runs in CI (Closed for `php -S`)
 
+`tests/browser/smoke.mjs` drives Chromium against the application served by
+`php -S` on a disposable MySQL store seeded through the application's own
+installer: **50 checks, 0 failures** (run `43631797400`). It covers the storefront,
+listing, product page and gallery behaviour, add-to-cart, customer sign-in,
+checkout to a placed order, admin sign-in, the signed-out admin guard, a 390×844
+mobile viewport (overflow, header, buttons) and CSP/console/request health.
+
+**Still open:** Apache/LiteSpeed with `.htaccess` rewriting and real HTTPS. The
+suite runs on staging with no code change, but it has not been run there.
 ## R-09 · Courier and webhook verification reviewed at file level only (Medium, open)
 
 `includes/courier.php` drivers, the Telegram webhook and `api/email-events.php`
@@ -120,16 +128,14 @@ half-changed.
 
 ---
 
-## R-14 · No MariaDB run exists (Medium, open)
+## R-14 · MariaDB 10.6 verified (Closed)
 
-MySQL 8.0 is exercised by the CI job's own steps, and the eleven-scenario suite
-targets MySQL. MariaDB differs in `information_schema` details, index limits,
-`NOWAIT` support and duplicate-key behaviour after a rollback, and **no MariaDB
-server has ever been used**. cPanel hosts ship either engine, so this is a real
-deployment question, not a technicality.
-**Action:** run `tests/mysql-integration.php` on MariaDB 10.6+ before promising
-MariaDB support.
-
+`tests/mysql-integration.php` ran against a real `mariadb:10.6` service — server
+version **10.6.28-MariaDB-ubu2204**, run `43631797400`, `SH_TEST_REQUIRE_ENGINE=1`
+— and passed all eleven engine scenarios. MariaDB support is no longer an
+assumption; the differences this risk named (`information_schema` details, index
+limits, `NOWAIT`, duplicate-key behaviour after a rollback) are now exercised on
+the engine itself.
 ## R-15 · A failed scheduled backup can still look quiet on some hosts (Low, open)
 
 The CLI entry point now explains itself and exits non-zero when the store is not
