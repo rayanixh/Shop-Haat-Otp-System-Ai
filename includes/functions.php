@@ -688,37 +688,22 @@ function sh_uploads_reachable(string $subdir = 'products'): array
         'error' => 'The uploads folder is not reachable over HTTP (status ' . $status . ').'];
 }
 
-function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $maxDim = 6000): array
+/**
+ * Content validation for an uploaded image.
+ *
+ * Pure: it reads the file the caller names but writes nothing, so it can be
+ * exercised without an HTTP POST. It returns the MIME type and the extension the
+ * file will be stored with — both derived from what getimagesize() detected,
+ * never from the client's filename, so a "photo.png" that is really a PHP script
+ * cannot choose its own extension.
+ *
+ * @return array{ok:bool,mime?:string,ext?:string,error?:string}
+ */
+function sh_upload_validate_image(array $file, int $maxBytes = 0, int $maxDim = 6000): array
 {
-    if (!isset($file['error']) || is_array($file['error'])) {
-        return ['ok' => false, 'error' => 'Invalid upload.'];
-    }
-    if ($file['error'] === UPLOAD_ERR_NO_FILE) {
-        return ['ok' => false, 'error' => 'No file selected.'];
-    }
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        // Report the ACTUAL reason instead of a vague catch-all.
-        $limit = sh_bytes_label(sh_server_upload_limit());
-        $msg = match ($file['error']) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
-                'The image is larger than this server allows (' . $limit . '). '
-                . 'Either choose a smaller image, or raise upload_max_filesize and post_max_size '
-                . 'in your hosting control panel (cPanel: Select PHP Version, then Options).',
-            UPLOAD_ERR_PARTIAL   => 'The upload was interrupted before it finished. Please try again.',
-            UPLOAD_ERR_NO_TMP_DIR => 'The server has no temporary upload folder configured. Contact your host.',
-            UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded file to disk. Check folder permissions.',
-            UPLOAD_ERR_EXTENSION  => 'A PHP extension blocked this upload.',
-            default               => 'The upload failed (error code ' . (int)$file['error'] . ').',
-        };
-        return ['ok' => false, 'error' => $msg];
-    }
-    if ($maxBytes > 0 && $file['size'] > $maxBytes) {
+    if ($maxBytes > 0 && (int)($file['size'] ?? 0) > $maxBytes) {
         return ['ok' => false, 'error' => 'File is larger than ' . sh_bytes_label($maxBytes) . '.'];
     }
-    if (!is_uploaded_file($file['tmp_name'])) {
-        return ['ok' => false, 'error' => 'Invalid upload source.'];
-    }
-
     $allowed = [
         'image/jpeg' => 'jpg',
         'image/png'  => 'png',
@@ -752,10 +737,50 @@ function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $ma
     if ($info[0] > $maxDim || $info[1] > $maxDim) {
         return ['ok' => false, 'error' => "Image dimensions must not exceed {$maxDim}px."];
     }
-    // The extension is NOT trusted or required: getimagesize() above already
-    // verified the real image type, and the saved filename is derived from that.
-    // Rejecting on extension used to block valid uploads with no extension or
-    // an unexpected one (e.g. photos straight off a phone).
+    // The client's extension is ignored: getimagesize() verified the real type
+    // and the stored name is derived from that. Rejecting on extension used to
+    // block valid uploads with no extension or an unexpected one (e.g. photos
+    // straight off a phone).
+    return ['ok' => true, 'mime' => $mime, 'ext' => $allowed[$mime]];
+}
+
+function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $maxDim = 6000): array
+{
+    if (!isset($file['error']) || is_array($file['error'])) {
+        return ['ok' => false, 'error' => 'Invalid upload.'];
+    }
+    if ($file['error'] === UPLOAD_ERR_NO_FILE) {
+        return ['ok' => false, 'error' => 'No file selected.'];
+    }
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        // Report the ACTUAL reason instead of a vague catch-all.
+        $limit = sh_bytes_label(sh_server_upload_limit());
+        $msg = match ($file['error']) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
+                'The image is larger than this server allows (' . $limit . '). '
+                . 'Either choose a smaller image, or raise upload_max_filesize and post_max_size '
+                . 'in your hosting control panel (cPanel: Select PHP Version, then Options).',
+            UPLOAD_ERR_PARTIAL   => 'The upload was interrupted before it finished. Please try again.',
+            UPLOAD_ERR_NO_TMP_DIR => 'The server has no temporary upload folder configured. Contact your host.',
+            UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded file to disk. Check folder permissions.',
+            UPLOAD_ERR_EXTENSION  => 'A PHP extension blocked this upload.',
+            default               => 'The upload failed (error code ' . (int)$file['error'] . ').',
+        };
+        return ['ok' => false, 'error' => $msg];
+    }
+    // The source check runs BEFORE the file is parsed: tmp_name is attacker
+    // controlled, so nothing here may read an arbitrary local path. Content
+    // validation (size ceiling, real MIME, dimensions) lives in
+    // sh_upload_validate_image() so it is testable without an HTTP request and
+    // cannot be skipped by a caller.
+    if (!is_uploaded_file($file['tmp_name'])) {
+        return ['ok' => false, 'error' => 'Invalid upload source.'];
+    }
+    $checked = sh_upload_validate_image($file, $maxBytes, $maxDim);
+    if (empty($checked['ok'])) {
+        return ['ok' => false, 'error' => (string)($checked['error'] ?? 'That file cannot be uploaded.')];
+    }
+    $mime = (string)$checked['mime'];
 
     $dir = SH_UPLOAD_DIR . '/' . $subdir;
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
@@ -768,8 +793,9 @@ function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $ma
         return ['ok' => false, 'error' => 'The folder /uploads/' . $subdir
             . ' is not writable. Set it to permission 755 (or 775) in your hosting file manager.'];
     }
-    // Safe, non-executable, unpredictable filename.
-    $name = date('Ymd') . '-' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
+    // Safe, non-executable, unpredictable filename. The extension comes from the
+    // validated MIME type, not from anything the client sent.
+    $name = date('Ymd') . '-' . bin2hex(random_bytes(8)) . '.' . (string)$checked['ext'];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
         return ['ok' => false, 'error' => 'Could not save the uploaded file.'];
     }
