@@ -2,55 +2,21 @@
 declare(strict_types=1);
 require_once __DIR__ . '/config/config.php';
 sh_require_installed();
-require_once SH_ROOT . '/includes/notifications.php';
 require_once SH_ROOT . '/includes/ai-support.php';
 
 sh_session_start();
-$supportGuestToken = sh_support_guest_token();
+// The customer support page is the conversation only. The former secondary
+// "Contact Support" section (heading, explanatory copy, email form and its
+// "Send message" button) was removed; admin inbox and customer-to-agent chat
+// continue to use the same conversation below.
+sh_support_guest_token();
 $pageStyles = ['assets/css/support.css'];
 $pageScripts = ['assets/js/support.js'];
-$sent = false;
-$errors = [];
-$user = null;
-if (function_exists('sh_user')) { $user = sh_user(); }
-
-$form = ['name' => $user['name'] ?? '', 'email' => $user['email'] ?? '', 'subject' => '', 'message' => ''];
-foreach ($form as $k => $v) { if (isset($_POST[$k])) { $form[$k] = trim((string)$_POST[$k]); } }
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    sh_csrf_require();
-    $v = new ShValidator($_POST);
-    $v->required('name', 'Your name')->maxLen('name', 110, 'Your name')
-      ->required('email', 'Email address')->email('email', 'Email address')
-      ->required('subject', 'Subject')->maxLen('subject', 150, 'Subject')
-      ->required('message', 'Message')->minLen('message', 10, 'Message')->maxLen('message', 2000, 'Message');
-    $errors = $v->errors();
-    if (!$errors) {
-        $to = trim(sh_support_setting('contact_email', ''));
-        if ($to === '') { $to = trim((string)sh_setting('contact_email', '')); }
-        $body = "SUPPORT REQUEST\n" . str_repeat('-', 28) . "\n"
-            . 'From: ' . $form['name'] . ' <' . $form['email'] . ">\n"
-            . 'Subject: ' . $form['subject'] . "\n\n" . $form['message'];
-        $res = $to !== '' ? sh_mail_send($to, 'Support: ' . $form['subject'], $body) : ['skipped' => true];
-        // Report honestly: if mail is not configured we say so rather than faking success.
-        if (!empty($res['ok'])) {
-            $sent = true;
-            sh_notify_log(null, 'email', 'support_request', 'sent', $to, null);
-        } else {
-            sh_notify_log(null, 'email', 'support_request', 'failed', $to, $res['error'] ?? 'Email not configured.');
-            $supportPhone = trim(sh_support_setting('contact_phone', ''));
-            if ($supportPhone === '') { $supportPhone = trim((string)sh_setting('contact_phone', '')); }
-            $errors['general'] = 'We could not send your message automatically. Please email us directly at '
-                . ($to !== '' ? $to : 'our contact address')
-                . ($supportPhone !== '' ? ' or call ' . $supportPhone : '') . '.';
-        }
-    }
-}
 
 // SEO: overridable from the SEO Manager, with a canonical and breadcrumb.
 $pageSeoKey = 'support';
 $pageTitle = 'Customer Support';
-$pageDescription = 'Contact the ' . sh_setting('site_name', 'ShopHaat')
+$pageDescription = 'Chat with the ' . sh_setting('site_name', 'ShopHaat')
     . ' support team about an order, a payment, a delivery or a return.';
 $pageCanonical = 'support.php';
 $pageBreadcrumbs = [['name' => 'Home', 'url' => 'index.php'], ['name' => 'Customer Support', 'url' => '']];
@@ -88,7 +54,7 @@ require_once SH_ROOT . '/includes/header.php';
       </div>
       <form class="sh-support-chat__compose" data-chat-form>
         <label class="sh-support-chat__message-label" for="sh-support-message">Your message</label>
-        <textarea class="sh-textarea" id="sh-support-message" data-chat-input rows="2" maxlength="2000" placeholder="Write a message…" required></textarea>
+        <textarea class="sh-textarea" id="sh-support-message" data-chat-input rows="2" maxlength="2000" placeholder="Write a message…" required data-sh-no-autogrow></textarea>
         <div class="sh-support-chat__compose-foot">
           <span class="sh-support-chat__counter" data-char-count>0 / 2,000</span>
           <button class="sh-btn" type="submit" data-chat-send><?= sh_icon('send', 15) ?> Send</button>
@@ -96,32 +62,6 @@ require_once SH_ROOT . '/includes/header.php';
       </form>
       <div class="sh-support-chat__disabled" data-chat-disabled hidden></div>
     </div>
-  </section>
-
-  <section class="sh-section sh-support-contact">
-      <div class="sh-section__head"><h2 class="sh-section__title"><?= sh_icon('headphones', 18) ?> Contact Support</h2></div>
-      <?php if ($sent): ?>
-        <div class="sh-alert sh-alert--success"><?= sh_icon('check-circle', 16) ?>
-          <span>Thank you — the store’s configured email system accepted your message. This page does not promise a response time.</span></div>
-      <?php endif; ?>
-      <?php if ($errors): ?>
-        <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?>
-          <div><ul><?php foreach ($errors as $er): ?><li><?= e($er) ?></li><?php endforeach; ?></ul></div></div>
-      <?php endif; ?>
-      <form method="post" novalidate>
-        <?= sh_csrf_field() ?>
-        <div class="sh-grid2">
-          <div class="sh-field"><label class="sh-field__label" for="sp-name">Your name <span class="sh-field__req">*</span></label>
-            <input class="sh-input" id="sp-name" name="name" required maxlength="110" value="<?= e($form['name']) ?>"></div>
-          <div class="sh-field"><label class="sh-field__label" for="sp-email">Email address <span class="sh-field__req">*</span></label>
-            <input class="sh-input" id="sp-email" type="email" name="email" required value="<?= e($form['email']) ?>"></div>
-        </div>
-        <div class="sh-field"><label class="sh-field__label" for="sp-subject">Subject <span class="sh-field__req">*</span></label>
-          <input class="sh-input" id="sp-subject" name="subject" required maxlength="150" value="<?= e($form['subject']) ?>"></div>
-        <div class="sh-field"><label class="sh-field__label" for="sp-msg">Message <span class="sh-field__req">*</span></label>
-          <textarea class="sh-textarea" id="sp-msg" name="message" required minlength="10" maxlength="2000"><?= e($form['message']) ?></textarea></div>
-        <button class="sh-btn" type="submit"><?= sh_icon('send', 15) ?> Send message</button>
-      </form>
   </section>
 </div>
 <?php require_once SH_ROOT . '/includes/footer.php'; ?>

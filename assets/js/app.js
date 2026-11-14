@@ -226,8 +226,11 @@
       if (btn.disabled) { return; }
       var qtyInput = document.getElementById(btn.getAttribute('data-qty-source') || '');
       var qty = qtyInput ? parseInt(qtyInput.value, 10) || 1 : 1;
+      var colour = document.querySelector('[data-product-colour]:checked');
+      var payload = { action: 'add', product_id: btn.getAttribute('data-add-cart'), quantity: qty };
+      if (colour) { payload.variant = colour.value; }
       btn.disabled = true;
-      api('cart.php', { action: 'add', product_id: btn.getAttribute('data-add-cart'), quantity: qty })
+      api('cart.php', payload)
         .then(function (r) {
           if (r.success) {
             setCartCount(r.count);
@@ -275,7 +278,11 @@
       ev.preventDefault();
       var pid = rm.getAttribute('data-cart-remove');
       rm.disabled = true;
-      api('cart.php', { action: 'remove', product_id: pid })
+      var row = rm.closest('[data-cart-row]');
+      var variant = row ? row.querySelector('[data-cart-variant]') : null;
+      var removePayload = { action: 'remove', product_id: pid };
+      if (variant) { removePayload.variant = variant.value; }
+      api('cart.php', removePayload)
         .then(function (r) {
           if (r.success) { location.reload(); }
           else { toast(r.error || 'Could not remove the item.', 'error'); rm.disabled = false; }
@@ -344,7 +351,10 @@
   }
 
   function cartUpdate(productId, qty, row) {
-    api('cart.php', { action: 'update', product_id: productId, quantity: qty })
+    var variant = row ? row.querySelector('[data-cart-variant]') : null;
+    var payload = { action: 'update', product_id: productId, quantity: qty };
+    if (variant) { payload.variant = variant.value; }
+    api('cart.php', payload)
       .then(function (r) {
         if (r.success) { location.reload(); }
         else { toast(r.error || 'Could not update the quantity.', 'error'); }
@@ -658,17 +668,107 @@
     var iv = setInterval(tick, 1000);
   });
 
-  /* ---------- Product gallery ------------------------------------------ */
+  /* ---------- Product gallery (manual only, no automatic rotation) ------ */
   var gallery = $('[data-gallery]');
   if (gallery) {
     var main = $('[data-gallery-main]', gallery);
-    $$('[data-gallery-thumb]', gallery).forEach(function (t) {
-      t.addEventListener('click', function () {
-        if (main) { main.src = t.getAttribute('data-gallery-thumb'); }
-        $$('[data-gallery-thumb]', gallery).forEach(function (x) { x.classList.remove('sh-gallery__thumb--on'); });
-        t.classList.add('sh-gallery__thumb--on');
+    var stage = $('[data-gallery-stage]', gallery);
+    var thumbs = $$('[data-gallery-thumb]', gallery);
+    var count = $('[data-gallery-count]', gallery);
+    var prev = $('[data-gallery-prev]', gallery);
+    var next = $('[data-gallery-next]', gallery);
+    var current = 0;
+    var startX = 0;
+    var startY = 0;
+    var tracking = false;
+
+    function applyNaturalRatio() {
+      if (!main || !stage || !main.naturalWidth || !main.naturalHeight) { return; }
+      var w = main.naturalWidth;
+      var h = main.naturalHeight;
+      // Keep extreme panoramas usable while preserving the image itself with
+      // object-fit: contain. The image is never cropped, stretched or zoomed.
+      var ratio = Math.min(2.2, Math.max(0.55, w / h));
+      stage.style.setProperty('--sh-gallery-ratio', String(ratio));
+    }
+
+    function showImage(index) {
+      if (!main || !thumbs.length) { return; }
+      current = (index + thumbs.length) % thumbs.length;
+      var chosen = thumbs[current];
+      var src = chosen.getAttribute('data-gallery-thumb') || '';
+      if (src !== '') {
+        main.src = src;
+        main.alt = chosen.getAttribute('data-gallery-alt') || main.alt;
+      }
+      thumbs.forEach(function (t, i) {
+        var on = i === current;
+        t.classList.toggle('sh-gallery__thumb--on', on);
+        t.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on) { t.setAttribute('aria-current', 'true'); }
+        else { t.removeAttribute('aria-current'); }
       });
+      if (count) { count.textContent = (current + 1) + ' / ' + thumbs.length; }
+      if (main.complete) { applyNaturalRatio(); }
+    }
+
+    thumbs.forEach(function (t, i) {
+      t.addEventListener('click', function () { showImage(i); });
     });
+    if (prev) { prev.addEventListener('click', function () { showImage(current - 1); }); }
+    if (next) { next.addEventListener('click', function () { showImage(current + 1); }); }
+    if (main) {
+      main.addEventListener('load', applyNaturalRatio);
+      if (main.complete) { applyNaturalRatio(); }
+    }
+    if (stage) {
+      stage.addEventListener('touchstart', function (ev) {
+        if (!ev.touches || !ev.touches.length) { return; }
+        startX = ev.touches[0].clientX;
+        startY = ev.touches[0].clientY;
+        tracking = true;
+      }, { passive: true });
+      stage.addEventListener('touchend', function (ev) {
+        if (!tracking || !ev.changedTouches || !ev.changedTouches.length) { return; }
+        var dx = ev.changedTouches[0].clientX - startX;
+        var dy = ev.changedTouches[0].clientY - startY;
+        tracking = false;
+        if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          showImage(current + (dx < 0 ? 1 : -1));
+        }
+      }, { passive: true });
+      // Mouse / pen dragging gets the same manual behaviour as touch swiping.
+      stage.addEventListener('pointerdown', function (ev) {
+        if (ev.pointerType === 'touch') { return; }
+        startX = ev.clientX;
+        startY = ev.clientY;
+        tracking = true;
+      });
+      stage.addEventListener('pointerup', function (ev) {
+        if (!tracking || ev.pointerType === 'touch') { return; }
+        var dx = ev.clientX - startX;
+        var dy = ev.clientY - startY;
+        tracking = false;
+        if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          showImage(current + (dx < 0 ? 1 : -1));
+        }
+      });
+    }
+    if (thumbs.length) { showImage(0); }
+  }
+
+  /* ---------- Customer preferred colour --------------------------------- */
+  var colourChoices = $$('[data-product-colour]');
+  var colourLabel = $('[data-product-colour-label]');
+  if (colourChoices.length) {
+    function renderColourChoice() {
+      var chosen = colourChoices.filter(function (radio) { return radio.checked; })[0];
+      if (colourLabel && chosen) {
+        colourLabel.textContent = chosen.getAttribute('data-colour-name') || '';
+      }
+    }
+    colourChoices.forEach(function (radio) { radio.addEventListener('change', renderColourChoice); });
+    renderColourChoice();
   }
 
   /* ---------- Tabs ------------------------------------------------------ */
@@ -677,7 +777,10 @@
     btns.forEach(function (b) {
       b.addEventListener('click', function () {
         var name = b.getAttribute('data-tab');
-        btns.forEach(function (x) { x.classList.toggle('sh-tabs__btn--on', x === b); });
+        btns.forEach(function (x) {
+          x.classList.toggle('sh-tabs__btn--on', x === b);
+          x.setAttribute('aria-selected', x === b ? 'true' : 'false');
+        });
         $$('[data-tab-panel]', wrap).forEach(function (p) {
           p.hidden = p.getAttribute('data-tab-panel') !== name;
         });
@@ -915,12 +1018,13 @@
   })();
 
   /* ---------- Textareas grow with their content --------------------------
-     No field hides text behind an internal scrollbar: textareas are sized to
-     their content (CSS field-sizing does this natively where supported; this
-     is the fallback, and the hook programmatic fills call afterwards). The
-     page scrolls; fields do not. */
+     Ordinary fields are sized to their content (CSS field-sizing does this
+     natively where supported; this is the fallback). Fixed-height chat
+     composers are explicitly excluded: they keep one stable row and long
+     drafts scroll inside the textarea instead of resizing the popup. */
   function growTextarea(el) {
     if (!el || el.tagName !== 'TEXTAREA') return;
+    if (el.hasAttribute('data-sh-no-autogrow') || el.classList.contains('sh-schat-input')) return;
     if (!el.offsetParent && el.getClientRects().length === 0) return;
     el.style.overflowY = 'hidden';
     el.style.height = 'auto';

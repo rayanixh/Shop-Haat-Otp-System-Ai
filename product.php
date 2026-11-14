@@ -73,9 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && sh_post('form') === 'review') {
 try { sh_query('UPDATE products SET view_count = view_count + 1 WHERE id = ?', [$pid]); }
 catch (Throwable $e) { sh_log_exception($e, 'view-count'); }
 
-$images  = sh_all('SELECT image FROM product_images WHERE product_id = ? ORDER BY sort_order, id', [$pid]);
-$gallery = array_values(array_filter(array_merge([$product['image']], array_column($images, 'image'))));
-if (!$gallery) { $gallery = [null]; }
+// Only real, existing files are shown. The legacy products.image is a
+// primary-image snapshot and doubles as a fallback for older installations.
+$galleryRows = sh_product_gallery_rows($pid, (string)($product['image'] ?? ''));
+$gallery = array_values(array_filter($galleryRows, static fn(array $r): bool => $r['url'] !== ''));
+$catalog = sh_product_catalog_display($pid, $product);
 $reviews = sh_all('SELECT * FROM reviews WHERE product_id = ? AND status = \'approved\' ORDER BY created_at DESC LIMIT 20', [$pid]);
 $related = sh_products_related($pid, $product['category_id'] ? (int)$product['category_id'] : null, 6);
 $shWishlist = sh_wishlist_ids();
@@ -119,8 +121,8 @@ $pageBreadcrumbs[] = ['name' => (string)$product['name'], 'url' => ''];
 // Gallery images join the structured data so image results show the real
 // product photography rather than a stock placeholder.
 $galleryImages = [];
-foreach ($images as $imgRow) {
-    $galleryImages[] = 'uploads/products/' . rawurlencode(basename((string)$imgRow['image']));
+foreach ($gallery as $imgRow) {
+    $galleryImages[] = 'uploads/products/' . rawurlencode(basename((string)$imgRow['file']));
 }
 
 // Resolve the metadata first, then build the Product node against the final
@@ -138,6 +140,19 @@ $shProductMeta = sh_seo_meta([
 ]);
 $structuredData = sh_seo_product_schema($product, $shProductMeta, $galleryImages);
 
+$descriptionText = trim((string)($product['description'] ?: $product['short_description'] ?: ''));
+$specLines = array_values(array_filter(array_map('trim', explode("\n", (string)($product['specifications'] ?? '')))));
+$reviewCount = (int)$product['review_count'];
+$soldCount = (int)$product['sold_count'];
+$canWriteReview = sh_user() !== null || $reviewError !== '';
+$tabList = [];
+if ($descriptionText !== '') { $tabList[] = ['id' => 'desc', 'label' => 'Description']; }
+if ($specLines !== []) { $tabList[] = ['id' => 'specs', 'label' => 'Specifications']; }
+if ($reviews !== [] || $canWriteReview) {
+    $tabList[] = ['id' => 'reviews', 'label' => $reviewCount > 0 ? 'Reviews (' . $reviewCount . ')' : 'Write a review'];
+}
+$firstTab = $tabList !== [] ? $tabList[0]['id'] : '';
+
 require_once SH_ROOT . '/includes/header.php';
 ?>
 <div class="sh-wrap">
@@ -150,34 +165,50 @@ require_once SH_ROOT . '/includes/header.php';
     <span aria-current="page"><?= e(sh_excerpt($product['name'], 60)) ?></span>
   </nav>
 
-  <div class="sh-pdp">
-    <!-- Gallery -->
+  <div class="sh-pdp<?= $gallery === [] ? ' sh-pdp--no-gallery' : '' ?>">
+    <?php if ($gallery !== []): ?>
+    <!-- Manual gallery: no timer, no autoplay, no automatic slide -->
     <div data-gallery>
-      <div class="sh-gallery__main">
-        <img data-gallery-main src="<?= e(sh_product_image($gallery[0])) ?>"
-             alt="<?= e(trim((string)($product['image_alt'] ?? '')) !== '' ? (string)$product['image_alt'] : (string)$product['name']) ?>"
-             width="460" height="460">
+      <div class="sh-gallery__main" data-gallery-stage>
+        <img data-gallery-main src="<?= e($gallery[0]['url']) ?>"
+             alt="<?= e(trim((string)($product['image_alt'] ?? '')) !== '' ? (string)$product['image_alt'] : (string)$product['name']) ?>">
       </div>
       <?php if (count($gallery) > 1): ?>
-        <div class="sh-gallery__thumbs">
+        <div class="sh-gallery__toolbar">
+          <div class="sh-gallery__nav">
+            <button class="sh-gallery__nav-btn" type="button" data-gallery-prev aria-label="Previous image"><?= sh_icon('chevron-left', 16) ?></button>
+            <span class="sh-gallery__count" data-gallery-count>1 / <?= count($gallery) ?></span>
+            <button class="sh-gallery__nav-btn" type="button" data-gallery-next aria-label="Next image"><?= sh_icon('chevron-right', 16) ?></button>
+          </div>
+        </div>
+        <div class="sh-gallery__thumbs" aria-label="Product images">
           <?php foreach ($gallery as $i => $g): ?>
+            <?php $galleryAlt = trim((string)($product['image_alt'] ?? '')) !== ''
+                ? (string)$product['image_alt'] . ' — image ' . ($i + 1)
+                : (string)$product['name'] . ' — image ' . ($i + 1); ?>
             <button class="sh-gallery__thumb <?= $i === 0 ? 'sh-gallery__thumb--on' : '' ?>" type="button"
-                    data-gallery-thumb="<?= e(sh_product_image($g)) ?>" aria-label="View image <?= $i + 1 ?>">
-              <img src="<?= e(sh_product_image($g)) ?>" alt="" loading="lazy">
+                    data-gallery-thumb="<?= e($g['url']) ?>" data-gallery-alt="<?= e($galleryAlt) ?>"
+                    aria-label="View image <?= $i + 1 ?>" aria-pressed="<?= $i === 0 ? 'true' : 'false' ?>">
+              <img src="<?= e($g['url']) ?>" alt="" loading="lazy">
             </button>
           <?php endforeach; ?>
         </div>
       <?php endif; ?>
     </div>
+    <?php endif; ?>
 
     <!-- Buy box -->
     <div>
       <h1 class="sh-pdp__title"><?= e($product['name']) ?></h1>
-      <div class="sh-pdp__meta">
-        <?= sh_stars((float)$product['rating'], (int)$product['review_count']) ?>
-        <span><?= (int)$product['review_count'] ?> review<?= (int)$product['review_count'] === 1 ? '' : 's' ?></span>
-        <span><?= (int)$product['sold_count'] ?> sold</span>
-      </div>
+      <?php if ($reviewCount > 0 || $soldCount > 0): ?>
+        <div class="sh-pdp__meta">
+          <?php if ($reviewCount > 0): ?>
+            <?= sh_stars((float)$product['rating'], $reviewCount) ?>
+            <span><?= $reviewCount ?> review<?= $reviewCount === 1 ? '' : 's' ?></span>
+          <?php endif; ?>
+          <?php if ($soldCount > 0): ?><span><?= $soldCount ?> sold</span><?php endif; ?>
+        </div>
+      <?php endif; ?>
 
       <div class="sh-pdp__price">
         <span class="sh-pdp__now"><?= e(sh_money($product['price'])) ?></span>
@@ -198,10 +229,33 @@ require_once SH_ROOT . '/includes/header.php';
           Inside city <?= e(sh_money(sh_setting('delivery_fee_inside', '60'))) ?> ·
           Outside city <?= e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?>
         </dd></div>
+        <?php if ($catalog['brand'] !== ''): ?>
+          <div class="sh-pdp__row"><dt>Brand</dt><dd><?= e($catalog['brand']) ?></dd></div>
+        <?php endif; ?>
+        <?php if ($catalog['type'] !== ''): ?>
+          <div class="sh-pdp__row"><dt>Product type</dt><dd><?= e($catalog['type']) ?></dd></div>
+        <?php endif; ?>
         <?php if ($product['sku']): ?>
           <div class="sh-pdp__row"><dt>SKU</dt><dd><?= e($product['sku']) ?></dd></div>
         <?php endif; ?>
       </dl>
+
+      <?php if ($catalog['colours'] !== []): ?>
+        <fieldset class="sh-pdp__option">
+          <legend class="sh-pdp__option-label">Available colours</legend>
+          <div class="sh-pdp__colour-list">
+            <?php foreach ($catalog['colours'] as $i => $colour): ?>
+              <label class="sh-pdp__colour">
+                <input type="radio" name="product_colour" value="<?= e($colour['value']) ?>"
+                       data-product-colour data-colour-name="<?= e($colour['name']) ?>" <?= $i === 0 ? 'checked' : '' ?>>
+                <span class="sh-pdp__swatch" style="background:<?= e($colour['hex']) ?>"></span>
+                <span><?= e($colour['name']) ?></span>
+              </label>
+            <?php endforeach; ?>
+          </div>
+          <div class="sh-pdp__selected-colour">Selected: <strong data-product-colour-label><?= e($catalog['colours'][0]['name']) ?></strong></div>
+        </fieldset>
+      <?php endif; ?>
 
       <?php if ($orderable): ?>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -233,6 +287,12 @@ require_once SH_ROOT . '/includes/header.php';
           <span>This item can no longer be ordered online. Please contact our support team if you need it.</span></div>
       <?php endif; ?>
 
+      <?php if ($reviews === [] && $canWriteReview === false): ?>
+        <p class="sh-table__meta" style="margin-top:10px">
+          <a href="<?= e(sh_url('login.php?redirect=' . urlencode('product.php?slug=' . $slug))) ?>" style="color:var(--sh-brand);font-weight:700">Sign in to write a review</a>
+        </p>
+      <?php endif; ?>
+
       <div class="sh-secure-note">
         <?= sh_icon('shield', 16) ?>
         <span>Secure checkout with bKash, Nagad, Rocket and Cash on Delivery. Your payment details are never stored on our servers.</span>
@@ -240,86 +300,92 @@ require_once SH_ROOT . '/includes/header.php';
     </div>
   </div>
 
-  <!-- Tabs -->
-  <div class="sh-pdp__tabs" data-tabs>
-    <div class="sh-tabs__head" role="tablist">
-      <button class="sh-tabs__btn sh-tabs__btn--on" type="button" data-tab="desc">Description</button>
-      <button class="sh-tabs__btn" type="button" data-tab="specs">Specifications</button>
-      <button class="sh-tabs__btn" type="button" data-tab="reviews">Reviews (<?= (int)$product['review_count'] ?>)</button>
-    </div>
-    <div class="sh-tabs__panel" data-tab-panel="desc">
-      <?= nl2br(e($product['description'] ?: $product['short_description'] ?: 'No description available.')) ?>
-    </div>
-    <div class="sh-tabs__panel" data-tab-panel="specs" hidden>
-      <?php $specs = array_filter(array_map('trim', explode("\n", (string)$product['specifications']))); ?>
-      <?php if ($specs): ?>
-        <table class="sh-spectable"><tbody>
-          <?php foreach ($specs as $line): $parts = explode(':', $line, 2); ?>
-            <tr>
-              <td><?= e(trim($parts[0])) ?></td>
-              <td><?= e(trim($parts[1] ?? '')) ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody></table>
-      <?php else: ?>
-        <p>No specifications have been provided for this product.</p>
-      <?php endif; ?>
-    </div>
-    <div class="sh-tabs__panel" data-tab-panel="reviews" hidden>
-      <?php if ($reviewError): ?>
-        <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?><span><?= e($reviewError) ?></span></div>
-      <?php endif; ?>
-      <?php if (!$reviews): ?>
-        <p style="color:var(--sh-muted)">No reviews yet. Be the first to share your experience.</p>
-      <?php else: ?>
-        <?php foreach ($reviews as $rv): ?>
-          <div class="sh-review">
-            <div class="sh-review__head">
-              <span class="sh-review__author"><?= e($rv['author_name']) ?></span>
-              <?= sh_stars((float)$rv['rating']) ?>
-              <span class="sh-review__date"><?= e(date('d M Y', strtotime($rv['created_at']))) ?></span>
-            </div>
-            <?php if ($rv['title']): ?><p class="sh-review__title"><?= e($rv['title']) ?></p><?php endif; ?>
-            <p class="sh-review__body"><?= nl2br(e($rv['body'])) ?></p>
-          </div>
+  <?php if ($tabList !== []): ?>
+    <!-- Only sections with real content are rendered: no empty tabs or labels. -->
+    <div class="sh-pdp__tabs" data-tabs>
+      <div class="sh-tabs__head" role="tablist">
+        <?php foreach ($tabList as $i => $tab): ?>
+          <button class="sh-tabs__btn <?= $i === 0 ? 'sh-tabs__btn--on' : '' ?>" type="button"
+                  role="tab" data-tab="<?= e($tab['id']) ?>" aria-selected="<?= $i === 0 ? 'true' : 'false' ?>"><?= e($tab['label']) ?></button>
         <?php endforeach; ?>
+      </div>
+
+      <?php if ($descriptionText !== ''): ?>
+        <div class="sh-tabs__panel" data-tab-panel="desc" role="tabpanel" <?= $firstTab !== 'desc' ? 'hidden' : '' ?>>
+          <?= nl2br(e($descriptionText)) ?>
+        </div>
       <?php endif; ?>
 
-      <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--sh-line)">
-        <h3 style="font-size:14.5px;font-weight:800;margin-bottom:12px">Write a review</h3>
-        <?php if (sh_user() === null): ?>
-          <p style="font-size:13.5px;color:var(--sh-muted)">
-            Please <a href="<?= e(sh_url('login.php?redirect=' . urlencode('product.php?slug=' . $slug))) ?>" style="color:var(--sh-brand);font-weight:700">sign in</a> to write a review.
-          </p>
-        <?php else: ?>
-          <form method="post">
-            <?= sh_csrf_field() ?>
-            <input type="hidden" name="form" value="review">
-            <div class="sh-grid2">
-              <div class="sh-field">
-                <label class="sh-field__label" for="rv-rating">Your rating</label>
-                <select class="sh-select" id="rv-rating" name="rating">
-                  <?php for ($i = 5; $i >= 1; $i--): ?>
-                    <option value="<?= $i ?>"><?= $i ?> star<?= $i === 1 ? '' : 's' ?></option>
-                  <?php endfor; ?>
-                </select>
+      <?php if ($specLines !== []): ?>
+        <div class="sh-tabs__panel" data-tab-panel="specs" role="tabpanel" <?= $firstTab !== 'specs' ? 'hidden' : '' ?>>
+          <table class="sh-spectable"><tbody>
+            <?php foreach ($specLines as $line): $parts = explode(':', $line, 2); ?>
+              <tr>
+                <td><?= e(trim($parts[0])) ?></td>
+                <td><?= e(trim($parts[1] ?? '')) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody></table>
+        </div>
+      <?php endif; ?>
+
+      <?php if ($reviews !== [] || $canWriteReview): ?>
+        <div class="sh-tabs__panel" data-tab-panel="reviews" role="tabpanel" <?= $firstTab !== 'reviews' ? 'hidden' : '' ?>>
+          <?php if ($reviewError): ?>
+            <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 16) ?><span><?= e($reviewError) ?></span></div>
+          <?php endif; ?>
+
+          <?php foreach ($reviews as $rv): ?>
+            <div class="sh-review">
+              <div class="sh-review__head">
+                <span class="sh-review__author"><?= e($rv['author_name']) ?></span>
+                <?= sh_stars((float)$rv['rating']) ?>
+                <span class="sh-review__date"><?= e(date('d M Y', strtotime($rv['created_at']))) ?></span>
               </div>
-              <div class="sh-field">
-                <label class="sh-field__label" for="rv-title">Review title</label>
-                <input class="sh-input" id="rv-title" name="title" maxlength="150" placeholder="Summarise your experience">
-              </div>
+              <?php if ($rv['title']): ?><p class="sh-review__title"><?= e($rv['title']) ?></p><?php endif; ?>
+              <p class="sh-review__body"><?= nl2br(e($rv['body'])) ?></p>
             </div>
-            <div class="sh-field">
-              <label class="sh-field__label" for="rv-body">Your review <span class="sh-field__req">*</span></label>
-              <textarea class="sh-textarea" id="rv-body" name="body" required minlength="8" maxlength="2000"
-                        placeholder="What did you like or dislike about this product?"></textarea>
+          <?php endforeach; ?>
+
+          <?php if (sh_user() === null): ?>
+            <?php if ($reviews !== []): ?>
+              <p style="font-size:13.5px;color:var(--sh-muted);margin-top:16px">
+                Please <a href="<?= e(sh_url('login.php?redirect=' . urlencode('product.php?slug=' . $slug))) ?>" style="color:var(--sh-brand);font-weight:700">sign in</a> to write a review.
+              </p>
+            <?php endif; ?>
+          <?php else: ?>
+            <div style="<?= $reviews !== [] ? 'margin-top:20px;padding-top:18px;border-top:1px solid var(--sh-line)' : '' ?>">
+              <h3 style="font-size:14.5px;font-weight:800;margin-bottom:12px">Write a review</h3>
+              <form method="post">
+                <?= sh_csrf_field() ?>
+                <input type="hidden" name="form" value="review">
+                <div class="sh-grid2">
+                  <div class="sh-field">
+                    <label class="sh-field__label" for="rv-rating">Your rating</label>
+                    <select class="sh-select" id="rv-rating" name="rating">
+                      <?php for ($i = 5; $i >= 1; $i--): ?>
+                        <option value="<?= $i ?>"><?= $i ?> star<?= $i === 1 ? '' : 's' ?></option>
+                      <?php endfor; ?>
+                    </select>
+                  </div>
+                  <div class="sh-field">
+                    <label class="sh-field__label" for="rv-title">Review title</label>
+                    <input class="sh-input" id="rv-title" name="title" maxlength="150" placeholder="Summarise your experience">
+                  </div>
+                </div>
+                <div class="sh-field">
+                  <label class="sh-field__label" for="rv-body">Your review <span class="sh-field__req">*</span></label>
+                  <textarea class="sh-textarea" id="rv-body" name="body" required minlength="8" maxlength="2000"
+                            placeholder="What did you like or dislike about this product?"></textarea>
+                </div>
+                <button class="sh-btn" type="submit"><?= sh_icon('send', 15) ?> Submit review</button>
+              </form>
             </div>
-            <button class="sh-btn" type="submit"><?= sh_icon('send', 15) ?> Submit review</button>
-          </form>
-        <?php endif; ?>
-      </div>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
-  </div>
+  <?php endif; ?>
 
   <?php if ($related): ?>
     <section class="sh-section" style="margin-top:14px">

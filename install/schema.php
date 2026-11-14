@@ -10,6 +10,7 @@ function sh_schema_tables(): array
 {
     return [
         'users', 'admins', 'categories', 'brands', 'products', 'product_images',
+        'product_types', 'product_colours', 'product_colour_selections',
         'cart', 'cart_items', 'orders', 'order_items', 'payments', 'payment_methods',
         'payment_gateways', 'product_codes', 'reviews', 'wishlist', 'coupons',
         'addresses', 'settings', 'notifications', 'notification_logs', 'app_logs',
@@ -103,10 +104,34 @@ function sh_schema_sql(): array
         UNIQUE KEY uq_brands_slug (slug)
     ) $E";
 
+    $sql[] = "CREATE TABLE IF NOT EXISTS product_types (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        name VARCHAR(120) NOT NULL,
+        slug VARCHAR(140) NOT NULL,
+        status TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_ptypes_slug (slug)
+    ) $E";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS product_colours (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        name VARCHAR(120) NOT NULL,
+        slug VARCHAR(140) NOT NULL,
+        hex CHAR(7) NOT NULL DEFAULT '#888888',
+        status TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_pcolours_slug (slug)
+    ) $E";
+
     $sql[] = "CREATE TABLE IF NOT EXISTS products (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT,
         category_id INT UNSIGNED DEFAULT NULL,
         brand_id INT UNSIGNED DEFAULT NULL,
+        catalog_type_id INT UNSIGNED DEFAULT NULL,
         name VARCHAR(190) NOT NULL,
         slug VARCHAR(210) NOT NULL,
         sku VARCHAR(60) DEFAULT NULL,
@@ -138,12 +163,14 @@ function sh_schema_sql(): array
         UNIQUE KEY uq_products_draft_token (ai_draft_token),
         KEY idx_products_category (category_id),
         KEY idx_products_brand (brand_id),
+        KEY idx_products_catalog_type (catalog_type_id),
         KEY idx_products_status (status),
         KEY idx_products_flash (is_flash_sale, status),
         KEY idx_products_featured (is_featured, status),
         KEY idx_products_price (price),
         CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL,
-        CONSTRAINT fk_products_brand FOREIGN KEY (brand_id) REFERENCES brands (id) ON DELETE SET NULL
+        CONSTRAINT fk_products_brand FOREIGN KEY (brand_id) REFERENCES brands (id) ON DELETE SET NULL,
+        CONSTRAINT fk_products_catalog_type FOREIGN KEY (catalog_type_id) REFERENCES product_types (id) ON DELETE SET NULL
     ) $E";
 
     $sql[] = "CREATE TABLE IF NOT EXISTS product_images (
@@ -155,6 +182,21 @@ function sh_schema_sql(): array
         PRIMARY KEY (id),
         KEY idx_pimages_product (product_id),
         CONSTRAINT fk_pimages_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+    ) $E";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS product_colour_selections (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        product_id INT UNSIGNED NOT NULL,
+        colour_id INT UNSIGNED DEFAULT NULL,
+        custom_name VARCHAR(120) DEFAULT NULL,
+        custom_hex CHAR(7) DEFAULT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_pcsel_product (product_id),
+        KEY idx_pcsel_colour (colour_id),
+        CONSTRAINT fk_pcsel_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE,
+        CONSTRAINT fk_pcsel_colour FOREIGN KEY (colour_id) REFERENCES product_colours (id) ON DELETE SET NULL
     ) $E";
 
     $sql[] = "CREATE TABLE IF NOT EXISTS cart (
@@ -173,11 +215,12 @@ function sh_schema_sql(): array
         id INT UNSIGNED NOT NULL AUTO_INCREMENT,
         cart_id INT UNSIGNED NOT NULL,
         product_id INT UNSIGNED NOT NULL,
+        variant VARCHAR(190) NOT NULL DEFAULT '',
         quantity INT NOT NULL DEFAULT 1,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
-        UNIQUE KEY uq_cart_product (cart_id, product_id),
+        UNIQUE KEY uq_cart_product_variant (cart_id, product_id, variant),
         KEY idx_citems_product (product_id),
         CONSTRAINT fk_citems_cart FOREIGN KEY (cart_id) REFERENCES cart (id) ON DELETE CASCADE,
         CONSTRAINT fk_citems_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
@@ -642,7 +685,10 @@ function sh_support_schema_sql(): array
             context_summary TEXT NULL,
             unread_admin INT UNSIGNED NOT NULL DEFAULT 0,
             unread_customer INT UNSIGNED NOT NULL DEFAULT 0,
-            last_message_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- Nullable on purpose: a freshly created conversation has no last
+            -- message yet. The AI-support upgrader already normalizes older
+            -- installs to this exact definition (ai/support-schema.php).
+            last_message_at DATETIME DEFAULT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
@@ -685,8 +731,8 @@ function sh_support_schema_sql(): array
         ) $E",
         "CREATE TABLE IF NOT EXISTS support_faqs (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            title VARCHAR(160) NOT NULL,
-            keywords VARCHAR(500) NOT NULL DEFAULT '',
+            title VARCHAR(160) NOT NULL DEFAULT '',
+            keywords VARCHAR(500) DEFAULT NULL,
             answer_bn TEXT NULL,
             answer_banglish TEXT NULL,
             answer_en TEXT NULL,
@@ -1217,6 +1263,28 @@ function sh_seed_essential_starters(PDO $pdo): void
     $gw->execute(['sslcommerz', 'SSLCommerz', 'sslcommerz', 'Cards, mobile banking and net banking via SSLCommerz.', 'sandbox', 0, 1]);
     $gw->execute(['aamarpay', 'aamarPay', 'aamarpay', 'Cards and mobile financial services via aamarPay.', 'sandbox', 0, 2]);
     $gw->execute(['shurjopay', 'shurjoPay', 'shurjopay', 'Payment aggregation via shurjoPay.', 'sandbox', 0, 3]);
+
+    // Shopper-facing product types and common colour swatches are structure,
+    // not business records: they contain no products, prices, brands or owner
+    // data. INSERT IGNORE keeps this safe when an upgraded database already
+    // has admin-created dictionary entries.
+    $typeSeed = $pdo->prepare('INSERT IGNORE INTO product_types (name, slug, status) VALUES (?, ?, 1)');
+    foreach (['Handbag', 'Shoulder Bag', 'T-Shirt', 'Shoes', 'Watch',
+              'Accessories', 'Electronics', 'Home & Living'] as $name) {
+        $slug = strtolower(trim((string)preg_replace('/[^A-Za-z0-9]+/', '-', $name), '-'));
+        $typeSeed->execute([$name, $slug]);
+    }
+    $colourSeed = $pdo->prepare('INSERT IGNORE INTO product_colours (name, slug, hex, status) VALUES (?, ?, ?, 1)');
+    $colours = [
+        ['Black', '#111827'], ['White', '#f8fafc'], ['Red', '#dc2626'],
+        ['Blue', '#2563eb'], ['Navy', '#1e3a8a'], ['Green', '#16a34a'],
+        ['Yellow', '#facc15'], ['Pink', '#ec4899'], ['Purple', '#7c3aed'],
+        ['Brown', '#92400e'], ['Grey', '#6b7280'], ['Beige', '#d6c3a5'],
+        ['Orange', '#f97316'], ['Silver', '#c0c4cc'], ['Gold', '#d4af37'],
+    ];
+    foreach ($colours as [$name, $hex]) {
+        $colourSeed->execute([$name, strtolower($name), $hex]);
+    }
 }
 
 /**
@@ -1438,4 +1506,9 @@ function sh_schema_seed(PDO $pdo, array $opts): void
     $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)')
         ->execute(['otp_schema_version', (string)SH_OTP_SCHEMA_VERSION]);
+
+    // The rows above were written through this raw PDO handle, bypassing
+    // sh_setting_save(). Refresh the request cache so a test or installer that
+    // recreates the schema does not keep migration versions from the old DB.
+    if (function_exists('sh_settings')) { sh_settings(true); }
 }

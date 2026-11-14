@@ -31,6 +31,14 @@ try {
 } catch (Throwable $e) { sh_log_exception($e, 'admin-badges'); }
 
 require_once SH_ROOT . '/includes/admin-perms.php';
+// Support inbox badge: initialize first so an unavailable support schema (or a
+// role without inbox access) can never surface an undefined-variable warning.
+$badgeSupport = 0;
+try {
+    if (sh_admin_can('support.view', 'support.reply', 'support.manage')) {
+        $badgeSupport = (int)sh_val('SELECT COUNT(*) FROM support_conversations WHERE unread_for_admin = 1', [], 0);
+    }
+} catch (Throwable $e) { sh_log_exception($e, 'admin-badges'); }
 $badgeReturned = 0;
 try { $badgeReturned = (int)sh_val("SELECT COUNT(*) FROM orders WHERE status = 'returned' AND updated_at >= ?", [date('Y-m-d H:i:s', time() - 7 * 86400)], 0); } catch (Throwable $e) {}
 // [key, href, icon, label, badge, permission]
@@ -57,6 +65,7 @@ $nav = [
     ],
     'Products' => [
         ['products',   'products.php',          'box',   'Products', 0, 'products.view'],
+        ['attributes', 'product-attributes.php','tag',   'Brands, Types & Colours', 0, 'catalog.manage'],
         ['categories', 'categories.php',        'grid',  'Categories', 0, 'catalog.manage'],
         ['stock',      'stock.php?view=all',    'list',  'Inventory', 0, 'products.stock'],
         ['stock:low',  'stock.php?view=alerts', 'alert', 'Low Stock', 0, 'products.stock'],

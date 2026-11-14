@@ -222,7 +222,7 @@ function sh_otp_find_latest(string $phone, string $purpose, ?int $userId): ?arra
  * `code` is only ever populated for the offline driver and MUST be treated as
  * test-only — never displayed in production UI.
  */
-function sh_otp_issue(string $phone, string $purpose, ?int $userId, string $ip = null): array
+function sh_otp_issue(string $phone, string $purpose, ?int $userId, ?string $ip = null): array
 {
     $ip = $ip ?: sh_client_ip();
     if (!sh_otp_enabled()) {
@@ -379,50 +379,258 @@ function sh_otp_limit_check(string $phone, string $ip): ?string
 // Provider drivers
 // ---------------------------------------------------------------------------
 /** @var array<string, callable> */
-function sh_otp_driver_registry(): array
+function &sh_otp_driver_registry(): array
 {
     static $drivers = null;
     if ($drivers === null) { $drivers = []; }
     return $drivers;
 }
 
-/** Register a custom provider driver: fn(string $phone, string $message): array{ok:bool,error:?string} */
+/** Register a custom provider driver: fn(string $phone, string $message, array $cfg): array */
 function sh_otp_register_driver(string $name, callable $fn): void
 {
+    // Returning the static registry by reference is essential: the old value
+    // return made every custom registration vanish (and emitted a PHP Notice).
     $drivers = &sh_otp_driver_registry();
     $drivers[$name] = $fn;
 }
 
-function sh_otp_send(string $provider, string $phone, string $message): array
+/**
+ * Read an SMS driver option. An explicit override set (used by the dedicated
+ * Human Support Notifications configuration) wins; otherwise the shared OTP
+ * settings are used. This keeps ONE driver implementation per carrier instead
+ * of a second, parallel notification system.
+ */
+function sh_otp_setting_value(string $key, array $cfg, string $default = ''): string
+{
+    if (array_key_exists($key, $cfg)) { return (string)$cfg[$key]; }
+    return (string)sh_setting($key, $default);
+}
+
+/** Short, secret-free reference an admin can quote without exposing provider data. */
+function sh_sms_diagnostic_id(): string
+{
+    try { return 'SMS-' . bin2hex(random_bytes(4)); }
+    catch (Throwable $e) {
+        if (function_exists('openssl_random_pseudo_bytes')) {
+            $bytes = openssl_random_pseudo_bytes(4);
+            if (is_string($bytes) && strlen($bytes) === 4) { return 'SMS-' . bin2hex($bytes); }
+        }
+        return 'SMS-' . substr(hash('sha256', microtime(true) . (string)getmypid() . __FILE__), 0, 8);
+    }
+}
+
+/** Redact credentials, long opaque tokens and phone numbers before any log is written. */
+function sh_sms_scrub_diagnostic(string $text): string
+{
+    $text = preg_replace('/[\r\n\t]+/', ' ', $text) ?? '';
+    if (function_exists('sh_scrub_secrets')) { $text = (string)sh_scrub_secrets($text); }
+    $text = preg_replace('/(?:\b(?:x-api-key|api[_-]?key|apikey|token|secret|password|authorization|bearer)\b\s*[:=]?\s*)([^\s,;"\']+)/i', '[redacted]', $text) ?? $text;
+    $text = preg_replace('/([?&](?:key|token|api_key|secret|password|access_token)=)[^&\s]+/i', '$1[redacted]', $text) ?? $text;
+    $text = preg_replace('/\b[A-Za-z0-9_-]{32,}\b/', '[redacted-token]', $text) ?? $text;
+    $text = preg_replace('/\+?\d{8,15}/', '[phone]', $text) ?? $text;
+    $text = preg_replace('/\s+/', ' ', $text) ?? $text;
+    return mb_substr(trim($text), 0, 400);
+}
+
+/** Base diagnostic shape shared by all drivers. No request body is ever logged. */
+function sh_sms_diagnostic_base(string $provider, string $phone, string $endpoint, string $method, string $auth): array
+{
+    $masked = function_exists('sh_phone_mask') ? (string)sh_phone_mask($phone) : '[phone]';
+    return [
+        'id' => sh_sms_diagnostic_id(),
+        'provider' => mb_substr($provider, 0, 40),
+        'endpoint' => $endpoint,
+        'method' => $method,
+        'auth' => $auth,
+        'recipient' => $masked,
+        'http_status' => 0,
+        'curl_errno' => 0,
+        'curl_error' => '',
+        'response' => '',
+        'acceptance' => '',
+        'ssl_verify' => 'on',
+        'timeout' => 15,
+        'duration_ms' => 0,
+    ];
+}
+
+/** Normalize and scrub a diagnostic before it reaches the secure admin log. */
+function sh_sms_diagnostic(array $diagnostic): array
+{
+    $diagnostic = array_merge(sh_sms_diagnostic_base('', '', '', '', ''), $diagnostic);
+    $scrub = ['endpoint', 'curl_error', 'response', 'error', 'acceptance'];
+    foreach ($scrub as $key) {
+        $diagnostic[$key] = sh_sms_scrub_diagnostic((string)($diagnostic[$key] ?? ''));
+    }
+    $diagnostic['recipient'] = sh_sms_scrub_diagnostic((string)($diagnostic['recipient'] ?? '[phone]'));
+    $diagnostic['provider'] = mb_substr(preg_replace('/[^a-z0-9_.:-]+/i', '-', (string)$diagnostic['provider']) ?: 'unknown', 0, 40);
+    $diagnostic['method'] = strtoupper(mb_substr((string)$diagnostic['method'], 0, 10));
+    $diagnostic['auth'] = mb_substr((string)$diagnostic['auth'], 0, 30);
+    $diagnostic['code'] = mb_substr(preg_replace('/[^a-z0-9_.:-]+/i', '-', (string)($diagnostic['code'] ?? '')) ?: 'unknown', 0, 40);
+    $diagnostic['id'] = preg_replace('/[^A-Za-z0-9-]/', '', (string)$diagnostic['id']) ?: sh_sms_diagnostic_id();
+    foreach (['http_status', 'curl_errno', 'timeout', 'duration_ms'] as $key) {
+        $diagnostic[$key] = max(0, (int)$diagnostic[$key]);
+    }
+    return $diagnostic;
+}
+
+/** One uniform transport result: ok, user-safe error, machine code, secure diagnostic. */
+function sh_sms_result(bool $ok, string $error, array $diagnostic, string $code = ''): array
+{
+    $diagnostic['code'] = $code !== '' ? $code : ($ok ? 'accepted' : 'provider_failed');
+    return [
+        'ok' => $ok,
+        'error' => $error !== '' ? sh_sms_scrub_diagnostic($error) : null,
+        'code' => (string)$diagnostic['code'],
+        'diagnostic' => sh_sms_diagnostic($diagnostic),
+    ];
+}
+
+/** Normalize a custom driver's result without leaking raw exceptions or secrets. */
+function sh_sms_normalize_result($result, string $provider, string $phone, array $cfg = []): array
+{
+    $result = is_array($result) ? $result : [];
+    $base = sh_sms_diagnostic_base($provider, $phone, '', 'CUSTOM', 'custom_driver');
+    $diagnostic = is_array($result['diagnostic'] ?? null)
+        ? array_merge($base, $result['diagnostic'])
+        : $base;
+    $ok = !empty($result['ok']);
+    $error = (string)($result['error'] ?? '');
+    $code = (string)($result['code'] ?? ($ok ? 'accepted' : 'provider_failed'));
+    return sh_sms_result($ok, $error, $diagnostic, $code);
+}
+
+/** cURL outcome plus transport metadata, always scrubbed. */
+function sh_sms_curl_finish($ch, $response, array $diagnostic, float $started): array
+{
+    $errno = $response === false ? (int)curl_errno($ch) : 0;
+    $error = $response === false ? (string)curl_error($ch) : '';
+    $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $diagnostic['http_status'] = $http;
+    $diagnostic['curl_errno'] = $errno;
+    $diagnostic['curl_error'] = $error;
+    $diagnostic['response'] = is_string($response) ? $response : '';
+    $diagnostic['duration_ms'] = (int)round((microtime(true) - $started) * 1000);
+    return sh_sms_diagnostic($diagnostic);
+}
+
+/** Translate cURL failures, including cPanel outbound HTTPS restrictions, for admins. */
+function sh_sms_curl_error_message(int $errno, string $error): string
+{
+    $safe = sh_sms_scrub_diagnostic($error);
+    $prefix = $errno > 0 ? 'cURL error ' . $errno . '. ' : '';
+    $detail = match ($errno) {
+        6 => 'DNS resolution failed; check outbound DNS and HTTPS access.',
+        7 => 'Connection failed; cPanel/shared-hosting outbound HTTPS may be blocked, or the provider is unreachable.',
+        28 => 'The request timed out; check outbound HTTPS, firewall and provider status.',
+        35, 51, 58, 60, 77 => 'TLS certificate verification failed; update the server CA bundle or contact the host.',
+        default => $safe !== '' ? $safe : 'The provider could not be reached.',
+    };
+    return $prefix . $detail;
+}
+
+/** User-safe, provider-specific HTTP status explanation. Raw bodies stay in the secure log. */
+function sh_sms_http_error(string $provider, int $status): string
+{
+    $name = $provider === 'textbee' ? 'TextBee' : 'The SMS provider';
+    if ($status === 401 || $status === 403) {
+        return $name . ' rejected authentication (HTTP ' . $status . '). Check the API key and account permissions.';
+    }
+    if ($status === 429) {
+        return $name . ' reported a plan/rate limit (HTTP 429). Wait before trying again; do not retry blindly.';
+    }
+    if ($status === 400) {
+        return $name . ' rejected the request (HTTP 400). Check account verification, registered device, sender and recipient format.';
+    }
+    if ($status >= 500) {
+        return $name . ' returned a server error (HTTP ' . $status . '). Try again later.';
+    }
+    return $name . ' returned HTTP ' . $status . ' without confirming acceptance.';
+}
+
+/** TextBee's current contract requires data.success:true and an smsBatchId. */
+function sh_sms_textbee_response_state(string $response): array
+{
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded) || !is_array($decoded['data'] ?? null)) {
+        return ['ok' => false, 'reason' => 'Response did not contain a data.success object.'];
+    }
+    if (($decoded['data']['success'] ?? null) !== true) {
+        return ['ok' => false, 'reason' => 'data.success was not true.'];
+    }
+    if (trim((string)($decoded['data']['smsBatchId'] ?? '')) === '') {
+        return ['ok' => false, 'reason' => 'No smsBatchId was returned.'];
+    }
+    return ['ok' => true, 'reason' => 'data.success=true and smsBatchId present.'];
+}
+
+/** Generic providers accept HTTP 2xx; an optional success marker must match if set. */
+function sh_sms_generic_response_state(string $response, string $field, string $value): array
+{
+    if ($field === '') {
+        return ['ok' => true, 'reason' => 'HTTP 2xx accepted (no success marker configured).'];
+    }
+    $decoded = json_decode($response, true);
+    if ($value === '') {
+        $present = is_array($decoded) && sh_array_get($decoded, $field) !== null;
+        return $present
+            ? ['ok' => true, 'reason' => 'HTTP 2xx and success field present.']
+            : ['ok' => false, 'reason' => 'Success field was not present in the response.'];
+    }
+    $matched = sh_otp_response_has($response, $field, $value);
+    return $matched
+        ? ['ok' => true, 'reason' => 'HTTP 2xx and success marker matched.']
+        : ['ok' => false, 'reason' => 'Success marker did not match the response.'];
+}
+
+/**
+ * One transport for both OTP codes and human-support SMS.
+ * $cfg is an optional set of per-channel credential overrides keyed by the
+ * SAME setting names the shipped drivers already use. Every outcome carries a
+ * scrubbed diagnostic for the secure Admin log; no result claims handset
+ * delivery, only provider acceptance.
+ *
+ * @return array{ok:bool,error:?string,code:string,diagnostic:array}
+ */
+function sh_sms_deliver(string $provider, string $phone, string $message, array $cfg = []): array
 {
     $drivers = sh_otp_driver_registry();
     if (isset($drivers[$provider])) {
         try {
-            return $drivers[$provider]($phone, $message);
+            return sh_sms_normalize_result($drivers[$provider]($phone, $message, $cfg), $provider, $phone, $cfg);
         } catch (Throwable $e) {
-            sh_log_exception($e, 'otp-provider');
-            return ['ok' => false, 'error' => 'SMS provider error.'];
+            sh_log_exception($e, 'sms-provider');
+            return sh_sms_result(false, 'The SMS provider failed unexpectedly. See secure diagnostics.',
+                sh_sms_diagnostic_base($provider, $phone, '', 'CUSTOM', 'custom_driver'), 'provider_exception');
         }
     }
-    if ($provider === 'offline') {
-        return sh_otp_provider_offline($phone, $message);
+    try {
+        if ($provider === 'offline') { return sh_otp_provider_offline($phone, $message); }
+        if ($provider === 'textbee') { return sh_otp_provider_textbee($phone, $message, $cfg); }
+        if ($provider === 'firebase') { return sh_otp_provider_firebase($phone, $message); }
+        if ($provider === 'generic_http') { return sh_otp_provider_generic($phone, $message, $cfg); }
+        return sh_sms_result(false, 'SMS provider is not configured.',
+            sh_sms_diagnostic_base($provider ?: 'unknown', $phone, '', '', 'none'), 'provider_not_configured');
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'sms-provider');
+        return sh_sms_result(false, 'The SMS provider failed unexpectedly. See secure diagnostics.',
+            sh_sms_diagnostic_base($provider, $phone, '', '', 'none'), 'provider_exception');
     }
-    if ($provider === 'textbee') {
-        return sh_otp_provider_textbee($phone, $message);
-    }
-    if ($provider === 'firebase') {
-        return sh_otp_provider_firebase($phone, $message);
-    }
-    if ($provider === 'generic_http') {
-        return sh_otp_provider_generic($phone, $message);
-    }
-    return ['ok' => false, 'error' => 'SMS provider is not configured.'];
+}
+
+function sh_otp_send(string $provider, string $phone, string $message): array
+{
+    return sh_sms_deliver($provider, $phone, $message);
 }
 
 /** Test driver: never delivered anywhere; only for confirming the flow works. */
 function sh_otp_provider_offline(string $phone, string $message): array
 {
-    return ['ok' => true, 'error' => null];
+    $diag = sh_sms_diagnostic_base('offline', $phone, '', 'NONE', 'none');
+    $diag['acceptance'] = 'Offline test driver only; no SMS was sent.';
+    return sh_sms_result(true, '', $diag, 'offline_test_only');
 }
 
 /** E.164 formatting for providers that require it (e.g. +8801712345678). */
@@ -433,24 +641,37 @@ function sh_otp_e164(string $phone): string
 }
 
 /**
- * TextBee driver — https://api.textbee.dev/api/v1/gateway/devices/{device_id}/send-sms
- * JSON body { recipients: [E.164], message }, header `x-api-key: <api key>`.
+ * TextBee driver — current documented account endpoint:
+ * POST https://api.textbee.dev/api/v1/gateway/send-sms
+ * JSON { recipients: [E.164], message, deviceId? }, header x-api-key.
+ * A 200 response means queued, NOT handset delivery; data.success:true plus
+ * smsBatchId is required before we report provider acceptance.
  */
-function sh_otp_provider_textbee(string $phone, string $message): array
+function sh_otp_provider_textbee(string $phone, string $message, array $cfg = []): array
 {
-    $apiKey = trim((string)sh_setting('otp_textbee_api_key', ''));
-    $deviceId = trim((string)sh_setting('otp_textbee_device_id', ''));
-    if ($apiKey === '' || $deviceId === '') {
-        return ['ok' => false, 'error' => 'TextBee API key and Device ID are both required.'];
+    $apiKey = trim(sh_otp_setting_value('otp_textbee_api_key', $cfg));
+    $deviceId = trim(sh_otp_setting_value('otp_textbee_device_id', $cfg));
+    $endpoint = 'https://api.textbee.dev/api/v1/gateway/send-sms';
+    $diag = sh_sms_diagnostic_base('textbee', $phone, $endpoint, 'POST', 'x-api-key');
+    if ($apiKey === '') {
+        $diag['acceptance'] = 'No TextBee API key configured.';
+        return sh_sms_result(false, 'TextBee API key is required. Device ID is optional with the current account endpoint.', $diag, 'credentials_missing');
     }
-    $url = 'https://api.textbee.dev/api/v1/gateway/devices/' . rawurlencode($deviceId) . '/send-sms';
-    $body = json_encode(['recipients' => [sh_otp_e164($phone)], 'message' => $message]);
-
-    $ch = curl_init($url);
+    if (!function_exists('curl_init')) {
+        $diag['acceptance'] = 'PHP cURL extension unavailable.';
+        return sh_sms_result(false, 'PHP cURL is not enabled on this server, so TextBee cannot be reached.', $diag, 'curl_missing');
+    }
+    $payload = ['recipients' => [sh_otp_e164($phone)], 'message' => $message];
+    if ($deviceId !== '') { $payload['deviceId'] = $deviceId; }
+    $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($body === false) {
+        return sh_sms_result(false, 'The TextBee request could not be encoded.', $diag, 'payload_error');
+    }
+    $ch = curl_init($endpoint);
     if ($ch === false) {
-        return ['ok' => false, 'error' => 'cURL is required for SMS delivery.'];
+        return sh_sms_result(false, 'cURL could not initialize the TextBee request.', $diag, 'curl_init_failed');
     }
-    curl_setopt_array($ch, [
+    $options = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
@@ -458,19 +679,29 @@ function sh_otp_provider_textbee(string $phone, string $message): array
         CURLOPT_TIMEOUT => 15,
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_SSL_VERIFYPEER => true,
-    ]);
+    ];
+    if (defined('CURLOPT_SSL_VERIFYHOST')) { $options[CURLOPT_SSL_VERIFYHOST] = 2; }
+    curl_setopt_array($ch, $options);
+    $started = microtime(true);
     $resp = curl_exec($ch);
-    $err = curl_error($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $diag = sh_sms_curl_finish($ch, $resp, $diag, $started);
 
     if ($resp === false) {
-        return ['ok' => false, 'error' => 'Could not reach TextBee: ' . $err];
+        $diag['acceptance'] = 'No HTTP response; request not queued.';
+        return sh_sms_result(false, 'Could not reach TextBee. ' . sh_sms_curl_error_message((int)$diag['curl_errno'], (string)$diag['curl_error']),
+            $diag, 'curl_' . (int)$diag['curl_errno']);
     }
-    if ($code >= 400) {
-        return ['ok' => false, 'error' => "TextBee rejected the request (HTTP {$code})."];
+    if ($diag['http_status'] >= 400) {
+        $diag['acceptance'] = 'HTTP error; request not queued.';
+        return sh_sms_result(false, sh_sms_http_error('textbee', (int)$diag['http_status']),
+            $diag, 'http_' . (int)$diag['http_status']);
     }
-    return ['ok' => true, 'error' => null];
+    $state = sh_sms_textbee_response_state((string)$resp);
+    $diag['acceptance'] = $state['reason'];
+    if (!$state['ok']) {
+        return sh_sms_result(false, 'TextBee did not confirm acceptance: ' . $state['reason'], $diag, 'invalid_response');
+    }
+    return sh_sms_result(true, '', $diag, 'accepted');
 }
 
 /**
@@ -481,55 +712,75 @@ function sh_otp_provider_textbee(string $phone, string $message): array
  */
 function sh_otp_provider_firebase(string $phone, string $message): array
 {
-    return ['ok' => false,
-        'error' => 'Firebase Auth cannot deliver this store\'s verification code. Choose TextBee or a custom HTTP SMS gateway instead.'];
+    $diag = sh_sms_diagnostic_base('firebase', $phone, '', 'NONE', 'none');
+    $diag['acceptance'] = 'Unsupported provider; no SMS was sent.';
+    return sh_sms_result(false,
+        'Firebase Auth cannot deliver this store\'s verification code. Choose TextBee or a custom HTTP SMS gateway instead.',
+        $diag, 'unsupported_provider');
 }
 
 /**
  * Generic HTTP driver. Supports GET / form-post / JSON-post bodies with
- * {phone} {message} {sender} {api_key} {api_secret} {token} {username}
- * {password} placeholders, custom headers, an optional success marker in the
- * response, optional bearer/basic auth, and a simple phone/message param
- * fallback when no body template is supplied.
+ * {phone} {phone_e164} {message} {sender} {api_key} {api_secret} {token}
+ * {username} {password} placeholders, custom headers, an optional success
+ * marker in the response, optional bearer/basic auth, and a phone/message param
+ * fallback when no body template is supplied. Only HTTPS endpoints are allowed.
  */
-function sh_otp_provider_generic(string $phone, string $message): array
+function sh_otp_provider_generic(string $phone, string $message, array $cfg = []): array
 {
-    $url = trim((string)sh_setting('otp_api_url', ''));
+    $url = trim((string)sh_otp_setting_value('otp_api_url', $cfg, ''));
+    $method = strtolower((string)sh_otp_setting_value('otp_api_method', $cfg, 'post_json'));
+    if (!in_array($method, ['get', 'post_form', 'post_json'], true)) { $method = 'post_json'; }
+    $diag = sh_sms_diagnostic_base('generic_http', $phone, $url, strtoupper($method), 'none');
     if ($url === '') {
-        return ['ok' => false, 'error' => 'SMS API URL is not configured.'];
+        $diag['acceptance'] = 'No endpoint configured.';
+        return sh_sms_result(false, 'SMS API URL is not configured.', $diag, 'credentials_missing');
     }
-    $method = strtolower((string)sh_setting('otp_api_method', 'post_json'));
-    $bodyTpl = (string)sh_setting('otp_api_body', '');
-    $headersTpl = (string)sh_setting('otp_api_headers', '');
-    $successField = (string)sh_setting('otp_success_field', '');
-    $successValue = (string)sh_setting('otp_success_value', '');
-    $sender = (string)sh_setting('otp_sender_id', 'ShopHaat');
+    if (preg_match('~^https://~i', $url) !== 1) {
+        $diag['acceptance'] = 'Rejected non-HTTPS endpoint.';
+        return sh_sms_result(false, 'Custom SMS API URL must use HTTPS.', $diag, 'insecure_endpoint');
+    }
+    if (!function_exists('curl_init')) {
+        $diag['acceptance'] = 'PHP cURL extension unavailable.';
+        return sh_sms_result(false, 'PHP cURL is not enabled on this server, so the SMS gateway cannot be reached.', $diag, 'curl_missing');
+    }
+
+    $bodyTpl = (string)sh_otp_setting_value('otp_api_body', $cfg, '');
+    $headersTpl = (string)sh_otp_setting_value('otp_api_headers', $cfg, '');
+    $successField = (string)sh_otp_setting_value('otp_success_field', $cfg, '');
+    $successValue = (string)sh_otp_setting_value('otp_success_value', $cfg, '');
+    $sender = (string)sh_otp_setting_value('otp_sender_id', $cfg, 'ShopHaat');
 
     $placeholders = [
-        '{phone}'     => $phone,
-        '{message}'   => $message,
-        '{sender}'    => $sender,
-        '{api_key}'   => (string)sh_setting('otp_api_key', ''),
-        '{api_secret}' => (string)sh_setting('otp_api_secret', ''),
-        '{token}'     => (string)sh_setting('otp_api_token', ''),
-        '{username}'  => (string)sh_setting('otp_api_username', ''),
-        '{password}'  => (string)sh_setting('otp_api_password', ''),
+        '{phone}'      => $phone,
+        '{phone_e164}' => sh_otp_e164($phone),
+        '{message}'    => $message,
+        '{sender}'     => $sender,
+        '{api_key}'    => (string)sh_otp_setting_value('otp_api_key', $cfg, ''),
+        '{api_secret}' => (string)sh_otp_setting_value('otp_api_secret', $cfg, ''),
+        '{token}'      => (string)sh_otp_setting_value('otp_api_token', $cfg, ''),
+        '{username}'   => (string)sh_otp_setting_value('otp_api_username', $cfg, ''),
+        '{password}'   => (string)sh_otp_setting_value('otp_api_password', $cfg, ''),
     ];
-
-    // Fallback: no body template => build from the phone/message param names.
     if (trim($bodyTpl) === '') {
-        $phoneParam = (string)sh_setting('otp_phone_param', 'phone');
-        $messageParam = (string)sh_setting('otp_message_param', 'message');
+        $phoneParam = (string)sh_otp_setting_value('otp_phone_param', $cfg, 'phone');
+        $messageParam = (string)sh_otp_setting_value('otp_message_param', $cfg, 'message');
         $pairs = [$phoneParam => $phone, $messageParam => $message];
-        $body = $method === 'post_json' ? json_encode($pairs) : http_build_query($pairs);
+        $body = $method === 'post_json' ? (string)json_encode($pairs) : http_build_query($pairs);
     } else {
         $body = str_replace(array_keys($placeholders), array_values($placeholders), $bodyTpl);
     }
     $headers = sh_otp_parse_headers($headersTpl, $placeholders);
+    $hasContentType = false;
+    foreach ($headers as $key => $value) {
+        if (strtolower((string)$key) === 'content-type') { $hasContentType = true; break; }
+    }
+    if (!$hasContentType && $method === 'post_json') { $headers['Content-Type'] = 'application/json'; }
+    if (!$hasContentType && $method === 'post_form') { $headers['Content-Type'] = 'application/x-www-form-urlencoded'; }
 
     $ch = curl_init();
     if ($ch === false) {
-        return ['ok' => false, 'error' => 'cURL is required for SMS delivery.'];
+        return sh_sms_result(false, 'cURL could not initialize the SMS request.', $diag, 'curl_init_failed');
     }
     $options = [
         CURLOPT_URL => $url,
@@ -538,45 +789,48 @@ function sh_otp_provider_generic(string $phone, string $message): array
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_SSL_VERIFYPEER => true,
     ];
+    if (defined('CURLOPT_SSL_VERIFYHOST')) { $options[CURLOPT_SSL_VERIFYHOST] = 2; }
     if ($method === 'get') {
-        $sep = (strpos($url, '?') === false) ? '?' : '&';
-        $options[CURLOPT_URL] = $url . $sep . $body;
+        $options[CURLOPT_URL] = $url . (str_contains($url, '?') ? '&' : '?') . $body;
     } else {
         $options[CURLOPT_POST] = true;
         $options[CURLOPT_POSTFIELDS] = $body;
     }
     $httpHeaders = [];
-    foreach ($headers as $k => $v) { $httpHeaders[] = "$k: $v"; }
-    // Optional auth: bearer token header, or HTTP basic auth.
-    $auth = strtolower((string)sh_setting('otp_api_auth', ''));
-    $token = (string)sh_setting('otp_api_token', '');
+    foreach ($headers as $k => $v) { $httpHeaders[] = $k . ': ' . $v; }
+    $auth = strtolower((string)sh_otp_setting_value('otp_api_auth', $cfg, ''));
+    $token = (string)sh_otp_setting_value('otp_api_token', $cfg, '');
     if ($auth === 'bearer' && $token !== '') {
         $httpHeaders[] = 'Authorization: Bearer ' . $token;
-    }
-    if ($auth === 'basic' && (string)sh_setting('otp_api_username', '') !== '') {
+        $diag['auth'] = 'bearer';
+    } elseif ($auth === 'basic' && (string)sh_otp_setting_value('otp_api_username', $cfg, '') !== '') {
         $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
-        $options[CURLOPT_USERPWD] = (string)sh_setting('otp_api_username', '') . ':' . (string)sh_setting('otp_api_password', '');
+        $options[CURLOPT_USERPWD] = (string)sh_otp_setting_value('otp_api_username', $cfg, '') . ':' . (string)sh_otp_setting_value('otp_api_password', $cfg, '');
+        $diag['auth'] = 'basic';
     }
     if ($httpHeaders) { $options[CURLOPT_HTTPHEADER] = $httpHeaders; }
     curl_setopt_array($ch, $options);
 
+    $started = microtime(true);
     $resp = curl_exec($ch);
-    $err = curl_error($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $diag = sh_sms_curl_finish($ch, $resp, $diag, $started);
 
     if ($resp === false) {
-        return ['ok' => false, 'error' => 'Could not reach the SMS provider: ' . $err];
+        $diag['acceptance'] = 'No HTTP response; request not accepted.';
+        return sh_sms_result(false, 'Could not reach the SMS provider. ' . sh_sms_curl_error_message((int)$diag['curl_errno'], (string)$diag['curl_error']),
+            $diag, 'curl_' . (int)$diag['curl_errno']);
     }
-    if ($code >= 400) {
-        return ['ok' => false, 'error' => "SMS provider rejected the request (HTTP {$code})."];
+    if ($diag['http_status'] >= 400) {
+        $diag['acceptance'] = 'HTTP error; request not accepted.';
+        return sh_sms_result(false, sh_sms_http_error('generic_http', (int)$diag['http_status']),
+            $diag, 'http_' . (int)$diag['http_status']);
     }
-    if ($successField !== '') {
-        if (!sh_otp_response_has($resp, $successField, $successValue)) {
-            return ['ok' => false, 'error' => 'SMS provider reported a failure.'];
-        }
+    $state = sh_sms_generic_response_state((string)$resp, $successField, $successValue);
+    $diag['acceptance'] = $state['reason'];
+    if (!$state['ok']) {
+        return sh_sms_result(false, 'SMS provider did not confirm acceptance: ' . $state['reason'], $diag, 'success_marker_missing');
     }
-    return ['ok' => true, 'error' => null];
+    return sh_sms_result(true, '', $diag, 'accepted');
 }
 
 function sh_otp_parse_headers(string $json, array $placeholders): array

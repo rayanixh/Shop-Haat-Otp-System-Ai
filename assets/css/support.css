@@ -1,7 +1,9 @@
 /* Customer support chat. All message content remains in normal document flow. */
 .sh-support-chat {
   --support-accent: var(--sh-primary, #e8501b);
-  margin: 0 0 26px;
+  /* No trailing margin: the removed secondary contact section used to leave
+     an empty band between the conversation and the footer. */
+  margin: 0;
   padding: clamp(16px, 3vw, 28px);
   border: 1px solid var(--sh-line, #e5e7eb);
   border-radius: 18px;
@@ -176,10 +178,17 @@
 .sh-support-chat__compose textarea {
   display: block;
   width: 100%;
+  height: 70px;
   min-height: 70px;
-  resize: vertical;
+  max-height: 70px;
+  resize: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  field-sizing: fixed;
   line-height: 1.55;
   box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .sh-support-chat__compose-foot { align-items: center; margin-top: 9px; }
 .sh-support-chat__counter { color: var(--sh-muted, #667085); font-size: 12px; }
@@ -198,3 +207,19 @@
   .sh-support-chat__thread-head { align-items: flex-start; flex-wrap: wrap; }
   .sh-support-chat__compose-foot { align-items: center; }
 }
+
+/* Long conversation names, URLs and error text stay inside normal flow. */
+.sh-support-chat__heading h1,
+.sh-support-chat__thread-head span,
+.sh-support-chat__counter,
+.sh-support-chat__disabled,
+.sh-support-chat__product-name {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.sh-support-chat__heading > *,
+.sh-support-chat__thread-head > *,
+.sh-support-chat__compose-foot > * {
+  min-width: 0;
+}
+.sh-support-chat__compose textarea { max-width: 100%; }

@@ -30,6 +30,19 @@
   const takeoverButton = $('[data-takeover]');
   const aiActionButton = $('[data-ai-action]');
   const resolveButton = $('[data-resolve-action]');
+  const joinButton = $('[data-join]');
+  const assignMeButton = $('[data-assign-me]');
+  const replyHumanButton = $('[data-reply-human]');
+  const leaveButton = $('[data-leave]');
+  const closeButton = $('[data-close]');
+  const reopenButton = $('[data-reopen]');
+  const humanActions = $('[data-human-actions]');
+  const stateHuman = $('[data-state-human]');
+  const stateAssignment = $('[data-state-assignment]');
+  const stateAi = $('[data-state-ai]');
+  const stateUnread = $('[data-state-unread]');
+  const stateRequested = $('[data-state-requested]');
+  const stateLast = $('[data-state-last]');
   const threadActions = $('.sh-support-admin__thread-actions');
   const assignmentControls = $('.sh-support-admin__assignment');
   const replyForm = $('[data-reply-form]');
@@ -101,7 +114,7 @@
   }
 
   function statusLabel(status) {
-    return ({ open: 'Open', pending: 'Pending human support', assigned: 'Assigned', resolved: 'Resolved', closed: 'Closed' })[status] || String(status || 'Open');
+    return ({ open: 'Open / AI active', pending: 'Pending human support', assigned: 'In progress', resolved: 'Resolved', closed: 'Closed' })[status] || String(status || 'Open');
   }
 
   function makeBadge(label, modifier = '') {
@@ -142,21 +155,35 @@
         const subject = document.createElement('span');
         subject.textContent = row.subject || `Conversation #${row.id}`;
         meta.append(subject);
+        // Every human-requested conversation shows its assignment, human
+        // support state, AI state and unread count at a glance.
         const assignee = document.createElement('span');
-        assignee.textContent = row.assigned_name ? `Assigned: ${row.assigned_name}` : 'Unassigned';
+        assignee.textContent = row.assignment_label || (row.assigned_name ? `Assigned: ${row.assigned_name}` : 'Unassigned');
         meta.append(assignee);
         button.append(meta);
 
         const preview = document.createElement('p');
         preview.className = 'sh-support-admin__conversation-preview';
-        preview.textContent = row.last_message || 'No public message yet.';
+        preview.textContent = row.message_preview || row.last_message || 'No public message yet.';
         button.append(preview);
+
+        const times = document.createElement('span');
+        times.className = 'sh-support-admin__conversation-times';
+        const requested = document.createElement('span');
+        requested.textContent = `Requested ${localTime(row.request_time || row.created_at) || '—'}`;
+        times.append(requested);
+        const last = document.createElement('span');
+        last.textContent = `Last message ${localTime(row.last_message_time) || '—'}`;
+        times.append(last);
+        button.append(times);
 
         const badges = document.createElement('span');
         badges.className = 'sh-support-admin__badge-row';
-        badges.append(makeBadge(statusLabel(row.status), row.status === 'pending' ? 'pending' : ''));
-        if (Number(row.unread_for_admin)) badges.append(makeBadge('Unread', 'unread'));
-        if (Number(row.ai_paused)) badges.append(makeBadge('AI paused'));
+        const humanLabel = row.human_status_label || statusLabel(row.status);
+        badges.append(makeBadge(humanLabel, row.human_status === 'pending' || row.status === 'pending' ? 'pending' : ''));
+        badges.append(makeBadge(row.ai_status || (Number(row.ai_paused) ? 'AI paused' : 'AI active')));
+        const unread = Number(row.unread_count ?? row.unread_for_admin ?? 0);
+        if (unread > 0) badges.append(makeBadge(`${unread} unread`, 'unread'));
         button.append(badges);
         button.addEventListener('click', () => selectConversation(Number(row.id), true));
         fragment.append(button);
@@ -267,27 +294,69 @@
     if (currentThread.customer_phone) details.push(String(currentThread.customer_phone));
     if (!currentThread.user_id) details.push('Guest session');
     customerDetails.textContent = details.join(' · ');
-    const assignee = currentThread.assigned_name ? `Assigned to ${currentThread.assigned_name}` : 'Unassigned';
+    const assignee = currentThread.assigned_name ? `Agent ${currentThread.assigned_name}` : 'Unassigned';
     const last = currentThread.last_message_at ? `Last message ${localTime(currentThread.last_message_at)}` : '';
-    threadStatus.textContent = [statusLabel(currentThread.status), assignee, Number(currentThread.ai_paused) ? 'AI paused' : 'AI active', last].filter(Boolean).join(' · ');
+    threadStatus.textContent = [
+      currentThread.human_status_label || statusLabel(currentThread.status),
+      assignee,
+      currentThread.ai_status ? `AI ${currentThread.ai_status}` : (Number(currentThread.ai_paused) ? 'AI paused' : 'AI active'),
+      last,
+    ].filter(Boolean).join(' · ');
 
     const assignedId = Number(currentThread.assigned_admin_id || 0);
     const resolved = currentThread.status === 'resolved' || currentThread.status === 'closed';
     const assignedToOther = assignedId > 0 && assignedId !== adminId && !superadmin;
+    const joined = assignedId > 0 && assignedId === adminId;
+    const humanRequested = Number(currentThread.ai_paused) === 1
+      || currentThread.human_status === 'pending'
+      || currentThread.human_status === 'in_progress'
+      || currentThread.status === 'pending'
+      || currentThread.status === 'assigned';
+
+    // Server-derived labels; fallbacks keep older cached responses readable.
+    stateHuman.textContent = currentThread.human_status_label || statusLabel(currentThread.status);
+    stateAssignment.textContent = currentThread.assignment_label
+      || (currentThread.assigned_name ? `Assigned to ${currentThread.assigned_name}` : 'Unassigned');
+    stateAi.textContent = currentThread.ai_status || (Number(currentThread.ai_paused) ? 'Paused' : 'Active');
+    stateUnread.textContent = String(Number(currentThread.unread_count ?? currentThread.unread_for_admin ?? 0));
+    stateRequested.textContent = localTime(currentThread.request_time || currentThread.created_at) || '—';
+    stateLast.textContent = localTime(currentThread.last_message_time) || '—';
+
     threadActions.hidden = !canReply;
     assignmentControls.hidden = !canReply;
+    humanActions.hidden = !canReply;
     aiActionButton.textContent = Number(currentThread.ai_paused) ? 'Resume AI' : 'Pause AI & take over';
     aiActionButton.dataset.transition = Number(currentThread.ai_paused) ? 'resume_ai' : 'takeover';
     aiActionButton.disabled = resolved || assignedToOther;
     resolveButton.textContent = resolved ? 'Reopen conversation' : 'Resolve conversation';
     resolveButton.dataset.transition = resolved ? 'reopen' : 'resolve';
     resolveButton.disabled = !resolved && assignedToOther;
+
+    // Joining is the explicit, atomic ownership claim. It is available only
+    // while nobody owns the thread; the server rejects a race with 409.
+    joinButton.hidden = resolved || assignedId > 0 || !humanRequested;
+    joinButton.disabled = resolved || assignedToOther || busy;
+    assignMeButton.hidden = resolved || assignedId > 0 || !humanRequested;
+    assignMeButton.disabled = resolved || assignedToOther || busy;
+    replyHumanButton.hidden = resolved || assignedToOther;
+    replyHumanButton.disabled = resolved || assignedToOther || busy;
+    leaveButton.hidden = !joined;
+    leaveButton.disabled = !canReply || resolved || busy;
+    closeButton.hidden = resolved;
+    closeButton.disabled = !canReply || assignedToOther || busy;
+    reopenButton.hidden = !resolved;
+    reopenButton.disabled = !canReply || busy;
+
     takeoverButton.hidden = resolved || !Number(currentThread.ai_paused) || assignedId === adminId;
     takeoverButton.disabled = resolved || assignedToOther;
     assignButton.disabled = resolved || !agentSelect.value;
     unassignButton.hidden = assignedId <= 0;
     unassignButton.disabled = !canReply || resolved || assignedToOther;
+    // The human composer is enabled once the agent has joined (or when a
+    // superadmin deliberately takes over an AI thread). Public replies on an
+    // unowned thread are still allowed: the server auto-claims it atomically.
     replyForm.hidden = resolved || !canReply;
+    replyForm.classList.toggle('is-human-owned', joined);
     replyInput.disabled = resolved || !canReply;
     replyKind.disabled = resolved || !canReply;
     replySend.disabled = resolved || !canReply || busy;
@@ -474,6 +543,26 @@
   takeoverButton.addEventListener('click', () => transition('takeover'));
   aiActionButton.addEventListener('click', () => transition(aiActionButton.dataset.transition || 'takeover'));
   resolveButton.addEventListener('click', () => transition(resolveButton.dataset.transition || 'resolve'));
+  joinButton.addEventListener('click', () => transition('join'));
+  assignMeButton.addEventListener('click', () => transition('assign_to_me'));
+  leaveButton.addEventListener('click', () => transition('leave'));
+  closeButton.addEventListener('click', () => transition('close'));
+  reopenButton.addEventListener('click', () => transition('reopen'));
+  replyHumanButton.addEventListener('click', async () => {
+    if (Number(currentThread.assigned_admin_id || 0) === 0
+        && (Number(currentThread.ai_paused) === 1 || currentThread.status === 'pending')) {
+      // Claim ownership first so the reply is unambiguously from a human.
+      await transition('join');
+    }
+    if (currentThread && currentThread.status !== 'resolved' && currentThread.status !== 'closed') {
+      replyKind.value = 'public';
+      replyLabel.textContent = 'Reply as human';
+      replyForm.hidden = false;
+      replyInput.disabled = false;
+      replyInput.focus();
+      replyForm.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
   updateReplyCount();

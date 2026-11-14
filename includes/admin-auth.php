@@ -80,6 +80,12 @@ function sh_require_admin(): array
         define('SH_ADMIN_ROUTE_CONTEXT', true);
     }
     if ($a === null) {
+        // Security-relevant denial, with no credentials, tokens or secret route.
+        if (function_exists('sh_log_line')) {
+            sh_log_line('security', !empty($_SESSION['sh_admin_expired'])
+                ? 'Admin access denied: expired session.'
+                : 'Admin access denied: no authenticated administrator session.');
+        }
         $redirect = (string)($_SERVER['REQUEST_URI'] ?? 'admin/dashboard.php');
         $loginUrl = 'admin/login.php?redirect=' . urlencode($redirect);
         $expired = !empty($_SESSION['sh_admin_expired']);

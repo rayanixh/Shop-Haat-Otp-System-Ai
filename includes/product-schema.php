@@ -19,6 +19,12 @@
  */
 declare(strict_types=1);
 
+// Gallery, brand/catalog-type and structured-colour tables are an additive
+// extension of the same product catalogue. Keeping the entry point here means
+// every existing product page/admin editor migrates a legacy installation on
+// its next request, without touching product URLs or old product rows.
+require_once __DIR__ . '/product-catalog.php';
+
 /**
  * Ensure the extra product columns and the draft-token index exist.
  *
@@ -34,9 +40,14 @@ function sh_product_schema_ensure(): void
     try {
         // One cached settings read on the hot path; the information_schema
         // probes below only run until the columns have been added once.
-        if (sh_setting('product_schema_v', '') === '1') { return; }
+        if (sh_setting('product_schema_v', '') === '1') {
+            sh_product_catalog_schema_ensure();
+            return;
+        }
         $pdo = sh_db();
-        if ($pdo->inTransaction()) { return; }
+        // DDL cannot safely run inside checkout's transaction; allow a later
+        // call in this request to retry after the transaction has committed.
+        if ($pdo->inTransaction()) { $done = false; return; }
 
         $cols = [
             'image_alt'      => 'VARCHAR(190) DEFAULT NULL',
@@ -77,6 +88,7 @@ function sh_product_schema_ensure(): void
         if (function_exists('sh_setting_save')) {
             sh_setting_save('product_schema_v', '1');
         }
+        sh_product_catalog_schema_ensure();
     } catch (Throwable $e) {
         if (function_exists('sh_log_exception')) {
             sh_log_exception($e, 'product-schema');

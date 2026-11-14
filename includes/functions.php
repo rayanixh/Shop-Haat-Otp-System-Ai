@@ -871,9 +871,9 @@ function sh_status_label(string $status): string
 }
 
 /**
- * Package / variant text stored with each order line: "Category · SKU". The
- * products table has no variants, so the category (e.g. "UID Top Up") and SKU
- * are the descriptive facts worth freezing at order time.
+ * Baseline package / variant text stored with each order line: "Category · SKU".
+ * A selected colour is appended by the cart summary as a structured variant
+ * before the order snapshot is frozen.
  */
 function sh_order_item_variant(string $category, string $sku): string
 {
@@ -971,9 +971,12 @@ function sh_client_ip(): string
 }
 
 /** Does a table exist in the current database? (guards lazy migrations) */
-function sh_table_exists(string $table): bool
+function sh_table_exists(string $table, bool $refresh = false): bool
 {
     static $known = [];
+    // DDL can add a table during the same request. Migration helpers pass
+    // $refresh=true so a previously cached "missing" answer cannot hide it.
+    if ($refresh) { unset($known[$table]); }
     if (array_key_exists($table, $known)) { return $known[$table]; }
     try {
         $n = (int)sh_val(
@@ -990,10 +993,11 @@ function sh_table_exists(string $table): bool
  * Check an existing schema column without interpolating user-controlled names.
  * Used for optional backwards-compatible fields such as a customer username.
  */
-function sh_table_has_column(string $table, string $column): bool
+function sh_table_has_column(string $table, string $column, bool $refresh = false): bool
 {
     static $known = [];
     $key = $table . '.' . $column;
+    if ($refresh) { unset($known[$key]); }
     if (array_key_exists($key, $known)) { return $known[$key]; }
     try {
         $n = (int)sh_val(

@@ -56,6 +56,21 @@ function ai_step(string $name): void
     echo '::group::' . $name . "\n";
 }
 
+/** Surface the sanitized server-side exception when a save fails in CI. */
+function ai_print_recent_logs(): void
+{
+    $directory = defined('SH_LOG_DIR') ? (string)SH_LOG_DIR : dirname(__DIR__) . '/logs';
+    $files = glob(rtrim($directory, '/\\') . '/app-*.log') ?: [];
+    sort($files, SORT_STRING);
+    $lines = [];
+    foreach (array_slice($files, -1) as $file) {
+        $lines = array_merge($lines, (array)@file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
+    }
+    foreach (array_slice($lines, -20) as $line) {
+        echo '::error::' . (string)$line . "\n";
+    }
+}
+
 /** Drop every table this test knows about, leaving an empty database. */
 function ai_drop_all(PDO $pdo): void
 {
@@ -184,6 +199,7 @@ try {
     ];
 
     $res = sh_ai_save_full_product($draft, 1);
+    if (empty($res['ok'])) { ai_print_recent_logs(); }
     ai_assert(!empty($res['ok']), 'the save failed: ' . (string)($res['error'] ?? 'unknown'));
     $id = (int)$res['id'];
     $createdProductIds[] = $id;

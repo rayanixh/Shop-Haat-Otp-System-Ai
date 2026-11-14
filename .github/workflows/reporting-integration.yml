@@ -7,6 +7,7 @@ on:
       - main
       - arena/9fe3cb2b-shop-haat-otp-system-ai
       - arena/403101d1-shop-haat-otp-system-ai
+      - arena/3066d658-shop-haat-otp-system-ai
   pull_request:
 
 permissions:
@@ -21,7 +22,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, dom, gd
+          extensions: mbstring, dom, gd, pdo_sqlite
           coverage: none
       - name: PHP syntax check every file
         run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
@@ -34,6 +35,32 @@ jobs:
       # message shapes and the static CSRF/permission/no-scroll-box wiring.
       - name: AI customer support unit suite
         run: php tests/support-unit.php
+      # Real PHP service functions against real PDO SQL (SQLite in this job,
+      # MySQL via SH_TEST_MYSQL_DSN elsewhere): one handoff confirmation,
+      # silent human-owned follow-ups, no AI/FAQ/fallback, admin reply,
+      # explicit Resume AI, takeover, assign/resolve/reopen idempotency.
+      - name: Human support handoff integration
+        run: php tests/human-support-handoff.php
+      # One SMS per genuinely new human-support request (both the button and
+      # the message-intent handoff paths), provider acceptance vs rejection,
+      # disabled/misconfigured provider never breaking chat, secret-free body
+      # and logs, and no duplicate after close/reopen/Resume AI. The outbound
+      # carrier is an explicit test transport: this is NOT a live SMS test.
+      - name: Human Support Notifications (SMS) integration
+        run: php tests/support-sms-notifications.php
+      # Real provider-driver code with outbound HTTP stubbed: current TextBee
+      # account endpoint, explicit data.success/smsBatchId acceptance, redacted
+      # diagnostics, cURL/SSL/HTTP error translation, HTTPS-only generic APIs,
+      # custom driver cfg passing and fail-closed offline/Firebase handling.
+      - name: SMS transport contract and diagnostics
+        run: php tests/support-sms-transport.php
+      # Server-side custom URL validation, no-lockout staged -> verified ->
+      # applied -> disabled lifecycle, generic 404s for legacy admin paths in
+      # isolated PHP subprocesses, and independent endpoint/asset guards.
+      - name: Custom Admin Access URL integration
+        env:
+          SH_TEST_PHP_BIN: php
+        run: php tests/admin-access-url.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -65,7 +92,7 @@ jobs:
       #     token limit, rejected key, server error, network failure, timeout)
       #     renders in the card and the button always resets.
       # Test-only: the store itself still runs on plain PHP with no Node.js.
-      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat)
+      - name: Front-end behaviour harnesses (page transition, slider, no-autosave, provider test, support chat, fixed-height chat composer, Admin URL preview, compact Settings, admin courier/AI provider UI/UX source audit)
         env:
           SH_PT_REQUIRE_JSDOM: '1'
           SH_SLIDER_REQUIRE_JSDOM: '1'
@@ -79,6 +106,61 @@ jobs:
           node tests/no-autosave-behavior.mjs
           node tests/provider-test-behavior.mjs
           node tests/support-chat-behavior.mjs
+          node tests/support-chat-optimistic-behavior.mjs
+          node tests/support-chat-composer-behavior.mjs
+          node tests/support-admin-inbox-behavior.mjs
+          node tests/admin-access-regression.mjs
+          node tests/admin-access-preview-behavior.mjs
+          node tests/support-settings-ui-behavior.mjs
+          node tests/ui-ux-audit.mjs
+      # ====================================================================
+      # SHOP HAAT — COMPLETE PRODUCT MANAGEMENT & IMAGE GALLERY UPGRADE
+      # Explicit 16-case functional acceptance matrix. The PHP/SQL suite drives
+      # the real helpers against PDO SQLite; the rendered/jsdom suite drives the
+      # real PHP templates, stylesheet and scripts. Both are fixtures, NOT live
+      # MySQL, a deployed store, a real browser/device or production parity.
+      # P01 additive migration; legacy one-image products, URLs and the
+      #     physical/digital fulfilment ENUM stay compatible.
+      # P02 fresh-install schema creates dictionary tables, cart_items.variant,
+      #     the per-variant unique key and idempotent type/colour starters.
+      # P03 admin create saves 1–5 ordered images; products.image follows the
+      #     first/primary image.
+      # P04 zero-image new products and >5-image submissions are rejected with
+      #     no orphan uploads.
+      # P05 secure 3 MB, MIME and image-dimension validation; a bad file rejects
+      #     the whole gallery atomically.
+      # P06 admin edit replaces, removes, reorders and adds images with local
+      #     previews and deferred old-file cleanup.
+      # P07 brands, merchandising types and common colour swatches support
+      #     create/edit/hide and usage-protected delete.
+      # P08 structured common and custom colours persist and reopen in the
+      #     product editor and storefront.
+      # P09 the cart API validates the selected colour and defaults to the first
+      #     real available option.
+      # P10 two colours create distinct cart lines, share product stock, and
+      #     update/remove/clear by variant.
+      # P11 guest-cart merge preserves variants and keeps a legacy pre-migration
+      #     product-only cart line working.
+      # P12 checkout/order snapshots and customer, admin and retry displays keep
+      #     the selected colour.
+      # P13 notification image captions and order text include the saved colour
+      #     snapshot.
+      # P14 an admin product save is all-or-nothing: DB rollback on failure and
+      #     old photos are deleted only after commit.
+      # P15 AI Auto Work, SEO structured data, product cards, legacy one-image
+      #     products and empty conditional tabs remain compatible.
+      # P16 the customer gallery is manual (buttons, thumbs, swipe), with no
+      #     autoplay/timers, no cropping/stretching, and a live SEO primary-image
+      #     preview; admin scripts are actually loaded.
+      # ====================================================================
+      - name: Product management PHP/SQL and rendered JS functional suites (16 cases)
+        env:
+          SH_PM_REQUIRE_JSDOM: '1'
+          SH_TEST_PHP_BIN: php
+        run: |
+          php tests/product-management-integration.php
+          php tests/product-management-render.php >/dev/null
+          node tests/product-management-behavior.mjs
       - name: Confirm no live credentials are tracked
         run: |
           if git ls-files --error-unmatch config/database.php >/dev/null 2>&1; then
@@ -136,6 +218,13 @@ jobs:
       # again for the reporting test below.
       - name: Installer seeding decision (demo data on and off)
         run: php tests/installer-demo-data.php
+      # Real MySQL/InnoDB evidence for P01/P02/P10/P15: canonical fresh
+      # schema, a simulated pre-upgrade store, the additive migration,
+      # dictionary starters, variant unique key, two colour lines for one
+      # product and the legacy primary-image snapshot. It drops the disposable
+      # tables again because the reporting suite requires an empty database.
+      - name: Product management migration and colour-variant key against MySQL
+        run: php tests/product-management-mysql.php
       - name: Exercise checkout, payment verification, reports, order timelines, and session recovery
         run: php tests/reporting-integration.php
       - name: Exercise session expiry through customer HTTP routes

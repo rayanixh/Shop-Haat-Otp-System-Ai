@@ -142,7 +142,7 @@ require dirname(__DIR__) . '/_layout.php';
 <div class="sh-aihead">
   <div>
     <h2 class="sh-aihead__title"><?= sh_icon('cpu', 20) ?> AI Providers</h2>
-    <p class="sh-aihead__sub">Every AI screen uses one of these accounts. Keys are encrypted at rest and never sent to the browser.</p>
+    <p class="sh-aihead__sub">Keys are encrypted at rest and never sent to the browser.</p>
   </div>
   <?php if ($aiInstalled): ?>
   <div class="sh-aihead__actions">
@@ -201,7 +201,7 @@ require dirname(__DIR__) . '/_layout.php';
         <input type="hidden" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
 
         <div class="sh-aiprov-formsec">
-          <p class="sh-aiprov-formsec__title">Provider and connection</p>
+          <h3 class="sh-aiprov-formsec__title">Provider and connection</h3>
           <div class="sh-grid2">
             <div class="sh-field">
               <label class="sh-field__label" for="pv-driver">Provider type</label>
@@ -243,7 +243,7 @@ require dirname(__DIR__) . '/_layout.php';
         </div>
 
         <div class="sh-aiprov-formsec">
-          <p class="sh-aiprov-formsec__title">Models</p>
+          <h3 class="sh-aiprov-formsec__title">Models</h3>
           <div class="sh-grid2">
             <div class="sh-field">
               <label class="sh-field__label" for="pv-model">Default text model</label>
@@ -271,7 +271,7 @@ require dirname(__DIR__) . '/_layout.php';
 
         <?php if ($cls::supportsCustomHeaders() || $formDriver === 'openai'): ?>
         <div class="sh-aiprov-formsec">
-          <p class="sh-aiprov-formsec__title">Advanced</p>
+          <h3 class="sh-aiprov-formsec__title">Advanced</h3>
           <div class="sh-grid2">
             <div class="sh-field">
               <label class="sh-field__label" for="pv-auth"><?= $formDriver === 'openai' ? 'Organisation ID (optional)' : 'Authentication header' ?></label>
@@ -291,7 +291,7 @@ require dirname(__DIR__) . '/_layout.php';
         <?php endif; ?>
 
         <div class="sh-aiprov-formsec">
-          <p class="sh-aiprov-formsec__title">Availability</p>
+          <h3 class="sh-aiprov-formsec__title">Availability</h3>
           <label class="sh-toggle" style="margin-bottom:10px">
             <input type="checkbox" name="status" value="1" <?= (isset($_POST['form']) ? !empty($_POST['status']) : ($editing ? (int)$editing['status'] === 1 : true)) ? 'checked' : '' ?>>
             <span class="sh-toggle__track"></span><span>Enabled — tasks may use this provider</span></label>
@@ -300,8 +300,8 @@ require dirname(__DIR__) . '/_layout.php';
             <span class="sh-toggle__track"></span><span>Use as the default provider when a task has no route</span></label>
         </div>
 
-        <div class="sh-actions">
-          <button class="sh-btn" type="submit"><?= sh_icon('check-circle', 15) ?> Save provider</button>
+        <div class="sh-actions sh-aiprov-actions">
+          <button class="sh-btn sh-btn--primary" type="submit"><?= sh_icon('check-circle', 15) ?> Save provider</button>
           <button class="sh-btn sh-btn--ghost" type="submit" name="save_action" value="test" data-no-lock><?= sh_icon('zap', 15) ?> Save &amp; test connection</button>
           <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('admin/ai/providers.php')) ?>">Cancel</a>
         </div>
@@ -423,6 +423,6 @@ foreach ($drivers as $key => $c) {
         . '<small>' . e($driverPitch[$key] ?? $c::helpText()) . '</small></span>'
         . '<span class="sh-aiprov-pick__go">' . sh_icon('chevron-right', 15) . '</span></a>';
 }
-echo sh_admin_modal('sh-aiprov-add', 'Add a provider', '<p class="sh-aiprov-pick__lead">Choose the API you want to connect. You can change the display name and models afterwards.</p>' . $pick, '', 'plus');
+echo sh_admin_modal('sh-aiprov-add', 'Add a provider', $pick, '', 'plus');
 ?>
 <?php require dirname(__DIR__) . '/_footer.php'; ?>

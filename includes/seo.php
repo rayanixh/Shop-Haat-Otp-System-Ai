@@ -353,9 +353,9 @@ function sh_seo_schema_ensure(): void
         // ALTER TABLE ... ADD COLUMN needs the identifier inline; every name
         // below is a literal from this array, never input.
         foreach ($columns as $table => $defs) {
-            if (!sh_table_exists($table)) { continue; }
+            if (!sh_table_exists($table, true)) { continue; }
             foreach ($defs as $col => $ddl) {
-                if (sh_table_has_column($table, $col)) { continue; }
+                if (sh_table_has_column($table, $col, true)) { continue; }
                 try {
                     $pdo->exec('ALTER TABLE `' . $table . '` ADD COLUMN `' . $col . '` ' . $ddl);
                 } catch (Throwable $e) {
@@ -403,9 +403,9 @@ function sh_seo_widen_text_columns(): int
     ];
     $changed = 0;
     foreach ($targets as $table => $columns) {
-        if (!sh_table_exists($table)) { continue; }
+        if (!sh_table_exists($table, true)) { continue; }
         foreach ($columns as $column) {
-            if (!sh_table_has_column($table, $column)) { continue; }
+            if (!sh_table_has_column($table, $column, true)) { continue; }
             $type = strtolower((string)sh_val(
                 'SELECT DATA_TYPE FROM information_schema.columns
                  WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?',

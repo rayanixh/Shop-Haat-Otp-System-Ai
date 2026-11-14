@@ -38,8 +38,8 @@ function sh_support_legacy_widget_payload(array $snapshot, ?array $messages = nu
     $conversation = is_array($snapshot['conversation'] ?? null) ? $snapshot['conversation'] : [];
     $status = (string)($conversation['status'] ?? 'open');
     $paused = !empty($conversation['ai_paused']);
-    $human = $paused || in_array($status, ['pending', 'assigned'], true)
-        || (int)($conversation['assigned_admin_id'] ?? 0) > 0;
+    // One source of truth: the same state machine the message pipeline uses.
+    $human = sh_support_human_controlled($conversation);
     $rows = $messages ?? (is_array($snapshot['messages'] ?? null) ? $snapshot['messages'] : []);
     return [
         'ok' => true,
@@ -169,10 +169,21 @@ if ($isAdminAction) {
     }
 
     if ($method === 'POST' && $action === 'admin_transition') {
+        // Explicit server-side allowlist: the browser never gets to invent an
+        // ownership or AI-state change. Every entry reaches the same RBAC,
+        // CSRF, prepared-SQL and FOR UPDATE checks inside the service layer.
+        $transition = (string)($input['transition'] ?? '');
+        $allowedTransitions = [
+            'join', 'assign_to_me', 'assign', 'unassign', 'leave', 'takeover',
+            'close', 'resolve', 'reopen', 'resume_ai',
+        ];
+        if (!in_array($transition, $allowedTransitions, true)) {
+            sh_support_api_fail('Unknown support action.', 400);
+        }
         $result = sh_support_admin_transition(
             max(0, (int)($input['id'] ?? 0)),
             $adminId,
-            (string)($input['transition'] ?? ''),
+            $transition,
             max(0, (int)($input['target_admin_id'] ?? 0)),
             (string)($input['reason'] ?? '')
         );

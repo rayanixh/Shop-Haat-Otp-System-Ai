@@ -71,11 +71,15 @@ function installer_reset(PDO $pdo): void
     foreach (sh_schema_sql() as $ddl) { $pdo->exec($ddl); }
 }
 
-/** The rows that must never appear unless the operator asked for the catalogue. */
+/** The rows that must never appear unless the operator asked for the catalogue.
+ *  The fixed product_types/product_colours dictionaries are structure, not
+ *  business rows; their per-product selections and gallery rows are business
+ *  content and must stay empty on a demo-OFF install. */
 function installer_business_row_total(): int
 {
-    $tables = ['products', 'categories', 'brands', 'coupons', 'promo_slides', 'reviews',
-               'orders', 'order_items', 'users', 'couriers'];
+    $tables = ['products', 'product_images', 'product_colour_selections',
+               'categories', 'brands', 'coupons', 'promo_slides', 'reviews',
+               'orders', 'order_items', 'users', 'cart', 'cart_items', 'couriers'];
     $total = 0;
     foreach ($tables as $t) { $total += installer_count($t); }
     return $total;
@@ -155,6 +159,13 @@ try {
     installer_assert_same(3, installer_count('payment_gateways'), 'The gateway definitions must exist');
     installer_assert_same(0, installer_count('payment_gateways', 'status = 1'), 'Gateway definitions must stay disabled until credentials are supplied');
 
+    // Structured dictionaries are part of the empty store's schema, not demo
+    // products. They must exist on a demo-OFF install and never duplicate when
+    // the installer or runtime seeding runs again.
+    installer_assert_same(8, installer_count('product_types'), 'The eight shopper-facing product types must be available on a fresh install');
+    installer_assert_same(15, installer_count('product_colours'), 'The fifteen common colour swatches must be available on a fresh install');
+    installer_assert_same(0, installer_count('product_colour_selections'), 'A demo-OFF install must not assign product colours');
+
     // The administrator: exactly one row, stored only as a hash.
     installer_assert_same(1, installer_count('admins'), 'A fresh install must create exactly one administrator');
     $offHash = installer_admin_hash('owner@example.test');
@@ -182,6 +193,8 @@ try {
     installer_simulate_runtime($pdo);
     installer_simulate_runtime($pdo);
     installer_assert_same(0, installer_business_row_total(), 'Demo content must never be inserted by a refresh, login, migration or repeated setup run');
+    installer_assert_same(8, installer_count('product_types'), 'Repeated runtime seeding must not duplicate structured product types');
+    installer_assert_same(15, installer_count('product_colours'), 'Repeated runtime seeding must not duplicate common colour swatches');
     installer_assert_same('none', (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'demo_data_state'", [], ''), 'A later run must not overwrite the recorded decision');
 
     // 2b. The owner unlock is the one authorised recovery: it resets the one
@@ -215,6 +228,8 @@ try {
 
     $seeded = [
         'products'   => installer_count('products'),
+        'product_images' => installer_count('product_images'),
+        'product_colour_selections' => installer_count('product_colour_selections'),
         'categories' => installer_count('categories'),
         'brands'     => installer_count('brands'),
         'coupons'    => installer_count('coupons'),
@@ -225,8 +240,11 @@ try {
     foreach (['products', 'categories', 'coupons', 'reviews', 'slider', 'cards'] as $k) {
         installer_assert($seeded[$k] > 0, 'A demo-ON install must create ' . $k);
     }
-    // The store has no brand system: the demo catalogue must not seed brands.
-    installer_assert_same(0, $seeded['brands'], 'A demo-ON install still seeds the retired brands');
+    // The bundled demo catalogue deliberately uses no brand records; brands
+    // remain an owner-managed dictionary table.
+    installer_assert_same(0, $seeded['brands'], 'A demo-ON install must not seed the retired demo brands');
+    installer_assert_same(0, $seeded['product_images'], 'A demo-ON install must not create legacy product gallery rows');
+    installer_assert_same(0, $seeded['product_colour_selections'], 'A demo-ON install must not assign product colours');
     installer_assert_same(2, $seeded['slider'], 'Exactly the two starter slides are installed');
     installer_assert_same(3, $seeded['cards'], 'Exactly the three starter feature cards are installed');
     installer_assert_same('installed', (string)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'demo_data_state'", [], ''), 'The completed catalogue must be recorded');
@@ -241,6 +259,8 @@ try {
     installer_simulate_runtime($pdo);
     $after = [
         'products'   => installer_count('products'),
+        'product_images' => installer_count('product_images'),
+        'product_colour_selections' => installer_count('product_colour_selections'),
         'categories' => installer_count('categories'),
         'brands'     => installer_count('brands'),
         'coupons'    => installer_count('coupons'),
@@ -249,6 +269,8 @@ try {
         'couriers'   => installer_count('couriers'),
     ];
     installer_assert_same($seeded['products'], $after['products'], 'A repeated run must not duplicate products');
+    installer_assert_same($seeded['product_images'], $after['product_images'], 'A repeated run must not create legacy product gallery rows');
+    installer_assert_same($seeded['product_colour_selections'], $after['product_colour_selections'], 'A repeated run must not assign product colours');
     installer_assert_same($seeded['categories'], $after['categories'], 'A repeated run must not duplicate categories');
     installer_assert_same($seeded['brands'], $after['brands'], 'A repeated run must not create brands');
     installer_assert_same($seeded['coupons'], $after['coupons'], 'A repeated run must not duplicate coupons');

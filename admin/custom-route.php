@@ -25,33 +25,30 @@ if ($isPending && !$isActive) {
 }
 
 // This dispatcher does not render admin pages itself: every validated target
-// enforces sh_require_admin/sh_require_perm. Pending-route verification checks
-// sh_admin() and requires the superadmin role before recording the route.
-// The route secret alone never authorizes the panel. This context merely allows
-// the dispatcher to include a fixed, validated PHP route; every target still
-// executes its existing authentication and role guards.
+// enforces sh_require_admin/sh_require_perm. A pending route only shows a
+// verification screen after a same-session ticket, an admin session and the
+// superadmin role have been checked; activation needs an explicit CSRF POST.
+// The route secret alone never authorizes or changes anything. This context
+// merely allows the dispatcher to include a fixed, validated PHP route.
 define('SH_ADMIN_ROUTE_CONTEXT', true);
 
 if ($isPending && !$isActive) {
-    unset($_SESSION[SH_ADMIN_ACCESS_VERIFY_SESSION_KEY]);
+    // Visiting the staged URL NEVER activates or verifies anything. The ticket
+    // stays in the session so the explicit POST below can consume it.
     $admin = sh_admin();
     if ($admin === null) {
-        sh_flash('info', 'Your admin session is no longer active. Sign in through the current admin route and verify again.');
+        sh_flash('info', 'Your admin session is no longer active. Sign in through the current admin route and open the proposed URL again.');
         sh_redirect('admin/login.php');
     }
     if (!sh_admin_is_superadmin()) { sh_admin_access_not_found(); }
-    if (!sh_admin_access_record_verification($requestedPath, (int)$admin['id'])) {
-        sh_log_line('security', 'Pending admin access route verification failed.');
-        sh_render_error_page(503, 'Route verification failed', 'The new admin route could not be verified. Your existing admin route remains active. Please return to Admin Access and try again.');
-    }
-    sh_admin_access_mark_verified_audit($requestedPath);
-    sh_flash('success', 'The proposed admin route is reachable from this authenticated browser. The old route is still active until you explicitly apply the change.');
 
-    if ($state['enabled'] && $state['active_path'] !== '') {
-        header('Location: ' . sh_admin_access_route_url($state['active_path'], 'security.php'));
-        exit;
-    }
-    sh_redirect('admin/security.php');
+    // Only the dispatcher can define this constant. admin/security.php renders
+    // a focused verification screen here and handles the CSRF-protected
+    // "Verify and activate new Admin URL" POST. Every included target still
+    // runs its own sh_require_admin()/sh_require_perm() guards.
+    define('SH_ADMIN_ACCESS_VERIFY_SCREEN', true);
+    require SH_ROOT . '/admin/security.php';
+    exit;
 }
 
 $route = $_GET['__admin_route'] ?? 'dashboard.php';

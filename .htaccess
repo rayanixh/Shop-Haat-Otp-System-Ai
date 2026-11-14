@@ -61,13 +61,14 @@ DirectoryIndex index.php index.html
   # though older deployments may have shipped an alias with that name.
   RewriteRule ^admin\.php$ - [F,L,NC]
 
-  # Custom Admin Access uses one high-entropy, normalized path segment. The
+  # Custom Admin Access uses one admin-chosen, normalized path segment. The
   # dispatcher verifies the configured active/pending path and the session;
-  # unknown long paths receive a generic 404. Existing files/directories are
-  # excluded so this cannot replace a real storefront route.
+  # unknown paths receive a generic 404. Existing files/directories and exact
+  # reserved route names are excluded so this cannot replace a real route.
+  # [NC] accepts uppercase input; the dispatcher compares the lowercase form.
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^[a-z0-9_-]{32,64}/?$ admin/custom-route.php [L,QSA,NC]
+  RewriteRule ^(?!(?:admin|adminphp|admin-login|admin-login-php|administrator|wp-admin|cpanel|webmail|login|logout|api|assets|uploads|install|support|cart|checkout|account|orders|products|product|category|categories|robots|sitemap|health|status|security|cron|config|includes|lib|logs|tests|tools|docs|auth|installer|index|track|help|page|payment|password|otp|register|login|logout)(?:/|$))[A-Za-z0-9_-]{3,80}/?$ admin/custom-route.php [L,QSA,NC]
 </IfModule>
 
 # --- Never serve files that can leak data or code ---------------------------

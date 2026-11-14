@@ -71,7 +71,7 @@ require dirname(__DIR__) . '/_layout.php';
           <label class="sh-field__label" for="aic-name">Product name <span class="sh-field__req">*</span></label>
           <input class="sh-input" id="aic-name" name="name" maxlength="190" required
                  placeholder="e.g. Stainless Steel Electric Kettle 1.8L" autocomplete="off">
-          <span class="sh-field__hint">The only required input. Everything else is generated from it.</span>
+
         </div>
         <div class="sh-field">
           <label class="sh-field__label" for="aic-notes">Anything the AI must know (optional)</label>
@@ -138,13 +138,13 @@ require dirname(__DIR__) . '/_layout.php';
           <div class="sh-grid3">
             <div class="sh-field"><label class="sh-field__label" for="aic-r-price">Selling price <span class="sh-field__req">*</span></label>
               <input class="sh-input" id="aic-r-price" data-f="price" inputmode="decimal" required>
-              <span class="sh-field__hint">AI never invents a price — enter the real one.</span></div>
+              </div>
             <div class="sh-field"><label class="sh-field__label" for="aic-r-compare">Compare-at price</label>
               <input class="sh-input" id="aic-r-compare" data-f="compare_price" inputmode="decimal">
               <span class="sh-field__hint">Optional. 0 or empty means no discount.</span></div>
             <div class="sh-field"><label class="sh-field__label" for="aic-r-stock">Stock quantity <span class="sh-field__req">*</span></label>
               <input class="sh-input" id="aic-r-stock" data-f="stock" type="number" min="0" step="1" value="0">
-              <span class="sh-field__hint">AI never invents stock — enter the real count.</span></div>
+              </div>
           </div>
 
           <div class="sh-field"><label class="sh-field__label" for="aic-r-short">Short description</label>
@@ -156,7 +156,7 @@ require dirname(__DIR__) . '/_layout.php';
                       placeholder="One per line: Label: Value"></textarea></div>
           <div class="sh-field"><label class="sh-field__label" for="aic-r-tags">Product tags</label>
             <input class="sh-input" id="aic-r-tags" data-f="tags" placeholder="comma, separated, tags">
-            <span class="sh-field__hint">Stored in the existing product_tags table.</span></div>
+            </div>
 
           <div class="sh-formsec" style="margin-top:4px">
             <h3 class="sh-formsec__title"><?= sh_icon('search', 15) ?> Search engine fields</h3>

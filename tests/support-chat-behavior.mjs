@@ -6,8 +6,9 @@
  * checks below) with a scripted fetch() standing in for api/support.php,
  * and asserts the customer-visible rules:
  *
- *   - opening the panel reveals it once (a single start call) in the page
- *     flow — absolutely positioned at the scroll offset, never a scroll box;
+ *   - opening the panel reveals it once (a single start call) as a
+ *     viewport-fixed, bottom-anchored popup; the message log alone scrolls
+ *     internally and the page is never scroll-pinned or scroll-locked;
  *   - every request carries the CSRF token and an idempotent client_msg_id,
  *     and a failed send offers Retry reusing that same id;
  *   - message bodies render as TEXT (an XSS payload stays inert) and only
@@ -62,20 +63,65 @@ function check(name, condition, detail) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* Fixture fidelity: every hook the script needs must exist in the shipped
- * markup, and the panel must stay in page flow (no inner scroll box). */
+ * markup, and the panel must be viewport-fixed and bottom-anchored. */
 const widgetPhp = readFileSync(join(ROOT, 'includes/support-widget.php'), 'utf8');
 const appCss = readFileSync(join(ROOT, 'assets/css/app.css'), 'utf8');
 const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8');
 const supportApi = readFileSync(join(ROOT, 'api/support.php'), 'utf8');
 for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-schat-suggest', 'sh-schat-form',
-	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-sub', 'sh-schat-badge',
+	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-badge',
 	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close']) {
 	check('shipped widget markup has #' + id, widgetPhp.includes('id="' + id + '"'));
 }
-check('chat panel is absolutely positioned in page flow (not fixed/scrollboxed)',
-	/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
-const chatCss = (appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || []).join('\n');
-check('no inner scroll region exists in the chat widget styles', !/overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(chatCss));
+check('chat panel is viewport-fixed, bottom-anchored and safe-area aware',
+	/\.sh-schat-sheet\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*calc\(var\(--sh-schat-bottom\) \+ env\(safe-area-inset-bottom/s.test(appCss)
+	&& !/\.sh-schat-sheet\s*\{[^}]*position:\s*absolute/.test(appCss));
+const chatRules = appCss.match(/\.sh-schat-[^{]+\{[^}]*\}/g) || [];
+const scrollingRules = chatRules.filter((r) => /overflow(-x|-y)?\s*:\s*(auto|scroll)/.test(r));
+const messageScrollRule = scrollingRules.find((r) => /^\.sh-schat-messages/.test(r)) || '';
+const composerScrollRule = scrollingRules.find((r) => /^\.sh-schat-input/.test(r)) || '';
+check('only the message log and fixed composer textarea own internal scroll regions',
+	scrollingRules.length === 2 && /overscroll-behavior:\s*contain/.test(messageScrollRule)
+	&& /overflow-y:\s*auto/.test(composerScrollRule) && /resize:\s*none/.test(composerScrollRule));
+const chatJs = readFileSync(join(ROOT, 'assets/js/support-chat.js'), 'utf8');
+check('widget JS never pins the panel to document scroll and re-measures the viewport',
+	!chatJs.includes('window.scrollY') && !chatJs.includes('form.scrollIntoView')
+	&& chatJs.includes('syncViewport()') && chatJs.includes('visualViewport'));
+/* Subtle composer sizing: smaller type/padding, a comfortable touch target,
+ * fixed dimensions and one horizontal row on mobile. The fixed popup and the
+ * two intentional internal scroll regions are asserted above. */
+const composerRules = appCss.match(/\.sh-schat-(?:form|input|send|handoff)\s*\{[^}]*\}/g) || [];
+const inputRule = composerRules.find((r) => r.startsWith('.sh-schat-input')) || '';
+const sendRule = composerRules.find((r) => r.startsWith('.sh-schat-send')) || '';
+const formRule = composerRules.find((r) => r.startsWith('.sh-schat-form')) || '';
+const handoffRule = composerRules.find((r) => r.startsWith('.sh-schat-handoff')) || '';
+const inputFont = Number((inputRule.match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+const sendFont = Number((sendRule.match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+const bubbleFont = Number(((appCss.match(/\.sh-schat-bubble\s*\{[^}]*\}/) || [''])[0].match(/font-size:\s*([\d.]+)px/) || [])[1] || 0);
+check('input type is subtly smaller than a message bubble but still readable',
+	inputFont > 0 && bubbleFont > 0 && inputFont < bubbleFont && inputFont >= 13,
+	`input ${inputFont}px / bubble ${bubbleFont}px`);
+check('Send button text and icon are subtly reduced, not removed',
+	sendFont > 0 && sendFont < 13.8 && /\.sh-schat-send svg\s*\{[^}]*width:\s*14px/.test(appCss)
+	&& widgetPhp.includes("sh_icon('send', 14)"));
+check('input padding is reduced without losing a comfortable touch target',
+	/padding:\s*8px 10px/.test(inputRule) && /min-height:\s*40px/.test(inputRule)
+	&& /min-height:\s*40px/.test(sendRule) && /padding:\s*8px 12px/.test(sendRule));
+check('Talk to a human stays visible and balanced with the smaller composer',
+	/font-size:\s*12\.5px/.test(handoffRule) && /min-height:\s*32px/.test(handoffRule)
+	&& widgetPhp.includes('Talk to a human') && widgetPhp.includes("sh_icon('user', 14)"));
+check('input and Send remain horizontally aligned on mobile',
+	/flex-wrap:\s*nowrap/.test(formRule) && /@media \(max-width: 420px\)[\s\S]{0,400}flex-wrap:\s*nowrap/.test(appCss)
+	&& /justify-content:\s*center/.test(sendRule));
+check('Bangla/Banglish/English placeholder and orange brand colour survive',
+	widgetPhp.includes('Write in বাংলা, Banglish or English') && /\.sh-schat-input:focus\s*\{[^}]*var\(--sh-brand\)/.test(appCss));
+
+check('the Customer Support popup has no subtitle or explanatory replacement',
+	!widgetPhp.includes('sh-schat-sub') && !appCss.includes('.sh-schat-sub')
+	&& !chatJs.includes('defaultSub') && !/Replies use live store data|Our support team will reply here/.test(widgetPhp + chatJs));
+check('the title-only header is centered with no leftover subtitle gap',
+	/\.sh-schat-head\s*\{[^}]*align-items:\s*center[^}]*margin-bottom:\s*8px/.test(appCss)
+	&& /\.sh-schat-headmain h2\s*\{[^}]*margin:\s*0;/.test(appCss));
 check('legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service', supportApi.includes("$action === 'send'") && supportApi.includes("$input['client_msg_id']") && supportApi.includes('sh_support_customer_send(') && supportApi.includes('sh_support_customer_handoff(') && supportApi.includes("$input['after_id']"));
 check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 
@@ -83,10 +129,9 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-controls="sh-schat-sheet" aria-label="Open customer support chat">
   <span class="sh-schat-fab-label">Support</span><span class="sh-schat-badge" id="sh-schat-badge" hidden>0</span>
 </button>
-<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
+<section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
   <header class="sh-schat-head"><div class="sh-schat-headmain">
-    <h2 id="sh-schat-title">Customer Support</h2>
-    <p class="sh-schat-sub" id="sh-schat-sub">Replies use live store data.</p></div>
+    <h2 id="sh-schat-title">Customer Support</h2></div>
     <div class="sh-schat-headactions">
       <button type="button" class="sh-schat-iconbtn" id="sh-schat-new" aria-label="Start a new conversation">+</button>
       <button type="button" class="sh-schat-iconbtn" id="sh-schat-close" aria-label="Close chat">×</button>
@@ -95,7 +140,7 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
   <div class="sh-schat-suggest" id="sh-schat-suggest" aria-label="Quick questions"></div>
   <form class="sh-schat-form" id="sh-schat-form">
     <label class="sh-sr-only" for="sh-schat-input">Type your message</label>
-    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="2000"></textarea>
+    <textarea class="sh-schat-input" id="sh-schat-input" rows="2" maxlength="2000" data-sh-no-autogrow></textarea>
     <button type="submit" class="sh-btn sh-btn-primary sh-schat-send" id="sh-schat-send">Send</button>
   </form>
   <p class="sh-schat-status" id="sh-schat-status" role="status"></p>
@@ -164,11 +209,20 @@ const reqs = (a) => requests.filter((r) => r.action === a);
 
 /* 1. Open → exactly one start, panel in flow, welcome + suggestions ------- */
 check('sheet starts hidden', $('#sh-schat-sheet').hidden === true);
+const formEl = $('#sh-schat-form');
+let pageScrollIntoViewCalls = 0;
+formEl.scrollIntoView = () => { pageScrollIntoViewCalls += 1; };
 $('#sh-schat-fab').click();
 await sleep(30);
 const sheet = $('#sh-schat-sheet');
 check('opening reveals the panel', sheet.hidden === false);
-check('panel is pinned to the current scroll offset (page flow)', sheet.style.top === '10px', sheet.style.top);
+check('opening never writes an inline document-scroll top', sheet.style.top === '', sheet.style.top);
+check('viewport metrics are applied to the fixed panel', sheet.style.getPropertyValue('--sh-schat-bottom') !== '');
+check('chat replies never scroll the website behind the fixed panel', pageScrollIntoViewCalls === 0, String(pageScrollIntoViewCalls));
+check('website scrolling stays unlocked and independent',
+	window.document.body.style.overflow === '' && window.document.documentElement.style.overflow === '');
+window.dispatchEvent(new window.Event('scroll'));
+check('a document scroll event never re-pins the panel', sheet.style.top === '' && sheet.style.getPropertyValue('--sh-schat-bottom') !== '', sheet.style.top);
 check('fab reports expanded state', $('#sh-schat-fab').getAttribute('aria-expanded') === 'true');
 check('start called once with the CSRF token', reqs('start').length === 1 && reqs('start')[0].p.get('csrf_token') === 'csrf-test-token');
 check('welcome message renders', $('#sh-schat-messages').textContent.includes('Welcome to ShopHaat!'));
@@ -235,8 +289,9 @@ check('repeated polls never duplicate a message', $$('#sh-schat-messages .sh-sch
 $('#sh-schat-handoff').click();
 await sleep(30);
 check('handoff posts to the API', reqs('handoff').length === 1);
-check('handoff hides the button and updates the subtitle',
-	$('#sh-schat-handoff').hidden === true && $('#sh-schat-sub').textContent.includes('support team will reply'));
+check('handoff hides the button and records human mode without a replacement subtitle',
+	$('#sh-schat-handoff').hidden === true && $('#sh-schat-sheet').getAttribute('data-human') === '1'
+	&& !$('#sh-schat-sheet').querySelector('.sh-schat-sub'));
 check('handoff notice renders as a system line', !!$('.sh-schat-notice'));
 check('handoff uses a UUIDv4 idempotency key', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reqs('handoff')[0].p.get('client_msg_id') || ''));
 const noticeCountAtHandoff = $$('#sh-schat-messages .sh-schat-notice').length;

@@ -78,6 +78,7 @@ require_once SH_ROOT . '/includes/header.php';
 
           <?php foreach ($summary['items'] as $it): ?>
             <div class="sh-cart-item" data-cart-row="<?= (int)$it['product_id'] ?>">
+              <input type="hidden" data-cart-variant value="<?= e($it['colour'] ?? '') ?>">
               <a href="<?= e(sh_url('product.php?slug=' . urlencode($it['slug']))) ?>">
                 <img class="sh-cart-item__img" src="<?= e(sh_product_image($it['image'])) ?>" alt="<?= e($it['name']) ?>" loading="lazy">
               </a>
@@ -85,6 +86,9 @@ require_once SH_ROOT . '/includes/header.php';
                 <a href="<?= e(sh_url('product.php?slug=' . urlencode($it['slug']))) ?>">
                   <p class="sh-cart-item__name"><?= e($it['name']) ?></p>
                 </a>
+                <?php if (($it['colour'] ?? '') !== ''): ?>
+                  <p class="sh-table__meta"><?= e($it['colour']) ?></p>
+                <?php endif; ?>
                 <p class="sh-cart-item__price"><?= e(sh_money($it['unit_price'])) ?>
                   <?php if ($it['compare_price'] > $it['unit_price']): ?>
                     <span style="font-size:12px;color:var(--sh-muted);text-decoration:line-through;font-weight:400">

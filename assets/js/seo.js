@@ -186,18 +186,26 @@
     // Choosing a replacement product image updates the preview immediately.
     // The file is not uploaded yet, so a local object URL is used — it points at
     // the browser's own copy, never at a server path.
+    function setPickedImageFile(file) {
+      if (pickedObjectUrl !== '' && window.URL && window.URL.revokeObjectURL) {
+        window.URL.revokeObjectURL(pickedObjectUrl);
+      }
+      pickedObjectUrl = file && window.URL && window.URL.createObjectURL
+        ? window.URL.createObjectURL(file)
+        : '';
+      render();
+    }
     if (entityFile) {
       entityFile.addEventListener('change', function () {
         var file = entityFile.files && entityFile.files[0];
-        if (pickedObjectUrl !== '' && window.URL && window.URL.revokeObjectURL) {
-          window.URL.revokeObjectURL(pickedObjectUrl);
-        }
-        pickedObjectUrl = file && window.URL && window.URL.createObjectURL
-          ? window.URL.createObjectURL(file)
-          : '';
-        render();
+        setPickedImageFile(file);
       });
     }
+    // The multi-image product editor owns its own file queue. It announces the
+    // file that is currently primary so this shared SEO preview stays in sync.
+    document.addEventListener('sh-product-image-picked', function (ev) {
+      setPickedImageFile(ev.detail && ev.detail.file ? ev.detail.file : null);
+    });
     var focusField = panel.querySelector('[data-seo-field="focus"]');
     if (focusField) { focusField.addEventListener('input', render); }
     if (noindexInput) { noindexInput.addEventListener('change', render); }
@@ -215,6 +223,11 @@
     }
 
     render();
+    // Ask the multi-image editor for its current primary. Deferred scripts run
+    // in order, but this handshake works in either order and uses no timer.
+    if (typeof window.CustomEvent === 'function') {
+      document.dispatchEvent(new CustomEvent('sh-product-image-picked-request'));
+    }
   }
 
   function init() {

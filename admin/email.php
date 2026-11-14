@@ -1009,7 +1009,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-panel__head" style="background:var(--sh-bg-2)">
           <h3 class="sh-panel__title"><?= sh_icon('mail', 16) ?> Custom SMTP Server Configuration</h3>
           <div class="sh-panel__actions">
-            <a href="<?= e(sh_url('admin/guides/smtp')) ?>" class="sh-btn sh-btn--sm" style="background:#0f766e;color:#fff;border-color:#0f766e">
+            <a href="<?= e(sh_url('admin/guides/smtp.php')) ?>" class="sh-btn sh-btn--sm" style="background:#0f766e;color:#fff;border-color:#0f766e">
               <?= sh_icon('book-open', 14) ?> Open SMTP Setup Guide &rarr;
             </a>
           </div>
@@ -1216,7 +1216,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-panel__head" style="background:var(--sh-bg-2)">
           <h3 class="sh-panel__title"><?= sh_icon('mail', 16) ?> Brevo HTTPS API Transport</h3>
           <div class="sh-panel__actions">
-            <a href="<?= e(sh_url('admin/guides/smtp')) ?>#brevo-api" class="sh-btn sh-btn--sm" style="background:#0f766e;color:#fff;border-color:#0f766e">
+            <a href="<?= e(sh_url('admin/guides/smtp.php')) ?>#brevo-api" class="sh-btn sh-btn--sm" style="background:#0f766e;color:#fff;border-color:#0f766e">
               <?= sh_icon('book-open', 14) ?> Brevo setup guide &rarr;
             </a>
           </div>
@@ -1419,7 +1419,7 @@ require __DIR__ . '/_layout.php';
         <div class="sh-panel__head" style="background:var(--sh-bg-2)">
           <h3 class="sh-panel__title"><?= sh_icon('settings', 16) ?> Firebase Integration Configuration</h3>
           <div class="sh-panel__actions">
-            <a href="<?= e(sh_url('admin/guides/firebase')) ?>" class="sh-btn sh-btn--sm" style="background:#2563eb;color:#fff;border-color:#2563eb">
+            <a href="<?= e(sh_url('admin/guides/firebase.php')) ?>" class="sh-btn sh-btn--sm" style="background:#2563eb;color:#fff;border-color:#2563eb">
               <?= sh_icon('book-open', 14) ?> Open Firebase Setup Guide &rarr;
             </a>
           </div>

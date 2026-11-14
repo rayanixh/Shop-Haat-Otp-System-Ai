@@ -36,7 +36,7 @@
       you: 'You', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
       conversation: 'Conversation', newChat: 'Start a new conversation',
       handoff: 'Request human support', resolvedForm: 'This conversation is resolved.',
-      waiting: 'Your message is saved for human support.', chars: 'characters', older: 'Load older messages',
+      chars: 'characters', older: 'Load older messages',
       requestError: 'Sorry, something went wrong. Please try again.', tooLong: 'Messages may contain at most 2,000 characters.',
       messagePlaceholder: 'Write a message…', price: 'Price', stock: 'In stock', outOfStock: 'Out of stock',
       open: 'Start a chat',
@@ -49,7 +49,7 @@
       you: 'আপনি', assistant: 'ShopHaat সহকারী', agent: 'সাপোর্ট এজেন্ট', system: 'সাপোর্ট আপডেট',
       conversation: 'কথোপকথন', newChat: 'নতুন কথোপকথন শুরু করুন',
       handoff: 'মানব-সাপোর্ট চান', resolvedForm: 'এই কথোপকথন সমাধান হয়েছে।',
-      waiting: 'আপনার বার্তাটি মানব-সাপোর্টের জন্য সংরক্ষিত হয়েছে।', chars: 'অক্ষর', older: 'আগের বার্তা দেখুন',
+      chars: 'অক্ষর', older: 'আগের বার্তা দেখুন',
       requestError: 'দুঃখিত, একটি সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।', tooLong: 'বার্তায় সর্বোচ্চ ২,০০০ অক্ষর লেখা যাবে।',
       messagePlaceholder: 'বার্তা লিখুন…', price: 'দাম', stock: 'স্টকে আছে', outOfStock: 'স্টকে নেই',
       open: 'চ্যাট শুরু করুন',
@@ -62,7 +62,7 @@
       you: 'Apni', assistant: 'ShopHaat Assistant', agent: 'Support agent', system: 'Support update',
       conversation: 'Conversation', newChat: 'Notun conversation shuru korun',
       handoff: 'Human support chan', resolvedForm: 'Ei conversation resolve hoyeche.',
-      waiting: 'Apnar message human support-er jonno save hoyeche.', chars: 'character', older: 'Purono message load korun',
+      chars: 'character', older: 'Purono message load korun',
       requestError: 'Sorry, ekta problem hoyeche. Please abar try korun.', tooLong: 'Message-e shorboccho 2,000 character thakte parbe.',
       messagePlaceholder: 'Message likhun…', price: 'Price', stock: 'Stock ache', outOfStock: 'Stock nei',
       open: 'Chat shuru korun',
@@ -294,11 +294,16 @@
     messageList.replaceChildren(fragment);
   }
 
+  // Fixed-height composer: long drafts scroll inside the textarea. Only the
+  // character counter updates while typing; no inline dimensions are written.
+  if (chatInput) {
+    chatInput.style.removeProperty('height');
+    chatInput.style.removeProperty('overflow-y');
+  }
+
   function updateCharCount() {
     const n = Array.from(chatInput.value).length;
     charCount.textContent = `${n.toLocaleString(language === 'bn' ? 'bn-BD' : 'en-BD')} / 2,000 ${tr('chars')}`;
-    chatInput.style.height = 'auto';
-    chatInput.style.height = `${Math.max(chatInput.scrollHeight, 70)}px`;
   }
 
   function setLanguage(next) {
@@ -356,7 +361,10 @@
       actionsNode.hidden = handoffButton.hidden;
       chatForm.hidden = !canSend;
       disabledNode.hidden = canSend;
-      disabledNode.textContent = isResolved ? tr('resolvedForm') : !enabled ? tr('disabled') : needsHuman ? tr('waiting') : '';
+      // No saved-message notice is rendered while a human owns the
+      // thread: the composer stays open and the server stores every message
+      // silently. Only the one server-written handoff confirmation is shown.
+      disabledNode.textContent = isResolved ? tr('resolvedForm') : !enabled ? tr('disabled') : '';
       chatInput.placeholder = tr('messagePlaceholder');
       sendButton.disabled = busy;
       if (sendButton.lastChild && sendButton.lastChild.nodeType === Node.TEXT_NODE) {

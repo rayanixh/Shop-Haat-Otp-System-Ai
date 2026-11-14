@@ -129,6 +129,8 @@ if ($retryOrderId > 0) {
                   <img class="sh-mini-item__img" src="<?= e(sh_product_image($retryItem['product_image'] ?? null)) ?>" alt="" loading="lazy">
                   <div class="sh-mini-item__name">
                     <?= e($retryItem['product_name']) ?>
+                    <?php $retryColour = sh_order_item_colour_text($retryItem); ?>
+                    <?php if ($retryColour !== ''): ?><div class="sh-mini-item__qty">Colour: <?= e($retryColour) ?></div><?php endif; ?>
                     <div class="sh-mini-item__qty">Qty <?= (int)$retryItem['quantity'] ?> × <?= e(sh_money($retryItem['unit_price'])) ?></div>
                   </div>
                   <span class="sh-mini-item__price"><?= e(sh_money($retryItem['line_total'])) ?></span>
@@ -398,7 +400,6 @@ require_once SH_ROOT . '/includes/header.php';
               <input type="radio" name="delivery_zone" value="outside" <?= $form['delivery_zone'] === 'outside' ? 'checked' : '' ?>>
               <span>Outside city — <?= e(sh_money(sh_setting('delivery_fee_outside', '120'))) ?> (2–4 working days)</span>
             </label>
-            <p class="sh-field__hint">Changing the zone updates the total after you place the order form submission.</p>
           </div>
           <div class="sh-field" style="margin-bottom:0">
             <label class="sh-field__label" for="ck-note">Order note (optional)</label>
@@ -416,6 +417,7 @@ require_once SH_ROOT . '/includes/header.php';
               <img class="sh-mini-item__img" src="<?= e(sh_product_image($it['image'])) ?>" alt="" loading="lazy">
               <div class="sh-mini-item__name">
                 <?= e($it['name']) ?>
+                <?php if (($it['colour'] ?? '') !== ''): ?><div class="sh-mini-item__qty"><?= e($it['colour']) ?></div><?php endif; ?>
                 <div class="sh-mini-item__qty">Qty <?= (int)$it['quantity'] ?> × <?= e(sh_money($it['unit_price'])) ?></div>
               </div>
               <span class="sh-mini-item__price"><?= e(sh_money($it['line_total'])) ?></span>

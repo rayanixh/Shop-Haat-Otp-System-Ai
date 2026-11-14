@@ -9,7 +9,9 @@ require_once SH_ROOT . '/includes/admin-tools.php';
 // The listing reads the SEO columns (the noindex marker) and links into the
 // editor, which owns the save handler.
 require_once SH_ROOT . '/includes/seo.php';
+require_once SH_ROOT . '/includes/product-schema.php';
 sh_seo_schema_ensure();
+sh_product_schema_ensure();
 
 sh_session_start();
 sh_require_admin();
@@ -47,7 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($delTarget) { sh_audit('product_updated', 'product', $id, (string)$delTarget['name'], ['status' => (int)$delTarget['status']], ['status' => 0, 'reason' => 'deactivated instead of deleted (used in orders)']); }
             sh_flash('info', 'This product appears in existing orders, so it was deactivated instead of deleted.');
         } else {
+            // Collect this product's own photo filenames before the cascade
+            // removes the gallery rows; only then delete files no other row uses.
+            $deleteFiles = [];
+            try {
+                foreach (sh_all('SELECT image FROM product_images WHERE product_id = ?', [$id]) as $img) {
+                    $deleteFiles[] = (string)$img['image'];
+                }
+                $legacy = sh_one('SELECT image FROM products WHERE id = ? LIMIT 1', [$id]);
+                if ($legacy !== null && trim((string)($legacy['image'] ?? '')) !== '') {
+                    $deleteFiles[] = (string)$legacy['image'];
+                }
+            } catch (Throwable $e) {
+                sh_log_exception($e, 'product-delete-images');
+            }
             sh_query('DELETE FROM products WHERE id = ?', [$id]);
+            foreach (array_unique($deleteFiles) as $file) {
+                try { sh_product_delete_unreferenced_image($file); }
+                catch (Throwable $e) { sh_log_exception($e, 'product-delete-file'); }
+            }
             if ($delTarget) { sh_audit('product_deleted', 'product', $id, (string)$delTarget['name'], ['price' => $delTarget['price'], 'stock' => (int)$delTarget['stock']], null); }
             sh_flash('success', 'Product deleted.');
         }
@@ -97,10 +117,21 @@ $whereSql = implode(' AND ', $where);
 $total = (int)sh_val("SELECT COUNT(*) FROM products p WHERE $whereSql", $args, 0);
 $pages = max(1, (int)ceil($total / $per));
 $page = min($page, $pages);
+$hasCatalogType = sh_table_has_column('products', 'catalog_type_id')
+    && (!function_exists('sh_table_exists') || sh_table_exists('product_types'));
+$hasGalleryTable = function_exists('sh_table_exists')
+    ? sh_table_exists('product_images')
+    : sh_table_has_column('product_images', 'id');
+$attributeSelect = $hasCatalogType ? ', pt.name AS catalog_type_name' : ', NULL AS catalog_type_name';
+$attributeJoin   = $hasCatalogType ? ' LEFT JOIN product_types pt ON pt.id = p.catalog_type_id' : '';
+$gallerySelect   = $hasGalleryTable
+    ? ', (SELECT COUNT(*) FROM product_images pi WHERE pi.product_id = p.id) AS gallery_count'
+    : ', 0 AS gallery_count';
 $rows = sh_all(
-    "SELECT p.*, c.name AS category_name
+    "SELECT p.*, c.name AS category_name, b.name AS brand_name" . $attributeSelect . $gallerySelect . "
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
+     LEFT JOIN brands b ON b.id = p.brand_id" . $attributeJoin . "
      WHERE $whereSql ORDER BY p.id DESC LIMIT $per OFFSET " . (($page - 1) * $per),
     $args
 );
@@ -178,6 +209,9 @@ $listQuery = sh_admin_keep_query(['edit', 'new']);
               <div style="min-width:0">
                 <div class="sh-table__name"><?= e($p['name']) ?></div>
                 <div class="sh-table__meta"><?= e($p['sku'] ?: 'No SKU') ?>
+                  <?php if (!empty($p['brand_name'])): ?> · <?= e($p['brand_name']) ?><?php endif; ?>
+                  <?php if (!empty($p['catalog_type_name'])): ?> · <?= e($p['catalog_type_name']) ?><?php endif; ?>
+                  <?php if ((int)($p['gallery_count'] ?? 0) > 0): ?> · <?= (int)$p['gallery_count'] ?> image<?= (int)$p['gallery_count'] === 1 ? '' : 's' ?><?php endif; ?>
                   <?php if ((int)$p['is_featured'] === 1): ?> · Featured<?php endif; ?>
                   <?php if ((int)$p['is_flash_sale'] === 1): ?> · Flash<?php endif; ?>
                 </div>

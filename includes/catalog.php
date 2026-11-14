@@ -182,13 +182,31 @@ function sh_category_by_slug(string $slug): ?array
 
 function sh_product_by_slug(string $slug): ?array
 {
-    return sh_one(
-        'SELECT p.*, c.name AS category_name, c.slug AS category_slug
-         FROM products p
-         LEFT JOIN categories c ON c.id = p.category_id
-         WHERE p.slug = ? AND p.status = 1 LIMIT 1',
-        [$slug]
-    );
+    try {
+        // Active brand/catalog-type labels join the row when the additive
+        // upgrade has run; hidden dictionaries resolve to empty labels.
+        return sh_one(
+            'SELECT p.*, c.name AS category_name, c.slug AS category_slug,
+                    b.name AS brand_name, pt.name AS catalog_type_name
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.category_id
+             LEFT JOIN brands b ON b.id = p.brand_id AND b.status = 1
+             LEFT JOIN product_types pt ON pt.id = p.catalog_type_id AND pt.status = 1
+             WHERE p.slug = ? AND p.status = 1 LIMIT 1',
+            [$slug]
+        );
+    } catch (Throwable $e) {
+        // A database whose additive migration is still pending must keep the
+        // original product URL and detail page working exactly as before.
+        if (function_exists('sh_log_exception')) { sh_log_exception($e, 'product-by-slug-compat'); }
+        return sh_one(
+            'SELECT p.*, c.name AS category_name, c.slug AS category_slug
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.category_id
+             WHERE p.slug = ? AND p.status = 1 LIMIT 1',
+            [$slug]
+        );
+    }
 }
 
 const SH_PRODUCT_SELECT = 'p.id, p.name, p.slug, p.price, p.compare_price, p.image, p.stock,

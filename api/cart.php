@@ -26,12 +26,15 @@ sh_csrf_require();
 $action = sh_post('action');
 $productId = sh_int($_POST['product_id'] ?? 0);
 $quantity = sh_int($_POST['quantity'] ?? 1, 1);
+// Server-side validation happens in sh_cart_add(): a colour string is only
+// accepted if it belongs to this product's structured colour selections.
+$variant = mb_substr(sh_post('variant'), 0, 190);
 
 try {
     switch ($action) {
         case 'add':
             if ($productId <= 0) { sh_json(['success' => false, 'error' => 'Invalid product.'], 400); }
-            $r = sh_cart_add($productId, $quantity);
+            $r = sh_cart_add($productId, $quantity, $variant);
             sh_json($r['ok']
                 ? ['success' => true, 'count' => $r['count'], 'message' => 'Added to your cart.']
                 : ['success' => false, 'error' => $r['error']]);
@@ -39,7 +42,7 @@ try {
 
         case 'update':
             if ($productId <= 0) { sh_json(['success' => false, 'error' => 'Invalid product.'], 400); }
-            $r = sh_cart_update($productId, $quantity);
+            $r = sh_cart_update($productId, $quantity, $variant);
             sh_json($r['ok']
                 ? ['success' => true, 'count' => $r['count'], 'message' => 'Cart updated.']
                 : ['success' => false, 'error' => $r['error']]);
@@ -47,7 +50,7 @@ try {
 
         case 'remove':
             if ($productId <= 0) { sh_json(['success' => false, 'error' => 'Invalid product.'], 400); }
-            $r = sh_cart_remove($productId);
+            $r = sh_cart_remove($productId, $variant);
             sh_json(['success' => true, 'count' => $r['count'], 'message' => 'Item removed.']);
             break;
 
