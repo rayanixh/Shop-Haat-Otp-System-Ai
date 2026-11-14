@@ -131,6 +131,17 @@ async function phoneMatrix(browser, label, pathFor = () => '/install/') {
     });
     check(`${label} @${width}px: every control is a comfortable touch target (>= 40px tall)`, tap.length === 0,
       tap.slice(0, 4).map((t) => `${t.tag}.${t.cls}=${t.h}px`).join(' | '));
+    const squeezed = await page.evaluate(() => {
+      const bad = [];
+      for (const el of document.querySelectorAll('.opt__name, .req__name, .step__label, .badge, .chip')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.width < 48) {
+          bad.push(`${(el.className || '').toString().split(' ')[0]}="${el.textContent.trim().slice(0, 14)}" ${Math.round(rect.width)}px`);
+        }
+      }
+      return bad.slice(0, 5);
+    });
+    check(`${label} @${width}px: no label is squeezed into a sliver`, squeezed.length === 0, squeezed.join(' | '));
     await snap(page, `installer-${label}-${width}px`);
     await page.close();
   }
@@ -407,10 +418,16 @@ async function phaseRepair(browser) {
     check('the unlock panel is still offered to the owner', await page.locator('#unlock-form').count() === 1);
     const steps = await page.$$eval('.steps .step', (els) => els.map((el) => el.className));
     check('store configuration is shown as not part of a repair', /step--skipped/.test(steps[2]), steps[2]);
-    const prefilled = await page.inputValue('#db_host').catch(() => '');
-    check('the saved connection host is pre-filled from config/database.php', prefilled === DB.host, `${prefilled} vs ${DB.host}`);
-    const pwValue = await page.inputValue('#db_pass').catch(() => 'n/a');
-    check('no saved password is written into the repair form', pwValue === '' || pwValue === 'n/a', pwValue === '' ? 'empty' : pwValue);
+    // A repair works over the saved connection: the page must not offer a way
+    // to enter different database credentials, and it must not echo the stored
+    // password back into the markup.
+    const credentialFields = await page.$$eval('#repair-form input', (els) => els
+      .map((el) => el.getAttribute('name') || '')
+      .filter((name) => ['db_host', 'db_name', 'db_user', 'db_pass'].includes(name)));
+    check('the repair form accepts no database credentials', credentialFields.length === 0, credentialFields.join(', '));
+    const repairHtml = await page.content();
+    check('the saved database password is never written into the page',
+      !/not-a-real-password|root_test_password/.test(repairHtml));
     const primary = page.locator('button[form="repair-form"]');
     check('the primary action repairs the database instead of installing', (await primary.textContent() || '').includes('Repair database tables'));
     check('the repair action is enabled', await primary.isEnabled());

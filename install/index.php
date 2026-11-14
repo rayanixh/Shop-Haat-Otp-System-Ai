@@ -102,22 +102,22 @@ $requirements = [
     ['name' => 'PHP version', 'need' => '8.1 or newer',
      'ok' => version_compare(PHP_VERSION, '8.1.0', '>='), 'value' => PHP_VERSION,
      'fix' => 'Switch this hosting account to PHP 8.1 or newer (cPanel → Select PHP Version), then reload this page.'],
-    ['name' => 'PDO extension', 'need' => 'Required',
+    ['name' => 'PDO extension', 'need' => '',
      'ok' => extension_loaded('pdo'), 'value' => extension_loaded('pdo') ? 'Enabled' : 'Missing',
      'fix' => 'Enable the PDO extension for the selected PHP version in cPanel → Select PHP Version → Extensions.'],
-    ['name' => 'pdo_mysql driver', 'need' => 'Required',
+    ['name' => 'pdo_mysql driver', 'need' => '',
      'ok' => extension_loaded('pdo_mysql'), 'value' => extension_loaded('pdo_mysql') ? 'Enabled' : 'Missing',
      'fix' => 'Enable pdo_mysql. The store cannot reach MySQL or MariaDB without this driver.'],
-    ['name' => 'JSON extension', 'need' => 'Required',
+    ['name' => 'JSON extension', 'need' => '',
      'ok' => extension_loaded('json'), 'value' => extension_loaded('json') ? 'Enabled' : 'Missing',
      'fix' => 'Enable the JSON extension for this PHP version.'],
-    ['name' => '/config directory', 'need' => 'Writable',
+    ['name' => '/config directory', 'need' => 'writable',
      'ok' => is_writable(SH_CONFIG_DIR), 'value' => is_writable(SH_CONFIG_DIR) ? 'Writable' : 'Not writable',
      'fix' => 'Set the config folder permission to 0755 in cPanel → File Manager → Permissions.'],
-    ['name' => '/uploads directory', 'need' => 'Writable',
+    ['name' => '/uploads directory', 'need' => 'writable',
      'ok' => is_writable(SH_UPLOAD_DIR), 'value' => is_writable(SH_UPLOAD_DIR) ? 'Writable' : 'Not writable',
      'fix' => 'Set the uploads folder permission to 0755 in cPanel → File Manager → Permissions.'],
-    ['name' => '/logs directory', 'need' => 'Writable',
+    ['name' => '/logs directory', 'need' => 'writable',
      'ok' => is_writable(SH_LOG_DIR), 'value' => is_writable(SH_LOG_DIR) ? 'Writable' : 'Not writable',
      'fix' => 'Set the logs folder permission to 0755 in cPanel → File Manager → Permissions.'],
 ];
@@ -144,7 +144,7 @@ foreach (sh_extension_requirements() as $ext) {
 $optTotal = count($optionalRequirements);
 $optAvailable = 0;
 foreach ($optionalRequirements as $o) { if ($o['ok']) { $optAvailable++; } }
-$checkedAt = date('H:i T');
+$checkedAt = date('H:i');
 
 // ---------------------------------------------------------------------------
 // Handle submission
@@ -561,7 +561,7 @@ button, input { font: inherit; color: inherit; }
   background: var(--brand); color: #fff; font-size: 12.5px; font-weight: 800; letter-spacing: .3px;
 }
 .chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px;
+  display: inline-flex; flex: none; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px;
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
   font-size: 11.5px; font-weight: 650; white-space: nowrap;
 }
@@ -605,12 +605,12 @@ button, input { font: inherit; color: inherit; }
 
 .req-list { margin-top: 14px; list-style: none; border-top: 1px solid var(--line-2); }
 .req {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
   gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-2); font-size: 13.5px;
 }
 .req:last-child { border-bottom: 0; }
 .req__name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
-.req__need { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.req__need { margin-left: 8px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
 .req__value { font-size: 12.5px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .badge {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px;
@@ -620,10 +620,10 @@ button, input { font: inherit; color: inherit; }
 .badge--bad { background: var(--bad-soft); border-color: var(--bad-line); color: #8c1d13; }
 
 /* Optional extensions: two columns on desktop, one on mobile. */
-.opt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.opt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; list-style: none; }
 .opt { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
-.opt__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.opt__name { min-width: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.opt__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.opt__name { flex: 1 1 110px; min-width: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
 .opt__purpose { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
 .opt__fallback { margin-top: 6px; font-size: 12px; color: var(--warn); overflow-wrap: anywhere; }
 .chip--ok { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
@@ -746,8 +746,7 @@ button, input { font: inherit; color: inherit; }
   .req { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; column-gap: 10px; }
   .req__name { grid-column: 1; grid-row: 1; }
   .req__badge { grid-column: 2; grid-row: 1; justify-self: end; }
-  .req__need { grid-column: 1; grid-row: 2; white-space: normal; }
-  .req__value { grid-column: 2; grid-row: 2; }
+  .req__value { grid-column: 1 / -1; grid-row: 2; text-align: left; }
   .actionbar { padding: 14px; }
   .actionbar__buttons { flex: 1 1 100%; flex-direction: column; align-items: stretch; }
   .actionbar__buttons .btn { width: 100%; }
@@ -854,8 +853,8 @@ button, input { font: inherit; color: inherit; }
     <div class="panel__head">
       <div>
         <h2 class="panel__title" id="requirements-title">Server requirements</h2>
-        <p class="panel__sub">Checked on this server at <?= e($checkedAt) ?>. Every required item must pass before
-        the installer will write anything.</p>
+        <p class="panel__sub">Checked on this server at <?= e($checkedAt) ?> (server time). Every required item
+        must pass before the installer will write anything.</p>
       </div>
       <span class="verdict verdict--<?= $reqOk ? 'ok' : 'bad' ?>">
         <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="#i-<?= $reqOk ? 'check' : 'alert' ?>"/></svg>
@@ -866,8 +865,7 @@ button, input { font: inherit; color: inherit; }
     <ul class="req-list">
       <?php foreach ($requirements as $r): ?>
         <li class="req">
-          <span class="req__name"><?= e($r['name']) ?></span>
-          <span class="req__need"><?= e($r['need']) ?></span>
+          <span class="req__name"><?= e($r['name']) ?><?php if ($r['need'] !== ''): ?><span class="req__need"><?= e($r['need']) ?></span><?php endif; ?></span>
           <span class="req__value"><?= e($r['value']) ?></span>
           <span class="badge req__badge badge--<?= $r['ok'] ? 'ok' : 'bad' ?>">
             <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="#i-<?= $r['ok'] ? 'check' : 'x' ?>"/></svg>
@@ -913,8 +911,8 @@ button, input { font: inherit; color: inherit; }
     <div class="panel__head">
       <div>
         <h2 class="panel__title" id="optional-title">Optional extensions</h2>
-        <p class="panel__sub">Recommended, not required. ShopHaat ships a fallback for each one, so a missing
-        extension never blocks the installation — the row shows what is used instead.</p>
+        <p class="panel__sub">Recommended, not required — ShopHaat ships a fallback for each one, so nothing
+        here can block the installation.</p>
       </div>
       <span class="chip">Optional</span>
     </div>
