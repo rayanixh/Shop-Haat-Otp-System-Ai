@@ -25,6 +25,10 @@ $_SERVER['REQUEST_SCHEME'] = 'http';
 
 require_once dirname(__DIR__, 2) . '/config/config.php';
 require_once SH_ROOT . '/install/schema.php';
+// sh_install_create_store() calls sh_install_demo_data() when demo data is
+// requested; the installer page always loads the demo module next to the
+// schema module, so seeding has to do the same.
+require_once SH_ROOT . '/install/demo-data.php';
 
 $say = static function (string $status, string $msg): void { printf("  %-6s %s\n", $status, $msg); };
 
