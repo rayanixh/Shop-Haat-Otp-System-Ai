@@ -319,6 +319,7 @@ jobs:
           SH_TEST_MYSQL_USER: shophaat_test
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
+          SH_TEST_REQUIRE_ENGINE: '1'
         run: |
           set -o pipefail
           rc=0
@@ -328,9 +329,19 @@ jobs:
               | tr "\n" "|" | cut -c1-1400 )
             echo "::error::engine: ${msg//\%/\%25}"
           fi
-          grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
-            | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
           exit "$rc"
+      # Runs last on purpose: the annotation list keeps the most recent entries,
+      # so a summary printed here survives while one printed earlier is evicted.
+      - name: Publish the engine result
+        if: always()
+        run: |
+          if [ -f /tmp/engine.log ]; then
+            msg=$( { grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|BLOCKED' /tmp/engine.log | head -n 4; } \
+              | tr '\n' '|' | cut -c1-900 )
+          else
+            msg="no engine log was produced"
+          fi
+          echo "::notice::engine: ${msg//\%/\%25}"
       # The rehearsal this project has never been able to run: the application
       # creates a real backup of the disposable store, the tool imports it into a
       # NEW scratch database, verifies tables/indexes/relationships/settings and a
@@ -413,6 +424,7 @@ jobs:
           SH_TEST_MYSQL_USER: shophaat_test
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
+          SH_TEST_REQUIRE_ENGINE: '1'
         run: |
           set -o pipefail
           rc=0
@@ -422,9 +434,19 @@ jobs:
               | tr "\n" "|" | cut -c1-1400 )
             echo "::error::engine: ${msg//\%/\%25}"
           fi
-          grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
-            | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
           exit "$rc"
+      # Runs last on purpose: the annotation list keeps the most recent entries,
+      # so a summary printed here survives while one printed earlier is evicted.
+      - name: Publish the engine result
+        if: always()
+        run: |
+          if [ -f /tmp/engine.log ]; then
+            msg=$( { grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|BLOCKED' /tmp/engine.log | head -n 4; } \
+              | tr '\n' '|' | cut -c1-900 )
+          else
+            msg="no engine log was produced"
+          fi
+          echo "::notice::engine: ${msg//\%/\%25}"
 
   # ========================================================================
   # The only environment in this project that has a real browser, a real web

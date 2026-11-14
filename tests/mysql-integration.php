@@ -182,6 +182,13 @@ if ($pdo === null) {
     if ($preflightError !== '') {
         mi_blocked('connect to MySQL/MariaDB', $preflightError);
     }
+    // CI sets SH_TEST_REQUIRE_ENGINE=1: a runner that was given a MySQL service
+    // and still reports BLOCKED has a harness defect, and a green tick must not
+    // hide it. This is what let a broken connection look like a passing suite.
+    if (getenv('SH_TEST_REQUIRE_ENGINE') === '1') {
+        fwrite(STDERR, "BLOCKED, BUT THIS RUN REQUIRES A REAL ENGINE: {$preflightError}\n");
+        exit(4);
+    }
     mi_section('Scenarios');
     foreach ([
         '1. fresh installation from install/schema.php',
