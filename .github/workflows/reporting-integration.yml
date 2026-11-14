@@ -337,7 +337,17 @@ jobs:
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ROOT_USER: root
           SH_TEST_MYSQL_ROOT_PASS: root_test_password
-        run: php tests/restore-rehearsal.php
+        # The step's log is only visible in the Actions UI; mirroring the tail as
+        # ::error:: annotations means the reason is also attached to the run for
+        # anyone (or anything) reading it through the API.
+        run: |
+          set -o pipefail
+          php tests/restore-rehearsal.php 2>&1 | tee /tmp/rehearsal.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            while IFS= read -r line; do echo "::error::rehearsal: $line"; done < <(tail -n 30 /tmp/rehearsal.log)
+          fi
+          exit "$rc"
 
   # ========================================================================
   # MariaDB is a different engine, not a different version of MySQL:
@@ -448,7 +458,16 @@ jobs:
           SH_BROWSER_BASE_URL: http://127.0.0.1:8080
           SH_BROWSER_ADMIN_PASSWORD: AdminTest!2026
           SH_BROWSER_CUSTOMER_PASSWORD: Customer!2026
-        run: node tests/browser/smoke.mjs
+        run: |
+          set -o pipefail
+          node tests/browser/smoke.mjs 2>&1 | tee /tmp/browser.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            while IFS= read -r line; do echo "::error::browser: $line"; done < <(grep -E '^  (FAIL|PASS)|^ - |^Browser regression|^Error|^    at ' /tmp/browser.log | tail -n 30)
+            echo "::error::browser: --- php server ---"
+            while IFS= read -r line; do echo "::error::php: $line"; done < <(tail -n 15 /tmp/php-server.log)
+          fi
+          exit "$rc"
       - name: Upload screenshots and the PHP server log
         if: always()
         uses: actions/upload-artifact@v4
