@@ -73,6 +73,15 @@ has not been *proven*, and this report does not present assumptions as facts.
 * **Security-critical issues found in this phase:** all fixed and covered by
   executed tests (F-101 Critical, F-102 High, F-103 Medium, F-104 Low,
   F-106 Medium).
+* **Installation wizard UI (2026-11-14):** `install/index.php` was redesigned as a
+  presentation-only change — same detection functions, same validation, same repair/unlock paths,
+  same CSRF protection. CI job "Installer UI" (run `43640083658`) drives the wizard in Chromium
+  against MySQL 8.0: **162 checks, 0 failures** across the ready screen (101), a blocked screen
+  built from genuinely unwritable folders (44) and the repair screen on an installed store (17),
+  at 1280 px and at 320/360/375/390/412/430 px, and a complete installation through the form.
+  Two pre-existing presentation defects were fixed: the success notice was computed and never
+  rendered, and a failed install printed the raw exception text. See
+  `reports/18-installer-ui-redesign.md`; screenshots in `docs/installer-ui/`.
 * **Known unresolved Critical issues:** none in the code paths audits covered.
 * **Known unresolved High issues:** none confirmed; two audited areas
   (payments, IDOR) remain *unverified* — see `SHOP_HAAT_REMAINING_RISKS.md`

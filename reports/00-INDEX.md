@@ -1,10 +1,18 @@
-# Phase index — sixteen phase reports, the final verification, and the final four blockers
+# Phase index — sixteen phase reports, the final verification, the final four blockers, and the installer redesign
 
 Branch: `arena/c6d8fd27-shop-haat-otp-system-ai` · base `31d1815` (main) · PR #16
 Audited commit range: `31d1815..HEAD`
 Date: 2026-11-14
 
-> **Latest pass: the final four blockers (report 17).** The four gaps left open by report 16
+> **Latest pass: the installation wizard UI (report 18).** `install/index.php` was redesigned
+> as a presentation-only change: the same checks, the same validation, the same CSRF protection,
+> a new interface. CI job "Installer UI" (run **`43640083658`**) drives it in Chromium against
+> MySQL 8.0 with **162 checks, 0 failures**: requirements (101), blocked state built from genuinely
+> unwritable folders (44), repair screen on an installed store (17). Screenshots and transcripts
+> are committed under `docs/installer-ui/`. The four existing CI jobs stayed green on the same
+> PHP file (`43639473898`).
+>
+> **Previous pass: the final four blockers (report 17).** The four gaps left open by report 16
 > are now executed results, and one earlier claim had to be withdrawn:
 >
 > | Blocker | Was | Now |
@@ -81,6 +89,7 @@ either backed by a command whose output is quoted, by the shipped code, or it is
 | 15 | [Final integration](15-final-integration.md) | **PASSED** — 1,738 checks, 241/241 files lint clean, security scan clean |
 | 16 | [Final verification and production decision](16-final-verification.md) | **CONDITIONALLY READY** — its three conditions are discharged by report 17 |
 | 17 | [The final four blockers](17-final-four-blockers.md) | **READY** — secrets, MySQL 8.0.46 + MariaDB 10.6.28, restore rehearsal 23/0, browser regression; seven defects fixed, six of them in the harness |
+| 18 | [Installation wizard UI redesign](18-installer-ui-redesign.md) | **DELIVERED** — presentation-only redesign, 162 browser checks (ready / blocked / repair) across desktop and six phone widths; engine, validation and CSRF unchanged |
 
 ## Environment facts behind the "NOT EXECUTED" rows
 
@@ -134,5 +143,8 @@ courier, SMS or SMTP provider can be contacted either.
 | `tests/mysql-integration.php` | The 11 MySQL/MariaDB engine scenarios (staging/CI, refuses non-test databases) |
 | `tests/cron-cli-auth.php` | Executes the shipped cron token parser with real argv/$_GET (32 checks) |
 | `tests/_support_php_bin.php` | Finds a PHP binary that can actually spawn a child; used to decide PASS vs BLOCKED |
+| `tests/browser/installer.mjs` | Installation wizard browser suite: 162 checks in three phases (report 18) |
+| `.github/workflows/installer-ui.yml` | The CI job that runs it (MySQL 8.0 + PHP 8.2 + Chromium) and publishes the screenshots |
+| `docs/installer-ui/` | 21 screenshots and 3 transcripts from the wizard run |
 | `install/migrations/2026-11-payment-transaction-unique.sql` (+ rollback) | TrxID uniqueness for existing stores |
 | `reports/00-INDEX.md` … `reports/15-final-integration.md` | These reports |
