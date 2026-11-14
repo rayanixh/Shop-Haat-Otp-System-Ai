@@ -306,6 +306,8 @@ try {
     product_same('physical', (string)sh_val('SELECT product_type FROM products WHERE id = ?', [$legacyId]), 'fulfilment ENUM value stayed physical');
     product_ok(str_contains(source('install/schema.php'), "product_type ENUM('physical','digital')"), 'merchandising type did not replace the fulfilment ENUM');
     product_ok(str_contains(source('product.php'), "product.php?slug='"), 'existing slug product URLs were preserved');
+    product_ok(str_contains(source('includes/product-catalog.php'), "ADD KEY idx_citems_cart (cart_id)"),
+        'migration adds an explicit cart_id index before dropping the legacy unique key');
     product_same('2', sh_setting('product_catalog_schema_v', '0'), 'migration version was persisted');
     product_ok(!str_contains(implode(' ', array_column($GLOBALS['product_test_log'], 1)), 'Schema migration failed'), 'migration did not fail');
     sh_product_catalog_schema_ensure();

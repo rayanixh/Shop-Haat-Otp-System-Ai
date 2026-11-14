@@ -146,8 +146,20 @@ function sh_product_catalog_schema_ensure(): void
             $pdo->exec("ALTER TABLE cart_items ADD COLUMN variant VARCHAR(190) NOT NULL DEFAULT '' AFTER product_id");
         }
         if ($indexExists('cart_items', 'uq_cart_product')) {
-            try { $pdo->exec('ALTER TABLE cart_items DROP INDEX uq_cart_product'); }
-            catch (Throwable $e) { sh_product_catalog_log('Could not replace cart unique key: ' . $e->getMessage()); }
+            // InnoDB uses the old unique key's leading cart_id column to index
+            // fk_citems_cart. Create an explicit plain index first; otherwise
+            // MySQL 1553 refuses to drop the unique key and the old product-only
+            // constraint would still reject a second colour line.
+            if (!$indexExists('cart_items', 'idx_citems_cart')) {
+                try { $pdo->exec('ALTER TABLE cart_items ADD KEY idx_citems_cart (cart_id)'); }
+                catch (Throwable $e) { sh_product_catalog_log('Could not add cart FK support index: ' . $e->getMessage()); }
+            }
+            if ($indexExists('cart_items', 'idx_citems_cart')) {
+                try { $pdo->exec('ALTER TABLE cart_items DROP INDEX uq_cart_product'); }
+                catch (Throwable $e) { sh_product_catalog_log('Could not replace cart unique key: ' . $e->getMessage()); }
+            } else {
+                sh_product_catalog_log('Could not replace cart unique key: no supporting cart_id index');
+            }
         }
         if (!$indexExists('cart_items', 'uq_cart_product_variant')) {
             try {

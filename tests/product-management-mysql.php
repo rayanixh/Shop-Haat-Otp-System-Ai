@@ -125,9 +125,15 @@ try {
     $pdo->exec('DROP TABLE IF EXISTS product_images');
     $pdo->exec('DROP TABLE IF EXISTS product_types');
     $pdo->exec('DROP TABLE IF EXISTS product_colours');
+    // A temporary plain cart_id index lets InnoDB drop the canonical unique
+    // key while fk_citems_cart remains. Remove it after the legacy
+    // product-only unique key takes over, so migration must add its own
+    // supporting index before replacing that key.
+    $pdo->exec('ALTER TABLE cart_items ADD KEY idx_citems_cart (cart_id)');
     $pdo->exec('ALTER TABLE cart_items DROP INDEX uq_cart_product_variant');
     $pdo->exec('ALTER TABLE cart_items DROP COLUMN variant');
     $pdo->exec('ALTER TABLE cart_items ADD UNIQUE KEY uq_cart_product (cart_id, product_id)');
+    $pdo->exec('ALTER TABLE cart_items DROP INDEX idx_citems_cart');
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
     sh_query("DELETE FROM settings WHERE setting_key IN ('product_schema_v','product_catalog_schema_v')");
     sh_settings(true); // the cached settings read must not see the deleted versions
@@ -146,6 +152,7 @@ try {
     pmm_ok(!pmm_table($pdo, 'product_images'), 'legacy simulation removed the gallery table');
     pmm_ok(!pmm_column($pdo, 'cart_items', 'variant'), 'legacy simulation removed cart_items.variant');
     pmm_ok(pmm_index($pdo, 'cart_items', 'uq_cart_product'), 'legacy simulation restored the product-only unique key');
+    pmm_ok(!pmm_index($pdo, 'cart_items', 'idx_citems_cart'), 'legacy simulation has no separate cart_id index');
 
     sh_product_schema_ensure(); // also calls sh_product_catalog_schema_ensure()
 
@@ -153,6 +160,7 @@ try {
     pmm_ok(pmm_column($pdo, 'cart_items', 'variant'), 'additive MySQL migration restored cart_items.variant');
     pmm_ok(pmm_index($pdo, 'cart_items', 'uq_cart_product_variant'), 'additive MySQL migration restored the variant unique key');
     pmm_ok(!pmm_index($pdo, 'cart_items', 'uq_cart_product'), 'additive MySQL migration dropped the product-only unique key');
+    pmm_ok(pmm_index($pdo, 'cart_items', 'idx_citems_cart'), 'additive MySQL migration added an explicit cart_id FK index');
     pmm_ok(pmm_index($pdo, 'products', 'idx_products_catalog_type'), 'additive MySQL migration restored the catalog-type index');
     pmm_ok(pmm_constraint($pdo, 'products', 'fk_products_catalog_type'), 'additive MySQL migration restored the catalog-type FK');
     pmm_same('2', sh_setting('product_catalog_schema_v', '0'), 'catalog migration version was persisted in MySQL');
