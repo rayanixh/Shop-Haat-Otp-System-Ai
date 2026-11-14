@@ -7,8 +7,8 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  the restricted panel is present
   PASS  the unlock panel is still offered to the owner
   PASS  store configuration is shown as not part of a repair — step step--skipped
-  FAIL  the saved connection host is pre-filled from config/database.php —  vs 127.0.0.1
-  PASS  no saved password is written into the repair form — n/a
+  PASS  the repair form accepts no database credentials
+  PASS  the saved database password is never written into the page
   PASS  the primary action repairs the database instead of installing
   PASS  the repair action is enabled
 
@@ -21,7 +21,5 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  the repair session: no JavaScript exceptions
   PASS  the repair session: no failed requests (4xx/5xx/network)
 
-Installer UI (repair): 16 passed, 1 failed
-Failures:
-  - the saved connection host is pre-filled from config/database.php —  vs 127.0.0.1
+Installer UI (repair): 17 passed, 0 failed
 Screenshots: installer

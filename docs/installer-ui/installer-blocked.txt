@@ -3,14 +3,14 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
 1. Genuinely failed checks block the installation
   PASS  the installer still responds with HTTP 200 when checks fail — status 200
   PASS  the verdict asks for action — Action required
-  PASS  the unwritable directories are reported as failed — /config directorywritable=Not writable, /uploads directorywritable=Not writable, /logs directorywritable=Not writable
+  PASS  the unwritable directories are reported as failed — /config directory=Not writable, /uploads directory=Not writable, /logs directory=Not writable
   PASS  a failed row states what was detected — Not writable, Not writable, Not writable
   PASS  the summary counts the failures — {"Required passed":"4/7","Required failed":"3","Optional available":"7/7","Overall readiness":"Blocked"}
   PASS  overall readiness is blocked — Blocked
   PASS  Continue is disabled while a required check fails
   PASS  progress stays at 0% when step 1 has not passed — aria-valuenow=0
   PASS  step 1 is marked as the current step — step step--current
-  FAIL  the failed checks are explained in plain language —  3 required checks must be fixed first /config directory — Set the config folder permission to 0755 in cPanel → File Man
+  PASS  the failed checks are explained in plain language —  3 required checks must be fixed first /config directory — Set the config folder permission to 0755 in cPanel → File Man
   PASS  the fix text names no server path
   PASS  the blocked screen: no console errors
   PASS  the blocked screen: no JavaScript exceptions
@@ -48,7 +48,5 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @430px: no label is squeezed into a sliver
   PASS  blocked @430px: the optional extensions are a single column — 1 column(s)
 
-Installer UI (requirements-fail): 43 passed, 1 failed
-Failures:
-  - the failed checks are explained in plain language —  3 required checks must be fixed first /config directory — Set the config folder permission to 0755 in cPanel → File Man
+Installer UI (requirements-fail): 44 passed, 0 failed
 Screenshots: installer
