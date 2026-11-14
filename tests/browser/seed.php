@@ -77,6 +77,17 @@ $admin = (int)$pdo->query('SELECT COUNT(*) FROM admins')->fetchColumn();
 $products = (int)$pdo->query('SELECT COUNT(*) FROM products WHERE status = 1')->fetchColumn();
 $categories = (int)$pdo->query('SELECT COUNT(*) FROM categories')->fetchColumn();
 $methods = (int)$pdo->query('SELECT COUNT(*) FROM payment_methods WHERE status = 1')->fetchColumn();
+// The gates that decide whether a sign-in survives to the next request. Printing
+// them means a checkout that bounces to login is explained by the store's own
+// configuration rather than guessed at.
+$gateKeys = ['auth_mode', 'email_verify_required_login', 'email_verification_required', 'email_verifier', 'guest_checkout'];
+$gate = [];
+foreach ($pdo->query("SELECT setting_key, setting_value FROM settings")->fetchAll() as $row) {
+    if (in_array((string)$row['setting_key'], $gateKeys, true)) {
+        $gate[(string)$row['setting_key']] = (string)$row['setting_value'];
+    }
+}
+$say('PASS', 'sign-in gates: ' . ($gate === [] ? '(none set)' : json_encode($gate)));
 $say($admin === 1 ? 'PASS' : 'FAIL', 'administrator account: ' . $admin);
 $say($products > 0 ? 'PASS' : 'FAIL', 'storefront products: ' . $products);
 $say($categories > 0 ? 'PASS' : 'FAIL', 'categories: ' . $categories);
@@ -101,8 +112,8 @@ if (is_array($first)) {
 }
 
 $customer = static function (PDO $pdo, string $name, string $email, string $phone) use ($say): void {
-    $st = $pdo->prepare("INSERT INTO users (name, email, phone, password_hash, status, email_verified)
-                         VALUES (?,?,?,?, 'active', 1)");
+    $st = $pdo->prepare("INSERT INTO users (name, email, phone, password_hash, status, email_verified, email_verified_at)
+                         VALUES (?,?,?,?, 'active', 1, NOW())");
     $st->execute([$name, $email, $phone, password_hash('Customer!2026', PASSWORD_DEFAULT)]);
     $say('PASS', 'customer seeded: ' . $email);
 };

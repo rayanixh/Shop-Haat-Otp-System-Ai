@@ -201,9 +201,17 @@ try {
     page.locator('form button[type="submit"], form input[type="submit"]').first().click(),
   ]);
   const afterLogin = page.url();
+  const passwordField = await page.locator('input[name="password"]').count();
   check('a customer can sign in with email and password',
-    !afterLogin.includes('login.php') || !(await page.locator('input[name="password"]').count()),
-    afterLogin.replace(BASE, ''));
+    !/\/login\.php/.test(afterLogin) && passwordField === 0,
+    `${afterLogin.replace(BASE, '')} · password field ${passwordField}`);
+  // The sign-in only counts when a second request still knows the customer: a
+  // landing page that is not the login form can still be a verification gate
+  // that created no session at all.
+  await page.goto(BASE + '/account.php', { waitUntil: 'domcontentloaded' });
+  const accountUrl = page.url();
+  check('the signed-in session survives a second request',
+    !/\/login\.php/.test(accountUrl), accountUrl.replace(BASE, ''));
   report(errors, 'login');
 
   /* ------------------------------------------------------------------ */
