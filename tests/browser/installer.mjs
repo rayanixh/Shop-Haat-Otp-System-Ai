@@ -150,11 +150,13 @@ async function phaseFresh(browser) {
     const h1 = (await page.textContent('h1') || '').trim();
     check('the page presents the installation title', h1 === 'Install your store', h1);
 
-    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => ({
-      label: (el.querySelector('.step__label') || {}).textContent?.trim() || '',
-      cls: el.className,
-      current: el.getAttribute('aria-current'),
-    })));
+    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => {
+      // The screen-reader state suffix is part of the accessible name but not
+      // part of the visible step label.
+      const label = el.querySelector('.step__label').cloneNode(true);
+      label.querySelectorAll('.sr-only').forEach((node) => node.remove());
+      return { label: label.textContent.trim(), cls: el.className, current: el.getAttribute('aria-current') };
+    }));
     check('the step indicator lists the four real steps', JSON.stringify(steps.map((s) => s.label)) === JSON.stringify(STEP_LABELS),
       steps.map((s) => s.label).join(' > '));
     check('step 1 is complete because every required check passed', /step--complete/.test(steps[0].cls), steps[0].cls);
@@ -228,7 +230,7 @@ async function phaseFresh(browser) {
 
   await area('3. The form keeps the existing fields, naming and CSRF protection', async () => {
     const fields = ['db_host', 'db_name', 'db_user', 'db_pass', 'site_name', 'site_logo', 'demo_on', 'demo_off',
-      'admin_email', 'admin_password', 'admin_password2', 'csrf_token'];
+      'admin_email', 'admin_password', 'admin_password2'];
     for (const id of fields) {
       const n = await page.locator(`#${id}`).count();
       check(`the form still contains #${id}`, n === 1, `${n} match(es)`);

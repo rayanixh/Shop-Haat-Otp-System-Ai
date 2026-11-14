@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # The installation wizard is the first screen a new owner sees, and the only
@@ -34,7 +34,11 @@ jobs:
           --health-timeout=5s
           --health-retries=12
     steps:
+      # The head branch, not the merge commit: the screenshots are committed
+      # back to it at the end of the job.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
@@ -143,6 +147,32 @@ jobs:
               | while IFS= read -r line; do echo "::notice::installer-repair: ${line//\%/\%25}"; done
           fi
           exit "$rc"
+      # The evidence has to be readable afterwards. The screenshots and the
+      # full check transcripts are committed to docs/installer-ui/, so a review
+      # can see exactly what ran without downloading anything.
+      - name: Publish the screenshots and transcripts on the branch
+        if: always()
+        run: |
+          mkdir -p docs/installer-ui
+          cp -f tests/browser/artifacts/installer/*.png docs/installer-ui/ 2>/dev/null || true
+          for f in /tmp/installer.log /tmp/installer-blocked.log /tmp/installer-repair.log; do
+            [ -f "$f" ] && cp -f "$f" "docs/installer-ui/$(basename "$f" .log).txt"
+          done
+          # The runner's own absolute paths are noise in a transcript.
+          if [ -d docs/installer-ui ]; then
+            grep -rl "/home/runner" docs/installer-ui 2>/dev/null | while IFS= read -r f; do
+              sed -i 's#/home/runner/work/[^ ]*/##g' "$f"
+            done
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/installer-ui
+          if git diff --cached --quiet; then
+            echo "::notice::no screenshot changes to publish"
+            exit 0
+          fi
+          git commit -q -m "docs: installer UI screenshots and transcripts from run ${{ github.run_id }}"
+          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
       - name: Upload the installer screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
