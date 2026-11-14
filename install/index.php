@@ -44,9 +44,12 @@ $shAccess = sh_install_access(
     sh_install_unlock_configured()
 );
 // Unlock attempts are rate limited per IP so the token cannot be brute forced
-// from the open internet.
+// from the open internet. The limiter fails CLOSED here: if the counter store is
+// unavailable (full disk, read-only logs/) we refuse the *wrong* token instead of
+// letting an attacker remove the throttle by breaking the store first. A correct
+// token never consults the limiter, so the owner can still get in and repair.
 $shUnlockThrottled = !$shUnlockOk && $shUnlockGiven !== ''
-    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900);
+    && !sh_file_rate_limit('install-unlock', sh_client_ip(), 5, 900, '', true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_log_line('install', 'Installer accessed: mode=' . $shAccess['mode']

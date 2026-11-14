@@ -91,7 +91,9 @@ if ($given === '' || !hash_equals($expected, $given)) {
     // Rate limit only the HTTP surface; a CLI caller is already local.
     if (!$isCli) {
         $bucketKey = function_exists('sh_client_ip') ? sh_client_ip() : 'unknown';
-        if (function_exists('sh_file_rate_limit') && !sh_file_rate_limit('backup-cron-token', $bucketKey, 10, 900)) {
+        // Fail closed: if the counter store is broken, refuse rather than let the
+        // token be guessed at unlimited rate. The message stays generic.
+        if (function_exists('sh_file_rate_limit') && !sh_file_rate_limit('backup-cron-token', $bucketKey, 10, 900, '', true)) {
             sh_log_line('backup', 'Scheduled backup token failures are being rate limited.');
             sh_cron_reply(false, 429, 'Too many attempts.');
         }

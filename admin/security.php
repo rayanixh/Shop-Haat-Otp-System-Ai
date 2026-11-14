@@ -234,7 +234,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sh_flash('success', 'The OTP pepper now comes from config/secrets.php. Existing limits keep counting; '
                 . 'delete the value from settings only after the daily window has passed.');
         } else {
-            sh_flash('error', (string)($written['error'] ?? 'The secrets file could not be written.'));
+            // The write failed: nothing changed, the pepper still resolves from
+            // the settings row and every existing rate limit keeps counting. Tell
+            // the operator exactly what to do instead of a dead end.
+            sh_security_log('otp_pepper_move_failed', (int)$admin['id'], ['error' => (string)($written['error'] ?? '')]);
+            sh_log_line('admin', 'OTP pepper could not be moved to config/secrets.php: '
+                . (string)($written['error'] ?? 'unknown error'));
+            sh_flash('error', (string)($written['error'] ?? 'The secrets file could not be written.')
+                . ' Nothing was changed and the current pepper is still in use, so verification and its'
+                . ' rate limits keep working. To finish the move by hand: copy the value that is currently'
+                . ' stored in the database (table settings, key otp_rate_pepper — it is never printed on this'
+                . ' page) into config/secrets.php with permissions 0600 as'
+                . " return ['otp_rate_pepper' => '…'];"
+                . ' then reload this page; the source above changes to config/secrets.php. If PHP has no write'
+                . ' access to config/, ask the host to restore it, or supply the pepper as the environment'
+                . ' variable SH_SECRET_OTP_RATE_PEPPER instead.');
         }
         sh_redirect('admin/security.php');
     }
