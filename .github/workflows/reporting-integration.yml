@@ -320,9 +320,14 @@ jobs:
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
         run: |
+          set -o pipefail
           rc=0
           php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
-          grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|^BLOCKED' /tmp/engine.log \
+          if [ "$rc" -ne 0 ]; then
+            grep -E 'BLOCKED|FAIL|REFUSED|Server ' /tmp/engine.log | head -n 25 \
+              | while IFS= read -r line; do echo "::error::engine: ${line//\%/\%25}"; done
+          fi
+          grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
             | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
           exit "$rc"
       # The rehearsal this project has never been able to run: the application
@@ -349,10 +354,11 @@ jobs:
         # step the moment the command failed and the diagnostics below would
         # never run. `|| rc=$?` keeps the shell alive long enough to report why.
         run: |
+          set -o pipefail
           rc=0
           php tests/restore-rehearsal.php 2>&1 | tee /tmp/rehearsal.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            { grep -E '^ *(FAIL|BLOCKED|REFUSED)|^Backup restore' /tmp/rehearsal.log; tail -n 12 /tmp/rehearsal.log; } \
+            { grep -E 'FAIL|BLOCKED|REFUSED|Backup restore' /tmp/rehearsal.log; tail -n 12 /tmp/rehearsal.log; } \
               | sort -u | head -n 40 \
               | while IFS= read -r line; do echo "::error::rehearsal: ${line//\%/\%25}"; done
           else
@@ -409,9 +415,14 @@ jobs:
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
         run: |
+          set -o pipefail
           rc=0
           php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
-          grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|^BLOCKED' /tmp/engine.log \
+          if [ "$rc" -ne 0 ]; then
+            grep -E 'BLOCKED|FAIL|REFUSED|Server ' /tmp/engine.log | head -n 25 \
+              | while IFS= read -r line; do echo "::error::engine: ${line//\%/\%25}"; done
+          fi
+          grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
             | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
           exit "$rc"
 
@@ -480,8 +491,13 @@ jobs:
           SH_BROWSER_ADMIN_PASSWORD: AdminTest!2026
           SH_BROWSER_CUSTOMER_PASSWORD: Customer!2026
         run: |
+          set -o pipefail
           rc=0
           node tests/browser/smoke.mjs 2>&1 | tee /tmp/browser.log || rc=$?
+          # Where the run stopped matters as much as what failed: the area
+          # markers go out first so a truncated log is still diagnostic.
+          grep -E '^[0-9]+\. ' /tmp/browser.log | tail -n 3 \
+            | while IFS= read -r line; do echo "::notice::browser-area: ${line//\%/\%25}"; done
           if [ "$rc" -ne 0 ]; then
             sed -n '/^Failures:/,$p' /tmp/browser.log | head -n 40 \
               | while IFS= read -r line; do echo "::error::browser: ${line//\%/\%25}"; done
