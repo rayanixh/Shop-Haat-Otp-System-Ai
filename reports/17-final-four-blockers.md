@@ -328,7 +328,8 @@ The blocked rows above are named individually, with what would unblock them.
 | `1db1c64` | 43631165563 | all four green | browser 50/0, rehearsal 23/0 |
 | `81205f7` | 43631797400 | all four green, engines named | MySQL 8.0.46, MariaDB 10.6.28, browser 50/0, rehearsal 23/0 |
 | `5ed42d2` | 43632389258 | browser red — one false positive | mobile pass counted navigation-cancelled images as failed requests |
-| `b5d4d3c` | 43632937440 | **all four green, final** | browser **105/0**, rehearsal 23/0, MySQL 8.0.46, MariaDB 10.6.28 |
+| `b5d4d3c` | 43632937440 | all four green | browser **105/0**, rehearsal 23/0, MySQL 8.0.46, MariaDB 10.6.28 |
+| `0a10b61` | 43633533126 | **all four green, final** | the same result a second time: browser 105/0, rehearsal 23/0, both engines — the numbers above are reproducible, not a lucky run |
 
 The two "green, wrongly" rows are kept deliberately: they are the reason the pipeline now
 runs under `pipefail` and the reason `SH_TEST_REQUIRE_ENGINE=1` exists. A report that only
