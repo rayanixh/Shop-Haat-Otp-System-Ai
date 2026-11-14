@@ -1,5 +1,17 @@
 # 03 — Real MySQL / MariaDB execution
 
+> **Update — report 17 (2026-11-14).** The pass recorded below said this suite passed on
+> `mysql:8.0` at `a11ffdf`. **That was wrong**: it never connected. The suite kept the
+> password in `$pass` and the pass counter in `$GLOBALS['pass']`, so the first `mi_pass()`
+> replaced the password with the integer `1`; PDO rejected it, every scenario reported
+> BLOCKED, and the step still exited 0.
+>
+> Fixed: the password is `$dbPass`, and CI sets `SH_TEST_REQUIRE_ENGINE=1`, which turns a
+> blocked connection on a provisioned runner into exit code 4. The suite now really runs:
+> **MySQL 8.0.46** and **MariaDB 10.6.28**, eleven engine scenarios, run `43631797400`
+> (server versions quoted from the run's own output). R-03 and R-14 are closed. See
+> [`17-final-four-blockers.md`](17-final-four-blockers.md) §0 and §2.
+
 **Status: NOT EXECUTED — there is no MySQL or MariaDB server, client, or Docker in this
 sandbox. No result in this report is simulated.**
 

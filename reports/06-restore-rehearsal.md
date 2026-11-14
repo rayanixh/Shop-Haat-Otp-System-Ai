@@ -1,5 +1,18 @@
 # 06 — Restore rehearsal
 
+> **Update — report 17 (2026-11-14).** The import was rehearsed for real. In CI, against
+> MySQL 8.0.46, `tools/restore-rehearsal.php --create-backup --app-check` made the
+> application create a backup, imported it into a **new** scratch database, verified the
+> file, the gzip round trip, **54 of 54 dumped tables**, the unique payment index, row
+> counts, a real order with its items and payment, zero orphan order items, and then had
+> the application read the restored copy through its own bootstrap; the scratch database
+> was dropped. **23 checks, 0 failures.**
+>
+> Two defects in this tooling were fixed: the verification compared against a hand-written
+> table list that included `sessions` (a table a fresh store never creates), and the
+> "uninstalled checkout" case ran the installed tool. See
+> [`17-final-four-blockers.md`](17-final-four-blockers.md) §3.
+
 **Status: PARTLY EXECUTED.** The file-integrity half runs here (24 checks pass). The
 "import into a scratch database and compare" half **needs MySQL** and is written out as an
 exact procedure instead of being claimed.

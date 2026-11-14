@@ -141,17 +141,30 @@ against the live store:
 ```bash
 # 1. Engine behaviour: schema, migration, unique TrxID, rollback, locking,
 #    OTP replay/expiry, order ownership, notification idempotency, backup metadata.
+#    SH_TEST_REQUIRE_ENGINE=1 makes "could not connect" a FAILURE instead of a
+#    green run full of BLOCKED rows — use it on any host you believe has MySQL.
 SH_TEST_MYSQL_DSN='mysql:host=127.0.0.1;dbname=shophaat_staging_test;charset=utf8mb4' \
 SH_TEST_MYSQL_USER=test SH_TEST_MYSQL_PASS=test SH_TEST_MYSQL_ALLOW_DROP=1 \
+SH_TEST_REQUIRE_ENGINE=1 \
       php tests/mysql-integration.php
-# MySQL 8.0 is already covered by CI (required step, green at a11ffdf), but run it
-# once on YOUR host too — hosting PHP/MySQL builds differ. If your host runs
-# MariaDB, this run is the only MariaDB evidence that will exist (REMAINING_RISKS R-14).
+# Verified in CI on MySQL 8.0.46 and MariaDB 10.6.28 (run 43631797400). Run it once
+# on YOUR host too — hosting PHP/MySQL builds differ. A blocked connection now
+# exits 4, so this step cannot pass without connecting.
 
-# 2. Restore rehearsal: verify a real backup, import it into a scratch database,
-#    check tables/indexes/relationships, then drop the scratch database.
-php tools/restore-rehearsal.php --dump=storage/backups/your-backup.sql.gz \
-    --host=127.0.0.1 --user=test --pass=test --scratch=shophaat_restore_test
+# 2. Restore rehearsal: the application creates a backup, the tool imports it into
+#    a NEW scratch database, verifies tables/indexes/relationships/a real order,
+#    points the application at the restored copy and has it read the data, then
+#    drops the scratch database.
+#    Needs an account that may CREATE/DROP the scratch database (often the panel
+#    user, not the store's own MySQL user).
+php tools/restore-rehearsal.php --create-backup --app-check \
+    --host=127.0.0.1 --user=root --pass='…' \
+    --scratch=shophaat_restore_test --live=shophaat_staging_test
+# Expected last lines: "REHEARSAL PASSED" and "Dropped the scratch database …".
+# Verified in CI on MySQL 8.0.46: 23 checks, 0 failures.
+
+# 2b. The refusals, which matter as much as the success path (10 passed, 0 failed):
+SH_TEST_PHP_BIN=$(command -v php) php tests/restore-rehearsal.php
 
 # 3. Cron authentication behaves as documented (query string, header, CLI argv).
 SH_TEST_PHP_BIN=$(command -v php) php tests/cron-cli-auth.php
@@ -180,6 +193,14 @@ reason — it is never counted as a pass and never as a failure.
       open it: you must get the app's "not found"/redirect answer, never the order.
 - [ ] Sign in to the admin panel; open Dashboard, Products, Orders, Settings,
       System Health.
+- [ ] Optional but recommended: run the browser regression against staging —
+      `SH_BROWSER_BASE_URL=https://staging.example.com node tests/browser/smoke.mjs`
+      (needs Node.js and a seeded disposable store: `php tests/browser/seed.php`
+      points the checkout at a *test* database and refuses any other name). CI runs
+      the same suite against `php -S` + MySQL: it walks fifteen storefront steps and
+      twelve admin steps, checks console/CSP/requests, a 390×844 phone viewport, and
+      replays the checkout POST to prove a double submit cannot create a second
+      order. Nothing in the storefront or admin panel requires Node.js.
 - [ ] Run the shipped checkers on the server if you have a terminal
       (optional): `php tools/security-scan.php`.
 - [ ] Watch `logs/app-*.log` for 24 hours for `error`/`security` channels.

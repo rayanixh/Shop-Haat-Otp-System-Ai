@@ -1,5 +1,16 @@
 # 13 — Secret migration write failure
 
+> **Update — report 17 (2026-11-14).** Re-investigated end to end. The seven failures that
+> this report attributed to the suite were all environment artefacts: on a host where
+> `chmod 0555` cannot deny a write (root, `CAP_DAC_OVERRIDE`, or a filesystem that ignores
+> modes) the permission checks prove nothing. The suite now probes for that and reports
+> those checks **BLOCKED by name** with the reason, and reproduces the failure path in a way
+> that works even as root (the target path is made a directory, so `rename()` cannot replace
+> it). Result: **68 passed / 0 failed** as a normal account, **51 / 0 / 13 blocked** with
+> `SH_TEST_ASSUME_NO_PERM_ENFORCEMENT=1`. **No change was needed in `includes/secrets.php`.**
+> Both modes are required CI steps. See
+> [`17-final-four-blockers.md`](17-final-four-blockers.md) §1.
+
 **Status: FIXED (dead end → guided recovery, audited) · PASSED (49 checks)**
 
 ```

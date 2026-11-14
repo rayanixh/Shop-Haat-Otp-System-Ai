@@ -1,5 +1,16 @@
 # 14 — Full browser regression
 
+> **Update — report 17 (2026-11-14).** A real browser regression now exists and runs in CI:
+> Chromium 131.0.6778.33 against the application served by `php -S` over a disposable MySQL
+> 8.0.46 store installed through the application's own installer (run `43631797400`).
+> Fifteen storefront steps, twelve admin steps, a 390×844 phone viewport, CSP/console/
+> request health, and a replayed checkout POST that must not create a second order.
+>
+> Three of its own assertions were wrong and are fixed — the "sign-in" clicked the header
+> search button, the gallery expected navigation on a single-image product, and the checkout
+> check accepted `login.php?redirect=checkout.php`. See
+> [`17-final-four-blockers.md`](17-final-four-blockers.md) §4.
+
 **Status: NOT EXECUTED — this sandbox has no browser and no web server that can execute PHP.**
 
 ```

@@ -1,8 +1,26 @@
-# Phase index — fifteen phase reports plus the final verification
+# Phase index — sixteen phase reports, the final verification, and the final four blockers
 
 Branch: `arena/c6d8fd27-shop-haat-otp-system-ai` · base `31d1815` (main) · PR #16
 Audited commit range: `31d1815..HEAD`
 Date: 2026-11-14
+
+> **Latest pass: the final four blockers (report 17).** The four gaps left open by report 16
+> are now executed results, and one earlier claim had to be withdrawn:
+>
+> | Blocker | Was | Now |
+> | --- | --- | --- |
+> | Secrets migration | 42/7 on a root-like host, cause unknown | No application defect. 68/0/0 here; 51/0/13 with `SH_TEST_ASSUME_NO_PERM_ENFORCEMENT=1`, each blocked check named |
+> | MySQL / MariaDB | "Passed on MySQL 8.0 at `a11ffdf`" — **false**, the suite never connected | MySQL **8.0.46** and MariaDB **10.6.28**, `SH_TEST_REQUIRE_ENGINE=1`, run `43631797400` |
+> | Restore rehearsal | "Automated but unrehearsed" | `--create-backup --app-check` on MySQL 8.0.46: **23 checks, 0 failures**, scratch database dropped |
+> | Browser regression | "No browser here" | Chromium 131.0.6778.33 against MySQL 8.0.46: storefront, admin, mobile, CSP — see report 17 §4 |
+>
+> Seven defects were found in this pass. Six were in the **test harness**, and four of those
+> had been reporting success: a `$pass`/`$GLOBALS['pass']` collision that made every
+> database scenario BLOCKED under a green tick, a `cmd | tee` pipeline that swallowed a
+> suite's exit code, a seed that produced an empty storefront while exiting 0, and three
+> browser assertions that passed for the wrong reason (the "sign-in" clicked the header
+> search button). All are fixed, and CI now fails on a blocked engine
+> (`SH_TEST_REQUIRE_ENGINE=1`) and propagates every suite's exit code (`pipefail`).
 
 > **Reconciled in the final verification pass (report 16).** Three numbers in the
 > earlier reports were wrong and are corrected here and in the reports themselves:
@@ -10,16 +28,21 @@ Date: 2026-11-14
 > | Claim | Status | Corrected fact |
 > | --- | --- | --- |
 > | `tests/admin-access-url.php` — "240 passed, 9 could not run" (reports 14, 15) | **stale** | 249/0 when a runnable PHP binary is supplied (`SH_TEST_PHP_BIN`); without one it is 240 passed + **9 BLOCKED**, and the suite now says so instead of failing |
-> | "1,528 checks green" (report 15) | **stale total** | **1,738 passed · 0 failed** across 21 PHP suites (1,537 before the two new suites), plus 16 rendered-template cases |
+> | "1,528 checks green" (report 15) | **stale total** | **1,738 passed · 0 failed** across 21 PHP suites (1,537 before the two new suites), plus 16 rendered-template cases. Re-measured in report 17: **1,767 checks · 0 failures**, 243/243 files lint clean |
+| "MariaDB is still untested (R-14)" (report 16) | **superseded** | MariaDB **10.6.28** passed the eleven engine scenarios (run `43631797400`) |
 > | "237/237 files lint clean" | **stale count** | **241/241** PHP files lint clean (four files added since: three tests and one tool) |
 >
 > No other claim in reports 01–15 changed. Report 16 records the five defects found
 > and fixed in this pass, everything that was re-executed, and the final verdict.
 >
-> **New engine evidence:** `tests/mysql-integration.php` passed as a required CI step on the
-> real `mysql:8.0` service (run `43621578351`, commit `a11ffdf`) — see report 03. MySQL
-> concurrency, rollback, row locking and the unique-TrxID migration are therefore verified on
-> MySQL 8.0, not inferred. MariaDB remains untested (R-14).
+> **Engine evidence, corrected:** the claim that `tests/mysql-integration.php` passed on the
+> real `mysql:8.0` service at `a11ffdf` (run `43621578351`) was **wrong**. That run — and
+> every run before report 17 — never opened a connection: the suite kept its password in
+> `$pass` and its pass counter in `$GLOBALS['pass']`, so the first `mi_pass()` replaced the
+> password with the integer `1` and PDO refused it. Every scenario reported BLOCKED while
+> the step exited 0. The suite now uses `$dbPass`, CI sets `SH_TEST_REQUIRE_ENGINE=1` (a
+> blocked engine exits 4), and the verified engines are **MySQL 8.0.46** and **MariaDB
+> 10.6.28** — run `43631797400`. See report 17 §0.
 
 Every report states what was **executed** in this environment and what was **not**, and
 why. Nothing below is inferred from a screenshot, a plan, or an assumption: a claim is
@@ -43,20 +66,21 @@ either backed by a command whose output is quoted, by the shipped code, or it is
 | --- | --- | --- |
 | 01 | [Payment workflow security](01-payment-workflow-security.md) | **FIXED** — DB-level TrxID uniqueness added; app-level checks confirmed |
 | 02 | [IDOR / object authorisation](02-idor-object-authorisation.md) | **PASSED** — 42-check scan over every route |
-| 03 | [Real MySQL execution](03-real-mysql-execution.md) | **PASSED on MySQL 8.0 in CI** (11 engine scenarios, run `43621578351`); not runnable in this sandbox, MariaDB untested |
+| 03 | [Real MySQL execution](03-real-mysql-execution.md) | **PASSED on MySQL 8.0.46 and MariaDB 10.6.28** (11 engine scenarios, run `43631797400`); the earlier `a11ffdf` claim is withdrawn — see report 17 §0 |
 | 04 | [Backup scheduler](04-backup-scheduler.md) | **FIXED + PASSED** — 49 checks (lock, verify, prune, lease) |
 | 05 | [Cron authentication](05-cron-authentication.md) | **FIXED + CONFIRMED** — the shipped token parser is executed with real argv (32 checks); a CLI run without a database no longer exits silently |
-| 06 | [Restore rehearsal](06-restore-rehearsal.md) | **PARTLY EXECUTED** — inspector (24 checks) + the new `tools/restore-rehearsal.php`; the import itself needs a MySQL server |
-| 07 | [CSP browser verification](07-csp-browser-verification.md) | **NOT EXECUTED** (no browser) — 31 static checks pass |
+| 06 | [Restore rehearsal](06-restore-rehearsal.md) | **PASSED** — real backup imported into a scratch database on MySQL 8.0.46: 23 checks, 0 failures; refusal matrix 10/0/2 here |
+| 07 | [CSP browser verification](07-csp-browser-verification.md) | **PASSED for violations, NOT EXECUTED for enforcement** — zero violation reports in Chromium across every visited page; the policy is still report-only on a real host |
 | 08 | [Upload security](08-upload-security.md) | **FIXED + PASSED** — 51 checks, validation split from the write path; the product-management suite now executes that validator instead of matching an old expression |
 | 09 | [Courier and webhooks](09-courier-and-webhooks.md) | **PASSED** — 39 checks (signature, TLS, replay, redaction) |
 | 10 | [Notification retry](10-notification-retry.md) | **PASSED** — claim/retry contract verified |
 | 11 | [Performance](11-performance.md) | **NOT EXECUTED** (no load generator) — static review only |
 | 12 | [Rate-limit fail-safe](12-rate-limit-fail-safe.md) | **FIXED + PASSED** — 34 checks, fail-closed for secrets |
-| 13 | [Secret migration write failure](13-secret-migration-write-failure.md) | **FIXED + PASSED** — 49 checks |
-| 14 | [Full browser regression](14-browser-regression.md) | **NOT EXECUTED** — no browser in this sandbox |
+| 13 | [Secret migration write failure](13-secret-migration-write-failure.md) | **PASSED, no application defect** — 68/0/0 here, 51/0/13 on a host that ignores permission bits (each blocked check named); CI runs both modes |
+| 14 | [Full browser regression](14-browser-regression.md) | **PASSED in CI** — Chromium 131 against MySQL 8.0.46: fifteen storefront steps, twelve admin steps, mobile 390×844, CSP/console/request health, replayed checkout POST |
 | 15 | [Final integration](15-final-integration.md) | **PASSED** — 1,738 checks, 241/241 files lint clean, security scan clean |
-| 16 | [Final verification and production decision](16-final-verification.md) | **CONDITIONALLY READY** — see the verdict and the blocked-test list |
+| 16 | [Final verification and production decision](16-final-verification.md) | **CONDITIONALLY READY** — its three conditions are discharged by report 17 |
+| 17 | [The final four blockers](17-final-four-blockers.md) | **READY** — secrets, MySQL 8.0.46 + MariaDB 10.6.28, restore rehearsal 23/0, browser regression; seven defects fixed, six of them in the harness |
 
 ## Environment facts behind the "NOT EXECUTED" rows
 

@@ -1,5 +1,13 @@
 # 07 — CSP verification in a real browser
 
+> **Update — report 17 (2026-11-14).** The policy has now been exercised in a real browser.
+> `tests/browser/smoke.mjs` collects `securitypolicyviolation` events on every page it
+> visits — storefront, product, cart, checkout, order tracking, and the five admin screens —
+> and found **zero violations** (Chromium 131.0.6778.33, MySQL 8.0.46, run `43631797400`).
+>
+> Still open: **enforcement**. The store ships the policy report-only, and the run used
+> `php -S`, so Apache/LiteSpeed over HTTPS with `enforce` switched on is untested (R-07).
+
 **Status: NOT EXECUTED — no browser, and no web server that can execute PHP, exists in this
 sandbox.** The static half (31 checks) passes; the dynamic half is a copy-paste procedure.
 

@@ -1,12 +1,21 @@
 # ShopHaat — Production Readiness Report
 
-**Status:** *conditionally ready.* The security, OTP, environment and hosting
-layers are in a verifiable state; payments, IDOR and the database/performance
-audits are **not** finished, and that is stated plainly rather than papered over.
+**Status:** *ready for the four areas that were still open.* Secrets migration,
+MySQL **8.0.46**, MariaDB **10.6.28**, the backup→restore rehearsal and a 50→90-check
+browser regression are now executed results rather than assumptions. The residual list
+(CSP *enforcement* on a real host, provider credentials, load/performance) is stated in
+`reports/17-final-four-blockers.md` §8.
 
-Date of this status: 2026-11-14, refreshed in the final verification pass — see
-[`reports/16-final-verification.md`](reports/16-final-verification.md) for the full
-evidence and the three conditions that remain.
+Date of this status: 2026-11-14, refreshed in the **final four blockers** pass — see
+[`reports/17-final-four-blockers.md`](reports/17-final-four-blockers.md).
+
+> **Correction:** the earlier claim that `tests/mysql-integration.php` "passed on the real
+> `mysql:8.0` service at `a11ffdf`" was **wrong** — the suite had never connected. A
+> `$pass` / `$GLOBALS['pass']` name collision in the suite made PDO reject the password and
+> every scenario reported BLOCKED under a green tick, because a suite that cannot test must
+> not fail the build. Fixed: the password is `$dbPass`, and CI sets
+> `SH_TEST_REQUIRE_ENGINE=1` so a blocked engine on a provisioned runner exits 4. The
+> engine results now quoted are from run `43631797400`, which connects.
 
 ---
 
@@ -37,9 +46,9 @@ start of the remediation work and is superseded). Static scan: 0 findings / 189 
 |---|---|---|
 | Payment integrity audit | Needs a live database for constraint/concurrency tests | Payment logic is unchanged and manual-verification based; risk is unchanged, not increased — but it is unverified |
 | IDOR sweep | Order ownership checks not exercised against a real session/DB | Same as above: unverified, not known-broken |
-| MySQL verification | The sandbox has no MySQL, but CI does | **Verified on MySQL 8.0**: `tests/mysql-integration.php` (eleven engine scenarios — schema, migration, unique TrxID, concurrent duplicate submission, rollback, row locking, OTP replay/expiry, ownership, idempotency, backup metadata) is a required CI step and passed at `a11ffdf`. **MariaDB is still untested** (R-14) |
-| Backup restore rehearsal | No isolated environment | Backups exist; `tools/restore-rehearsal.php` automates the rehearsal, but the import itself is untested here |
-| Browser/functional regression | No web server or browser here | UI rendering of the new admin panel was not visually inspected |
+| MySQL / MariaDB verification | Closed | `tests/mysql-integration.php` ran against **MySQL 8.0.46** and **MariaDB 10.6.28** with `SH_TEST_REQUIRE_ENGINE=1` (run `43631797400`): schema, migration, unique TrxID, concurrent duplicate payment, rollback, row locking, OTP concurrency/expiry/replay, ownership, notification idempotency, backup metadata |
+| Backup restore rehearsal | Closed for the rehearsed path | `tools/restore-rehearsal.php --create-backup --app-check`: real backup, scratch database, 54/54 tables, indexes, a real order, the application reading the restored copy, scratch dropped — **23 checks, 0 failures** (same run) |
+| Browser/functional regression | Closed for `php -S` | `tests/browser/smoke.mjs` in Chromium 131 against MySQL 8.0.46: fifteen storefront steps, twelve admin steps, mobile 390×844, CSP/console/request health, and a replayed checkout POST that must not create a second order |
 
 None of the above is a claim that something is broken — it is a statement that it
 has not been *proven*, and this report does not present assumptions as facts.
@@ -51,10 +60,13 @@ has not been *proven*, and this report does not present assumptions as facts.
 2. Configure trusted proxies if the store is behind Cloudflare or a load balancer.
 3. Confirm Admin → System Health: environment row green, client-IP policy green,
    OTP provider ready, no missing required extension.
-4. Run `SH_TEST_MYSQL_DSN=… php tests/mysql-integration.php` on a disposable staging
-   database (add `SH_TEST_MYSQL_ALLOW_DROP=1`), then repeat it on MariaDB.
-5. Rehearse one restore: `php tools/restore-rehearsal.php --dump=… --user=… --pass=…`.
-6. Enforce CSP on staging, browse, then production.
+4. Run `SH_TEST_MYSQL_DSN=… SH_TEST_MYSQL_ALLOW_DROP=1 SH_TEST_REQUIRE_ENGINE=1 php
+   tests/mysql-integration.php` on a disposable staging database — `REQUIRE_ENGINE` turns
+   "could not connect" into a failure, so the step cannot pass without an engine.
+5. Rehearse one restore: `php tools/restore-rehearsal.php --create-backup --app-check
+   --user=… --pass=… --scratch=… --live=…`; it must end with `REHEARSAL PASSED`.
+6. Enforce CSP on staging, browse, then production. Optionally run
+   `node tests/browser/smoke.mjs` against staging (CI runs it against `php -S`).
 
 ## 4. Verdict
 
@@ -65,10 +77,28 @@ has not been *proven*, and this report does not present assumptions as facts.
 * **Known unresolved High issues:** none confirmed; two audited areas
   (payments, IDOR) remain *unverified* — see `SHOP_HAAT_REMAINING_RISKS.md`
   R-01/R-02.
-* **Final verification pass (2026-11-14):** one application defect found and fixed
-  (a CLI cron run could exit 0 silently), two test defects fixed, and two
-  verification tools added. Verdict unchanged: **CONDITIONALLY READY**, with three
-  named conditions in `reports/16-final-verification.md` §6.
-* **What this report does not say:** it does not say the application is 100 %
-  secure, and it does not say it is fully production-ready while R-01, R-02, R-03
-  and R-06 are open.
+* **Final four blockers pass (2026-11-14):** the three conditions from report 16 are
+  discharged — MariaDB 10.6.28 verified, a real restore rehearsed (23/0), and a browser
+  pass with CSP violation reporting in place. Seven defects were found and fixed in this
+  pass, **six of them in the test harness** that had been reporting success:
+  1. `tests/mysql-integration.php` — `$pass` collided with the `$GLOBALS['pass']` counter,
+     so PDO received `1` as the password and every engine scenario was BLOCKED under a
+     green tick.
+  2. CI — `cmd | tee` without `pipefail` reported tee's status, so a suite with failures
+     exited 0 (two runs went green carrying `6 passed, 2 failed` and `19 passed, 4 failed`).
+  3. `tools/restore-rehearsal.php` — a hand-written table list flagged `sessions` as lost
+     though the dump never had it.
+  4. `tests/restore-rehearsal.php` — the "uninstalled checkout" case ran the installed tool
+     and created a backup instead of refusing.
+  5. `tests/browser/seed.php` — missing `require install/demo-data.php` produced an empty
+     storefront while exiting 0 (the application's error page was the only clue).
+  6. `tests/browser/smoke.mjs` — the sign-in clicked the header search button, the gallery
+     assertion assumed a multi-image product, and the checkout check accepted a login
+     redirect. All three produced plausible-looking passes.
+  7. `tests/mysql-integration.php` — added `SH_TEST_REQUIRE_ENGINE` so this class of
+     silent BLOCKED cannot recur in CI.
+* **Verdict: READY** for the four areas targeted, with the residual list in
+  `reports/17-final-four-blockers.md` §8 (CSP enforcement on a real host, provider
+  credentials, load/performance, restoring across engine versions).
+* **What this report does not say:** it does not say the application is 100 % secure, and
+  it does not claim anything measured on a live provider or under production load.
