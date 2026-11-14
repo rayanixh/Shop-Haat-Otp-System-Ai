@@ -319,7 +319,12 @@ jobs:
           SH_TEST_MYSQL_USER: shophaat_test
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
-        run: php tests/mysql-integration.php
+        run: |
+          rc=0
+          php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
+          grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|^BLOCKED' /tmp/engine.log \
+            | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
+          exit "$rc"
       # The rehearsal this project has never been able to run: the application
       # creates a real backup of the disposable store, the tool imports it into a
       # NEW scratch database, verifies tables/indexes/relationships/settings and a
@@ -350,6 +355,13 @@ jobs:
             { grep -E '^ *(FAIL|BLOCKED|REFUSED)|^Backup restore' /tmp/rehearsal.log; tail -n 12 /tmp/rehearsal.log; } \
               | sort -u | head -n 40 \
               | while IFS= read -r line; do echo "::error::rehearsal: ${line//\%/\%25}"; done
+          else
+            # The counts belong on the run, not only inside a log nobody opens:
+            # "passed 10, blocked 2" is the difference between a rehearsal that
+            # ran against MySQL and one that only proved its refusals.
+            grep -E '^(Backup restore|Real rehearsal|BLOCKED)' /tmp/rehearsal.log \
+              | tail -n 6 \
+              | while IFS= read -r line; do echo "::notice::rehearsal: ${line//\%/\%25}"; done
           fi
           exit "$rc"
 
@@ -396,7 +408,12 @@ jobs:
           SH_TEST_MYSQL_USER: shophaat_test
           SH_TEST_MYSQL_PASS: shophaat_test_password
           SH_TEST_MYSQL_ALLOW_DROP: '1'
-        run: php tests/mysql-integration.php
+        run: |
+          rc=0
+          php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
+          grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|^BLOCKED' /tmp/engine.log \
+            | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
+          exit "$rc"
 
   # ========================================================================
   # The only environment in this project that has a real browser, a real web
@@ -471,6 +488,9 @@ jobs:
             echo "::error::browser: --- php -S log tail ---"
             tail -n 25 /tmp/php-server.log \
               | while IFS= read -r line; do echo "::error::php: ${line//\%/\%25}"; done
+          else
+            grep -E '^Browser regression|^Base URL' /tmp/browser.log \
+              | while IFS= read -r line; do echo "::notice::browser: ${line//\%/\%25}"; done
           fi
           exit "$rc"
       - name: Upload screenshots and the PHP server log
