@@ -41,12 +41,19 @@ $tool = SH_ROOT . '/tools/restore-rehearsal.php';
 $tmp = sys_get_temp_dir() . '/sh-restore-suite-' . bin2hex(random_bytes(3));
 @mkdir($tmp, 0777, true);
 
-/** Run the tool; returns [output, exitCode, codesReliable]. */
-function rr_run(array $args, string $tmp): array
+/**
+ * Run the tool; returns [output, exitCode, codesReliable].
+ *
+ * $toolOverride runs a copy of the tool from another directory. The tool finds
+ * the application through its own location (dirname(__DIR__)), so a copy under a
+ * bare temporary root is the only honest way to reproduce "not installed" on a
+ * machine where the real checkout IS installed.
+ */
+function rr_run(array $args, string $tmp, ?string $toolOverride = null): array
 {
     $php = sh_test_php_binary();
     if (!$php['ok']) { return ['', -1, false]; }
-    $cmd = escapeshellarg($php['bin']) . ' ' . escapeshellarg(SH_ROOT . '/tools/restore-rehearsal.php');
+    $cmd = escapeshellarg($php['bin']) . ' ' . escapeshellarg($toolOverride ?? SH_ROOT . '/tools/restore-rehearsal.php');
     foreach ($args as $a) { $cmd .= ' ' . escapeshellarg($a); }
     $cmd .= ' 2>&1';
     $out = (string)@shell_exec($cmd);
@@ -102,8 +109,8 @@ file_put_contents($good, "SET NAMES utf8mb4;\n-- ShopHaat database backup\n"
         return;
     }
 
-    $check = static function (string $name, array $args, string $expectText, ?int $expectCode) use ($ok, $codesReliable): void {
-        [$out, $rc] = rr_run($args, sys_get_temp_dir());
+    $check = static function (string $name, array $args, string $expectText, ?int $expectCode, ?string $tool = null) use ($ok, $codesReliable): void {
+        [$out, $rc] = rr_run($args, sys_get_temp_dir(), $tool);
         $ok(str_contains($out, $expectText), $name . ' — expected the output to contain "' . $expectText . '", got: '
             . substr(trim(preg_replace('~\s+~', ' ', $out)), 0, 180));
         if ($expectCode !== null && $codesReliable) {
@@ -125,8 +132,14 @@ file_put_contents($good, "SET NAMES utf8mb4;\n-- ShopHaat database backup\n"
         ['--dump=' . $good, '--user=x', '--scratch=shophaat_production_test'], 'looks like a production database', 2);
     $check('an invalid scratch name is refused',
         ['--dump=' . $good, '--user=x', '--scratch=bad-name!'], 'letters, digits and underscores', 2);
+    // A copy of the tool under a bare root: dirname(__DIR__) has no config/ and no
+    // installed lock, so the "installed checkout" gate is what gets exercised.
+    $bareRoot = $tmp . '/bare';
+    @mkdir($bareRoot . '/tools', 0777, true);
+    $bareTool = $bareRoot . '/tools/restore-rehearsal.php';
+    copy(SH_ROOT . '/tools/restore-rehearsal.php', $bareTool);
     $check('--create-backup refuses an uninstalled checkout',
-        ['--create-backup', '--user=x'], 'needs an installed checkout', 2);
+        ['--create-backup', '--user=x'], 'needs an installed checkout', 2, $bareTool);
 
     if (!$codesReliable) {
         $blocked('exit codes 2 (refused) and 3 (blocked) are distinguishable',
@@ -165,8 +178,14 @@ file_put_contents($good, "SET NAMES utf8mb4;\n-- ShopHaat database backup\n"
         . ' 2>&1; echo "__RC=$?"';
     $out = (string)@shell_exec($cmd);
     $rc = preg_match('~__RC=(-?\d+)~', $out, $rm) ? (int)$rm[1] : -1;
+    $ownFails = [];
+    foreach (preg_split('~\R~', $out) as $line) {
+        if (preg_match('~^\s*(FAIL|BLOCKED)\b~', $line)) { $ownFails[] = trim($line); }
+    }
     $ok(str_contains($out, 'REHEARSAL PASSED'),
-        'the rehearsal passes end to end (' . $scratch . ') — ' . substr(trim(preg_replace('~\s+~', ' ', $out)), -260));
+        'the rehearsal passes end to end (' . $scratch . ') — '
+        . ($ownFails === [] ? 'the tool reported no failing check but did not print REHEARSAL PASSED'
+            : implode(' | ', array_slice($ownFails, 0, 4))));
     if ($codesReliable) {
         $ok($rc === 0, 'the rehearsal exits 0 (got ' . $rc . ')');
     }

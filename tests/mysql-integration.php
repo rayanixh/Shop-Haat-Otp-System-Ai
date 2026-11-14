@@ -65,7 +65,10 @@ mi_section('Environment');
 
 $dsn = (string)getenv('SH_TEST_MYSQL_DSN');
 $user = (string)getenv('SH_TEST_MYSQL_USER');
-$pass = (string)getenv('SH_TEST_MYSQL_PASS');
+// NOT $pass: the pass/fail counters live in $GLOBALS['pass'], so a global
+// $pass was overwritten by the first mi_pass() and PDO received an int as the
+// password — which silently turned every database scenario into BLOCKED.
+$dbPass = (string)getenv('SH_TEST_MYSQL_PASS');
 
 echo 'php            : ' . PHP_VERSION . ' (' . PHP_SAPI . ")\n";
 echo 'pdo_mysql      : ' . (extension_loaded('pdo_mysql') ? 'loaded' : 'MISSING') . "\n";
@@ -150,7 +153,7 @@ if ($dsn !== '' && extension_loaded('pdo_mysql') && $preflightError === '') {
 $pdo = null;
 if ($dsn !== '' && extension_loaded('pdo_mysql') && $preflightError === '') {
     try {
-        $pdo = new PDO($dsn, $user, $pass, [
+        $pdo = new PDO($dsn, $user, $dbPass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
@@ -217,7 +220,7 @@ $dbCfg = [
     'port' => (int)($pt[1] ?? 3306),
     'name' => $d[1] ?? '',
     'user' => $user,
-    'pass' => $pass,
+    'pass' => $dbPass,
     'charset' => $c[1] ?? 'utf8mb4',
 ];
 if (!is_file($cfgPath)) {
@@ -377,7 +380,7 @@ mi_section('4. Concurrent duplicate transaction submissions');
 // connections in one process with an explicit lock, which proves the database
 // (not the application) is the referee.
 try {
-    $b = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $b = new PDO($dsn, $user, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $pdo->beginTransaction();
     $pdo->exec("INSERT INTO payments (order_id, kind, amount, status, transaction_id) VALUES (NULL, 'manual', 5, 'pending', 'CONC-TRX-1')");
     $b->beginTransaction();
@@ -413,7 +416,7 @@ mi_ok('a rolled-back update leaves the row untouched',
 mi_section('6. SELECT … FOR UPDATE locking');
 // ===========================================================================
 try {
-    $b = new PDO($dsn, $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $b = new PDO($dsn, $user, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $b->exec('SET SESSION innodb_lock_wait_timeout = 1');
     $orderId = (int)sh_query_first($pdo, 'SELECT MIN(id) FROM orders');
     $pdo->beginTransaction();

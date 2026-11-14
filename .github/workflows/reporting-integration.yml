@@ -471,7 +471,15 @@ jobs:
         env:
           SH_BROWSER_SEED: '1'
           SH_BROWSER_HOST: 127.0.0.1:8080
-        run: php tests/browser/seed.php
+        # The seed's counts decide whether an empty storefront is a seeding
+        # problem or a rendering problem, so they go on the run, not in the log.
+        run: |
+          set -o pipefail
+          rc=0
+          php tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
+          grep -E '^(PASS|FAIL|\{)' /tmp/seed.log | head -n 12 \
+            | while IFS= read -r line; do echo "::notice::seed: ${line//\%/\%25}"; done
+          exit "$rc"
       - name: Start the PHP web server
         run: |
           php -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &

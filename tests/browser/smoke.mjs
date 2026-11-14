@@ -97,7 +97,8 @@ try {
   const home = await page.goto(BASE + '/index.php', { waitUntil: 'domcontentloaded' });
   check('the home page responds 200', home && home.status() === 200, `status ${home?.status()}`);
   const cards = await page.locator('article.sh-product-card').count();
-  check('the home page lists products', cards > 0, `${cards} product cards`);
+  check('the home page lists products', cards > 0,
+    `${cards} product cards · url ${page.url().replace(BASE, '')} · title "${(await page.title()).slice(0, 90)}"`);
   const brokenImages = await page.evaluate(() => Array.from(document.images)
     .filter((img) => img.complete && img.naturalWidth === 0)
     .map((img) => img.currentSrc || img.src).slice(0, 3));
@@ -111,8 +112,12 @@ try {
   /* ------------------------------------------------------------------ */
   console.log('\n2. Category page');
   errors = await watch(page);
-  const catHref = await page.locator('a.sh-product-card__media').first().getAttribute('href');
-  const productUrl = new URL(catHref, BASE).toString();
+  // An empty catalogue must not abort the run: the later areas then fail with a
+  // readable reason instead of a 30 s locator timeout.
+  const catHref = await page.locator('a.sh-product-card__media').first()
+    .getAttribute('href', { timeout: 5000 }).catch(() => null);
+  const productUrl = catHref ? new URL(catHref, BASE).toString() : BASE + '/product.php?slug=missing-in-seed';
+  if (!catHref) { check('a product card links to a product page', false, 'the home page had no product cards'); }
   const cat = await page.goto(BASE + '/products.php', { waitUntil: 'domcontentloaded' });
   check('the shop listing responds 200', cat && cat.status() === 200, `status ${cat?.status()}`);
   const listed = await page.locator('article.sh-product-card').count();
