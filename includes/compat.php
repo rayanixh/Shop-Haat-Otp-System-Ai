@@ -216,6 +216,38 @@ if (!function_exists('sh_compat_mb_strlen')) {
 // ---------------------------------------------------------------------------
 // Bind the plain mb_* names only when the extension is genuinely missing.
 // ---------------------------------------------------------------------------
+/**
+ * Response headers from the last stream-wrapper HTTP request.
+ *
+ * `$http_response_header` is deprecated in PHP 8.4, and PHP raises the notice
+ * while *compiling* a file that mentions it — so a single reference turns every
+ * request into a log line. http_get_last_response_headers() is the supported
+ * replacement (8.4+); below that the magic variable is still the only source, so
+ * it is read through $GLOBALS, which does not trigger the notice.
+ *
+ * @return list<string>
+ */
+function sh_http_last_response_headers(): array
+{
+    if (function_exists('http_get_last_response_headers')) {
+        $headers = http_get_last_response_headers();
+        return is_array($headers) ? array_values(array_map('strval', $headers)) : [];
+    }
+    $legacy = $GLOBALS['http_response_header'] ?? [];
+    return is_array($legacy) ? array_values(array_map('strval', $legacy)) : [];
+}
+
+/**
+ * Status code from the last stream-wrapper HTTP request (0 when unknown).
+ */
+function sh_http_last_status(): int
+{
+    foreach (sh_http_last_response_headers() as $line) {
+        if (preg_match('~^HTTP/\S+\s+(\d{3})~', $line, $m)) { return (int)$m[1]; }
+    }
+    return 0;
+}
+
 if (!function_exists('mb_strlen')) {
     function mb_strlen(string $string, ?string $encoding = null): int { return sh_compat_mb_strlen($string); }
     function mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string

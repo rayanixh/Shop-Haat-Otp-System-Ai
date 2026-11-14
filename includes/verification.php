@@ -12,6 +12,8 @@
  * Columns added to orders: order_ip, order_ip_version.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
@@ -304,8 +306,7 @@ function sh_verify_http(string $method, string $url, array $headers, ?string $bo
         set_error_handler(static fn(): bool => true);
         try { $raw = file_get_contents($url, false, $ctx); } finally { restore_error_handler(); }
         if ($raw === false) { return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'Connection failed']; }
-        $status = 0;
-        foreach ($http_response_header ?? [] as $line) { if (preg_match('~^HTTP/\S+\s+(\d{3})~', $line, $m)) { $status = (int)$m[1]; } }
+        $status = sh_http_last_status();
     } else {
         $ch = curl_init($url);
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => min(5, $timeout),
