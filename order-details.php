@@ -73,6 +73,8 @@ require_once SH_ROOT . '/includes/header.php';
           <div class="sh-mini-item">
             <img class="sh-mini-item__img" src="<?= e(sh_product_image($it['product_image'])) ?>" alt="" loading="lazy">
             <div class="sh-mini-item__name"><?= e($it['product_name']) ?>
+              <?php $colour = sh_order_item_colour_text($it); ?>
+              <?php if ($colour !== ''): ?><div class="sh-mini-item__qty">Colour: <?= e($colour) ?></div><?php endif; ?>
               <div class="sh-mini-item__qty"><?= e(ucfirst($it['product_type'])) ?> · Qty <?= (int)$it['quantity'] ?> × <?= e(sh_money($it['unit_price'])) ?></div></div>
             <span class="sh-mini-item__price"><?= e(sh_money($it['line_total'])) ?></span>
           </div>

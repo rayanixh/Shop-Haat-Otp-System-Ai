@@ -65,14 +65,41 @@ if ($form === 'save') {
     $dupe = sh_one('SELECT id FROM products WHERE slug = ? AND id <> ? LIMIT 1', [$slug, $id]);
     if ($dupe) { $errors['slug'] = 'Another product already uses the URL slug "' . $slug . '".'; }
 
-    $image = sh_post('current_image');
-    if (!empty($_FILES['image']['name'])) {
-        $up = sh_upload_image($_FILES['image'], 'products');
-        if (!empty($up['ok'])) { $image = $up['file']; }
-        else { $errors['image'] = $up['error'] ?? 'The image could not be uploaded.'; }
+    $productBefore = $id > 0 ? sh_one('SELECT image FROM products WHERE id = ? LIMIT 1', [$id]) : null;
+    $savedGallery = $id > 0
+        ? sh_product_gallery_rows($id, (string)($productBefore['image'] ?? ''), true)
+        : [];
+    // A brand-new product needs one photo. A legacy product that has none may
+    // still be edited without being forced to invent one; once it has photos,
+    // removing every photo is rejected.
+    $requireImage = $id <= 0 || $savedGallery !== [];
+    foreach (sh_product_gallery_submission_errors($savedGallery, $_POST, $_FILES, $requireImage) as $i => $message) {
+        $errors['gallery_' . $i] = $message;
     }
+    $plan = ['ok' => false, 'rows' => [], 'primary' => '', 'uploaded' => []];
+    $cleanupUploads = static function () use (&$plan): void {
+        foreach (($plan['uploaded'] ?? []) as $file) { sh_product_delete_image_file((string)$file); }
+        $plan['uploaded'] = [];
+    };
+    // Upload only when the rest of the form is valid: no orphan files are left
+    // behind by an unrelated validation error.
+    if (!$errors) {
+        $plan = sh_product_gallery_plan($savedGallery, $_POST, $_FILES, $requireImage);
+        if (!$plan['ok']) {
+            foreach ($plan['errors'] as $i => $message) { $errors['gallery_' . $i] = $message; }
+        }
+    }
+    $image = (string)($plan['primary'] ?? '');
 
     if (!$errors) {
+        $brandId = sh_int($_POST['brand_id'] ?? 0);
+        $catalogTypeId = sh_int($_POST['catalog_type_id'] ?? 0);
+        $colourIds = isset($_POST['colour_ids']) && is_array($_POST['colour_ids'])
+            ? array_slice(array_map('intval', $_POST['colour_ids']), 0, 40) : [];
+        $customNames = isset($_POST['custom_colour_name']) && is_array($_POST['custom_colour_name'])
+            ? array_slice(array_map('strval', $_POST['custom_colour_name']), 0, 20) : [];
+        $customHexes = isset($_POST['custom_colour_hex']) && is_array($_POST['custom_colour_hex'])
+            ? array_slice(array_map('strval', $_POST['custom_colour_hex']), 0, 20) : [];
         $data = [
             'category_id' => sh_int($_POST['category_id'] ?? 0) ?: null,
             'name' => sh_post('name'),
@@ -105,7 +132,19 @@ if ($form === 'save') {
             'seo_canonical'       => mb_substr(sh_seo_clean_url(sh_post('seo_canonical')), 0, 255) ?: null,
             'seo_noindex'         => !empty($_POST['seo_noindex']) ? 1 : 0,
         ];
+        $pdo = sh_db();
+        $ownsTransaction = !$pdo->inTransaction();
         try {
+            // Admin tooling tables must exist before a transaction: MySQL DDL
+            // commits implicitly and would break the product save's rollback.
+            sh_admin_schema_ensure();
+            if ($ownsTransaction) { $pdo->beginTransaction(); }
+            if (trim(sh_post('new_brand')) !== '') {
+                $brandId = sh_product_catalog_create_brand(sh_post('new_brand'));
+            }
+            if (trim(sh_post('new_catalog_type')) !== '') {
+                $catalogTypeId = sh_product_catalog_create_type(sh_post('new_catalog_type'));
+            }
             if ($id > 0) {
                 $before = sh_one('SELECT * FROM products WHERE id = ?', [$id]) ?? [];
                 $stockReason = trim(sh_post('stock_reason'));
@@ -113,7 +152,10 @@ if ($form === 'save') {
                 $applyData = $data;
                 if ($stockChanged) { unset($applyData['stock']); } // applied through sh_stock_adjust so the history is recorded
                 sh_update('products', $applyData, 'id = ?', [$id]);
-                if ($stockChanged) { sh_stock_adjust($id, (int)$data['stock'], $stockReason !== '' ? $stockReason : 'Edited in product form', 'manual'); }
+                if ($stockChanged) {
+                    $stockResult = sh_stock_adjust($id, (int)$data['stock'], $stockReason !== '' ? $stockReason : 'Edited in product form', 'manual');
+                    if (empty($stockResult['ok'])) { throw new RuntimeException('The stock history could not be saved.'); }
+                }
                 $diff = [];
                 foreach (['name', 'sku', 'category_id', 'status', 'low_stock_threshold', 'is_featured', 'is_flash_sale', 'compare_price'] as $k) {
                     if (array_key_exists($k, $before) && (string)$before[$k] !== (string)$data[$k]) { $diff[$k] = [$before[$k], $data[$k]]; }
@@ -124,19 +166,36 @@ if ($form === 'save') {
                 if ($diff) {
                     sh_audit('product_updated', 'product', $id, (string)$data['name'], array_map(static fn($d) => $d[0], $diff), array_map(static fn($d) => $d[1], $diff));
                 }
-                sh_stock_check_alert($id);
                 sh_flash('success', 'Product "' . $data['name'] . '" updated.');
             } else {
                 $id = sh_insert('products', $data);
                 sh_audit('product_created', 'product', $id, (string)$data['name'], null, ['price' => $data['price'], 'stock' => $data['stock'], 'type' => 'physical']);
-                if ((int)$data['stock'] > 0) { sh_stock_adjust($id, (int)$data['stock'], 'Initial stock', 'initial'); }
+                if ((int)$data['stock'] > 0) {
+                    $stockResult = sh_stock_adjust($id, (int)$data['stock'], 'Initial stock', 'initial');
+                    if (empty($stockResult['ok'])) { throw new RuntimeException('The initial stock history could not be saved.'); }
+                }
                 sh_flash('success', 'Product "' . $data['name'] . '" created.');
             }
+            // File deletion is intentionally deferred until AFTER commit.
+            $oldFiles = sh_product_gallery_commit($id, $plan, $savedGallery, false);
+            sh_product_catalog_save_relations(
+                $id, $brandId, $catalogTypeId, $colourIds, $customNames, $customHexes
+            );
+            if ($ownsTransaction) { $pdo->commit(); }
+            foreach ($oldFiles as $file) {
+                try { sh_product_delete_unreferenced_image((string)$file); }
+                catch (Throwable $ignored) { sh_log_exception($ignored, 'product-old-image-cleanup'); }
+            }
+            // Uploaded files are now referenced by committed DB rows.
+            $plan['uploaded'] = [];
+            sh_stock_check_alert($id);
             // The product list, its slugs and the sitemap all just changed.
             sh_seo_cache_invalidate();
             sh_redirect($listUrl);
         } catch (Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) { $pdo->rollBack(); }
             sh_log_exception($e, 'product-save');
+            $cleanupUploads();
             $errors['general'] = 'The product could not be saved. The error has been logged.';
         }
     }
@@ -172,7 +231,34 @@ $chk = static function (string $k, bool $default = false) use ($editing, $errors
 };
 
 $cats = sh_all('SELECT id, name FROM categories ORDER BY name ASC');
-
+$editingId = (int)($editing['id'] ?? 0);
+$brands = sh_product_brands_all(true);
+$types = sh_product_types_all(true);
+$commonColours = sh_product_colours_all(true);
+$colourState = sh_product_colour_form_state($editingId, $errors ? $_POST : []);
+$brandIdValue = $errors ? sh_int($_POST['brand_id'] ?? 0) : (int)($editing['brand_id'] ?? 0);
+$catalogTypeIdValue = $errors ? sh_int($_POST['catalog_type_id'] ?? 0) : (int)($editing['catalog_type_id'] ?? 0);
+$galleryRows = $editingId > 0
+    ? sh_product_gallery_rows($editingId, (string)($editing['image'] ?? ''), false)
+    : [];
+$renderRows = $galleryRows;
+if ($errors && isset($_POST['image_row']) && is_array($_POST['image_row'])) {
+    $byToken = [];
+    foreach ($galleryRows as $row) { $byToken['e:' . (int)$row['id']] = $row; }
+    $ordered = [];
+    foreach ($_POST['image_row'] as $token) {
+        $token = (string)$token;
+        if (isset($byToken[$token])) { $ordered[] = $byToken[$token]; unset($byToken[$token]); }
+    }
+    $renderRows = array_merge($ordered, array_values($byToken));
+}
+$postedRemove = $errors && isset($_POST['image_remove']) && is_array($_POST['image_remove'])
+    ? array_map('intval', array_keys($_POST['image_remove'])) : [];
+$serverLimit = (int)sh_server_upload_limit();
+$galleryMaxBytes = $serverLimit > 0 ? min(SH_PRODUCT_MAX_IMAGE_BYTES, $serverLimit) : SH_PRODUCT_MAX_IMAGE_BYTES;
+$customRows = $colourState['custom'];
+$customRows[] = ['name' => '', 'hex' => '#888888']; // one no-JS custom-colour row
+$adminScripts = ['product_form' => 'assets/js/product-form.js'];
 $adminPage = 'products';
 $adminTitle = $editing !== null ? 'Edit product' : 'New product';
 require __DIR__ . '/_layout.php';
@@ -193,11 +279,11 @@ require __DIR__ . '/_layout.php';
 
   <div class="sh-panel sh-formcard">
     <div class="sh-panel__body">
-      <form method="post" enctype="multipart/form-data" novalidate data-dirty-guard>
+      <form method="post" enctype="multipart/form-data" novalidate data-dirty-guard data-product-form>
         <?= sh_csrf_field() ?>
         <input type="hidden" name="form" value="save">
         <input type="hidden" id="p-id" name="id" value="<?= (int)($editing['id'] ?? 0) ?>">
-        <input type="hidden" id="p-current-image" name="current_image" value="<?= e($val('image')) ?>">
+        <input type="hidden" id="p-current-image" value="<?= e($val('image')) ?>">
 
         <div class="sh-grid2">
           <div class="sh-field"><label class="sh-field__label" for="p-name">Product name <span class="sh-field__req">*</span></label>
@@ -215,6 +301,34 @@ require __DIR__ . '/_layout.php';
             </select></div>
           <div class="sh-field"><label class="sh-field__label" for="p-sku">SKU</label>
             <input class="sh-input" id="p-sku" name="sku" maxlength="60" value="<?= e($val('sku')) ?>"></div>
+        </div>
+        <div class="sh-pa__row">
+          <div class="sh-field">
+            <label class="sh-field__label" for="p-brand">Brand</label>
+            <select class="sh-select" id="p-brand" name="brand_id">
+              <option value="0" <?= $brandIdValue === 0 ? 'selected' : '' ?>>Unbranded / No brand</option>
+              <?php foreach ($brands as $b): ?>
+                <option value="<?= (int)$b['id'] ?>" <?= $brandIdValue === (int)$b['id'] ? 'selected' : '' ?>><?= e($b['name']) ?><?= (int)$b['status'] !== 1 ? ' (hidden)' : '' ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="sh-pa__quick">
+              <input class="sh-input" name="new_brand" maxlength="120" placeholder="Add a new brand" value="<?= e($errors ? sh_post('new_brand') : '') ?>">
+              <a class="sh-pa__link" href="<?= e(sh_url('admin/product-attributes.php#brands')) ?>">Manage brands</a>
+            </div>
+          </div>
+          <div class="sh-field">
+            <label class="sh-field__label" for="p-catalog-type">Product type</label>
+            <select class="sh-select" id="p-catalog-type" name="catalog_type_id">
+              <option value="0" <?= $catalogTypeIdValue === 0 ? 'selected' : '' ?>>Not specified</option>
+              <?php foreach ($types as $t): ?>
+                <option value="<?= (int)$t['id'] ?>" <?= $catalogTypeIdValue === (int)$t['id'] ? 'selected' : '' ?>><?= e($t['name']) ?><?= (int)$t['status'] !== 1 ? ' (hidden)' : '' ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="sh-pa__quick">
+              <input class="sh-input" name="new_catalog_type" maxlength="120" placeholder="Add a new type" value="<?= e($errors ? sh_post('new_catalog_type') : '') ?>">
+              <a class="sh-pa__link" href="<?= e(sh_url('admin/product-attributes.php#types')) ?>">Manage types</a>
+            </div>
+          </div>
         </div>
         <div class="sh-grid3">
           <div class="sh-field"><label class="sh-field__label" for="p-price">Selling price <span class="sh-field__req">*</span></label>
@@ -239,17 +353,94 @@ require __DIR__ . '/_layout.php';
               <a class="sh-table__meta" style="margin-left:8px" href="<?= e(sh_url('admin/stock.php?view=all&q=' . urlencode((string)$editing['name']))) ?>">Stock history</a></div></div>
           <?php endif; ?>
         </div>
-        <div class="sh-field"><label class="sh-field__label" for="p-img">Product image</label>
-          <input class="sh-input" id="p-img" type="file" name="image" accept="image/*">
-          <span class="sh-field__hint">PNG, JPG, WebP or GIF. Maximum <?= e(sh_bytes_label(sh_server_upload_limit())) ?> (your server's limit).</span>
-          <span class="sh-field__hint">JPG, PNG or WebP. Max 3 MB.</span></div>
+        <div class="sh-field">
+          <label class="sh-field__label">Product images</label>
+          <div class="sh-pg" data-product-gallery-editor>
+            <div class="sh-pg__head"><strong>Gallery</strong><span class="sh-pg__count" data-pg-count><?= count($renderRows) ?> / <?= SH_PRODUCT_MAX_IMAGES ?> images</span></div>
+            <p class="sh-pg__hint">Upload 1–<?= SH_PRODUCT_MAX_IMAGES ?> real photos. The first image is primary; use the arrows to reorder. JPG, PNG, WebP or GIF, maximum <?= e(sh_bytes_label($galleryMaxBytes)) ?> each. Previews keep their own proportions.</p>
+            <div class="sh-pg__grid" data-pg-grid>
+              <?php foreach ($renderRows as $i => $row): ?>
+                <?php $rid = (int)$row['id']; $removed = in_array($rid, $postedRemove, true); ?>
+                <div class="sh-pg__tile <?= $i === 0 ? 'is-primary' : '' ?><?= $removed ? ' is-removed' : '' ?>" data-pg-tile="existing" data-pg-token="e:<?= $rid ?>">
+                  <span class="sh-pg__primary" data-pg-primary <?= $i === 0 ? '' : 'hidden' ?>>PRIMARY</span>
+                  <div class="sh-pg__preview">
+                    <?php if ($row['url'] !== ''): ?>
+                      <img src="<?= e($row['url']) ?>" alt="Saved product image <?= $i + 1 ?>">
+                    <?php else: ?>
+                      <span class="sh-pg__hint">Image file missing</span>
+                    <?php endif; ?>
+                  </div>
+                  <input type="hidden" name="image_row[]" value="e:<?= $rid ?>" data-pg-token>
+                  <div class="sh-pg__actions">
+                    <button class="sh-pg__btn" type="button" data-pg-move="-1" aria-label="Move image <?= $i + 1 ?> earlier">←</button>
+                    <button class="sh-pg__btn" type="button" data-pg-move="1" aria-label="Move image <?= $i + 1 ?> later">→</button>
+                    <button class="sh-pg__btn sh-pg__btn--danger" type="button" data-pg-remove-btn aria-pressed="<?= $removed ? 'true' : 'false' ?>"><?= $removed ? 'Undo' : 'Remove' ?></button>
+                    <input class="sh-pg__remove-label" type="checkbox" name="image_remove[<?= $rid ?>]" value="1" data-pg-remove <?= $removed ? 'checked' : '' ?>>
+                  </div>
+                  <label class="sh-pg__hint">Replace
+                    <input class="sh-pg__file" type="file" name="image_replace[<?= $rid ?>]" data-pg-replace accept="image/jpeg,image/png,image/webp,image/gif" <?= $removed ? 'disabled' : '' ?>>
+                  </label>
+                  <div class="sh-pg__removed">Will be removed</div>
+                </div>
+              <?php endforeach; ?>
+              <div class="sh-pg__new" data-pg-input-wrap>
+                <label class="sh-field__label" for="p-images">Add images</label>
+                <input id="p-images" type="file" name="images[]" multiple data-pg-input accept="image/jpeg,image/png,image/webp,image/gif">
+                <span class="sh-pg__hint">Choose up to <?= SH_PRODUCT_MAX_IMAGES ?> images in total. New previews appear before you save.</span>
+              </div>
+            </div>
+            <p class="sh-pg__error" data-pg-error hidden></p>
+          </div>
+        </div>
+
+        <div class="sh-field">
+          <label class="sh-field__label">Product colours</label>
+          <div class="sh-pc" data-product-colour-editor>
+            <div class="sh-pg__head"><strong>Available colours</strong>
+              <a class="sh-pa__link" href="<?= e(sh_url('admin/product-attributes.php#colours')) ?>">Manage swatches</a></div>
+            <p class="sh-pg__hint">Select common swatches or add product-specific custom colours. Only selected colours appear to customers and are stored as structured attributes.</p>
+            <?php if ($commonColours): ?>
+              <div class="sh-pc__list">
+                <?php foreach ($commonColours as $c): ?>
+                  <label class="sh-pc__chip">
+                    <input type="checkbox" name="colour_ids[]" value="<?= (int)$c['id'] ?>"
+                           data-colour-option data-colour-name="<?= e($c['name']) ?>"
+                           <?= isset($colourState['selected'][(int)$c['id']]) ? 'checked' : '' ?>>
+                    <span class="sh-pc__swatch" style="background:<?= e(sh_product_clean_hex($c['hex'])) ?>"></span>
+                    <span class="sh-pc__chip-name"><?= e($c['name']) ?><?= (int)$c['status'] !== 1 ? ' (hidden)' : '' ?></span>
+                  </label>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
+            <div class="sh-pc__custom" data-pc-custom>
+              <?php foreach ($customRows as $row): ?>
+                <div class="sh-pc__row" data-pc-row>
+                  <input class="sh-input" type="text" name="custom_colour_name[]" maxlength="120" data-pc-name
+                         value="<?= e($row['name']) ?>" placeholder="Custom colour name" aria-label="Custom colour name">
+                  <input type="color" name="custom_colour_hex[]" value="<?= e(sh_product_clean_hex($row['hex'])) ?>" aria-label="Custom colour swatch">
+                  <button class="sh-pg__btn sh-pg__btn--danger" type="button" data-pc-remove aria-label="Remove custom colour">×</button>
+                </div>
+              <?php endforeach; ?>
+            </div>
+            <template data-pc-template>
+              <div class="sh-pc__row" data-pc-row>
+                <input class="sh-input" type="text" name="custom_colour_name[]" maxlength="120" data-pc-name
+                       value="" placeholder="Custom colour name" aria-label="Custom colour name">
+                <input type="color" name="custom_colour_hex[]" value="#888888" aria-label="Custom colour swatch">
+                <button class="sh-pg__btn sh-pg__btn--danger" type="button" data-pc-remove aria-label="Remove custom colour">×</button>
+              </div>
+            </template>
+            <div class="sh-pc__tools">
+              <button class="sh-btn sh-btn--sm sh-btn--ghost" type="button" data-pc-add><?= sh_icon('plus', 13) ?> Add custom colour</button>
+              <span class="sh-pc__summary" data-pc-summary></span>
+            </div>
+          </div>
+        </div>
+
         <div class="sh-field"><label class="sh-field__label" for="p-img-alt">Image alt text</label>
           <input class="sh-input" id="p-img-alt" name="image_alt" maxlength="190" value="<?= e($val('image_alt')) ?>"
                  placeholder="Describe the product for screen readers and search engines">
           <span class="sh-field__hint">Leave empty to use the product name. AI Auto Work fills this when it generates the draft.</span></div>
-        <?php if ($val('image') !== ''): ?>
-          <p style="margin:-4px 0 12px"><img src="<?= e(sh_product_image($val('image'))) ?>" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:7px;border:1px solid var(--sh-line)"></p>
-        <?php endif; ?>
         <div class="sh-field"><label class="sh-field__label" for="p-short">Short description</label>
           <input class="sh-input" id="p-short" name="short_description" maxlength="255" value="<?= e($val('short_description')) ?>"></div>
         <div class="sh-field"><label class="sh-field__label" for="p-desc">Full description</label>
@@ -274,7 +465,7 @@ require __DIR__ . '/_layout.php';
         // The preview must show THIS product's picture, not a placeholder. The
         // helper returns '' when the file is gone, so the preview can say so.
         $seoImage        = $val('image') !== '' ? sh_seo_product_image(['image' => $val('image')]) : '';
-        $seoImageInput   = 'p-img';
+        $seoImageInput   = '';
         $seoImageCurrent = 'p-current-image';
         require __DIR__ . '/_seo-fields.php';
         ?>

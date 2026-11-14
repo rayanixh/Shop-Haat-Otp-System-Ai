@@ -5,6 +5,11 @@
  */
 
 require_once __DIR__ . '/auth.php';
+// Structured colour/gallery relations are additive. Running the idempotent
+// version check here keeps cart APIs safe immediately after an upgrade, even
+// when a shopper has an old non-product page cached in the browser.
+require_once __DIR__ . '/product-schema.php';
+sh_product_schema_ensure();
 
 const SH_MAX_QTY = 20;
 
@@ -12,8 +17,15 @@ function sh_cart_items(): array
 {
     $cartId = sh_cart_id(false);
     if ($cartId <= 0) { return []; }
+    // A checkout can start while a transaction is already open, which defers
+    // the additive migration. Keep a pre-migration install orderable with its
+    // original product-only cart lines instead of failing on a missing column.
+    $variantSelect = sh_cart_has_variant_column()
+        ? 'ci.variant AS selected_colour'
+        : "'' AS selected_colour";
     return sh_all(
-        'SELECT ci.id AS item_id, ci.quantity, p.id AS product_id, p.name, p.slug, p.price,
+        'SELECT ci.id AS item_id, ci.quantity, ' . $variantSelect . ',
+                p.id AS product_id, p.name, p.slug, p.price,
                 p.compare_price, p.stock, p.image, p.product_type, p.status, p.sku,
                 c.name AS category_name
          FROM cart_items ci
@@ -72,6 +84,9 @@ function sh_cart_summary(?string $couponCode = null, string $deliveryZone = 'ins
         $count += $qty;
         if ($r['product_type'] === 'physical') { $hasPhysical = true; }
 
+        $baseVariant = sh_order_item_variant((string)($r['category_name'] ?? ''), (string)($r['sku'] ?? ''));
+        $colour = trim((string)($r['selected_colour'] ?? ''));
+        $variantParts = array_values(array_filter([$baseVariant, $colour], static fn(string $v): bool => $v !== ''));
         $items[] = [
             'item_id'       => (int)$r['item_id'],
             'product_id'    => (int)$r['product_id'],
@@ -79,7 +94,8 @@ function sh_cart_summary(?string $couponCode = null, string $deliveryZone = 'ins
             'slug'          => $r['slug'],
             'image'         => $r['image'],
             'product_type'  => $r['product_type'],
-            'variant'       => sh_order_item_variant((string)($r['category_name'] ?? ''), (string)($r['sku'] ?? '')),
+            'variant'       => implode(' · ', $variantParts),
+            'colour'        => $colour,
             'unit_price'    => $price,
             'compare_price' => (float)$r['compare_price'],
             'quantity'      => $qty,
@@ -148,7 +164,7 @@ function sh_cart_count(): int
 }
 
 /** @return array{ok:bool,error?:string,count?:int} */
-function sh_cart_add(int $productId, int $qty = 1): array
+function sh_cart_add(int $productId, int $qty = 1, string $variant = ''): array
 {
     $qty = max(1, min(SH_MAX_QTY, $qty));
     $p = sh_one('SELECT id, name, stock, status, product_type FROM products WHERE id = ? LIMIT 1', [$productId]);
@@ -161,29 +177,56 @@ function sh_cart_add(int $productId, int $qty = 1): array
     if ((int)$p['stock'] <= 0) {
         return ['ok' => false, 'error' => 'This product is currently out of stock.'];
     }
+    // Never trust a client-supplied colour: only a value from this product's
+    // structured colour selections may become a cart/order variant.
+    $choice = sh_product_colour_variant($productId, $variant);
+    if (!$choice['ok']) { return ['ok' => false, 'error' => (string)$choice['error']]; }
+    $variant = (string)$choice['variant'];
+
     $cartId = sh_cart_id(true);
-    $existing = sh_one('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ?', [$cartId, $productId]);
-    $newQty = (int)($existing['quantity'] ?? 0) + $qty;
-    if ($newQty > (int)$p['stock']) {
-        $newQty = (int)$p['stock'];
-        if ($existing && (int)$existing['quantity'] >= $newQty) {
-            return ['ok' => false, 'error' => 'No additional stock is available for this product.'];
-        }
+    $hasVariant = sh_cart_has_variant_column();
+    if ($hasVariant) {
+        $existing = sh_one('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant = ?', [$cartId, $productId, $variant]);
+        // The stock limit applies to the product across all colour lines, not to
+        // each colour independently.
+        $otherQty = (int)sh_val('SELECT COALESCE(SUM(quantity),0) FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant <> ?', [$cartId, $productId, $variant], 0);
+    } else {
+        // Legacy unique key is (cart_id, product_id); a colour cannot create a
+        // second line until the additive migration has run.
+        $existing = sh_one('SELECT quantity FROM cart_items WHERE cart_id = ? AND product_id = ?', [$cartId, $productId]);
+        $otherQty = 0;
     }
-    $newQty = min(SH_MAX_QTY, $newQty);
-    sh_query(
-        'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)',
-        [$cartId, $productId, $newQty]
-    );
+    $availableForThisColour = max(0, (int)$p['stock'] - $otherQty);
+    $newQty = (int)($existing['quantity'] ?? 0) + $qty;
+    if ($existing && (int)$existing['quantity'] >= $availableForThisColour) {
+        return ['ok' => false, 'error' => 'No additional stock is available for this product.'];
+    }
+    $newQty = min($newQty, $availableForThisColour, SH_MAX_QTY);
+    if ($newQty < 1) {
+        return ['ok' => false, 'error' => 'No additional stock is available for this product.'];
+    }
+    if ($hasVariant) {
+        sh_query(
+            'INSERT INTO cart_items (cart_id, product_id, variant, quantity) VALUES (?,?,?,?)
+             ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)',
+            [$cartId, $productId, $variant, $newQty]
+        );
+    } else {
+        sh_query(
+            'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
+             ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)',
+            [$cartId, $productId, $newQty]
+        );
+    }
     return ['ok' => true, 'count' => sh_cart_count()];
 }
 
-function sh_cart_update(int $productId, int $qty): array
+function sh_cart_update(int $productId, int $qty, string $variant = ''): array
 {
     $cartId = sh_cart_id(false);
     if ($cartId <= 0) { return ['ok' => false, 'error' => 'Your cart is empty.']; }
-    if ($qty <= 0) { return sh_cart_remove($productId); }
+    $variant = trim(mb_substr($variant, 0, 190));
+    if ($qty <= 0) { return sh_cart_remove($productId, $variant); }
     $p = sh_one('SELECT stock, status, product_type FROM products WHERE id = ? LIMIT 1', [$productId]);
     if ($p === null || (int)$p['status'] !== 1) {
         return ['ok' => false, 'error' => 'This product is not available.'];
@@ -192,18 +235,32 @@ function sh_cart_update(int $productId, int $qty): array
         return ['ok' => false, 'error' => 'This product can no longer be ordered online. Please contact support.'];
     }
     $qty = min(SH_MAX_QTY, $qty);
-    if ($qty > (int)$p['stock']) {
-        return ['ok' => false, 'error' => 'Only ' . (int)$p['stock'] . ' unit(s) available.'];
+    $hasVariant = sh_cart_has_variant_column();
+    $otherQty = $hasVariant
+        ? (int)sh_val('SELECT COALESCE(SUM(quantity),0) FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant <> ?', [$cartId, $productId, $variant], 0)
+        : 0;
+    $available = max(0, (int)$p['stock'] - $otherQty);
+    if ($qty > $available) {
+        return ['ok' => false, 'error' => 'Only ' . $available . ' unit(s) available.'];
     }
-    sh_query('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ?', [$qty, $cartId, $productId]);
+    if ($hasVariant) {
+        sh_query('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ? AND variant = ?', [$qty, $cartId, $productId, $variant]);
+    } else {
+        sh_query('UPDATE cart_items SET quantity = ? WHERE cart_id = ? AND product_id = ?', [$qty, $cartId, $productId]);
+    }
     return ['ok' => true, 'count' => sh_cart_count()];
 }
 
-function sh_cart_remove(int $productId): array
+function sh_cart_remove(int $productId, string $variant = ''): array
 {
     $cartId = sh_cart_id(false);
+    $variant = trim(mb_substr($variant, 0, 190));
     if ($cartId > 0) {
-        sh_query('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?', [$cartId, $productId]);
+        if (sh_cart_has_variant_column()) {
+            sh_query('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant = ?', [$cartId, $productId, $variant]);
+        } else {
+            sh_query('DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?', [$cartId, $productId]);
+        }
     }
     return ['ok' => true, 'count' => sh_cart_count()];
 }

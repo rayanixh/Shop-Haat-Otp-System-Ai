@@ -871,9 +871,9 @@ function sh_status_label(string $status): string
 }
 
 /**
- * Package / variant text stored with each order line: "Category · SKU". The
- * products table has no variants, so the category (e.g. "UID Top Up") and SKU
- * are the descriptive facts worth freezing at order time.
+ * Baseline package / variant text stored with each order line: "Category · SKU".
+ * A selected colour is appended by the cart summary as a structured variant
+ * before the order snapshot is frozen.
  */
 function sh_order_item_variant(string $category, string $sku): string
 {

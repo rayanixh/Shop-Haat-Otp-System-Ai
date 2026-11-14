@@ -65,6 +65,7 @@ $nav = [
     ],
     'Products' => [
         ['products',   'products.php',          'box',   'Products', 0, 'products.view'],
+        ['attributes', 'product-attributes.php','tag',   'Brands, Types & Colours', 0, 'catalog.manage'],
         ['categories', 'categories.php',        'grid',  'Categories', 0, 'catalog.manage'],
         ['stock',      'stock.php?view=all',    'list',  'Inventory', 0, 'products.stock'],
         ['stock:low',  'stock.php?view=alerts', 'alert', 'Low Stock', 0, 'products.stock'],

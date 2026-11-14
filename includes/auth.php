@@ -277,6 +277,19 @@ function sh_cart_id(bool $create = true): int
     return $ids[$key] = sh_insert('cart', ['session_token' => $token]);
 }
 
+/** Whether the additive colour-variant cart column is present on this install. */
+function sh_cart_has_variant_column(): bool
+{
+    static $has = null;
+    if ($has !== null) { return $has; }
+    try {
+        $has = function_exists('sh_table_has_column') && sh_table_has_column('cart_items', 'variant');
+    } catch (Throwable $e) {
+        $has = false;
+    }
+    return $has;
+}
+
 /**
  * Move a guest cart into an authenticated customer's cart atomically. A login
  * session ID regeneration retains the random cart token; this transaction makes
@@ -327,12 +340,27 @@ function sh_merge_guest_cart(int $userId): void
             sh_query('UPDATE cart SET user_id = ?, session_token = NULL WHERE id = ?', [$userId, $guestId]);
         } else {
             $ownId = (int)$own['id'];
-            foreach (sh_all('SELECT product_id, quantity FROM cart_items WHERE cart_id = ? FOR UPDATE', [$guestId]) as $it) {
-                sh_query(
-                    'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
-                     ON DUPLICATE KEY UPDATE quantity = LEAST(quantity + VALUES(quantity), ?)',
-                    [$ownId, (int)$it['product_id'], max(1, min($maxQty, (int)$it['quantity'])), $maxQty]
-                );
+            $hasVariant = sh_cart_has_variant_column();
+            $select = $hasVariant
+                ? 'SELECT product_id, variant, quantity FROM cart_items WHERE cart_id = ? FOR UPDATE'
+                : "SELECT product_id, '' AS variant, quantity FROM cart_items WHERE cart_id = ? FOR UPDATE";
+            foreach (sh_all($select, [$guestId]) as $it) {
+                $variant = trim(mb_substr((string)($it['variant'] ?? ''), 0, 190));
+                if ($hasVariant) {
+                    sh_query(
+                        'INSERT INTO cart_items (cart_id, product_id, variant, quantity) VALUES (?,?,?,?)
+                         ON DUPLICATE KEY UPDATE quantity = LEAST(quantity + VALUES(quantity), ?)',
+                        [$ownId, (int)$it['product_id'], $variant, max(1, min($maxQty, (int)$it['quantity'])), $maxQty]
+                    );
+                } else {
+                    // Legacy schema before the colour migration: preserve the
+                    // original product-only cart line rather than failing login.
+                    sh_query(
+                        'INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?,?,?)
+                         ON DUPLICATE KEY UPDATE quantity = LEAST(quantity + VALUES(quantity), ?)',
+                        [$ownId, (int)$it['product_id'], max(1, min($maxQty, (int)$it['quantity'])), $maxQty]
+                    );
+                }
             }
             sh_query('DELETE FROM cart WHERE id = ?', [$guestId]);
         }

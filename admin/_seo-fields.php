@@ -205,7 +205,7 @@ if ($seoPreviewImage === '') { $seoPreviewImage = $seoDefaultImage; }
       <div style="display:flex;gap:12px;align-items:flex-start;margin-top:12px;border:1px solid var(--sh-line);border-radius:9px;padding:12px;background:#fff;max-width:620px">
         <div style="width:96px;height:96px;flex:none;border-radius:8px;background:var(--sh-brand-soft);display:grid;place-items:center;overflow:hidden">
           <img data-seo-preview="image" alt=""<?= $seoPreviewImage !== '' ? ' src="' . e($seoPreviewImage) . '"' : '' ?>
-               style="width:100%;height:100%;object-fit:cover;display:<?= $seoPreviewImage !== '' ? 'block' : 'none' ?>">
+               style="width:100%;height:100%;object-fit:contain;padding:5px;display:<?= $seoPreviewImage !== '' ? 'block' : 'none' ?>">
           <span data-seo-preview="image-fallback" style="font-size:11px;color:var(--sh-muted);text-align:center;<?= $seoPreviewImage !== '' ? 'display:none' : '' ?>">No image</span>
         </div>
         <div style="min-width:0">

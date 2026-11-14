@@ -806,6 +806,25 @@ function sh_order_item_variant_text(array $item): string
     return '';
 }
 
+/**
+ * The customer-selected colour portion of a saved order-item variant.
+ *
+ * `product_variant` also carries the legacy category/SKU package text. Order
+ * pages show only the colour so the new choice is visible without making an old
+ * order look like it had a colour option when it did not. Notifications keep
+ * the full snapshot text via sh_order_item_variant_text().
+ */
+function sh_order_item_colour_text(array $item): string
+{
+    $variant = trim((string)($item['product_variant'] ?? $item['variant'] ?? ''));
+    $needle = 'Colour: ';
+    $pos = mb_strrpos($variant, $needle);
+    if ($pos === false) { return ''; }
+    $colour = trim(mb_substr($variant, $pos + mb_strlen($needle)));
+    $parts = preg_split('/\s+·\s+/u', $colour) ?: [$colour];
+    return trim((string)($parts[0] ?? ''));
+}
+
 /** Items for many orders at once (list screens): [order_id => rows]. */
 function sh_order_items_for(array $orderIds): array
 {
