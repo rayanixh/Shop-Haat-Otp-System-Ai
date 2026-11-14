@@ -652,6 +652,32 @@ t_ok('the next request is blocked by the daily limit', !$dailyBlocked['ok']);
 t_ok('the message names the daily limit', str_contains((string)$dailyBlocked['error'], 'Daily verification limit'));
 t_eq('the daily count ignores other numbers', 4, t_count('otp_rate_limits', 'phone_key = ?', [sh_otp_rate_key('phone', $phone)]));
 
+// The daily counter is a calendar-day count, not a longer rolling window: a
+// request made an hour ago must still count against today, even though it is
+// outside the 60-second phone window.
+t_reset();
+t_setting('otp_phone_rate_limit', '100');
+t_setting('otp_phone_rate_window', '60');
+t_setting('otp_ip_rate_limit', '100');
+t_setting('otp_daily_limit', '3');
+sh_query(
+    'INSERT INTO otp_rate_limits (phone_key, ip_key, purpose, outcome, created_at)
+     VALUES (?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3600 SECOND))',
+    [sh_otp_rate_key('phone', $phone), sh_otp_rate_key('ip', $ip), 'login', 'requested']
+);
+t_eq('a request from an hour ago is outside the 60-second phone window', 0,
+    sh_otp_rate_count(sh_db(), 'phone_key', sh_otp_rate_key_candidates('phone', $phone), 'rolling', 60));
+t_eq('the same request still counts towards today', 1,
+    sh_otp_rate_count(sh_db(), 'phone_key', sh_otp_rate_key_candidates('phone', $phone), 'today'));
+t_setting('otp_daily_limit', '1');
+$oldCounts = sh_otp_issue($phone, 'login', null, $ip);
+t_ok('an hour-old request blocks the request once the daily limit is 1',
+    !$oldCounts['ok'] && str_contains((string)$oldCounts['error'], 'Daily verification limit'),
+    (string)($oldCounts['error'] ?? ''));
+// Restore the shared defaults so a later section does not inherit these.
+t_setting('otp_daily_limit', '20');
+t_setting('otp_phone_rate_limit', '50');
+
 // ===========================================================================
 t_sec('5. Verification: success, replay, expiry, attempts, purposes');
 // ===========================================================================
@@ -964,6 +990,122 @@ t_ok('issuing is refused while phone OTP is off', !$disabled['ok'] && ($disabled
 t_setting('authentication_mode', 'phone_otp');
 t_ok('the authentication mode round-trips without changing other settings',
     sh_auth_mode() === 'phone_otp' && sh_setting('otp_length', '6') === '6');
+
+// ===========================================================================
+t_sec('11. Pepper secrecy and rotation');
+// ===========================================================================
+t_reset();
+t_setting('otp_provider', 'test_ok');
+t_accepting_provider();
+t_setting('otp_phone_rate_limit', '50');
+t_setting('otp_ip_rate_limit', '50');
+t_setting('otp_daily_limit', '100');
+t_setting('otp_resend_cooldown', '0');
+t_setting('otp_max_resends', '10');
+
+$storedPepper = (string)sh_setting('otp_rate_pepper', '');
+t_ok('the install has a pepper', strlen($storedPepper) >= 32);
+t_eq('with no external secret the current pepper is the stored one', $storedPepper, sh_otp_rate_pepper());
+t_eq('no retired pepper is in play yet', [$storedPepper], sh_otp_rate_peppers());
+t_ok('the pepper never appears in a rate row', $storedPepper !== '' &&
+    !str_contains(json_encode(t_rate_rows()), $storedPepper));
+t_ok('identifiers are HMAC-SHA256 of the pepper, not a plain hash',
+    sh_otp_rate_key('phone', $phone) === hash_hmac('sha256', 'phone:' . sh_phone_normalize($phone), $storedPepper));
+
+// --- rotation ------------------------------------------------------------
+// A row written under the OLD pepper must keep counting after a new secret is
+// supplied: the identifiers are one-way, so a naive rotation would silently
+// reset every limit for 24 hours.
+$oldKey = sh_otp_rate_key('phone', $phone);
+sh_query(
+    'INSERT INTO otp_rate_limits (phone_key, ip_key, purpose, outcome, created_at) VALUES (?,?,?,?, NOW())',
+    [$oldKey, sh_otp_rate_key('ip', $ip), 'login', 'requested']
+);
+$newPepper = str_repeat('ab', 32);
+putenv('SH_SECRET_OTP_RATE_PEPPER=' . $newPepper);
+t_eq('an environment secret takes over as the current pepper', $newPepper, sh_otp_rate_pepper());
+t_ok('the retired pepper is still accepted for counting',
+    in_array($storedPepper, sh_otp_rate_peppers(), true));
+t_ok('a new identifier differs from the old one', sh_otp_rate_key('phone', $phone) !== $oldKey);
+t_ok('both identifiers are candidates for a lookup',
+    in_array($oldKey, sh_otp_rate_key_candidates('phone', $phone), true)
+    && in_array(sh_otp_rate_key('phone', $phone), sh_otp_rate_key_candidates('phone', $phone), true));
+
+t_setting('otp_phone_rate_limit', '1');
+$rotated = sh_otp_issue($phone, 'login', null, $ip);
+t_ok('a row hashed with the retired pepper still counts towards the limit',
+    !$rotated['ok'] && str_contains((string)$rotated['error'], 'this number'),
+    (string)($rotated['error'] ?? ''));
+
+// An explicit previous-pepper list is also honoured, and de-duplicated.
+putenv('SH_SECRET_OTP_RATE_PEPPER_PREVIOUS=' . $storedPepper . ',' . $storedPepper);
+$candidates = sh_otp_rate_key_candidates('phone', $phone);
+t_eq('an explicit previous-pepper list is de-duplicated', 2, count($candidates));
+putenv('SH_SECRET_OTP_RATE_PEPPER_PREVIOUS');
+
+// New rows are written under the current pepper only.
+t_reset();
+t_setting('otp_phone_rate_limit', '50');
+$fresh = sh_otp_issue($phone, 'login', null, $ip);
+t_ok('issuing works again with the new pepper', $fresh['ok'] === true, (string)($fresh['error'] ?? ''));
+$row = t_last_rate_row();
+t_eq('new rows are keyed with the current pepper', sh_otp_rate_key('phone', $phone), (string)($row['phone_key'] ?? ''));
+
+// The secret resolver reports the source, never the value.
+t_eq('the source is reported as the environment', 'environment', sh_secret_source(SH_OTP_PEPPER_SECRET));
+t_ok('the source label never contains the secret', !str_contains(sh_secret_source(SH_OTP_PEPPER_SECRET), substr($newPepper, 0, 8)));
+putenv('SH_SECRET_OTP_RATE_PEPPER');
+t_eq('removing the secret falls back to the stored pepper', $storedPepper, sh_otp_rate_pepper());
+
+// A missing pepper must fail closed, never silently allow everything.
+t_setting('otp_rate_pepper', '');
+sh_settings(true);
+t_eq('with no pepper at all, no identifier can be produced', '', sh_otp_rate_key('phone', $phone, ''));
+t_eq('a generated pepper is persisted once', 64, strlen(sh_otp_rate_pepper()));
+t_eq('the generated pepper is stable for the next call', sh_otp_rate_pepper(), sh_otp_rate_pepper());
+t_ok('the regenerated pepper is stored, not regenerated per request',
+    (string)sh_setting('otp_rate_pepper', '') !== '');
+
+// ===========================================================================
+t_sec('12. Environment matrix: development / staging / production');
+// ===========================================================================
+t_setting('otp_textbee_api_key', 'test-key-not-real');
+t_setting('otp_provider', 'offline');
+$matrix = [
+    'development' => ['dev' => true],
+    'staging'     => ['dev' => false],
+    'production'  => ['dev' => false],
+];
+foreach ($matrix as $env => $flags) {
+    t_env($env);
+    t_eq("SH_ENVIRONMENT={$env} resolves to {$env}", $env, sh_environment());
+}
+
+t_env('staging');
+t_eq('staging is not development', false, sh_is_development());
+t_eq('staging reports itself', true, sh_is_staging());
+t_ok('the offline driver is refused on staging', !sh_otp_provider_ready('offline'));
+t_ok('the refusal explains why', str_contains(implode(' ', sh_otp_provider_config_errors('offline')), 'development'));
+t_eq('no code is echoed on staging', false, sh_otp_allow_code_echo());
+t_ok('a correctly configured real provider IS ready on staging', sh_otp_provider_ready('textbee'));
+t_eq('verbose diagnostics are refused on staging', false, sh_debug_allowed());
+$stagingIssue = sh_otp_issue($phone, 'login', null, $ip);
+t_ok('a staging request with the offline driver fails closed',
+    !$stagingIssue['ok'] && ($stagingIssue['reason'] ?? '') === 'config', (string)($stagingIssue['error'] ?? ''));
+t_ok('no OTP code is returned on staging', empty($stagingIssue['code']));
+
+t_env('development');
+t_eq('the offline driver is allowed in development', true, sh_otp_provider_ready('offline'));
+t_eq('code echo is allowed in development with the offline driver', true, sh_otp_allow_code_echo());
+t_eq('verbose diagnostics are allowed in development', true, sh_debug_allowed());
+
+t_env('production');
+t_eq('the offline driver is refused in production', false, sh_otp_provider_ready('offline'));
+t_eq('no code is echoed in production', false, sh_otp_allow_code_echo());
+t_eq('no verbose diagnostics in production', false, sh_debug_allowed());
+t_env('staging');
+t_eq('an unknown value falls back to production', 'production', (function () { t_env('not-a-real-env'); return sh_environment(); })());
+t_env('production');
 
 // ===========================================================================
 // Summary

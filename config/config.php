@@ -36,9 +36,15 @@ sh_register_error_handlers();
 // this host. See includes/compat.php.
 require_once SH_ROOT . '/includes/compat.php';
 
-// Deployment environment ('production' by default). Drives the offline-OTP
-// guard, code-exposure rules and staging-only admin affordances.
+// Client IP + trusted-proxy resolution. Loaded before anything that rate limits
+// or builds a URL, so no module can see a spoofable address.
+require_once SH_ROOT . '/includes/client-ip.php';
+
+// Deployment environment: development / staging / production ('production' by
+// default). Drives the offline-OTP guard, code-exposure rules, debug output and
+// the optional staging access gate.
 require_once SH_ROOT . '/includes/environment.php';
+if (function_exists('sh_staging_gate') && sh_staging_gate()) { exit; }
 
 // Security response headers (CSP, nosniff, clickjacking, Referrer-Policy, HSTS).
 // Applied before any page logic runs so no route can forget them; the module
@@ -91,8 +97,12 @@ function sh_site_url(): string
 /** True when the current request arrived over HTTPS, including a trusted proxy. */
 function sh_request_is_https(): bool
 {
-    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') { return true; }
+    if (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) !== 'https') { return false; }
+    // A proxy header is only believed when it comes from a configured trusted
+    // proxy. With no proxy list configured the historical behaviour is kept so
+    // an existing Cloudflare/LiteSpeed deployment keeps issuing https URLs.
+    return !function_exists('sh_forwarded_proto_trusted') || sh_forwarded_proto_trusted();
 }
 
 /** Shared cookie scope for the storefront when it is installed in a subfolder. */

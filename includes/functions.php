@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/compat.php';
 require_once __DIR__ . '/environment.php';
+require_once __DIR__ . '/client-ip.php';
 /**
  * Shared helpers: settings, escaping, money, slugs, icons, uploads, pagination.
  */
@@ -1076,16 +1077,8 @@ function sh_phone_variants(?string $phone): array
 }
 
 /** Best-effort client IP, aware of common shared-hosting reverse proxies. */
-function sh_client_ip(): string
-{
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $k) {
-        $v = $_SERVER[$k] ?? '';
-        if ($v === '') { continue; }
-        $first = trim(explode(',', $v)[0]);
-        if ($first !== '' && filter_var($first, FILTER_VALIDATE_IP)) { return $first; }
-    }
-    return '0.0.0.0';
-}
+/* sh_client_ip() lives in includes/client-ip.php, which this file requires
+ * above. It is the single implementation used by every rate limiter. */
 
 /** Does a table exist in the current database? (guards lazy migrations) */
 function sh_table_exists(string $table, bool $refresh = false): bool

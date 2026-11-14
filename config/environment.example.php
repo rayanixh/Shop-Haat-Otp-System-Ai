@@ -1,21 +1,29 @@
 <?php
 /**
- * Deployment environment for this installation.
+ * ShopHaat — deployment environment (EXAMPLE).
  *
- * Copy this file to config/environment.php on the server and set the value.
- * No other code change is needed.
+ * Copy to `config/environment.php` and keep it OUTSIDE version control.
+ * Alternatively set the `SH_ENVIRONMENT` environment variable on the host
+ * (cPanel → Setup PHP / Environment Variables), which needs no file at all.
  *
- *   'production'  (default) Real shop. Offline OTP is refused, codes are never
- *                 returned by any API or admin screen, and a missing SMS
- *                 provider is reported as a configuration error.
+ * Accepted values:
+ *   'development'  offline OTP allowed, test-code echo allowed for a superadmin,
+ *                  verbose diagnostics. Never on a live store.
+ *   'staging'      real provider required, no code echo, no debug output,
+ *                  optionally protected by HTTP basic auth (below).
+ *   'production'   the default. Strict.
  *
- *   'development' Local / staging / test copy. The offline OTP driver may be
- *                 used and Admin → Security can display the generated test
- *                 code. Never use this value on a live store.
- *
- * If this file is absent the deployment is treated as production. You can also
- * set the SH_ENVIRONMENT environment variable instead, but a file is the most
- * portable option on shared hosting / cPanel.
+ * An unrecognised value is treated as 'production'.
  */
-
 return 'production';
+
+/*
+ * Staging access gate (only read when the environment is 'staging').
+ * Set both to protect the site with HTTP basic auth:
+ *
+ *   define('SH_STAGING_USER', 'staging-review');
+ *   define('SH_STAGING_PASS', 'use-a-long-random-value');
+ *
+ * When they are absent the site stays reachable, and Admin → System Health
+ * reports that staging is unprotected so it cannot go unnoticed.
+ */

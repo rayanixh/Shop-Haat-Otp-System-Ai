@@ -255,6 +255,70 @@ was not part of the baseline either.)
    `install/migrations/2026-11-otp-rate-limits-rollback.sql`. Codes, customers
    and orders are untouched; limits fall back to the previous behaviour.
 
+---
+
+# Phase 2 — Production readiness work (client IP, secrets, environments, CSP)
+
+This section covers the second remediation pass. It is additive: everything in
+sections 1–6 above still stands.
+
+## 7. Additional findings fixed
+
+| ID | Severity | Finding | Fix | Test evidence |
+|----|----------|---------|-----|---------------|
+| F-101 | Critical | `sh_client_ip()` trusted `CF-Connecting-IP` / `X-Forwarded-For` from **any** caller, so every per-IP limit (OTP, customer login, admin login, support chat, installer unlock, CSP reports) could be reset per request | New `includes/client-ip.php`: `REMOTE_ADDR` unless the peer is a configured proxy; strict IP/CIDR parsing; right-to-left XFF walk; public-IP filter on header values; live-fetched, cached Cloudflare ranges; one implementation shared with courier verification | `tests/trusted-proxy.php` **58/58** |
+| F-102 | High | The OTP rate-limit pepper lived only in `settings`, so it travelled in every DB backup, and a rotation would have silently reset every limit | New `includes/secrets.php` (constant → env → `config/secrets.php` → DB), retired-pepper counting so a rotation preserves history, admin "Move to config/secrets.php" with `0600` + atomic write, example config | `tests/secrets.php` **36/36**; `tests/otp-security.php` §11 **20/20** |
+| F-103 | Medium | `staging` mapped to `development`, so a staging copy allowed the offline SMS driver and OTP code display | Three environments with production as default and for every typo; `sh_debug_allowed()`; optional HTTP-basic staging gate from `config/config.php`; unprotected staging surfaced in Security + System Health | `tests/environment.php` **61/61**; `tests/otp-security.php` §12 **19/19** |
+| F-104 | Low | `X-Forwarded-Proto` believed from any peer | Only believed from a trusted proxy once a proxy list exists; historical behaviour kept when none is configured (no broken deployments) | `tests/trusted-proxy.php` §8 |
+| F-106 | Medium | Daily OTP limit degenerated into a 60-second window while the limit queries were being centralised (regression introduced and caught during this work) | Window is now a closed enum (`rolling` seconds vs `today` → `CURDATE()`); only `?` placeholders are generated | `tests/otp-security.php` §4 — an hour-old row must still count towards today |
+
+## 8. CSP readiness (verified, not assumed)
+
+`tests/csp-readiness.php` (**31/31**) scans every template and the shipped JS:
+
+* 0 inline event-handler attributes across the application;
+* 0 inline `<script>` without the per-request nonce;
+* 0 scripts loaded from another origin;
+* 0 `eval()` / `new Function()` in `assets/js/*.js`;
+* policy: `default-src 'self'`, `script-src 'self' 'nonce-…'` (no
+  `unsafe-inline`, no `unsafe-eval`), `object-src 'none'`, `base-uri 'self'`,
+  `form-action 'self'`, `frame-ancestors`, `report-uri`;
+* report receiver present and rate limited; admin rollback (report-only /
+  enforce / off) present.
+
+The default stays **report-only** because enforcement has not been exercised in a
+real browser here. The switch and the rollback already exist, and the deployment
+checklist describes the staged rollout.
+
+## 9. Admin surfaces added
+
+* **Admin → Security → Deployment, secrets and client IPs** — environment badge,
+  development/staging warnings, pepper source *label only* with the migration
+  action, client-IP policy summary, "Trust Cloudflare ranges" (fetches the live
+  list) and a link to the manual proxy list.
+* **Admin → System Health** — new "Deployment environment" and "Client IP policy"
+  rows, so an unprotected staging site or a store behind a proxy with no trusted
+  ranges is visible instead of silent.
+
+## 10. Test totals for this pass
+
+```
+tests/trusted-proxy.php            58 passed    0 failed   (new)
+tests/secrets.php                  36 passed    0 failed   (new)
+tests/environment.php              61 passed    0 failed   (new)
+tests/csp-readiness.php            31 passed    0 failed   (new)
+tests/otp-security.php            199 passed    0 failed   (+42 this pass)
+tests/security-regression.php     185 passed    0 failed   (1 skip: header emission, N/A in CLI)
+tests/support-unit.php             58 passed    0 failed
+tests/support-sms-transport.php    25 passed    0 failed
+php tools/security-scan.php        0 findings / 189 files
+php -l                             clean on every application PHP file
+```
+
+The project's own static analyser reports no findings, and the whole
+application still lints. No test was reported as passing without being executed.
+
+
 ## 6. Recommended follow-ups (not done here)
 
 * Run the MySQL-mode suite on staging and record the result.

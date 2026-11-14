@@ -212,6 +212,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/security.php');
     }
 
+    // Move the OTP rate-limit pepper out of the settings table and into
+    // config/secrets.php. The value is never rendered: it is read, written and
+    // forgotten. Existing rate-limit history keeps counting because the stored
+    // copy is still recognised while it matches.
+    if ($form === 'secrets_migrate_pepper') {
+        if (!function_exists('sh_secret_write_file')) { require_once SH_ROOT . '/includes/secrets.php'; }
+        if (sh_secret_is_external(SH_OTP_PEPPER_SECRET)) {
+            sh_flash('info', 'The OTP pepper is already supplied by the server configuration. Nothing was changed.');
+            sh_redirect('admin/security.php');
+        }
+        $pepper = sh_otp_rate_pepper(false);
+        if ($pepper === '') {
+            sh_flash('error', 'There is no stored OTP pepper to move yet. Send one test code first.');
+            sh_redirect('admin/security.php');
+        }
+        $written = sh_secret_write_file([SH_OTP_PEPPER_SECRET => $pepper]);
+        if (!empty($written['ok'])) {
+            sh_security_log('otp_pepper_moved', (int)$admin['id'], ['target' => 'config/secrets.php']);
+            sh_log_line('admin', 'OTP rate-limit pepper moved to config/secrets.php by ' . $admin['email']);
+            sh_flash('success', 'The OTP pepper now comes from config/secrets.php. Existing limits keep counting; '
+                . 'delete the value from settings only after the daily window has passed.');
+        } else {
+            sh_flash('error', (string)($written['error'] ?? 'The secrets file could not be written.'));
+        }
+        sh_redirect('admin/security.php');
+    }
+
+    // Fill the trusted-proxy list from Cloudflare's published ranges (fetched
+    // live, never hardcoded) so a Cloudflare store gets correct client IPs —
+    // and therefore correct rate limits — without hand-typing ranges.
+    if ($form === 'proxy_cloudflare') {
+        if (!function_exists('sh_cloudflare_ranges')) { require_once SH_ROOT . '/includes/client-ip.php'; }
+        $ranges = sh_cloudflare_ranges(true);
+        if ($ranges === []) {
+            sh_flash('error', 'Cloudflare\'s range list could not be downloaded. Paste the ranges manually '
+                . 'in Admin → Customer Verification → Trusted proxies.');
+        } else {
+            sh_setting_save('verify_trusted_proxies', implode("\n", $ranges));
+            sh_setting_save('verify_proxy_mode', 'cloudflare');
+            sh_security_log('trusted_proxies_updated', (int)$admin['id'], ['source' => 'cloudflare', 'entries' => count($ranges)]);
+            sh_flash('success', count($ranges) . ' Cloudflare ranges saved. Client IPs are now taken from '
+                . 'CF-Connecting-IP only for those proxies.');
+        }
+        sh_redirect('admin/security.php');
+    }
+
     if ($form === 'test') {
         $phone = sh_phone_normalize(sh_post('test_phone'));
         if ($phone === '') {
@@ -801,6 +847,90 @@ UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secre
   </div>
 </div>
 <?php endif; ?>
+
+<?php
+// ---- Deployment, secrets and trusted proxies --------------------------------
+if (!function_exists('sh_trusted_proxy_entries')) { require_once SH_ROOT . '/includes/client-ip.php'; }
+$envLabel      = function_exists('sh_environment_label') ? sh_environment_label() : 'Production';
+$envName       = function_exists('sh_environment') ? sh_environment() : 'production';
+$stagingOpen   = function_exists('sh_staging_unprotected') && sh_staging_unprotected();
+$pepperSource  = function_exists('sh_secret_source') ? sh_secret_source('otp_rate_pepper') : 'none';
+$proxyMode     = function_exists('sh_proxy_mode') ? sh_proxy_mode() : 'auto';
+$proxyEntries  = sh_trusted_proxy_entries();
+$hasPepper     = sh_otp_rate_pepper(false) !== '';
+?>
+<div class="sh-panel" style="margin-top:14px">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('cpu', 17) ?> Deployment, secrets and client IPs</h2>
+    <span class="sh-badge" style="margin-left:auto">Environment: <?= e($envLabel) ?></span>
+  </div>
+  <div class="sh-panel__body">
+    <?php if ($envName === 'development'): ?>
+      <p class="sh-panel__note" style="border-left:3px solid #a15c07;padding-left:10px">
+        <strong>This installation is marked as development.</strong> The offline SMS driver is available and a
+        superadmin can see test codes. Never point a development installation at live customer data.
+      </p>
+    <?php elseif ($stagingOpen): ?>
+      <p class="sh-panel__note" style="border-left:3px solid #a15c07;padding-left:10px">
+        <strong>This staging site has no access protection.</strong> Set <code>SH_STAGING_USER</code> and
+        <code>SH_STAGING_PASS</code> in <code>config/environment.php</code> (or as environment variables) to
+        require a password before any page is served.
+      </p>
+    <?php else: ?>
+      <p class="sh-panel__note">
+        A production installation. Offline test mode and OTP code display are both unavailable here.
+      </p>
+    <?php endif; ?>
+
+    <div class="sh-grid2">
+      <div class="sh-field">
+        <label class="sh-field__label">OTP rate-limit pepper</label>
+        <p class="sh-field__hint" style="margin:0 0 8px">
+          Used to hash phone numbers and IPs in the rate-limit log. It is never displayed anywhere.
+          Source: <strong><?= e($pepperSource === 'none' ? ($hasPepper ? 'database settings' : 'not created yet') : $pepperSource) ?></strong>
+        </p>
+        <?php if ($hasPepper && $pepperSource === 'none'): ?>
+          <form method="post">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="secrets_migrate_pepper">
+            <button class="sh-btn sh-btn--ghost sh-btn--sm" type="submit">
+              <?= sh_icon('key', 14) ?> Move to config/secrets.php
+            </button>
+          </form>
+          <span class="sh-field__hint">Keeps existing rate limits. The stored copy stays valid until you remove it.</span>
+        <?php else: ?>
+          <span class="sh-field__hint">Managed outside the database — nothing to do here.</span>
+        <?php endif; ?>
+      </div>
+
+      <div class="sh-field">
+        <label class="sh-field__label">Client IP source (rate limiting)</label>
+        <p class="sh-field__hint" style="margin:0 0 8px">
+          Mode <strong><?= e($proxyMode) ?></strong> —
+          <?php if ($proxyEntries === []): ?>
+            <strong>no trusted proxies configured</strong>, so the connection address is used.
+          <?php else: ?>
+            <?= count($proxyEntries) ?> trusted prox<?= count($proxyEntries) === 1 ? 'y' : 'ies' ?>.
+          <?php endif; ?>
+          Forwarded headers are ignored unless the request comes from a trusted proxy.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <form method="post">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="proxy_cloudflare">
+            <button class="sh-btn sh-btn--ghost sh-btn--sm" type="submit">
+              <?= sh_icon('zap', 14) ?> Trust Cloudflare ranges
+            </button>
+          </form>
+          <a class="sh-btn sh-btn--ghost sh-btn--sm" href="<?= e(sh_url('admin/verification.php')) ?>#v-tp">
+            <?= sh_icon('settings', 14) ?> Edit proxy list
+          </a>
+        </div>
+        <span class="sh-field__hint">Behind Cloudflare, run this once. Behind another proxy, add its ranges manually.</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script<?= sh_csp_nonce_attr() ?>>
 (function () {

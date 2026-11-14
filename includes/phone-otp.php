@@ -23,6 +23,7 @@
 
 require_once SH_ROOT . '/includes/functions.php';
 require_once SH_ROOT . '/includes/errors.php';
+require_once SH_ROOT . '/includes/secrets.php';
 
 /** Allowed OTP purposes. Keep in sync with UI copy and admin filters. */
 function sh_otp_purposes(): array
@@ -582,11 +583,32 @@ function sh_otp_verify(string $phone, string $purpose, string $code, ?int $userI
 // "below the limit" and both proceed.
 // ---------------------------------------------------------------------------
 
-/** Per-install secret used to key the rate-limit identifiers. */
+/** Secret name of the per-install pepper used by every rate-limit identifier. */
+const SH_OTP_PEPPER_SECRET = 'otp_rate_pepper';
+
+/**
+ * Per-install secret used to key the rate-limit identifiers.
+ *
+ * Resolution order (see includes/secrets.php):
+ *   1. SH_SECRET_OTP_RATE_PEPPER constant;
+ *   2. SH_SECRET_OTP_RATE_PEPPER / SH_OTP_RATE_PEPPER environment variable;
+ *   3. config/secrets.php;
+ *   4. the value stored in `settings` (legacy, and the fallback for hosts with
+ *      no environment-variable support);
+ *   5. generated once and stored — only when $create is true.
+ *
+ * The value itself is never logged, rendered or returned to a client.
+ */
 function sh_otp_rate_pepper(bool $create = true): string
 {
-    $pepper = (string)sh_setting('otp_rate_pepper', '');
-    if ($pepper !== '') { return $pepper; }
+    if (!function_exists('sh_secret')) { require_once __DIR__ . '/secrets.php'; }
+
+    $secret = sh_secret(SH_OTP_PEPPER_SECRET, '');
+    if ($secret !== '') { return $secret; }
+
+    $stored = (string)sh_setting('otp_rate_pepper', '');
+    if ($stored !== '') { return $stored; }
+
     if (!$create) { return ''; }
     try {
         $pepper = bin2hex(random_bytes(32));
@@ -598,8 +620,58 @@ function sh_otp_rate_pepper(bool $create = true): string
     return $pepper;
 }
 
-/** Privacy-preserving identifier for a phone number or IP address. */
-function sh_otp_rate_key(string $kind, string $value): string
+/**
+ * Peppers that must still be recognised when counting limits.
+ *
+ * A rotation cannot re-key existing rows (the identifiers are one-way hashes and
+ * the plaintext is deliberately not stored), so the previous pepper is kept for
+ * reads: the window counts rows hashed with the old secret too, and history is
+ * preserved instead of silently resetting every limit. Supply it as
+ * SH_SECRET_OTP_RATE_PEPPER_PREVIOUS (comma or space separated).
+ *
+ * When a secret source is in use and the legacy `settings` value differs, the
+ * legacy value is added automatically — that is the migration path: copy the
+ * stored pepper into config/secrets.php (Admin → Security does it), and existing
+ * history keeps counting.
+ *
+ * @return array<int,string>
+ */
+function sh_otp_rate_previous_peppers(): array
+{
+    if (!function_exists('sh_secret')) { require_once __DIR__ . '/secrets.php'; }
+
+    $out = [];
+    $raw = sh_secret(SH_OTP_PEPPER_SECRET . '_previous', '');
+    foreach (preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $p) {
+        $p = trim($p);
+        if ($p !== '') { $out[] = $p; }
+    }
+
+    $stored = (string)sh_setting('otp_rate_pepper', '');
+    if ($stored !== '' && $stored !== sh_otp_rate_pepper(false)) { $out[] = $stored; }
+
+    return array_values(array_unique($out));
+}
+
+/**
+ * Every pepper a rate-limit lookup must accept, current first.
+ *
+ * @return array<int,string>
+ */
+function sh_otp_rate_peppers(): array
+{
+    $current = sh_otp_rate_pepper();
+    if ($current === '') { return []; }
+    return array_values(array_unique(array_merge([$current], sh_otp_rate_previous_peppers())));
+}
+
+/**
+ * Privacy-preserving identifier for a phone number or IP address.
+ *
+ * @param string|null $pepper explicit pepper (used when counting with a retired
+ *                            pepper); null means "the current pepper"
+ */
+function sh_otp_rate_key(string $kind, string $value, ?string $pepper = null): string
 {
     $kind = strtolower(trim($kind));
     $value = trim($value);
@@ -611,9 +683,61 @@ function sh_otp_rate_key(string $kind, string $value): string
         if ($normalised !== '') { $value = $normalised; }
     }
     if ($value === '') { return ''; }
-    $pepper = sh_otp_rate_pepper();
+    $pepper = $pepper ?? sh_otp_rate_pepper();
     if ($pepper === '') { return ''; }
     return hash_hmac('sha256', $kind . ':' . $value, $pepper);
+}
+
+/**
+ * Identifier candidates for a value under every accepted pepper.
+ *
+ * @return array<int,string> current key first, empty when unusable
+ */
+function sh_otp_rate_key_candidates(string $kind, string $value): array
+{
+    $keys = [];
+    foreach (sh_otp_rate_peppers() as $pepper) {
+        $k = sh_otp_rate_key($kind, $value, $pepper);
+        if ($k !== '') { $keys[] = $k; }
+    }
+    return array_values(array_unique($keys));
+}
+
+/**
+ * COUNT(*) of rate rows for one column across one or more key candidates.
+ *
+ * Two things vary and both are fixed here, never by a caller: the column name
+ * (a strict allowlist) and the window (a closed enum). The only thing built at
+ * runtime is the list of `?` placeholders, so no value can reach the SQL text.
+ *
+ * @param array<int,string> $keys    key candidates from sh_otp_rate_key_candidates()
+ * @param string            $window  'rolling' (a window of $seconds) or 'today'
+ */
+function sh_otp_rate_count(PDO $pdo, string $column, array $keys, string $window = 'rolling', int $seconds = 60): int
+{
+    if ($column !== 'phone_key' && $column !== 'ip_key') { return 0; }
+    $keys = array_values(array_unique(array_filter($keys, static fn($k) => is_string($k) && $k !== '')));
+    if ($keys === []) { return 0; }
+
+    $placeholders = implode(',', array_fill(0, count($keys), '?'));
+    if ($window === 'today') {
+        $sql = sprintf(
+            'SELECT COUNT(*) FROM otp_rate_limits WHERE %s IN (%s) AND created_at >= CURDATE()',
+            $column,
+            $placeholders
+        );
+        $params = $keys;
+    } else {
+        $sql = sprintf(
+            'SELECT COUNT(*) FROM otp_rate_limits WHERE %s IN (%s) AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            $column,
+            $placeholders
+        );
+        $params = array_merge($keys, [max(1, $seconds)]);
+    }
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    return (int)$st->fetchColumn();
 }
 
 /**
@@ -698,7 +822,11 @@ function sh_otp_rate_begin(string $phone, string $ip, string $purpose, ?int $use
 
     $phoneKey = sh_otp_rate_key('phone', $phone);
     $ipKey = $ip !== '' ? sh_otp_rate_key('ip', $ip) : '';
-    if ($phoneKey === '' || !sh_otp_rate_ensure()) {
+    // Rows written before a pepper rotation are still counted, so rotating the
+    // secret does not silently clear every limit.
+    $phoneKeys = sh_otp_rate_key_candidates('phone', $phone);
+    $ipKeys = $ip !== '' ? sh_otp_rate_key_candidates('ip', $ip) : [];
+    if ($phoneKey === '' || $phoneKeys === [] || !sh_otp_rate_ensure()) {
         return $fail('Verification is temporarily unavailable. Please try again shortly.', 'unavailable');
     }
 
@@ -712,22 +840,19 @@ function sh_otp_rate_begin(string $phone, string $ip, string $purpose, ?int $use
         if ($ipKey !== '') { sh_otp_rate_lock($pdo, $ipKey); }
 
         $error = null;
-        $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE phone_key = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)');
-        $st->execute([$phoneKey, sh_otp_phone_rate_window()]);
-        if ((int)$st->fetchColumn() >= sh_otp_phone_rate_limit()) {
+        $phoneWindow = sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'rolling', sh_otp_phone_rate_window());
+        if ($phoneWindow >= sh_otp_phone_rate_limit()) {
             $error = 'Too many verification requests for this number. Please wait a few minutes.';
         }
-        if ($error === null && $ipKey !== '') {
-            $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE ip_key = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)');
-            $st->execute([$ipKey, sh_otp_ip_rate_window()]);
-            if ((int)$st->fetchColumn() >= sh_otp_ip_rate_limit()) {
+        if ($error === null && $ipKeys !== []) {
+            $ipWindow = sh_otp_rate_count($pdo, 'ip_key', $ipKeys, 'rolling', sh_otp_ip_rate_window());
+            if ($ipWindow >= sh_otp_ip_rate_limit()) {
                 $error = 'Too many verification requests from this device. Please try again later.';
             }
         }
         if ($error === null) {
-            $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE phone_key = ? AND created_at >= CURDATE()');
-            $st->execute([$phoneKey]);
-            if ((int)$st->fetchColumn() >= sh_otp_daily_limit()) {
+            $daily = sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'today');
+            if ($daily >= sh_otp_daily_limit()) {
                 $error = 'Daily verification limit reached for this number. Please try again tomorrow.';
             }
         }
@@ -795,26 +920,19 @@ function sh_otp_rate_cleanup(int $keepDays = 30): int
 function sh_otp_limit_check(string $phone, string $ip): ?string
 {
     $phoneKey = sh_otp_rate_key('phone', $phone);
-    $ipKey = $ip !== '' ? sh_otp_rate_key('ip', $ip) : '';
-    if ($phoneKey === '' || !sh_otp_rate_ensure()) {
+    $phoneKeys = sh_otp_rate_key_candidates('phone', $phone);
+    $ipKeys = $ip !== '' ? sh_otp_rate_key_candidates('ip', $ip) : [];
+    if ($phoneKey === '' || $phoneKeys === [] || !sh_otp_rate_ensure()) {
         return 'Verification is temporarily unavailable. Please try again shortly.';
     }
     $pdo = sh_db();
-    $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE phone_key = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)');
-    $st->execute([$phoneKey, sh_otp_phone_rate_window()]);
-    if ((int)$st->fetchColumn() >= sh_otp_phone_rate_limit()) {
+    if (sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'rolling', sh_otp_phone_rate_window()) >= sh_otp_phone_rate_limit()) {
         return 'Too many verification requests for this number. Please wait a few minutes.';
     }
-    if ($ipKey !== '') {
-        $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE ip_key = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)');
-        $st->execute([$ipKey, sh_otp_ip_rate_window()]);
-        if ((int)$st->fetchColumn() >= sh_otp_ip_rate_limit()) {
-            return 'Too many verification requests from this device. Please try again later.';
-        }
+    if ($ipKeys !== [] && sh_otp_rate_count($pdo, 'ip_key', $ipKeys, 'rolling', sh_otp_ip_rate_window()) >= sh_otp_ip_rate_limit()) {
+        return 'Too many verification requests from this device. Please try again later.';
     }
-    $st = $pdo->prepare('SELECT COUNT(*) FROM otp_rate_limits WHERE phone_key = ? AND created_at >= CURDATE()');
-    $st->execute([$phoneKey]);
-    if ((int)$st->fetchColumn() >= sh_otp_daily_limit()) {
+    if (sh_otp_rate_count($pdo, 'phone_key', $phoneKeys, 'today') >= sh_otp_daily_limit()) {
         return 'Daily verification limit reached for this number. Please try again tomorrow.';
     }
     return null;

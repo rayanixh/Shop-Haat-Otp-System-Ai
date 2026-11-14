@@ -92,6 +92,41 @@ function sh_health_collect(): array
         $items['otp'] = sh_health_item('Customer phone OTP', 'Off (email + password)', 'healthy',
             'No SMS provider is contacted while phone OTP is disabled.');
     }
+    // Deployment environment: development relaxes guard rails, staging must be
+    // protected and must not echo codes, production must have neither.
+    $envName = function_exists('sh_environment') ? sh_environment() : 'production';
+    if ($envName === 'development') {
+        $items['env'] = sh_health_item('Deployment environment', 'Development', 'warning',
+            'Offline SMS and test-code display are available. Never use a development copy with live customer data.');
+    } elseif ($envName === 'staging') {
+        $items['env'] = sh_health_item('Deployment environment',
+            sh_staging_unprotected() ? 'Staging (unprotected)' : 'Staging (protected)',
+            sh_staging_unprotected() ? 'warning' : 'healthy',
+            sh_staging_unprotected()
+                ? 'Set SH_STAGING_USER and SH_STAGING_PASS in config/environment.php to require a password.'
+                : 'Offline OTP and code display are disabled; real providers are required.');
+    } else {
+        $items['env'] = sh_health_item('Deployment environment', 'Production', 'healthy',
+            'Offline OTP, OTP code display and debug output are all disabled.');
+    }
+
+    // Client-IP policy. Without it the per-IP rate limits key on a value the
+    // caller can choose, so it is reported rather than assumed.
+    if (function_exists('sh_trusted_proxy_entries')) {
+        $proxyMode = sh_proxy_mode();
+        $proxyEntries = sh_trusted_proxy_entries();
+        if ($proxyMode === 'none') {
+            $items['proxy'] = sh_health_item('Client IP policy', 'Connection address only', 'healthy',
+                'Forwarding headers are ignored for every request.');
+        } elseif ($proxyEntries === []) {
+            $items['proxy'] = sh_health_item('Client IP policy', 'No trusted proxies configured', 'warning',
+                'Per-IP limits use the connection address. Behind Cloudflare, run Admin → Security → Trust Cloudflare ranges.');
+        } else {
+            $items['proxy'] = sh_health_item('Client IP policy', $proxyMode . ' · ' . count($proxyEntries) . ' proxy range(s)', 'healthy',
+                'Forwarded headers are trusted only from these proxies.');
+        }
+    }
+
     // Storage (disk)
     $total = @disk_total_space(SH_ROOT); $free = @disk_free_space(SH_ROOT);
     if ($total && $free !== false) {
