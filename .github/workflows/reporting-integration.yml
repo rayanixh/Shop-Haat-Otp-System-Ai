@@ -324,8 +324,9 @@ jobs:
           rc=0
           php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            grep -E 'BLOCKED|FAIL|REFUSED|Server ' /tmp/engine.log | head -n 25 \
-              | while IFS= read -r line; do echo "::error::engine: ${line//\%/\%25}"; done
+            msg=$( { grep -E "BLOCKED|FAIL|REFUSED|Error" /tmp/engine.log | head -n 8; tail -n 4 /tmp/engine.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::engine: ${msg//\%/\%25}"
           fi
           grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
             | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
@@ -358,15 +359,13 @@ jobs:
           rc=0
           php tests/restore-rehearsal.php 2>&1 | tee /tmp/rehearsal.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            { grep -E 'FAIL|BLOCKED|REFUSED|Backup restore' /tmp/rehearsal.log; tail -n 12 /tmp/rehearsal.log; } \
-              | sort -u | head -n 40 \
-              | while IFS= read -r line; do echo "::error::rehearsal: ${line//\%/\%25}"; done
+            # One annotation, not forty: a run can only hold so many, and a
+            # message that gets dropped explains nothing.
+            msg=$( { grep -E "FAIL|BLOCKED|REFUSED|Error" /tmp/rehearsal.log | head -n 6; tail -n 5 /tmp/rehearsal.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::rehearsal: ${msg//\%/\%25}"
           else
-            # The counts belong on the run, not only inside a log nobody opens:
-            # "passed 10, blocked 2" is the difference between a rehearsal that
-            # ran against MySQL and one that only proved its refusals.
-            grep -E '^(Backup restore|Real rehearsal|BLOCKED)' /tmp/rehearsal.log \
-              | tail -n 6 \
+            grep -E "Backup restore|Real rehearsal|BLOCKED" /tmp/rehearsal.log | tail -n 6 \
               | while IFS= read -r line; do echo "::notice::rehearsal: ${line//\%/\%25}"; done
           fi
           exit "$rc"
@@ -419,8 +418,9 @@ jobs:
           rc=0
           php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
           if [ "$rc" -ne 0 ]; then
-            grep -E 'BLOCKED|FAIL|REFUSED|Server ' /tmp/engine.log | head -n 25 \
-              | while IFS= read -r line; do echo "::error::engine: ${line//\%/\%25}"; done
+            msg=$( { grep -E "BLOCKED|FAIL|REFUSED|Error" /tmp/engine.log | head -n 8; tail -n 4 /tmp/engine.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::engine: ${msg//\%/\%25}"
           fi
           grep -E 'Server +:|^PASS [0-9]+|engine tested|REFUSED|BLOCKED' /tmp/engine.log | head -n 20 \
             | while IFS= read -r line; do echo "::notice::engine: ${line//\%/\%25}"; done
@@ -476,9 +476,15 @@ jobs:
         run: |
           set -o pipefail
           rc=0
-          php tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
-          grep -E '^(PASS|FAIL|\{)' /tmp/seed.log | head -n 12 \
-            | while IFS= read -r line; do echo "::notice::seed: ${line//\%/\%25}"; done
+          php -d display_errors=1 -d error_reporting=E_ALL tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( { grep -E "FAIL|ERROR|EXCEPTION|REFUSED|SQLSTATE" /tmp/seed.log | head -n 6; tail -n 5 /tmp/seed.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::seed: ${msg//\%/\%25}"
+          else
+            grep -E "PASS|FAIL|\{" /tmp/seed.log | head -n 10 \
+              | while IFS= read -r line; do echo "::notice::seed: ${line//\%/\%25}"; done
+          fi
           exit "$rc"
       - name: Start the PHP web server
         run: |
@@ -507,11 +513,10 @@ jobs:
           grep -E '^[0-9]+\. ' /tmp/browser.log | tail -n 3 \
             | while IFS= read -r line; do echo "::notice::browser-area: ${line//\%/\%25}"; done
           if [ "$rc" -ne 0 ]; then
-            sed -n '/^Failures:/,$p' /tmp/browser.log | head -n 40 \
-              | while IFS= read -r line; do echo "::error::browser: ${line//\%/\%25}"; done
-            echo "::error::browser: --- php -S log tail ---"
-            tail -n 25 /tmp/php-server.log \
-              | while IFS= read -r line; do echo "::error::php: ${line//\%/\%25}"; done
+            msg=$( sed -n '/^Failures:/,$p' /tmp/browser.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::browser: ${msg//\%/\%25}"
+            srv=$( tail -n 12 /tmp/php-server.log 2>/dev/null | tr "\n" "|" | cut -c1-800 )
+            echo "::error::php: ${srv//\%/\%25}"
           else
             grep -E '^Browser regression|^Base URL' /tmp/browser.log \
               | while IFS= read -r line; do echo "::notice::browser: ${line//\%/\%25}"; done

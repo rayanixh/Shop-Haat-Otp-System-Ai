@@ -215,11 +215,25 @@ $say($code === 0 ? 'PASS' : 'FAIL', 'import finished' . ($code === 0 ? '' : ' wi
 
 /* --- 4. Verify the restored database ------------------------------------- */
 echo "\n4. Restored content\n";
-$required = ['users', 'admins', 'settings', 'products', 'orders', 'order_items', 'payments',
-    'payment_methods', 'categories', 'coupons', 'sessions', 'notification_logs', 'db_backups'];
-$present = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-$missing = array_values(array_diff($required, $present));
-$say($missing === [] ? 'PASS' : 'FAIL', count($present) . ' tables restored' . ($missing === [] ? '' : '; missing: ' . implode(', ', $missing)));
+// The expected tables come from the dump itself, never from a hard-coded list: a
+// table this store never created (sessions only exists once the session handler
+// has been used, for example) cannot be reported as a table the restore lost.
+preg_match_all('~CREATE TABLE `([^`]+)`~i', $body, $tmMatches);
+$dumped = array_values(array_unique(array_map('strval', $tmMatches[1] ?? [])));
+$present = array_map('strval', $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN));
+$missing = array_values(array_diff($dumped, $present));
+$say($missing === [] && $dumped !== [] ? 'PASS' : 'FAIL',
+    count($present) . ' of ' . count($dumped) . ' dumped tables restored'
+    . ($missing === [] ? '' : '; missing: ' . implode(', ', array_slice($missing, 0, 8))));
+// The tables the storefront cannot run without must be among the restored ones
+// whenever the dump carried them (a backup that quietly lost `orders` is the
+// failure this rehearsal exists to catch).
+$core = ['users', 'admins', 'settings', 'products', 'orders', 'order_items', 'payments',
+    'payment_methods', 'categories', 'coupons', 'notification_logs', 'db_backups'];
+$coreDumped = array_values(array_intersect($core, $dumped));
+$coreMissing = array_values(array_diff($coreDumped, $present));
+$say($coreMissing === [] ? 'PASS' : 'FAIL', count($coreDumped) . ' core tables carried by the dump are present'
+    . ($coreMissing === [] ? '' : '; missing: ' . implode(', ', $coreMissing)));
 
 $idx = $pdo->query("SELECT NON_UNIQUE FROM information_schema.STATISTICS
     WHERE TABLE_SCHEMA = " . $pdo->quote($scratch) . " AND TABLE_NAME = 'payments'
