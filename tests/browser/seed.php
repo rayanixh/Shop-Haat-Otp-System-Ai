@@ -82,6 +82,24 @@ $say($products > 0 ? 'PASS' : 'FAIL', 'storefront products: ' . $products);
 $say($categories > 0 ? 'PASS' : 'FAIL', 'categories: ' . $categories);
 $say($methods > 0 ? 'PASS' : 'FAIL', 'active payment methods: ' . $methods);
 
+// A real multi-image gallery. product.php only renders its previous/next
+// controls when a product actually has more than one picture, so the gallery
+// assertions need a product that has some — written through product_images, the
+// same table the admin form writes.
+$first = $pdo->query('SELECT id, name, slug, image FROM products ORDER BY id ASC LIMIT 1')->fetch();
+$galleryImages = 0;
+if (is_array($first)) {
+    $insertImage = $pdo->prepare('INSERT INTO product_images (product_id, image, sort_order) VALUES (?,?,?)');
+    foreach ([' — side view' => 1, ' — in use' => 2] as $suffix => $order) {
+        $file = sh_demo_placeholder((string)$first['name'] . $suffix, '#dbe4f0', '#8fa6c4');
+        if ($file !== '') { $insertImage->execute([(int)$first['id'], $file, $order]); }
+    }
+    $galleryImages = (int)$pdo->query(
+        'SELECT COUNT(*) FROM product_images WHERE product_id = ' . (int)$first['id']
+    )->fetchColumn();
+    $say($galleryImages >= 2 ? 'PASS' : 'FAIL', 'extra gallery images on "' . $first['name'] . '": ' . $galleryImages);
+}
+
 $customer = static function (PDO $pdo, string $name, string $email, string $phone) use ($say): void {
     $st = $pdo->prepare("INSERT INTO users (name, email, phone, password_hash, status, email_verified)
                          VALUES (?,?,?,?, 'active', 1)");
@@ -96,11 +114,20 @@ $customer($pdo, 'Second Customer', 'customer2@example.test', '01700000002');
 // payment-submission step is reachable.
 $pdo->exec("UPDATE payment_methods SET account_number = '01711111111' WHERE code = 'bkash'");
 
+// The browser run needs to know which page has the gallery it should exercise.
+$state = [
+    'products'           => $products,
+    'categories'         => $categories,
+    'galleryImages'      => $galleryImages,
+    'galleryProductUrl'  => is_array($first) ? '/product.php?slug=' . urlencode((string)$first['slug']) : '',
+];
+@mkdir(__DIR__ . '/artifacts', 0777, true);
+@file_put_contents(__DIR__ . '/artifacts/state.json', json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+
 echo "\nSeed complete: http://" . (string)(getenv('SH_BROWSER_HOST') ?: '127.0.0.1:8080') . "\n";
 echo "admin@example.test / AdminTest!2026 · customer@example.test / Customer!2026\n";
-echo json_encode(['admin' => 'admin@example.test', 'customer' => 'customer@example.test',
-    'password' => 'Customer!2026', 'admin_password' => 'AdminTest!2026',
-    'products' => $products, 'categories' => $categories]) . "\n";
+echo json_encode($state + ['admin' => 'admin@example.test', 'customer' => 'customer@example.test',
+    'password' => 'Customer!2026', 'admin_password' => 'AdminTest!2026']) . "\n";
 // A seed that produced no catalogue cannot support a browser run: say so here
 // rather than letting eight browser checks fail for one cause.
-exit($products > 0 && $admin === 1 && $methods > 0 ? 0 : 1);
+exit($products > 0 && $admin === 1 && $methods > 0 && $galleryImages >= 2 ? 0 : 1);

@@ -31,7 +31,7 @@
  * Exit code 0 only when every check passed.
  */
 import { chromium } from 'playwright';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +41,12 @@ const ADMIN = { email: 'admin@example.test', password: process.env.SH_BROWSER_AD
 const CUSTOMER = { email: 'customer@example.test', password: process.env.SH_BROWSER_CUSTOMER_PASSWORD || 'Customer!2026' };
 const ARTIFACTS = join(HERE, 'artifacts');
 mkdirSync(ARTIFACTS, { recursive: true });
+
+// What the seed actually built. tests/browser/seed.php records the product it
+// gave a multi-image gallery, so the gallery assertions describe a known page
+// instead of "whichever card happened to be first".
+let seeded = {};
+try { seeded = JSON.parse(readFileSync(join(ARTIFACTS, 'state.json'), 'utf8')); } catch { seeded = {}; }
 
 const checks = [];
 function check(name, ok, detail = '') {
@@ -116,8 +122,10 @@ try {
   // readable reason instead of a 30 s locator timeout.
   const catHref = await page.locator('a.sh-product-card__media').first()
     .getAttribute('href', { timeout: 5000 }).catch(() => null);
-  const productUrl = catHref ? new URL(catHref, BASE).toString() : BASE + '/product.php?slug=missing-in-seed';
   if (!catHref) { check('a product card links to a product page', false, 'the home page had no product cards'); }
+  const productUrl = seeded.galleryProductUrl
+    ? new URL(seeded.galleryProductUrl, BASE).toString()
+    : (catHref ? new URL(catHref, BASE).toString() : BASE + '/product.php?slug=missing-in-seed');
   const cat = await page.goto(BASE + '/products.php', { waitUntil: 'domcontentloaded' });
   check('the shop listing responds 200', cat && cat.status() === 200, `status ${cat?.status()}`);
   const listed = await page.locator('article.sh-product-card').count();
@@ -128,22 +136,41 @@ try {
   console.log('\n3. Product page and gallery');
   errors = await watch(page);
   const prod = await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
-  check('the product page responds 200', prod && prod.status() === 200, `status ${prod?.status()}`);
+  check('the product page responds 200', prod && prod.status() === 200, `status ${prod?.status()} ${productUrl.replace(BASE, '')}`);
   const mainLoaded = await page.evaluate(() => {
     const img = document.querySelector('[data-gallery-main]');
     return !!img && img.complete && img.naturalWidth > 0;
   });
   check('the main gallery image really loads (naturalWidth > 0)', mainLoaded);
-  const counterBefore = await page.locator('[data-gallery-count]').first().textContent().catch(() => '');
+  const thumbs = await page.locator('[data-gallery-thumb]').count();
   const nextBtn = page.locator('[data-gallery-next]').first();
-  if (await nextBtn.count()) {
-    await nextBtn.click();
-    await page.waitForTimeout(250);
-    const counterAfter = await page.locator('[data-gallery-count]').first().textContent().catch(() => '');
-    check('the gallery "next" control changes the counter',
-      counterBefore !== counterAfter, `${(counterBefore || '').trim()} → ${(counterAfter || '').trim()}`);
+  if (thumbs > 1) {
+    // A real multi-image gallery: the control must exist, and pressing it must
+    // change both the counter and the image the shopper is looking at.
+    check('a multi-image product shows its thumbnails', thumbs > 1, `${thumbs} thumbnails`);
+    const before = await page.evaluate(() => ({
+      count: (document.querySelector('[data-gallery-count]')?.textContent || '').trim(),
+      src: document.querySelector('[data-gallery-main]')?.getAttribute('src') || '',
+    }));
+    if (await nextBtn.count()) {
+      await nextBtn.click();
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => ({
+        count: (document.querySelector('[data-gallery-count]')?.textContent || '').trim(),
+        src: document.querySelector('[data-gallery-main]')?.getAttribute('src') || '',
+      }));
+      check('the gallery "next" control changes the counter', before.count !== after.count, `${before.count} → ${after.count}`);
+      check('the gallery "next" control changes the main image', before.src !== '' && before.src !== after.src,
+        `${before.src.split('/').pop()} → ${after.src.split('/').pop()}`);
+    } else {
+      check('the gallery "next" control exists for a multi-image product', false, 'no [data-gallery-next]');
+    }
   } else {
-    check('the gallery "next" control exists', false, 'no [data-gallery-next] on the page');
+    // One image, no navigation: the app hides the controls on purpose, so their
+    // absence is the correct behaviour and worth asserting.
+    check('a single-image product hides the gallery navigation',
+      (await page.locator('[data-gallery-next]').count()) === 0 && (await page.locator('[data-gallery-count]').count()) === 0,
+      `${thumbs} thumbnail(s), seeded gallery ${seeded.galleryImages ?? 'unknown'}`);
   }
   await snap(page, '03-product');
   report(errors, 'product');
@@ -182,35 +209,53 @@ try {
   /* ------------------------------------------------------------------ */
   console.log('\n6. Checkout → order placed');
   errors = await watch(page);
+  // Say the preconditions out loud: a signed-in session and a non-empty cart.
+  // Without them a checkout page cannot render its form, and a bare locator
+  // timeout would hide which of the two was missing.
   await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
+  let cartRows = await page.locator('[data-cart-row]').count();
+  if (cartRows === 0) {
+    await page.goto(productUrl, { waitUntil: 'domcontentloaded' });
+    const addAgain = page.locator('[data-add-cart]').first();
+    if (await addAgain.count()) { await addAgain.click(); await page.waitForTimeout(700); }
+    await page.goto(BASE + '/cart.php', { waitUntil: 'domcontentloaded' });
+    cartRows = await page.locator('[data-cart-row]').count();
+  }
+  check('the cart still holds the item after signing in', cartRows > 0, `${cartRows} line(s) at ${page.url().replace(BASE, '')}`);
+
   const goCheckout = page.locator('a:has-text("Checkout"), a[href*="checkout.php"]').first();
   if (await goCheckout.count()) {
     await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), goCheckout.click()]);
   } else {
     await page.goto(BASE + '/checkout.php', { waitUntil: 'domcontentloaded' });
   }
-  check('the checkout page opens', page.url().includes('checkout.php'), page.url().replace(BASE, ''));
+  const onCheckout = page.url().includes('checkout.php') && !page.url().includes('/login.php');
+  const heading = (await page.locator('h1').first().textContent().catch(() => '')) || '';
+  check('the checkout page opens for a signed-in customer', onCheckout,
+    `${page.url().replace(BASE, '')} · h1 "${heading.trim().slice(0, 60)}" · cart ${cartRows}`);
   const hasToken = await page.locator('input[name="order_token"]').count();
-  check('checkout carries the order idempotency token', hasToken > 0);
-  if (page.url().includes('checkout.php')) {
+  check('checkout carries the order idempotency token', hasToken > 0,
+    `${page.url().replace(BASE, '')} · ${hasToken} token field(s)`);
+  if (onCheckout && hasToken > 0) {
     await page.fill('input[name="customer_name"]', 'Browser Customer');
     await page.fill('input[name="customer_phone"]', '01700000009');
     await page.fill('input[name="address_line"]', '12 Test Road, Dhanmondi');
     await page.fill('input[name="area"]', 'Dhanmondi');
     await page.fill('input[name="city"]', 'Dhaka');
-    const cod = page.locator('input[name="payment_method_id"]').first();
+    const cod = page.locator('input[name="payment_method_id"]').last();
     if (await cod.count()) { await cod.check().catch(() => {}); }
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {}),
-      page.locator('form button[type="submit"]').last().click(),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+      page.locator('button:has-text("Place Order")').first().click(),
     ]);
     const successUrl = page.url();
     check('placing the order lands on the confirmation page', /order-success\.php/.test(successUrl), successUrl.replace(BASE, ''));
-    const body = (await page.content()).slice(0, 40000);
+    const body = (await page.content()).slice(0, 60000);
     const orderNumber = (body.match(/SH[-\s]?[A-Z0-9]{6,}/) || [])[0] || '';
     check('the confirmation names the order', orderNumber !== '', orderNumber);
   } else {
-    check('placing the order lands on the confirmation page', false, 'checkout was not reachable');
+    check('placing the order lands on the confirmation page', false,
+      'checkout was not reachable with the seeded customer session');
   }
   await snap(page, '06-checkout');
   report(errors, 'checkout');
