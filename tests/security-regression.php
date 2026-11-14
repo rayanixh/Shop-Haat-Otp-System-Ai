@@ -3752,6 +3752,13 @@ sh_t('the SEO columns are TEXT and older installs are widened safely', function 
     if (!str_contains($seo, 'information_schema.columns')) { return 'the migration does not inspect the current type'; }
     if (!str_contains($seo, "sh_setting_save('seo_schema_v', '2')")) { return 'the schema version was not advanced'; }
     if (str_contains($seo, 'DROP TABLE')) { return 'the SEO migration drops a table'; }
+
+    // A test that drops and recreates the schema must not keep a stale
+    // per-request cache of missing tables, columns or migration versions.
+    $helpers = (string)file_get_contents(SH_ROOT . '/includes/functions.php');
+    if (!str_contains($helpers, 'bool $refresh = false')) { return 'schema helpers cannot re-check information_schema after DDL'; }
+    if (!str_contains($seo, 'sh_table_has_column($table, $column, true)')) { return 'the widening migration can reuse a stale missing-column result'; }
+    if (!str_contains($schema, 'sh_settings(true)')) { return 'a reseeded schema keeps stale migration versions in the settings cache'; }
     return true;
 });
 

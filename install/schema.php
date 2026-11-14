@@ -1506,4 +1506,9 @@ function sh_schema_seed(PDO $pdo, array $opts): void
     $pdo->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)')
         ->execute(['otp_schema_version', (string)SH_OTP_SCHEMA_VERSION]);
+
+    // The rows above were written through this raw PDO handle, bypassing
+    // sh_setting_save(). Refresh the request cache so a test or installer that
+    // recreates the schema does not keep migration versions from the old DB.
+    if (function_exists('sh_settings')) { sh_settings(true); }
 }
