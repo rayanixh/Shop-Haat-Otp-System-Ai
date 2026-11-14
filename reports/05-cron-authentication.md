@@ -92,3 +92,52 @@ SH_BACKUP_CRON_TOKEN=$TOKEN php cron/backup.php   # exit 0
 curl -s -o /dev/null -w '%{http_code}\n' "https://store/cron/backup.php?token=wrong"   # 403
 curl -s -o /dev/null -w '%{http_code}\n' -H "X-Backup-Token: $TOKEN" https://store/cron/backup.php   # 200
 ```
+
+## Final verification pass — the parser is now executed, not grepped
+
+The earlier evidence for this phase was static (the source contains `--token=`, `hash_equals`,
+`SH_BACKUP_CRON_TOKEN`). `tests/cron-cli-auth.php` (32 checks) now **extracts the shipped
+`sh_cron_given_token()` from `cron/backup.php` and calls it** with real argv arrays, a real
+`$_GET` and a real `$_SERVER`:
+
+```
+$ SH_TEST_PHP_BIN=$PWD/.tmpharness/node_modules/.bin/php-wasm-cli php tests/cron-cli-auth.php
+Cron / shared-hosting authentication (real argument parsing): passed 32, failed 0
+```
+
+What it executes:
+
+* `--token=…` from argv, from an absolute cPanel path, and a bare positional token;
+* `SH_BACKUP_CRON_TOKEN` when argv has none;
+* the **old documented form** `php cron/backup.php?token=…` — it resolves to the literal
+  string `cron/backup.php?token=…`, which can never equal a token, so that form still cannot
+  authenticate and cannot be "silently accepted";
+* HTTP `?token=`, the `X-Backup-Token` header, header-wins-over-query, and an empty header not
+  masking a valid query token;
+* CLI mode ignoring `$_GET` and HTTP headers entirely;
+* `sh_base_url()` for a root install, `/admin`, and `/shop`, `/shop/cron`, `/shop/admin/ai`
+  subdirectory installs (each run in a child process, because the helper caches its answer);
+* the exact command quoted in `SHOP_HAAT_DEPLOYMENT_CHECKLIST.md`, parsed from the document
+  and executed, so the documentation cannot drift from the code again.
+
+### A real defect found and fixed in this pass
+
+`sh_require_installed()` answered "not installed" with `header('Location: …'); exit;` — which
+does nothing in a CLI process. `php cron/backup.php --token=…` on an uninstalled copy therefore
+produced **no output at all and exit status 0**, so a scheduled backup that never ran looked
+successful in the cPanel cron log. It now detects `PHP_SAPI === 'cli'` and writes the reason to
+STDERR with a non-zero status:
+
+```
+$ php cron/backup.php --token=x
+Shop Haat: cannot run from the command line — config/database.php is missing. Finish the web
+installer, then run this command again.
+```
+
+(The php-wasm harness always reports shell status 0, so the non-zero status itself could only
+be reviewed in the source here; the message was observed. On a normal host `exit(1)` is
+honoured.)
+
+Still **NOT EXECUTED**: the full token → backup → reply path against a real database, and the
+HTTP surface (no web server here). Both are covered by `tests/backup-scheduler.php` (49 checks,
+SQLite mirror) for the scheduler half.

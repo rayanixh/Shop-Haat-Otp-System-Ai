@@ -272,7 +272,7 @@ function sh_test_uuid(): string
 /** Minimal assertion runner shared by both suites. */
 function sh_test_run(string $title, callable $fn): array
 {
-    $passed = 0; $failed = 0; $failures = [];
+    $passed = 0; $failed = 0; $blocked = 0; $failures = []; $blocks = [];
     $ok = static function (bool $cond, string $msg) use (&$passed, &$failed, &$failures): void {
         if ($cond) { $passed++; echo "  PASS  $msg\n"; return; }
         $failed++; $failures[] = $msg; echo "  FAIL  $msg\n";
@@ -280,9 +280,19 @@ function sh_test_run(string $title, callable $fn): array
     $eq = static function ($expected, $actual, string $msg) use ($ok): void {
         $ok($expected === $actual, $msg . ' (expected ' . var_export($expected, true) . ', got ' . var_export($actual, true) . ')');
     };
+    // BLOCKED is not a failure of the application: the environment could not run
+    // the check (no runnable PHP binary, no MySQL server, no browser). It is
+    // reported separately so a missing dependency is never mistaken for a defect
+    // and never counted as a pass.
+    $blockedFn = static function (string $msg, string $reason = '') use (&$blocked, &$blocks): void {
+        $blocked++;
+        $blocks[] = $msg . ($reason !== '' ? ' — ' . $reason : '');
+        echo '  BLOCKED ' . $msg . ($reason !== '' ? ' — ' . $reason : '') . "\n";
+    };
     echo $title . "\n" . str_repeat('-', min(72, strlen($title))) . "\n";
-    $fn($ok, $eq);
-    echo "\n$title: passed $passed, failed $failed\n";
+    $fn($ok, $eq, $blockedFn);
+    echo "\n$title: passed $passed, failed $failed" . ($blocked > 0 ? ", blocked $blocked" : '') . "\n";
     if ($failures) { echo "Failures:\n - " . implode("\n - ", $failures) . "\n"; }
-    return [$passed, $failed];
+    if ($blocks) { echo "Blocked:\n - " . implode("\n - ", $blocks) . "\n"; }
+    return [$passed, $failed, $blocked];
 }

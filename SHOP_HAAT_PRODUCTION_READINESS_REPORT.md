@@ -4,7 +4,9 @@
 layers are in a verifiable state; payments, IDOR and the database/performance
 audits are **not** finished, and that is stated plainly rather than papered over.
 
-Date of this status: 2026-11-14.
+Date of this status: 2026-11-14, refreshed in the final verification pass — see
+[`reports/16-final-verification.md`](reports/16-final-verification.md) for the full
+evidence and the three conditions that remain.
 
 ---
 
@@ -23,9 +25,11 @@ Date of this status: 2026-11-14.
 | Uploads | Content-verified MIME, random names, no executable formats, `.htaccess` deny | code review + `tests/security-regression.php` |
 | Static analysis | 0 findings / 189 files | `php tools/security-scan.php` |
 | Support/SMS subsystems | Unchanged behaviour after this work | `tests/support-unit.php` 58/58, `tests/support-sms-transport.php` 25/25 |
-| PHP syntax | Every PHP file | `php -l` clean (221 files) |
+| PHP syntax | Every PHP file | `php -l` clean (241 files) |
 
-**Total executed in this environment: 622 assertions, 0 failures.**
+**Total executed in this environment: 1,738 assertions, 0 failures**, across 21 PHP
+suites (measured in the final verification pass; the 622 figure above was the state at the
+start of the remediation work and is superseded). Static scan: 0 findings / 189 files.
 
 ## 2. What is not ready (blocking a "complete" claim)
 
@@ -33,8 +37,8 @@ Date of this status: 2026-11-14.
 |---|---|---|
 | Payment integrity audit | Needs a live database for constraint/concurrency tests | Payment logic is unchanged and manual-verification based; risk is unchanged, not increased — but it is unverified |
 | IDOR sweep | Order ownership checks not exercised against a real session/DB | Same as above: unverified, not known-broken |
-| MySQL verification | No MySQL in the sandbox; suites ran on a SQLite shim | Locking semantics are approximated, not proven |
-| Backup restore rehearsal | No isolated environment | Backups exist; the restore path is untested |
+| MySQL verification | No MySQL in the sandbox; suites ran on a SQLite shim | Locking semantics are approximated, not proven. `tests/mysql-integration.php` now runs the eleven engine scenarios on any staging server and in CI |
+| Backup restore rehearsal | No isolated environment | Backups exist; `tools/restore-rehearsal.php` automates the rehearsal, but the import itself is untested here |
 | Browser/functional regression | No web server or browser here | UI rendering of the new admin panel was not visually inspected |
 
 None of the above is a claim that something is broken — it is a statement that it
@@ -47,8 +51,10 @@ has not been *proven*, and this report does not present assumptions as facts.
 2. Configure trusted proxies if the store is behind Cloudflare or a load balancer.
 3. Confirm Admin → System Health: environment row green, client-IP policy green,
    OTP provider ready, no missing required extension.
-4. Run `SH_TEST_MYSQL_DSN=… php tests/otp-security.php` on staging.
-5. Enforce CSP on staging, browse, then production.
+4. Run `SH_TEST_MYSQL_DSN=… php tests/mysql-integration.php` on a disposable staging
+   database (add `SH_TEST_MYSQL_ALLOW_DROP=1`), then repeat it on MariaDB.
+5. Rehearse one restore: `php tools/restore-rehearsal.php --dump=… --user=… --pass=…`.
+6. Enforce CSP on staging, browse, then production.
 
 ## 4. Verdict
 
@@ -59,6 +65,10 @@ has not been *proven*, and this report does not present assumptions as facts.
 * **Known unresolved High issues:** none confirmed; two audited areas
   (payments, IDOR) remain *unverified* — see `SHOP_HAAT_REMAINING_RISKS.md`
   R-01/R-02.
+* **Final verification pass (2026-11-14):** one application defect found and fixed
+  (a CLI cron run could exit 0 silently), two test defects fixed, and two
+  verification tools added. Verdict unchanged: **CONDITIONALLY READY**, with three
+  named conditions in `reports/16-final-verification.md` §6.
 * **What this report does not say:** it does not say the application is 100 %
   secure, and it does not say it is fully production-ready while R-01, R-02, R-03
   and R-06 are open.

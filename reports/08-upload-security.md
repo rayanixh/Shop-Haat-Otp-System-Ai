@@ -79,3 +79,32 @@ Deletion is confined: `sh_delete_upload('../secret.txt', 'products')` stays insi
   needs a live host (`HOSTING LIMITED`).
 * **A huge upload against `upload_max_filesize`** — the code path is exercised via the
   simulated `UPLOAD_ERR_INI_SIZE`, but the host's real ceiling is a staging fact.
+
+## Final verification pass — one stale assertion replaced with real execution
+
+`tests/product-management-integration.php` (case P05) asserted the upload size limit by
+matching an exact expression in `includes/functions.php`:
+
+```
+$file['size'] > $maxBytes
+```
+
+The upload hardening in `ac63117` moved the check into `sh_upload_validate_image()` and made it
+overflow-safe:
+
+```php
+if ($maxBytes > 0 && (int)($file['size'] ?? 0) > $maxBytes) {
+```
+
+The behaviour was unchanged (and stronger), but the literal no longer matched, so the suite
+reported a failure that looked like a security regression and, because the suite exits non-zero,
+it turned the CI job red at `e65b2a7`. The assertion was **not** relaxed to make it pass. It was
+replaced with the thing it was trying to describe:
+
+* `sh_upload_validate_image()` is extracted from the shipped file and **called** with a reported
+  size of `SH_PRODUCT_MAX_IMAGE_BYTES + 1` and with a real 1×1 PNG at exactly the limit;
+* the suite asserts the oversize file is rejected and that the write path delegates to the same
+  validator (`$checked = sh_upload_validate_image($file, $maxBytes, $maxDim)`), so no future
+  refactor can bypass the check silently.
+
+Result: `Product management integration: 169 checks, 0 failures, 16 cases`.

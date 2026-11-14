@@ -22,12 +22,12 @@ reporting them as passing.
 | `tests/security-regression.php` | 185 passed, 1 skipped | Markup-level contracts: no inline handlers, nonce present, no `onclick=`, no `javascript:` URLs |
 | `tests/csp-readiness.php` | 31 passed | Policy, nonces, collector safety |
 | `tests/idor-scan.php` | 42 passed | Route guards (including the AJAX fragments a browser calls) |
-| `tests/admin-access-url.php` | 240 passed, 9 not run | The 9 need to spawn a PHP subprocess; php-wasm reports a non-executable `PHP_BINARY` and there is no `php` on `PATH` (see below) |
+| `tests/admin-access-url.php` | **249 passed** (with `SH_TEST_PHP_BIN`) | The 9 subprocess checks need a runnable PHP binary; with `SH_TEST_PHP_BIN` set to the node CLI they pass. Without it the suite reports 240 passed + **9 BLOCKED** (see below) |
 
 That is a code-level safety net. It is **not** a browser regression: it cannot see layout,
 focus order, a broken fetch, or a JavaScript exception.
 
-## The 9 checks that could not run (environment, not regressions)
+## The 9 subprocess checks — why they used to be reported as failures
 
 `admin-access-url.php` probes the admin guard by writing a small PHP file and running it with
 `shell_exec(PHP_BINARY …)`:
@@ -37,8 +37,19 @@ $ php -r 'var_dump(is_executable(PHP_BINARY));'
 bool(false)   // /tmp/php-wasm-bin…/php — a temporary binary a subprocess cannot run
 ```
 
-The same 9 fail at HEAD before any change in this phase. On a machine with a normal PHP binary
-they execute; nothing in the guard changed here.
+`is_executable()` says true for that path while the subprocess cannot actually start, so the
+suite used to record nine **FAIL** lines for a missing dependency rather than a defect. Two
+things were wrong and both are fixed in the final verification pass:
+
+1. the suite now finds a binary with `tests/_support_php_bin.php`, which **verifies** a
+   candidate by executing `php -r 'echo …'` before using it (`SH_TEST_PHP_BIN`, then
+   `PHP_BINARY`, then `php` on `PATH`);
+2. when none works, the nine checks are reported **BLOCKED** with the reason, and the suite
+   summary reads `passed 240, failed 0, blocked 9` — a missing tool can no longer look like a
+   security regression.
+
+With a binary it is **249 passed, 0 failed, 0 blocked** (measured; the GitHub runner's `php`
+does the same, and CI runs this suite that way).
 
 ## The regression script to run on staging (copy-paste)
 

@@ -8,35 +8,41 @@ theoretical maximum.
 
 ---
 
-## R-01 · Payments were not audited end-to-end (High, open)
+## R-01 · Payment concurrency is still unverified on a real engine (High, open — narrower than before)
 
-* **What is known:** checkout totals are recalculated server-side
-  (`api/checkout.php`, `includes/payment.php`), and manual payment submission
-  requires CSRF + order ownership.
-* **What is not verified:** transaction-id uniqueness under concurrency,
-  duplicate submission handling, allowed payment status transitions, and whether
-  an admin-side verification can be replayed against another order.
-* **Why it is open:** requires a live database to test the constraints, and the
-  sandbox has no MySQL.
-* **Interim mitigation:** manual gateway verification stays admin-driven; no
-  automated callback marks an order paid. Do not enable an automated gateway
-  until the audit is completed.
+* **Now verified:** `tests/payment-security.php` (53 checks) covers server-side
+  price recalculation, quantity/discount/shipping manipulation, TrxID handling,
+  duplicate submission, ownership, the allowed status transitions and admin
+  verification; `install/schema.php` carries `UNIQUE KEY uq_payments_transaction_id`
+  and the migration that adds it to an existing store.
+* **Still not verified:** the same guarantees **under real concurrency on MySQL/
+  MariaDB** (two simultaneous submissions, `SELECT … FOR UPDATE`, rollback after a
+  duplicate key). `tests/mysql-integration.php` scenarios 3–5 exist for exactly
+  that and are BLOCKED without a server.
+* **Interim mitigation unchanged:** manual gateway verification stays
+  admin-driven; no automated callback marks an order paid. Do not enable an
+  automated gateway until the engine run is attached.
 
-## R-02 · IDOR sweep on customer endpoints not completed (High, open)
+## R-02 · IDOR verified statically and at predicate level, not over HTTP (High, open — narrower)
 
-* **What is known:** `api/orders.php`, `order-details.php` and `track.php`
-  resolve the order from the session or from a phone+order-number pair.
-* **What is not verified:** every customer-facing endpoint and AJAX handler has
-  a server-side ownership check (order, address, profile, verification data).
-* **Interim mitigation:** none specific — this is the next audit item.
+* **Now verified:** `tests/idor-scan.php` (42 checks) walks every customer route
+  and AJAX handler and confirms each one consults an ownership check
+  (`sh_order_can_view()`, session user id) before returning data or mutating it.
+  `tests/mysql-integration.php` §9 executes `sh_order_can_view()` against real
+  order rows for owner / other customer / guest / guest-with-session cases.
+* **Still not verified:** two real sessions (customer A and customer B) over HTTP
+  with a changed order id, an expired session and a POST ownership swap. That
+  needs a web server; the response codes could not be observed here.
+* **Interim mitigation:** none specific — run the HTTP matrix in
+  `reports/02-idor-object-authorisation.md` on staging.
 
 ## R-03 · MySQL-specific behaviour untested in this environment (Medium, open)
 
 All database work here ran on SQLite through a translating shim. Locking
 (`SELECT … FOR UPDATE`), `INSERT … ON DUPLICATE KEY`, and index behaviour are
 MySQL/MariaDB features that the shim approximates, not proves.
-**Action:** run `SH_TEST_MYSQL_DSN='mysql:host=…;dbname=…' php tests/otp-security.php`
-and the other DB suites against a staging database before relying on them.
+**Action:** run `tests/mysql-integration.php` (eleven engine scenarios) against a
+disposable staging database, and then repeat it on MariaDB — see R-14.
 
 ## R-04 · `X-Forwarded-Proto` remains lenient when no proxy list is set (Low, open)
 
@@ -53,7 +59,7 @@ through a normal PHP setup; a misconfigured server that maps arbitrary extension
 to PHP would need `uploads/` made non-executable at the server level.
 **Action:** on nginx, add the deny block from the deployment checklist.
 
-## R-06 · Backup restore has not been rehearsed (Medium, open)
+## R-06 · Backup restore is automated but still unrehearsed here (Medium, open)
 
 Backups are created (`cron/backup.php`, `sh_backup_create()`), stored under
 `storage/backups/` with an Apache deny rule + `index.php` 403, and downloaded
@@ -111,6 +117,27 @@ fails, the message says so and the stored pepper keeps working — no state is
 half-changed.
 
 ---
+
+## R-14 · No MariaDB run exists (Medium, open)
+
+MySQL 8.0 is exercised by the CI job's own steps, and the eleven-scenario suite
+targets MySQL. MariaDB differs in `information_schema` details, index limits,
+`NOWAIT` support and duplicate-key behaviour after a rollback, and **no MariaDB
+server has ever been used**. cPanel hosts ship either engine, so this is a real
+deployment question, not a technicality.
+**Action:** run `tests/mysql-integration.php` on MariaDB 10.6+ before promising
+MariaDB support.
+
+## R-15 · A failed scheduled backup can still look quiet on some hosts (Low, open)
+
+The CLI entry point now explains itself and exits non-zero when the store is not
+installed (fixed in this pass). What remains is host-dependent: some hosts mail
+cron output only when it is non-empty, and a *successful* run prints one line to
+STDOUT. Confirm on staging that the cPanel cron output is delivered, or set
+`MAILTO=` on the cron line.
+**Note:** the shell status of `cron/backup.php` could not be observed in this
+sandbox because the php-wasm CLI always returns 0; it was verified by reading the
+`exit()` path and by observing the message.
 
 ## Risk accepted deliberately
 

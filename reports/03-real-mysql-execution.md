@@ -87,3 +87,56 @@ mysql -e "SELECT INDEX_NAME, NON_UNIQUE FROM information_schema.STATISTICS
 
 Until a MySQL run happens on staging, the app should be described as *"verified by
 inspection and by translated-logic suites"* for these six items — not as "tested on MySQL".
+
+## Final verification pass — the suite that makes this reproducible
+
+`tests/mysql-integration.php` is new. It is the staging procedure this report used to
+describe in prose, as executable code, and it is what a host with MySQL must run before any
+MariaDB/MySQL claim is repeated.
+
+```
+SH_TEST_MYSQL_DSN='mysql:host=127.0.0.1;dbname=shophaat_staging_test;charset=utf8mb4' \
+SH_TEST_MYSQL_USER=test SH_TEST_MYSQL_PASS=test SH_TEST_MYSQL_ALLOW_DROP=1 \
+      php tests/mysql-integration.php
+```
+
+Eleven scenarios, each printing exactly one of PASS / FAIL / BLOCKED / NOT TESTED:
+
+| # | Scenario | What it proves |
+| --- | --- | --- |
+| 1 | Fresh install from `install/schema.php` | all 50 tables, InnoDB, `uq_payments_transaction_id` unique, the old plain index gone |
+| 2 | Upgrade of a pre-migration store | `sh_payment_submission_schema_ensure()` adds the index, replaces the plain one, and **postpones** instead of throwing when duplicate history blocks the ALTER |
+| 3 | Unique TrxID | duplicate non-NULL rejected with SQLSTATE 23000; two NULLs allowed |
+| 4 | Concurrent duplicate submission | a second connection cannot claim the same TrxID |
+| 5 | Transaction rollback | rolled-back insert/update leave no trace |
+| 6 | `SELECT … FOR UPDATE` | a second connection hits the lock wait, not a dirty read |
+| 7/8 | OTP create, verify, replay, expiry | one-time use and expiry are enforced by the engine, not by PHP timing |
+| 9 | Order ownership | `sh_order_can_view()` with real rows for owner / other customer / guest |
+| 10 | Notification idempotency | one claim, refused duplicate, one retry, attempts incremented, no second retry |
+| 11 | Backup metadata | a real dump on this engine, verified, with size and table count recorded |
+
+Safety, because it drops tables: the DSN must name a database; the name must contain
+test/staging/scratch/ci; a name containing prod/production/live/main/master is refused
+outright; dropping needs `SH_TEST_MYSQL_ALLOW_DROP=1`; an existing `config/database.php` is
+only used if it points at the same database and user, otherwise the run is refused. All four
+refusals were executed here and print `REFUSED: …` with exit status 2 (see report 16).
+
+**Result in this sandbox: BLOCKED.** `pdo_mysql` is compiled into the php-wasm build, but the
+wasm socket layer traps the process inside `pdo_mysql::__construct` when it connects — a fatal
+that no `try/catch` can catch. The suite detects the Emscripten runtime and reports:
+
+```
+BLOCKED   connect to MySQL/MariaDB — this PHP runs under php-wasm (Emscripten); pdo_mysql
+          cannot open a socket there and the process aborts inside pdo_mysql::__construct.
+```
+
+It is wired into `.github/workflows/reporting-integration.yml` as the last step of the MySQL
+8.0 job (the disposable `shophaat_reporting_test` database, `SH_TEST_MYSQL_ALLOW_DROP=1`).
+That step is `continue-on-error: true` until it has one green MySQL 8.0 run; flip that line
+once it does so a regression fails the build.
+
+**Unchanged engine statement:** the only real MySQL evidence in this project remains the CI
+job's existing MySQL 8.0 steps (`product-management-mysql.php`, `reporting-integration.php`,
+`email-system.php`, `support-system.php`, `product-ai-save.php`, `seo-content-length.php`,
+`courier-connection-tests.php`), which were green at `007357c`. **No MariaDB run exists.** Do
+not claim MariaDB compatibility until this suite has been run on a MariaDB server.

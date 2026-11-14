@@ -329,3 +329,26 @@ application still lints. No test was reported as passing without being executed.
   the 1-in-200 probabilistic call.
 * Consider notifying the admin (email/System Health badge) when the provider
   becomes unready while `phone_otp` is the active mode.
+
+---
+
+## 11. Final verification pass (2026-11-14)
+
+A second pass re-ran everything and looked specifically for defects that an earlier
+pass could have hidden. One application defect and two test defects were found.
+
+| ID | Severity | Finding | Fix | Evidence |
+| --- | --- | --- | --- | --- |
+| D-16-1 | Medium | `sh_require_installed()` answered "not installed" with `header('Location: …'); exit;`. In CLI that header is a no-op, so `php cron/backup.php --token=…` printed nothing and exited **0** — a scheduled backup that never ran looked successful in the cPanel log | CLI branch in `config/config.php`: message on STDERR naming the cause and the next step, non-zero exit | `tests/cron-cli-auth.php` §8 executes the real entry point and asserts the message and a clean failure |
+| D-16-2 | Test integrity | `tests/admin-access-url.php` reported 9 **FAIL** checks whenever no runnable PHP binary existed, which reads as a security regression | `tests/_support_php_bin.php` verifies a candidate by executing it (`SH_TEST_PHP_BIN` → `PHP_BINARY` → `PATH`); a missing binary now yields **BLOCKED** with the reason | without: 240 passed, 0 failed, 9 blocked · with: 249 passed, 0 failed |
+| D-16-3 | Test integrity | A P05 assertion matched the literal `$file['size'] > $maxBytes`; the hardened validator (`ac63117`) uses `$maxBytes > 0 && (int)($file['size'] ?? 0) > $maxBytes`, so the suite failed while the code was correct — and CI went red at `e65b2a7` | the assertion now **calls** `sh_upload_validate_image()` with an oversize file and with a real PNG at the limit, and asserts the write path delegates to it | `product-management-integration: 169 checks, 0 failures` |
+
+New verification code from this pass: `tests/mysql-integration.php` (eleven engine
+scenarios, safety-gated), `tools/restore-rehearsal.php` (dump → scratch DB →
+verification → drop), `tests/cron-cli-auth.php` (32 behavioural checks of the shipped
+token parser), and a BLOCKED category in `sh_test_run()` so a missing environment
+dependency can never masquerade as a defect or as a pass.
+
+Re-run totals: **1,738 passed · 0 failed** over 21 suites, `php -l` 241/241,
+`tools/security-scan.php` 0 findings / 189 files. Verdict and the three remaining
+conditions: `reports/16-final-verification.md`.

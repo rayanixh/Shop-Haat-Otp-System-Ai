@@ -283,6 +283,22 @@ function sh_require_installed(): void
 {
     $state = sh_db_state();
 
+    // A command-line caller (cron, CLI tooling) cannot follow a Location header.
+    // Sending one made `php cron/backup.php` exit 0 with no output at all, so a
+    // scheduled backup that never ran looked successful in the cPanel log.
+    if (PHP_SAPI === 'cli' && $state['status'] !== 'ok') {
+        $why = match ($state['status']) {
+            'no-config'  => 'config/database.php is missing',
+            'no-database' => 'the configured database is missing or unreachable',
+            'no-tables'  => 'the database has no application tables',
+            'no-server'  => 'the database server cannot be reached',
+            default      => 'the installation is incomplete',
+        };
+        fwrite(STDERR, 'Shop Haat: cannot run from the command line — ' . $why
+            . '. Finish the web installer, then run this command again.' . "\n");
+        exit(1);
+    }
+
     switch ($state['status']) {
         case 'ok':
             // Self-healing migration for features added after the original install

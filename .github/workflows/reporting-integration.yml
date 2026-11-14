@@ -61,6 +61,15 @@ jobs:
         env:
           SH_TEST_PHP_BIN: php
         run: php tests/admin-access-url.php
+      # The shipped CLI token parser is executed with real argv/env/$_GET: the
+      # documented cPanel command resolves its token, the old
+      # `php cron/backup.php?token=…` form cannot authenticate, the HTTP header
+      # still wins over the query string, and a CLI run without a database
+      # explains itself instead of exiting silently.
+      - name: Cron CLI authentication
+        env:
+          SH_TEST_PHP_BIN: php
+        run: php tests/cron-cli-auth.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -284,3 +293,21 @@ jobs:
       # test database; no external provider or live credential is used.
       - name: AI customer support end-to-end against MySQL
         run: php tests/support-system.php
+      # MySQL-only behaviour that a SQLite mirror cannot prove: a fresh install of
+      # all 50 tables on InnoDB, an upgrade from a pre-migration store, the unique
+      # TrxID index (including the duplicate-history case that must postpone the
+      # ALTER instead of failing a customer checkout), rollback, row locking,
+      # order ownership and notification idempotency.
+      # It runs last because it drops and recreates the disposable tables. It
+      # refuses any database whose name does not look like a test database.
+      # First runs are advisory (continue-on-error) until this step has a green
+      # MySQL 8.0 result; remove that line once it does, so a regression fails the
+      # build.
+      - name: MySQL integration (schema, migration, locking, idempotency)
+        continue-on-error: true
+        env:
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ALLOW_DROP: '1'
+        run: php tests/mysql-integration.php

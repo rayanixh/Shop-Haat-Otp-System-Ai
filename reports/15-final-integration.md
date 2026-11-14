@@ -1,6 +1,10 @@
 # 15 — Final integration
 
-**Status: PASSED — 1,528 checks green, 237/237 PHP files lint clean, security scan: no findings**
+**Status: PASSED — 1,738 checks green, 241/241 PHP files lint clean, security scan: no findings**
+
+*(Reconciled in the final verification pass: this table previously read 1,528 and 237. The
+admin-access suite was under-counted by nine and two suites — `cron-cli-auth` and
+`product-management-integration` — are new. See report 16.)*
 
 Run on branch `arena/c6d8fd27-shop-haat-otp-system-ai` at the commit this report ships with.
 
@@ -26,23 +30,25 @@ Run on branch `arena/c6d8fd27-shop-haat-otp-system-ai` at the commit this report
 | `tests/support-sms-transport.php` | **25 passed** |
 | `tests/environment.php` | **61 passed** |
 | `tests/backup-inspect.php` | **24 passed** |
-| `tests/admin-access-url.php` | **240 passed**, 9 not executable here (no runnable PHP binary for its subprocess probe — see report 14) |
+| `tests/admin-access-url.php` | **249 passed** with `SH_TEST_PHP_BIN` (240 + 0 failed + 9 BLOCKED without one — see report 14) |
+| `tests/cron-cli-auth.php` | **32 passed** (executes the shipped cron token parser with real argv/$_GET) |
+| `tests/product-management-integration.php` | **169 passed**, 16 cases |
 | `tests/product-management-render.php` | 16 fixture renders produced (JSON, no pass/fail contract) |
-| **Total** | **1,528 passed · 0 failed** |
+| **Total** | **1,738 passed · 0 failed** |
 
 ## Static gates
 
 ```
-$ for f in $(git ls-files '*.php'); do php -l "$f"; done
-lint failures: 0 of 237
+$ while read -r f; do php -l "$f"; done < <(git ls-files '*.php'; git ls-files --others --exclude-standard '*.php')
+lint failures: 0 of 241
 
 $ php tools/security-scan.php
 No findings.
 critical 0   high 0   medium 0   low 0   (files scanned: 189)
 ```
 
-Project size at this commit: 237 PHP files, 84,243 lines, 50 tables, 62 admin pages,
-11 API endpoints, 11 SQL migrations.
+Project size at this commit: 241 PHP files (application + tests/tools), 50 tables, 62 admin
+pages, 11 API endpoints, 11 SQL migrations.
 
 ## Suites that need a database and did not run
 
@@ -50,7 +56,7 @@ Project size at this commit: 237 PHP files, 84,243 lines, 50 tables, 62 admin pa
 `tests/reporting-integration.php`, `tests/installer-demo-data.php`, `tests/product-ai-save.php`,
 `tests/seo-content-length.php`, `tests/courier-connection-tests.php` — all fail with
 "Database configuration missing" / "MySQL only". No MySQL server exists in this sandbox
-(report 03). None of them is counted in the 1,528.
+(report 03). None of them is counted in the 1,738.
 
 ## What changed in this phase, commit by commit
 

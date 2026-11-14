@@ -125,6 +125,46 @@ never reset during that window.
       variable. Setting the token in `config/secrets.php`
       (`'backup_cron_token' => '…'`) keeps it out of the database as well.
 - [ ] Confirm one run produced a file in Admin → Backups.
+- [ ] Run the command once by hand in cPanel → Terminal and read the output. A
+      healthy run prints one line (`OK <file> · <size>`). If the store is not
+      installed yet it prints `Shop Haat: cannot run from the command line — …`
+      on STDERR and exits non-zero instead of exiting silently, so an empty cron
+      log now means "ran and did nothing" rather than "never ran".
+- [ ] If your host only mails cron output when it is non-empty, add `MAILTO=you@example.com`
+      to the cron line so a failure reaches you.
+
+## 9b. Staging verification before you point DNS at production
+
+Run these against a **disposable** database and a staging copy of the files, not
+against the live store:
+
+```bash
+# 1. Engine behaviour: schema, migration, unique TrxID, rollback, locking,
+#    OTP replay/expiry, order ownership, notification idempotency, backup metadata.
+SH_TEST_MYSQL_DSN='mysql:host=127.0.0.1;dbname=shophaat_staging_test;charset=utf8mb4' \
+SH_TEST_MYSQL_USER=test SH_TEST_MYSQL_PASS=test SH_TEST_MYSQL_ALLOW_DROP=1 \
+      php tests/mysql-integration.php
+# repeat on MariaDB if that is what your host runs (see REMAINING_RISKS R-14)
+
+# 2. Restore rehearsal: verify a real backup, import it into a scratch database,
+#    check tables/indexes/relationships, then drop the scratch database.
+php tools/restore-rehearsal.php --dump=storage/backups/your-backup.sql.gz \
+    --host=127.0.0.1 --user=test --pass=test --scratch=shophaat_restore_test
+
+# 3. Cron authentication behaves as documented (query string, header, CLI argv).
+SH_TEST_PHP_BIN=$(command -v php) php tests/cron-cli-auth.php
+
+# 4. The whole local battery (no database needed).
+for t in otp-security security-regression payment-security uploads idor-scan \
+         backup-scheduler secrets-migration rate-limit-failsafe webhooks-and-retries \
+         csp-readiness admin-access-url cron-cli-auth product-management-integration; do
+    SH_TEST_PHP_BIN=$(command -v php) php tests/$t.php || echo "FAILED: $t"
+done
+```
+
+Each suite prints `passed N, failed M` and exits non-zero on a failure. A check
+that cannot run in the current environment is printed as `BLOCKED` with the
+reason — it is never counted as a pass and never as a failure.
 
 ## 10. Post-deploy verification
 
@@ -132,6 +172,10 @@ never reset during that window.
       too).
 - [ ] Sign in as a customer (email+password **and** phone OTP if enabled).
 - [ ] Place one test order end-to-end and confirm the order and payment rows.
+- [ ] Submit a manual payment with a transaction id, then submit the **same** id on
+      a second order: the second must be refused (DB-level uniqueness).
+- [ ] Sign in as customer A, copy the order-details URL of customer B's order and
+      open it: you must get the app's "not found"/redirect answer, never the order.
 - [ ] Sign in to the admin panel; open Dashboard, Products, Orders, Settings,
       System Health.
 - [ ] Run the shipped checkers on the server if you have a terminal

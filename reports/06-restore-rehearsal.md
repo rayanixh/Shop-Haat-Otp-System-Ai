@@ -102,3 +102,34 @@ mysql -e "DROP DATABASE shophaat_restore;"
 * The rehearsal should be repeated **after** the phase-01 migration, so the restored store
   contains `uq_payments_transaction_id` — otherwise the very next payment submission will
   re-add it, which is fine but hides whether the dump captured it.
+
+## Final verification pass — the rehearsal is now a tool, not a checklist
+
+`tools/restore-rehearsal.php` implements the procedure end to end and refuses to skip a step:
+
+```
+php tools/restore-rehearsal.php --dump=storage/backups/shophaat-20261114.sql.gz \
+    --host=127.0.0.1 --user=shophaat_test --pass=… --scratch=shophaat_restore_test
+```
+
+1. **Dump integrity first** — gzip magic bytes (a `.gz` that is not gzip is called out, because
+   `gzopen()` reads an uncompressed file silently), the application's own header line,
+   `CREATE TABLE` count, `SET NAMES`, and a statement count. A truncated backup fails here,
+   before a database is created.
+2. **Safety gate** — the scratch name must be `[A-Za-z0-9_]`, must contain
+   test/scratch/restore/staging, must not contain prod/production/live, and must not equal the
+   name passed to `--live`. There is no `--force`; the only way to name a live database is to
+   pass it to `--scratch`, which is refused.
+3. **Import** — `gunzip -c … | mysql …` streamed through `proc_open` with the password in
+   `MYSQL_PWD`, never on the command line (`ps` output stays clean) and never in the log.
+4. **Verify the result** — every required table, `uq_payments_transaction_id` still unique,
+   row counts for settings/orders/products/users, a representative order with its items and
+   payment, and a join that proves no `order_items` row points at a missing order.
+5. **Application access** — prints the exact commands to point a staging *copy* of the app at
+   the restored database. The browser step stays **NOT TESTED** here (no web server).
+6. **Clean up** — drops the scratch database unless `--keep`.
+
+Executed here: the refusal paths and the dump inspection (all four `REFUSED:` messages and the
+five inspection verdicts, quoted in report 16). **BLOCKED** at step 3: no `mysql` client and no
+server in this sandbox, so the real restore into a scratch database remains
+**NOT TESTED** — as it was before. It has not been marked PASSED.

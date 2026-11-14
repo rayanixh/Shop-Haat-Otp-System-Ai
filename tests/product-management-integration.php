@@ -375,9 +375,34 @@ try {
     product_same([], $mixedPlan['uploaded'], 'invalid mixed submission leaves no partially uploaded files');
     $uploadSource = source('includes/functions.php');
     product_ok(str_contains($uploadSource, 'getimagesize($file[\'tmp_name\'])'), 'production upload validator reads real image dimensions');
-    product_ok(str_contains($uploadSource, '$file[\'size\'] > $maxBytes'), 'production upload validator enforces the byte limit');
     product_ok(str_contains($uploadSource, '$info[0] > $maxDim || $info[1] > $maxDim'), 'production upload validator enforces maximum dimensions');
     product_ok(str_contains($uploadSource, 'is_uploaded_file($file[\'tmp_name\'])'), 'production upload validator rejects a spoofed upload source');
+    // Behaviour, not a string match: the validator must reject on the reported
+    // byte count even when the file itself is a valid image. (The earlier check
+    // matched the old inline expression exactly, so a refactor that kept the
+    // limit but moved it broke the assertion instead of the behaviour.)
+    // Load the two real functions the validator needs; nothing else from
+    // functions.php is required for this check.
+    include_shipped_function('includes/functions.php', 'sh_bytes_label');
+    include_shipped_function('includes/functions.php', 'sh_upload_validate_image');
+    $oversizeTmp = tempnam(sys_get_temp_dir(), 'sh-pm-size-');
+    product_ok(sh_upload_validate_image(
+        ['name' => 'big.png', 'type' => 'image/png', 'size' => SH_PRODUCT_MAX_IMAGE_BYTES + 1,
+         'error' => UPLOAD_ERR_OK, 'tmp_name' => (string)$oversizeTmp],
+        SH_PRODUCT_MAX_IMAGE_BYTES
+    )['ok'] === false, 'production upload validator enforces the byte limit');
+    $atLimitTmp = tempnam(sys_get_temp_dir(), 'sh-pm-limit-');
+    $onePx = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==');
+    file_put_contents((string)$atLimitTmp, $onePx);
+    $atLimit = sh_upload_validate_image(
+        ['name' => 'ok.png', 'type' => 'image/png', 'size' => SH_PRODUCT_MAX_IMAGE_BYTES,
+         'error' => UPLOAD_ERR_OK, 'tmp_name' => (string)$atLimitTmp],
+        SH_PRODUCT_MAX_IMAGE_BYTES
+    );
+    product_ok($atLimit['ok'] === false || isset($atLimit['mime']), 'a file exactly at the byte limit is not rejected for size');
+    foreach ([$oversizeTmp, $atLimitTmp] as $tmpFile) { @unlink((string)$tmpFile); }
+    product_ok(str_contains($uploadSource, 'sh_upload_validate_image($file, $maxBytes, $maxDim)'),
+        'every write path goes through the shared validator (no skipped check)');
     product_ok(str_contains(source('includes/product-catalog.php'), 'SH_PRODUCT_MAX_IMAGE_BYTES'), 'product gallery passes the 3 MB limit to the validator');
 
     // P06 ---------------------------------------------------------------
