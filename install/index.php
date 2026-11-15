@@ -484,7 +484,6 @@ code{overflow-wrap:anywhere;word-break:break-word}
         <li><span><?= e($r['label']) ?></span><span class="<?= $r['ok'] ? 'ok' : 'bad' ?>"><?= e($r['value']) ?></span></li>
       <?php endforeach; ?>
     </ul>
-    <h2 style="margin-top:18px">Optional extensions</h2>
     <ul class="req">
       <?php foreach ($optionalRequirements as $r): ?>
         <li><span><?= e($r['label']) ?></span><span class="<?= $r['ok'] ? 'ok' : 'warn' ?>"><?= e($r['value']) ?></span></li>
