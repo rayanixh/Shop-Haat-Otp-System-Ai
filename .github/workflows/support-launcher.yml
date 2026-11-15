@@ -1,0 +1,179 @@
+name: Support launcher UI
+
+# The floating support launcher is the most-seen control on the storefront, so
+# it gets the same treatment as the installer: a real Chromium run against a real
+# PHP server and a real MySQL database, at every phone width the brief names,
+# with the screenshots committed back to the branch as evidence.
+#
+# What this job proves, and nothing less:
+#   * the launcher is a 56px circle with no "Support" text, bottom-right
+#     anchored, never stretched at 320–430px or on desktop;
+#   * the three-option menu opens above it, animates, stays inside the viewport,
+#     closes on selection, Escape and an outside click, and honours
+#     prefers-reduced-motion;
+#   * Facebook and WhatsApp open the destinations an administrator configured in
+#     the EXISTING support settings page (a plain-http link is rejected there),
+#     and an unconfigured store shows the unavailable state instead of a dead
+#     link;
+#   * Live Chat still opens the untouched chat panel: it loads the conversation,
+#     answers a real message, and Talk to a human still escalates.
+on:
+  push:
+    branches:
+      - main
+      - arena/c6d8fd27-shop-haat-otp-system-ai
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  support-launcher:
+    name: Support launcher (Chromium, MySQL, phone widths, screenshots)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: shophaat_browser_test
+          MYSQL_USER: shophaat_test
+          MYSQL_PASSWORD: shophaat_test_password
+          MYSQL_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      # The head branch, not the merge commit: the screenshots are committed
+      # back to it at the end of the job.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml, fileinfo, gd, curl, intl
+          coverage: none
+      - name: Point the checkout at the disposable database
+        run: |
+          php -r 'file_put_contents("config/database.php", "<?php\nreturn " . var_export(["host" => "127.0.0.1", "port" => 3306, "name" => "shophaat_browser_test", "user" => "shophaat_test", "pass" => "shophaat_test_password", "charset" => "utf8mb4"], true) . ";\n");'
+          php -l config/database.php
+      - name: Seed the store through the application installer path
+        env:
+          SH_BROWSER_SEED: '1'
+          SH_BROWSER_HOST: 127.0.0.1:8080
+        run: |
+          set -o pipefail
+          rc=0
+          php -d display_errors=1 -d error_reporting=E_ALL tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( { grep -E "FAIL|ERROR|EXCEPTION|REFUSED|SQLSTATE" /tmp/seed.log | grep -v "^<" | head -n 6; tail -n 5 /tmp/seed.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::seed: ${msg//\%/\%25}"
+          fi
+          exit "$rc"
+      - name: Start the PHP web server
+        run: |
+          php -d log_errors=1 -d error_log=/tmp/php-errors.log -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/index.php >/tmp/home.html; then break; fi
+            sleep 1
+          done
+          # A launcher that is not in the markup cannot be tested in a browser.
+          if ! grep -q 'id="sh-schat-fab"' /tmp/home.html; then
+            echo '::error::the storefront did not render the support launcher'
+            tail -n 20 /tmp/php-server.log
+            exit 1
+          fi
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Support launcher — admin, desktop, 320–430px, keyboard, fallback
+        env:
+          SH_SUPPORT_BASE_URL: http://127.0.0.1:8080
+          SH_SUPPORT_ADMIN_EMAIL: admin@example.test
+          SH_SUPPORT_ADMIN_PASSWORD: AdminTest!2026
+        run: |
+          set -o pipefail
+          rc=0
+          node tests/browser/support-launcher.mjs 2>&1 | tee /tmp/support-launcher.log || rc=$?
+          # Where the run stopped matters as much as what failed.
+          grep -E '^[0-9]+\. |^[0-9]+px phone' /tmp/support-launcher.log | tail -n 3 \
+            | while IFS= read -r line; do echo "::notice::support-launcher-area: ${line//\%/\%25}"; done
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/support-launcher.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::support-launcher: ${msg//\%/\%25}"
+            srv=$( tail -n 12 /tmp/php-server.log 2>/dev/null | tr "\n" "|" | cut -c1-800 )
+            echo "::error::php: ${srv//\%/\%25}"
+          else
+            grep -E '^Support launcher UI' /tmp/support-launcher.log \
+              | while IFS= read -r line; do echo "::notice::support-launcher: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      # The link/validation and markup contract suite needs no database, so it
+      # runs here too: the browser job and the static contract stay in step.
+      - name: Support launcher link and markup contract
+        run: |
+          set -o pipefail
+          rc=0
+          php tests/support-links.php 2>&1 | tee /tmp/support-links.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/support-links.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::support-links: ${msg//\%/\%25}"
+          else
+            grep -E '^Passed:' /tmp/support-links.log \
+              | while IFS= read -r line; do echo "::notice::support-links: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      # The evidence has to be readable afterwards: screenshots and the full
+      # transcript are committed to docs/support-launcher/.
+      - name: Publish the screenshots and transcript on the branch
+        if: always()
+        run: |
+          mkdir -p docs/support-launcher
+          cp -f tests/browser/artifacts/support-launcher/*.png docs/support-launcher/ 2>/dev/null || true
+          for f in /tmp/support-launcher.log /tmp/support-links.log /tmp/seed.log /tmp/php-errors.log; do
+            [ -f "$f" ] && cp -f "$f" "docs/support-launcher/$(basename "$f" .log).txt"
+          done
+          if [ -d docs/support-launcher ]; then
+            grep -rl "/home/runner" docs/support-launcher 2>/dev/null | while IFS= read -r f; do
+              sed -i 's#/home/runner/work/[^ ]*/##g' "$f"
+            done
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/support-launcher
+          if git diff --cached --quiet; then
+            echo "::notice::no screenshot changes to publish"
+            exit 0
+          fi
+          git commit -q -m "docs: support launcher screenshots and transcript from run ${{ github.run_id }}"
+          # The PR run and the branch run can publish at the same moment, so a
+          # rejected push is retried on top of whatever landed first instead of
+          # failing the job (the evidence still reaches the branch).
+          pushed=0
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.head_ref || github.ref_name }}"; then pushed=1; break; fi
+            sleep $((attempt * 5))
+            git pull --rebase -q origin "${{ github.head_ref || github.ref_name }}" || true
+          done
+          if [ "$pushed" -ne 1 ]; then
+            echo "::warning::the screenshots could not be pushed to the branch; they are attached as an artifact instead"
+          fi
+      - name: Upload the screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: support-launcher-artifacts
+          path: |
+            tests/browser/artifacts/support-launcher/
+            /tmp/support-launcher.log
+            /tmp/support-links.log
+            /tmp/seed.log
+            /tmp/php-server.log
+          if-no-files-found: warn

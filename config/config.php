@@ -31,6 +31,21 @@ ini_set('error_log', SH_LOG_DIR . '/php-error.log');
 require_once SH_ROOT . '/includes/errors.php';
 sh_register_error_handlers();
 
+// Optional-extension fallbacks (mbstring shims, extension inventory). Loaded
+// before anything else so no module can call a helper that is unavailable on
+// this host. See includes/compat.php.
+require_once SH_ROOT . '/includes/compat.php';
+
+// Client IP + trusted-proxy resolution. Loaded before anything that rate limits
+// or builds a URL, so no module can see a spoofable address.
+require_once SH_ROOT . '/includes/client-ip.php';
+
+// Deployment environment: development / staging / production ('production' by
+// default). Drives the offline-OTP guard, code-exposure rules, debug output and
+// the optional staging access gate.
+require_once SH_ROOT . '/includes/environment.php';
+if (function_exists('sh_staging_gate') && sh_staging_gate()) { exit; }
+
 // Security response headers (CSP, nosniff, clickjacking, Referrer-Policy, HSTS).
 // Applied before any page logic runs so no route can forget them; the module
 // degrades to safe defaults when the database is unavailable.
@@ -50,7 +65,7 @@ function sh_base_url(): string
     // Pages inside /admin, /api or /install resolve up to the project root.
     // Trailing segments are stripped repeatedly so nested folders such as
     // /admin/ai or /admin/guides also resolve correctly rather than becoming the base URL.
-    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google', 'guides'];
+    $known = ['admin', 'api', 'install', 'ai', 'auth', 'google', 'guides', 'cron', 'storage', 'tests'];
     $parts = array_values(array_filter(explode('/', $dir), static fn($p) => $p !== ''));
     while ($parts !== [] && in_array(end($parts), $known, true)) {
         array_pop($parts);
@@ -82,8 +97,12 @@ function sh_site_url(): string
 /** True when the current request arrived over HTTPS, including a trusted proxy. */
 function sh_request_is_https(): bool
 {
-    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') { return true; }
+    if (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) !== 'https') { return false; }
+    // A proxy header is only believed when it comes from a configured trusted
+    // proxy. With no proxy list configured the historical behaviour is kept so
+    // an existing Cloudflare/LiteSpeed deployment keeps issuing https URLs.
+    return !function_exists('sh_forwarded_proto_trusted') || sh_forwarded_proto_trusted();
 }
 
 /** Shared cookie scope for the storefront when it is installed in a subfolder. */
@@ -263,6 +282,22 @@ function sh_db_state(): array
 function sh_require_installed(): void
 {
     $state = sh_db_state();
+
+    // A command-line caller (cron, CLI tooling) cannot follow a Location header.
+    // Sending one made `php cron/backup.php` exit 0 with no output at all, so a
+    // scheduled backup that never ran looked successful in the cPanel log.
+    if (PHP_SAPI === 'cli' && $state['status'] !== 'ok') {
+        $why = match ($state['status']) {
+            'no-config'  => 'config/database.php is missing',
+            'no-database' => 'the configured database is missing or unreachable',
+            'no-tables'  => 'the database has no application tables',
+            'no-server'  => 'the database server cannot be reached',
+            default      => 'the installation is incomplete',
+        };
+        fwrite(STDERR, 'Shop Haat: cannot run from the command line — ' . $why
+            . '. Finish the web installer, then run this command again.' . "\n");
+        exit(1);
+    }
 
     switch ($state['status']) {
         case 'ok':

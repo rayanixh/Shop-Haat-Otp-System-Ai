@@ -9,6 +9,8 @@
  *  - Nothing in here throws out to the caller; the webhook must always answer 200.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/functions.php';
 
@@ -461,9 +463,7 @@ function sh_wa_test_connection(): array
         set_error_handler(static fn(): bool => true);
         try { $body = file_get_contents($url, false, $ctx); } finally { restore_error_handler(); }
         if ($body === false) { return ['ok' => false, 'error' => 'Connection failed.']; }
-        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $mm)) {
-            $code = (int)$mm[1];
-        }
+        $code = sh_http_last_status();
     }
 
     $json = json_decode((string)$body, true);

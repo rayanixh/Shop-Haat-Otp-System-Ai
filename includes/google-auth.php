@@ -14,6 +14,8 @@
  * Works alongside the existing Email + Password login; nothing here replaces it.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 const SH_GOOGLE_AUTH_URL  = 'https://accounts.google.com/o/oauth2/v2/auth';
 const SH_GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const SH_GOOGLE_JWKS_URL  = 'https://www.googleapis.com/oauth2/v3/certs';
@@ -146,8 +148,7 @@ function sh_google_http(string $method, string $url, array $form = [], int $time
     set_error_handler(static fn(): bool => true);
     try { $res = file_get_contents($url, false, $ctx); }
     finally { restore_error_handler(); }
-    $code = 0;
-    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) { $code = (int)$m[1]; }
+    $code = sh_http_last_status();
     if ($res === false) { return ['ok' => false, 'status' => $code, 'body' => '', 'error' => 'Connection failed.']; }
     return ['ok' => $code >= 200 && $code < 300, 'status' => $code, 'body' => (string)$res, 'error' => $code >= 300 ? 'HTTP ' . $code : ''];
 }

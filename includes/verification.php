@@ -12,6 +12,8 @@
  * Columns added to orders: order_ip, order_ip_version.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
@@ -149,57 +151,22 @@ function sh_verify_mask(string $secret): string
 // Client IP (trusted-proxy aware)
 // ---------------------------------------------------------------------------
 /**
- * Determine the real client IP. Modes (setting verify_proxy_mode):
- *   auto       – Cloudflare header when present, otherwise REMOTE_ADDR (default)
- *   none       – REMOTE_ADDR only
- *   cloudflare – CF-Connecting-IP only when REMOTE_ADDR is a trusted proxy
- *                (or always, when no proxy list is configured)
- *   xff        – X-Forwarded-For, only when REMOTE_ADDR is a listed trusted proxy;
- *                the right-most address not belonging to a trusted proxy wins.
+ * Client IP for courier verification checks.
+ *
+ * Delegates to sh_client_ip() in includes/client-ip.php, which is the single
+ * trusted-proxy implementation used by every rate limiter in the application.
+ * Two divergent IP parsers would let one of them be spoofed without the others
+ * noticing, so this wrapper exists only for backward compatibility.
  */
 function sh_verify_client_ip(): string
 {
-    $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-    $mode = 'auto';
-    $trusted = [];
-    try {
-        $mode = (string)sh_setting('verify_proxy_mode', 'auto');
-        $trusted = preg_split('/[\s,]+/', (string)sh_setting('verify_trusted_proxies', ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-    } catch (Throwable $e) { /* settings not available yet */ }
-
-    $isTrusted = static function (string $ip) use ($trusted): bool {
-        foreach ($trusted as $t) { if (sh_verify_ip_in_cidr($ip, $t)) { return true; } }
-        return false;
-    };
-    $valid = static fn(string $ip): bool => (bool)filter_var($ip, FILTER_VALIDATE_IP);
-
-    if ($mode === 'cloudflare' || $mode === 'auto') {
-        $cf = trim((string)($_SERVER['HTTP_CF_CONNECTING_IP'] ?? ''));
-        if ($cf !== '' && $valid($cf) && (!$trusted || $isTrusted($remote))) { return $cf; }
-    }
-    if ($mode === 'xff' && $trusted && $isTrusted($remote)) {
-        $chain = array_map('trim', explode(',', (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '')));
-        for ($i = count($chain) - 1; $i >= 0; $i--) {
-            $ip = $chain[$i];
-            if ($ip !== '' && $valid($ip) && !$isTrusted($ip)) { return $ip; }
-        }
-    }
-    return $valid($remote) ? $remote : '0.0.0.0';
+    return function_exists('sh_client_ip') ? sh_client_ip() : (string)($_SERVER['REMOTE_ADDR'] ?? '');
 }
 
+/** CIDR membership test (backward-compatible name for includes/client-ip.php). */
 function sh_verify_ip_in_cidr(string $ip, string $cidr): bool
 {
-    if (strpos($cidr, '/') === false) { return $ip === $cidr; }
-    [$subnet, $bits] = explode('/', $cidr, 2);
-    $ipBin = @inet_pton($ip); $subBin = @inet_pton($subnet);
-    if ($ipBin === false || $subBin === false || strlen($ipBin) !== strlen($subBin)) { return false; }
-    $bits = (int)$bits; $len = strlen($ipBin) * 8;
-    if ($bits < 0 || $bits > $len) { return false; }
-    $full = intdiv($bits, 8); $rem = $bits % 8;
-    if ($full > 0 && substr($ipBin, 0, $full) !== substr($subBin, 0, $full)) { return false; }
-    if ($rem === 0) { return true; }
-    $mask = (0xFF << (8 - $rem)) & 0xFF;
-    return (ord($ipBin[$full]) & $mask) === (ord($subBin[$full]) & $mask);
+    return function_exists('sh_ip_in_cidr') ? sh_ip_in_cidr($ip, $cidr) : ($ip === $cidr);
 }
 
 function sh_verify_ip_version(string $ip): int
@@ -339,8 +306,7 @@ function sh_verify_http(string $method, string $url, array $headers, ?string $bo
         set_error_handler(static fn(): bool => true);
         try { $raw = file_get_contents($url, false, $ctx); } finally { restore_error_handler(); }
         if ($raw === false) { return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'Connection failed']; }
-        $status = 0;
-        foreach ($http_response_header ?? [] as $line) { if (preg_match('~^HTTP/\S+\s+(\d{3})~', $line, $m)) { $status = (int)$m[1]; } }
+        $status = sh_http_last_status();
     } else {
         $ch = curl_init($url);
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => min(5, $timeout),

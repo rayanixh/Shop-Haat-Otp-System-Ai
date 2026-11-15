@@ -156,22 +156,46 @@ function sh_security_header_list(): array
  * caller is still within $max events per $window seconds.
  *
  * The counter file is written with LOCK_EX and lives under logs/, which is
- * denied to the web by its own .htaccess. Failure to open the file fails OPEN
- * deliberately: a broken log directory must not lock the owner out of repair.
+ * denied to the web by its own .htaccess.
+ *
+ * What happens when the counter cannot be written (read-only or full disk, a
+ * broken logs/ directory, an unwritable NFS mount) is a per-endpoint decision,
+ * not a global one:
+ *
+ *   $failClosed = false (default) — flood protection (CSP report collector,
+ *   email webhook). Telemetry must never be dropped because a counter file
+ *   could not be opened.
+ *
+ *   $failClosed = true — brute-force protection of a secret (installer unlock
+ *   token, backup cron token). If the limiter cannot count, the request is
+ *   refused rather than letting an attacker hammer the secret at unlimited
+ *   rate by breaking the counter store first. This cannot lock the owner out:
+ *   these endpoints only consult the limiter for a *wrong* secret, so the
+ *   correct token always works.
+ *
+ * Every refusal is logged so the operator can see why the endpoint went quiet.
  */
-function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, string $dir = ''): bool
+function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, string $dir = '', bool $failClosed = false): bool
 {
+    $fallback = !$failClosed;
+    $refused = static function (string $why) use ($bucket, $failClosed, $fallback): bool {
+        if ($failClosed && function_exists('sh_log_line')) {
+            sh_log_line('security', 'Rate limiter for "' . $bucket . '" is unavailable (' . $why . '); denying the request.');
+        }
+        return $fallback;
+    };
+
     $bucket = preg_replace('/[^a-z0-9_.-]+/i', '-', $bucket) ?: 'general';
     $dir = $dir !== '' ? rtrim($dir, '/') : (defined('SH_LOG_DIR') ? SH_LOG_DIR . '/limits' : '');
-    if ($dir === '') { return true; }
-    if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) { return true; }
+    if ($dir === '') { return $refused('no storage directory'); }
+    if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) { return $refused('cannot create the storage directory'); }
 
     $file = $dir . '/' . $bucket . '-' . hash('sha256', $key) . '.txt';
     $now = time();
     $fh = @fopen($file, 'c+');
-    if ($fh === false) { return true; }
+    if ($fh === false) { return $refused('cannot open the counter file'); }
     try {
-        if (!flock($fh, LOCK_EX)) { return true; }
+        if (!flock($fh, LOCK_EX)) { return $refused('cannot lock the counter file'); }
         $data = json_decode((string)stream_get_contents($fh), true);
         if (!is_array($data) || !isset($data['t'], $data['n']) || ($now - (int)$data['t']) > $window) {
             $data = ['t' => $now, 'n' => 0];
@@ -179,13 +203,13 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
         $data['n'] = (int)$data['n'] + 1;
         ftruncate($fh, 0);
         rewind($fh);
-        fwrite($fh, (string)json_encode($data));
-        fflush($fh);
+        $written = fwrite($fh, (string)json_encode($data));
+        if ($written === false || !fflush($fh)) { return $refused('cannot update the counter file'); }
         $allowed = $data['n'] <= $max;
         flock($fh, LOCK_UN);
         return $allowed;
     } catch (Throwable $e) {
-        return true;
+        return $refused('counter error: ' . $e->getMessage());
     } finally {
         fclose($fh);
     }

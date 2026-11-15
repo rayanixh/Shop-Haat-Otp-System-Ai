@@ -1,4 +1,7 @@
 <?php
+require_once __DIR__ . '/compat.php';
+require_once __DIR__ . '/environment.php';
+require_once __DIR__ . '/client-ip.php';
 /**
  * Shared helpers: settings, escaping, money, slugs, icons, uploads, pagination.
  */
@@ -304,6 +307,102 @@ function sh_unique_slug(string $table, string $base, int $ignoreId = 0): string
 }
 
 /**
+ * HTML allow-list tokenizer used when the DOM extension is unavailable (or the
+ * document cannot be parsed).
+ *
+ * This is a real sanitizer, not "strip everything": it walks the string, emits
+ * an element ONLY when its name is on the allow-list and always reconstructed
+ * without attributes, and escapes every other character as text. An element
+ * that is not allow-listed keeps its inner text (matching the DOM path, which
+ * unwraps non-allowed elements) except for script/style-like containers, whose
+ * contents are dropped entirely.
+ *
+ * Nothing from the source tag (attributes, casing, slashes) is ever copied
+ * into the output, so constructs such as `<p/onmouseover=alert(1)>` — which a
+ * naive tag regex accepts but browsers treat as an attribute — cannot become
+ * an attribute here.
+ *
+ * @param array<int,string> $allowed element names, lower case
+ */
+function sh_sanitize_html_fallback(string $html, array $allowed = ['p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'h2', 'h3', 'h4']): string
+{
+    $allow = [];
+    foreach ($allowed as $name) { $allow[strtolower((string)$name)] = true; }
+    $void = ['br' => true, 'hr' => true, 'img' => true];
+    $drop = ['script' => true, 'style' => true, 'iframe' => true, 'object' => true, 'embed' => true, 'svg' => true, 'math' => true];
+
+    $escape = static fn(string $text): string
+        => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    $out = '';
+    $stack = [];
+    $len = strlen($html);
+    $offset = 0;
+    $dropDepth = 0;
+    while ($offset < $len) {
+        $lt = strpos($html, '<', $offset);
+        if ($lt === false) {
+            if ($dropDepth === 0) { $out .= $escape(substr($html, $offset)); }
+            break;
+        }
+        if ($dropDepth === 0 && $lt > $offset) { $out .= $escape(substr($html, $offset, $lt - $offset)); }
+        $gt = strpos($html, '>', $lt);
+        if ($gt === false) {
+            // Unterminated tag: everything left is text.
+            if ($dropDepth === 0) { $out .= $escape(substr($html, $lt)); }
+            break;
+        }
+        $raw = substr($html, $lt, $gt - $lt + 1);
+        $offset = $gt + 1;
+
+        // Comments / doctypes / processing instructions are discarded.
+        if (str_starts_with($raw, '<!--') || str_starts_with($raw, '<!') || str_starts_with($raw, '<?')) {
+            continue;
+        }
+        // No whitespace is allowed between "<" and the tag name: real markup
+        // never has it, while prose such as "a < b and 1 > 0" always does, so
+        // ordinary comparisons survive as escaped text instead of being eaten.
+        if (preg_match('~^<(/?)([A-Za-z][A-Za-z0-9]*)\b[^>]*>$~', $raw, $m) !== 1) {
+            if ($dropDepth === 0) { $out .= $escape($raw); }
+            continue;
+        }
+        $closing = $m[1] === '/';
+        $tag = strtolower($m[2]);
+
+        if (isset($drop[$tag])) {
+            if ($closing) { $dropDepth = max(0, $dropDepth - 1); }
+            elseif (!str_ends_with(rtrim($raw), '/>')) { $dropDepth++; }
+            continue;
+        }
+        if ($dropDepth > 0) { continue; }
+
+        if (!isset($allow[$tag])) {
+            // Unwrap: the element itself is dropped and its inner text is kept
+            // by the text branch above (matching the DOM path).
+            continue;
+        }
+        if (isset($void[$tag])) {
+            $out .= '<' . $tag . '>';
+            continue;
+        }
+        if ($closing) {
+            // Only close what we opened, so the output cannot be unbalanced.
+            $pos = array_search($tag, $stack, true);
+            if ($pos === false) { continue; }
+            while (count($stack) > (int)$pos) {
+                $out .= '</' . array_pop($stack) . '>';
+            }
+            continue;
+        }
+        if (str_ends_with(rtrim($raw), '/>')) { continue; }
+        $stack[] = $tag;
+        $out .= '<' . $tag . '>';
+    }
+    while ($stack !== []) { $out .= '</' . array_pop($stack) . '>'; }
+    return trim($out);
+}
+
+/**
  * Allowlist HTML sanitizer for the few places where markup is intentional
  * (AI-generated article drafts).
  *
@@ -321,8 +420,11 @@ function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', '
     $html = trim($html);
     if ($html === '') { return ''; }
     if (!class_exists('DOMDocument')) {
-        // Conservative fallback: text only, no markup at all.
-        return trim(strip_tags($html));
+        // No DOM extension on this host: use the allow-list tokenizer below.
+        // It emits only bare, attribute-free tags from the allow-list and
+        // escapes everything else, so formatting survives without ever
+        // passing raw HTML through.
+        return sh_sanitize_html_fallback($html, $allowed);
     }
 
     $allow = array_flip(array_map('strtolower', $allowed));
@@ -348,7 +450,10 @@ function sh_sanitize_html_allowlist(string $html, array $allowed = ['p', 'br', '
         libxml_use_internal_errors($prev);
     }
     if (!$loaded || $fatal || $doc->documentElement === null) {
-        return trim(strip_tags($html));
+        // The tree cannot be trusted (parse error / nesting limit). Keep the
+        // words and the simple formatting through the same safe tokenizer
+        // instead of discarding the markup or passing it through unfiltered.
+        return sh_sanitize_html_fallback($html, $allowed);
     }
 
     // Collect first, then modify: mutating a live DOMNodeList skips siblings.
@@ -546,14 +651,23 @@ function sh_uploads_reachable(string $subdir = 'products'): array
         $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
     } else {
+        // No cURL: read the status from the stream wrapper's response headers.
+        // $http_response_header is deprecated in PHP 8.4+, and wrapper_data is
+        // available on every supported version.
         set_error_handler(static fn(): bool => true);
         try {
-            $body = file_get_contents($url, false, stream_context_create(
+            $fp = fopen($url, 'rb', false, stream_context_create(
                 ['http' => ['timeout' => 10, 'ignore_errors' => true]]));
+            if ($fp !== false) {
+                $meta = stream_get_meta_data($fp);
+                $body = stream_get_contents($fp);
+                fclose($fp);
+                $headers = is_array($meta['wrapper_data'] ?? null) ? $meta['wrapper_data'] : [];
+                if (isset($headers[0]) && preg_match('/\s(\d{3})\s/', (string)$headers[0], $m)) {
+                    $status = (int)$m[1];
+                }
+            }
         } finally { restore_error_handler(); }
-        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
-            $status = (int)$m[1];
-        }
     }
 
     if ($status === 200 && $body !== false && $body !== '') {
@@ -574,37 +688,22 @@ function sh_uploads_reachable(string $subdir = 'products'): array
         'error' => 'The uploads folder is not reachable over HTTP (status ' . $status . ').'];
 }
 
-function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $maxDim = 6000): array
+/**
+ * Content validation for an uploaded image.
+ *
+ * Pure: it reads the file the caller names but writes nothing, so it can be
+ * exercised without an HTTP POST. It returns the MIME type and the extension the
+ * file will be stored with — both derived from what getimagesize() detected,
+ * never from the client's filename, so a "photo.png" that is really a PHP script
+ * cannot choose its own extension.
+ *
+ * @return array{ok:bool,mime?:string,ext?:string,error?:string}
+ */
+function sh_upload_validate_image(array $file, int $maxBytes = 0, int $maxDim = 6000): array
 {
-    if (!isset($file['error']) || is_array($file['error'])) {
-        return ['ok' => false, 'error' => 'Invalid upload.'];
-    }
-    if ($file['error'] === UPLOAD_ERR_NO_FILE) {
-        return ['ok' => false, 'error' => 'No file selected.'];
-    }
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        // Report the ACTUAL reason instead of a vague catch-all.
-        $limit = sh_bytes_label(sh_server_upload_limit());
-        $msg = match ($file['error']) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
-                'The image is larger than this server allows (' . $limit . '). '
-                . 'Either choose a smaller image, or raise upload_max_filesize and post_max_size '
-                . 'in your hosting control panel (cPanel: Select PHP Version, then Options).',
-            UPLOAD_ERR_PARTIAL   => 'The upload was interrupted before it finished. Please try again.',
-            UPLOAD_ERR_NO_TMP_DIR => 'The server has no temporary upload folder configured. Contact your host.',
-            UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded file to disk. Check folder permissions.',
-            UPLOAD_ERR_EXTENSION  => 'A PHP extension blocked this upload.',
-            default               => 'The upload failed (error code ' . (int)$file['error'] . ').',
-        };
-        return ['ok' => false, 'error' => $msg];
-    }
-    if ($maxBytes > 0 && $file['size'] > $maxBytes) {
+    if ($maxBytes > 0 && (int)($file['size'] ?? 0) > $maxBytes) {
         return ['ok' => false, 'error' => 'File is larger than ' . sh_bytes_label($maxBytes) . '.'];
     }
-    if (!is_uploaded_file($file['tmp_name'])) {
-        return ['ok' => false, 'error' => 'Invalid upload source.'];
-    }
-
     $allowed = [
         'image/jpeg' => 'jpg',
         'image/png'  => 'png',
@@ -638,10 +737,50 @@ function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $ma
     if ($info[0] > $maxDim || $info[1] > $maxDim) {
         return ['ok' => false, 'error' => "Image dimensions must not exceed {$maxDim}px."];
     }
-    // The extension is NOT trusted or required: getimagesize() above already
-    // verified the real image type, and the saved filename is derived from that.
-    // Rejecting on extension used to block valid uploads with no extension or
-    // an unexpected one (e.g. photos straight off a phone).
+    // The client's extension is ignored: getimagesize() verified the real type
+    // and the stored name is derived from that. Rejecting on extension used to
+    // block valid uploads with no extension or an unexpected one (e.g. photos
+    // straight off a phone).
+    return ['ok' => true, 'mime' => $mime, 'ext' => $allowed[$mime]];
+}
+
+function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $maxDim = 6000): array
+{
+    if (!isset($file['error']) || is_array($file['error'])) {
+        return ['ok' => false, 'error' => 'Invalid upload.'];
+    }
+    if ($file['error'] === UPLOAD_ERR_NO_FILE) {
+        return ['ok' => false, 'error' => 'No file selected.'];
+    }
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        // Report the ACTUAL reason instead of a vague catch-all.
+        $limit = sh_bytes_label(sh_server_upload_limit());
+        $msg = match ($file['error']) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
+                'The image is larger than this server allows (' . $limit . '). '
+                . 'Either choose a smaller image, or raise upload_max_filesize and post_max_size '
+                . 'in your hosting control panel (cPanel: Select PHP Version, then Options).',
+            UPLOAD_ERR_PARTIAL   => 'The upload was interrupted before it finished. Please try again.',
+            UPLOAD_ERR_NO_TMP_DIR => 'The server has no temporary upload folder configured. Contact your host.',
+            UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded file to disk. Check folder permissions.',
+            UPLOAD_ERR_EXTENSION  => 'A PHP extension blocked this upload.',
+            default               => 'The upload failed (error code ' . (int)$file['error'] . ').',
+        };
+        return ['ok' => false, 'error' => $msg];
+    }
+    // The source check runs BEFORE the file is parsed: tmp_name is attacker
+    // controlled, so nothing here may read an arbitrary local path. Content
+    // validation (size ceiling, real MIME, dimensions) lives in
+    // sh_upload_validate_image() so it is testable without an HTTP request and
+    // cannot be skipped by a caller.
+    if (!is_uploaded_file($file['tmp_name'])) {
+        return ['ok' => false, 'error' => 'Invalid upload source.'];
+    }
+    $checked = sh_upload_validate_image($file, $maxBytes, $maxDim);
+    if (empty($checked['ok'])) {
+        return ['ok' => false, 'error' => (string)($checked['error'] ?? 'That file cannot be uploaded.')];
+    }
+    $mime = (string)$checked['mime'];
 
     $dir = SH_UPLOAD_DIR . '/' . $subdir;
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
@@ -654,8 +793,9 @@ function sh_upload_image(array $file, string $subdir, int $maxBytes = 0, int $ma
         return ['ok' => false, 'error' => 'The folder /uploads/' . $subdir
             . ' is not writable. Set it to permission 755 (or 775) in your hosting file manager.'];
     }
-    // Safe, non-executable, unpredictable filename.
-    $name = date('Ymd') . '-' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
+    // Safe, non-executable, unpredictable filename. The extension comes from the
+    // validated MIME type, not from anything the client sent.
+    $name = date('Ymd') . '-' . bin2hex(random_bytes(8)) . '.' . (string)$checked['ext'];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
         return ['ok' => false, 'error' => 'Could not save the uploaded file.'];
     }
@@ -906,7 +1046,11 @@ function sh_phone_normalize(?string $phone): string
 {
     $p = preg_replace('/[\s\-().]/', '', (string)$phone);
     if ($p === null || $p === '') { return ''; }
-    if (preg_match('/^(?:\+?880)?(1[3-9]\d{8})$/', $p, $m)) {
+    // The local "01XXXXXXXXX" form, the international "8801…" form and the
+    // "+8801…" form all describe one subscriber, so they must collapse onto the
+    // same canonical value. Otherwise the same number would occupy several
+    // rate-limit buckets and two different customer records.
+    if (preg_match('/^(?:\+?880|0)?(1[3-9]\d{8})$/', $p, $m)) {
         return '880' . $m[1];
     }
     $p = ltrim($p, '+');
@@ -959,16 +1103,8 @@ function sh_phone_variants(?string $phone): array
 }
 
 /** Best-effort client IP, aware of common shared-hosting reverse proxies. */
-function sh_client_ip(): string
-{
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $k) {
-        $v = $_SERVER[$k] ?? '';
-        if ($v === '') { continue; }
-        $first = trim(explode(',', $v)[0]);
-        if ($first !== '' && filter_var($first, FILTER_VALIDATE_IP)) { return $first; }
-    }
-    return '0.0.0.0';
-}
+/* sh_client_ip() lives in includes/client-ip.php, which this file requires
+ * above. It is the single implementation used by every rate limiter. */
 
 /** Does a table exist in the current database? (guards lazy migrations) */
 function sh_table_exists(string $table, bool $refresh = false): bool

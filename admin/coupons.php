@@ -68,7 +68,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
-      <thead><tr><th>Code</th><th>Discount</th><th>Conditions</th><th>Used</th><th>Validity</th><th>Status</th><th data-label="" style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>Code</th><th>Discount</th><th>Conditions</th><th>Used</th><th>Validity</th><th>Status</th><th data-label="">Actions</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?>
         <tr class="sh-table--empty"><td colspan="7">

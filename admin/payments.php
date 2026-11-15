@@ -260,7 +260,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table">
-      <thead><tr><th>Order</th><th>Method</th><th>Transaction ID</th><th>Amount</th><th>Status</th><th>Submitted</th><th style="text-align:right">Action</th></tr></thead>
+      <thead><tr><th>Order</th><th>Method</th><th>Transaction ID</th><th>Amount</th><th>Status</th><th>Submitted</th><th>Action</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="7">No data available</td></tr>
       <?php else: foreach ($rows as $p): ?>
@@ -275,7 +275,7 @@ require __DIR__ . '/_layout.php';
               <div class="sh-table__meta" style="color:#c33">order <?= e(sh_money($p['order_total'])) ?></div><?php endif; ?></td>
           <td><span class="sh-badge <?= e(sh_status_class($p['status'])) ?>"><?= e(sh_status_label($p['status'])) ?></span><?php if ($p['order_payment_status'] === 'refunded'): ?> <span class="sh-badge sh-badge--muted">Refunded</span><?php endif; ?></td>
           <td class="sh-table__meta"><?= e(date('d M, h:i A', strtotime($p['created_at']))) ?></td>
-          <td style="text-align:right">
+          <td>
             <a class="sh-btn sh-btn--sm <?= $p['status'] === 'pending' && $p['transaction_id'] ? '' : 'sh-btn--ghost' ?>"
                href="<?= e(sh_url('admin/payments.php?id=' . (int)$p['id'])) ?>">
               <?= $p['status'] === 'pending' && $p['transaction_id'] ? 'Review' : 'View' ?></a>

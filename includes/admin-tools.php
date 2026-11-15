@@ -527,6 +527,21 @@ function sh_backup_create(string $createdBy, string $source = 'manual'): array
         try { sh_insert('db_backups', ['file_name' => $name, 'file_size' => 0, 'tables_count' => $tables, 'status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 255), 'created_by' => $createdBy, 'source' => $source]); } catch (Throwable $e2) {}
         return ['ok' => false, 'error' => 'The backup failed. The error has been logged.'];
     }
+    // Never record a "completed" backup that is empty or unreadable: a corrupt
+    // file that looks successful is worse than an honest failure.
+    $verify = sh_backup_verify_file($path);
+    if (empty($verify['ok'])) {
+        @unlink($path);
+        try {
+            sh_insert('db_backups', [
+                'file_name' => $name, 'file_size' => 0, 'tables_count' => $tables, 'status' => 'failed',
+                'error' => mb_substr((string)($verify['error'] ?? 'verification failed'), 0, 255),
+                'created_by' => $createdBy, 'source' => $source,
+            ]);
+        } catch (Throwable $e2) { /* the log line below is the record of last resort */ }
+        sh_log_line('backup', 'Backup failed verification and was removed: ' . (string)($verify['error'] ?? ''));
+        return ['ok' => false, 'error' => (string)($verify['error'] ?? 'The backup file could not be verified.')];
+    }
     $size = (int)@filesize($path);
     $id = sh_insert('db_backups', ['file_name' => $name, 'file_size' => $size, 'tables_count' => $tables, 'status' => 'completed', 'created_by' => $createdBy, 'source' => $source]);
     return ['ok' => true, 'id' => $id, 'file' => $name, 'size' => $size, 'tables' => $tables];
@@ -542,24 +557,244 @@ function sh_backup_path(array $b): string
     $file = basename((string)$b['file_name']);
     return sh_backup_dir() . '/' . $file;
 }
-/** Run the scheduled backup if due (called from cron.php or lazily from the admin). */
-function sh_backup_run_scheduled(): ?array
+/**
+ * Path of the scheduler lock file.
+ *
+ * The lock lives beside the backups it protects: if that folder is not
+ * writable, no backup can be written either, so there is nothing to serialise.
+ */
+function sh_backup_lock_path(): string
 {
+    return sh_backup_dir() . '/.backup-scheduler.lock';
+}
+
+/**
+ * Take the scheduler lock without blocking.
+ *
+ * flock() is used deliberately: it is atomic on local disks and NFS, it needs no
+ * shell access, no Redis and no extra table, and the kernel releases it when the
+ * process dies — so an abandoned lock cannot block the scheduler forever. The
+ * handle must be kept for the lifetime of the run and passed to
+ * sh_backup_lock_release(); the file itself is never deleted (deleting it would
+ * allow a second process to create a new inode and take a "different" lock).
+ *
+ * @return resource|false
+ */
+function sh_backup_lock_acquire()
+{
+    $path = sh_backup_lock_path();
+    $fh = @fopen($path, 'c');
+    if ($fh === false) { return false; }
+    if (!@flock($fh, LOCK_EX | LOCK_NB)) {
+        @fclose($fh);
+        return false;
+    }
+    // Diagnostics only; never used for the decision.
+    @ftruncate($fh, 0);
+    @rewind($fh);
+    @fwrite($fh, json_encode(['pid' => getmypid(), 'at' => date('c'), 'host' => (string)($_SERVER['HTTP_HOST'] ?? PHP_SAPI)]));
+    @fflush($fh);
+    return $fh;
+}
+
+/** @param resource|false $fh */
+function sh_backup_lock_release($fh): void
+{
+    if (!is_resource($fh)) { return; }
+    try { @flock($fh, LOCK_UN); } catch (Throwable $e) { /* already gone */ }
+    @fclose($fh);
+}
+
+/**
+ * Verify a finished backup file before it is trusted.
+ *
+ * A zero-byte file, a truncated gzip stream or a file that vanished is not a
+ * backup: the timestamp must not advance and retention must not run.
+ *
+ * @return array{ok:bool,error?:string,size?:int}
+ */
+function sh_backup_verify_file(string $path): array
+{
+    if (!is_file($path)) { return ['ok' => false, 'error' => 'The backup file was not created.']; }
+    $size = (int)@filesize($path);
+    if ($size <= 0) { return ['ok' => false, 'error' => 'The backup file is empty.']; }
+
+    if (str_ends_with($path, '.gz')) {
+        if (!function_exists('gzopen')) { return ['ok' => false, 'error' => 'gzip support disappeared before verification.']; }
+        // gzopen() happily reads an *uncompressed* file, so a truncated or
+        // never-compressed file would otherwise pass verification. Check the
+        // gzip magic bytes first, then prove the stream still decompresses.
+        $magic = '';
+        $fh = @fopen($path, 'rb');
+        if ($fh !== false) {
+            $magic = (string)@fread($fh, 2);
+            @fclose($fh);
+        }
+        if ($magic !== "\x1f\x8b") { return ['ok' => false, 'error' => 'The backup is named .gz but is not a gzip file.']; }
+        $gz = @gzopen($path, 'rb');
+        if ($gz === false) { return ['ok' => false, 'error' => 'The compressed backup could not be opened.']; }
+        $read = 0;
+        try {
+            $chunk = @gzread($gz, 65536);
+            if ($chunk === false) { return ['ok' => false, 'error' => 'The compressed backup could not be read.']; }
+            $read = strlen($chunk);
+        } finally {
+            @gzclose($gz);
+        }
+        if ($read <= 0) { return ['ok' => false, 'error' => 'The compressed backup contains no data.']; }
+    }
+    return ['ok' => true, 'size' => $size];
+}
+
+/**
+ * Run the scheduled backup if it is due.
+ *
+ * Order of operations (each step deliberate):
+ *   1. schedule off / not due        → null (nothing to report)
+ *   2. lock held by another process  → report 'locked', change nothing
+ *   3. create the backup
+ *   4. FAILURE                        → do NOT touch backup_last_auto and do NOT
+ *                                       run retention, so the next cron run
+ *                                       retries instead of waiting a full period,
+ *                                       and the last good backup survives
+ *   5. verify the file on disk        → a failed verification is a failure (step 4)
+ *   6. success                        → stamp backup_last_auto, then retention
+ *
+ * The due check is repeated inside the lock: a second cron process that was
+ * waiting must not create a duplicate backup.
+ *
+ * @param callable|null $creator Injectable for tests; defaults to sh_backup_create().
+ */
+function sh_backup_run_scheduled(?callable $creator = null): ?array
+{
+    $creator = $creator ?? static fn(): array => sh_backup_create('scheduler', 'auto');
+
     $freq = (string)sh_setting('backup_schedule', 'off');
     if ($freq === 'off') { return null; }
     $days = ['daily' => 1, 'weekly' => 7, 'monthly' => 30][$freq] ?? 0;
     if ($days === 0) { return null; }
-    $last = (string)sh_setting('backup_last_auto', '');
-    if ($last !== '' && time() - strtotime($last) < $days * 86400) { return null; }
-    sh_setting_save('backup_last_auto', date('Y-m-d H:i:s'));
-    $r = sh_backup_create('scheduler', 'auto');
-    // Retention
-    $keep = max(1, (int)sh_setting('backup_keep', '10'));
+
+    $due = static function () use ($days): bool {
+        $last = (string)sh_setting('backup_last_auto', '');
+        if ($last === '') { return true; }
+        $ts = strtotime($last);
+        if ($ts === false) { return true; }   // corrupted timestamp: try now
+        return (time() - $ts) >= $days * 86400;
+    };
+    if (!$due()) { return null; }
+
+    $lock = sh_backup_lock_acquire();
+    if ($lock === false) {
+        return ['ok' => false, 'skipped' => 'locked', 'error' => 'Another backup is already running.'];
+    }
+
     try {
-        $old = sh_all('SELECT * FROM db_backups WHERE status = \'completed\' ORDER BY id DESC LIMIT 1000 OFFSET ' . $keep);
-        foreach ($old as $b) { @unlink(sh_backup_path($b)); sh_query('DELETE FROM db_backups WHERE id = ?', [(int)$b['id']]); }
-    } catch (Throwable $e) {}
-    return $r;
+        // Double-check inside the lock: the process that held it may just have
+        // finished and stamped the timestamp.
+        if (!$due()) { return null; }
+
+        try {
+            $result = (array)$creator();
+        } catch (Throwable $e) {
+            sh_log_exception($e, 'backup-scheduler');
+            $result = ['ok' => false, 'error' => 'The scheduled backup failed.'];
+        }
+
+        if (empty($result['ok']) || empty($result['file'])) {
+            sh_log_line('backup', 'Scheduled backup failed; the schedule timestamp was left unchanged so the next run retries. '
+                . (string)($result['error'] ?? ''));
+            return ['ok' => false, 'error' => (string)($result['error'] ?? 'The scheduled backup failed.')];
+        }
+
+        $path = sh_backup_dir() . '/' . basename((string)$result['file']);
+        $verify = sh_backup_verify_file($path);
+        if (empty($verify['ok'])) {
+            sh_log_line('backup', 'Scheduled backup file failed verification: ' . (string)($verify['error'] ?? ''));
+            try { sh_query("UPDATE db_backups SET status = 'failed', error = ? WHERE file_name = ?",
+                [mb_substr((string)($verify['error'] ?? 'verification failed'), 0, 255), basename((string)$result['file'])]); } catch (Throwable $e) {}
+            @unlink($path);
+            return ['ok' => false, 'error' => (string)($verify['error'] ?? 'The backup file failed verification.')];
+        }
+
+        // Only now is the run a success.
+        sh_setting_save('backup_last_auto', date('Y-m-d H:i:s'));
+        $result['size'] = (int)($verify['size'] ?? ($result['size'] ?? 0));
+        $result['pruned'] = sh_backup_prune((int)sh_setting('backup_keep', '10'));
+
+        return $result;
+    } finally {
+        sh_backup_lock_release($lock);
+    }
+}
+
+/**
+ * Retention: keep the newest $keep completed backups.
+ *
+ * Runs only after a verified backup. The newest entry is never deleted (even
+ * when $keep is 0 or 1), and a file with an active download lease is skipped so
+ * a download cannot lose its file mid-transfer.
+ *
+ * @return int number of backups removed
+ */
+function sh_backup_prune(int $keep = 10): int
+{
+    $keep = max(1, $keep);
+    $removed = 0;
+    try {
+        $rows = sh_all("SELECT * FROM db_backups WHERE status = 'completed' ORDER BY id DESC LIMIT 1000");
+    } catch (Throwable $e) {
+        return 0;
+    }
+    foreach ($rows as $index => $row) {
+        if ($index < $keep) { continue; }
+        if (sh_backup_is_leased((int)$row['id'])) {
+            sh_log_line('backup', 'Retention skipped backup #' . (int)$row['id'] . ' because it is being downloaded.');
+            continue;
+        }
+        $path = sh_backup_path($row);
+        if (is_file($path)) {
+            if (!@unlink($path)) {
+                sh_log_line('backup', 'Retention could not delete ' . basename($path) . '; its record was kept.');
+                continue;   // keep the record in step with the file
+            }
+        }
+        try {
+            sh_query('DELETE FROM db_backups WHERE id = ?', [(int)$row['id']]);
+            $removed++;
+        } catch (Throwable $e) {
+            sh_log_line('backup', 'Retention could not delete the record for backup #' . (int)$row['id'] . '.');
+        }
+    }
+    return $removed;
+}
+
+/** Lease marker used to protect a backup that is being downloaded. */
+function sh_backup_lease_path(int $backupId): string
+{
+    return sh_backup_dir() . '/.download-' . max(1, $backupId) . '.lease';
+}
+
+function sh_backup_lease_start(int $backupId): void
+{
+    @file_put_contents(sh_backup_lease_path($backupId), (string)time(), LOCK_EX);
+}
+
+function sh_backup_lease_end(int $backupId): void
+{
+    @unlink(sh_backup_lease_path($backupId));
+}
+
+/** A lease older than 30 minutes is considered abandoned. */
+function sh_backup_is_leased(int $backupId): bool
+{
+    $file = sh_backup_lease_path($backupId);
+    if (!is_file($file)) { return false; }
+    $started = (int)@file_get_contents($file);
+    if ($started <= 0 || (time() - $started) > 1800) {
+        @unlink($file);
+        return false;
+    }
+    return true;
 }
 
 function sh_bytes_human(int $b): string

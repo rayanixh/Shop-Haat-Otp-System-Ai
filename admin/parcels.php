@@ -328,7 +328,7 @@ require __DIR__ . '/_layout.php';
     </div>
     <div class="sh-tablewrap">
       <table class="sh-table">
-        <thead><tr><th>Parcel</th><th>Courier</th><th>Order</th><th>Customer</th><th>COD</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
+        <thead><tr><th>Parcel</th><th>Courier</th><th>Order</th><th>Customer</th><th>COD</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
         <?php if (!$rows): ?><tr class="sh-table--empty"><td colspan="7">No parcels match these filters.</td></tr>
         <?php else: foreach ($rows as $p): ?>
@@ -342,7 +342,7 @@ require __DIR__ . '/_layout.php';
             <td><?= e($p['customer_name']) ?><div class="sh-table__meta"><?= e($p['customer_phone']) ?></div></td>
             <td style="font-weight:700"><?= e(sh_money($p['cod_amount'])) ?></td>
             <td><span class="sh-badge <?= e(sh_shipment_status_class($p['status'])) ?>"><?= e(sh_shipment_status_label($p['status'])) ?></span></td>
-            <td style="text-align:right"><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/parcels.php?id=' . (int)$p['id'])) ?>">Open</a></td>
+            <td><a class="sh-btn sh-btn--sm sh-btn--ghost" href="<?= e(sh_url('admin/parcels.php?id=' . (int)$p['id'])) ?>">Open</a></td>
           </tr>
         <?php endforeach; endif; ?>
         </tbody>

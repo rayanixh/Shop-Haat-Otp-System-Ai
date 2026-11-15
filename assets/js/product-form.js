@@ -29,6 +29,8 @@
     var input = gallery.querySelector('[data-pg-input]');
     var count = gallery.querySelector('[data-pg-count]');
     var error = gallery.querySelector('[data-pg-error]');
+    var dropTitle = gallery.querySelector('[data-pg-drop-title]');
+    var dropSub = gallery.querySelector('[data-pg-drop-sub]');
     if (!grid || !inputWrap || !input) { return; }
     var pickerTemplate = input.cloneNode(false);
     var queue = [];
@@ -82,6 +84,23 @@
         if (primary) { primary.hidden = i !== 0; }
       });
       if (count) { count.textContent = tiles.length + ' / ' + MAX_IMAGES + ' images'; }
+      // The upload area reflects the 5-image ceiling; the input stays enabled
+      // because disabling it would also drop already-picked files on submit.
+      var full = tiles.length >= MAX_IMAGES;
+      if (inputWrap) {
+        inputWrap.classList.toggle('is-full', full);
+        inputWrap.setAttribute('data-pg-full', full ? '1' : '0');
+      }
+      if (dropTitle) {
+        dropTitle.textContent = full
+          ? 'Gallery is full — remove an image to add another'
+          : 'Add images';
+      }
+      if (dropSub) {
+        dropSub.textContent = full
+          ? 'Remove an image below to free a slot, then add a new one.'
+          : 'Upload 1–' + MAX_IMAGES + ' real photos. New previews appear before you save.';
+      }
       announcePrimary(tiles);
       return tiles.length;
     }
@@ -190,7 +209,10 @@
       next.id = 'p-images';
       if (!supportsTransfer) { next.removeAttribute('multiple'); }
       next.addEventListener('change', onFilesPicked);
-      inputWrap.appendChild(next);
+      // Keep the picker inside the styled drop zone label so the whole area
+      // still opens the file dialog in browsers without DataTransfer.
+      var dropLabel = inputWrap.querySelector('.sh-pg__dropzone');
+      (dropLabel || inputWrap).appendChild(next);
       input = next;
     }
 

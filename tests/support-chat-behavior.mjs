@@ -70,7 +70,8 @@ const supportBackend = readFileSync(join(ROOT, 'includes/ai-support.php'), 'utf8
 const supportApi = readFileSync(join(ROOT, 'api/support.php'), 'utf8');
 for (const id of ['sh-schat-fab', 'sh-schat-sheet', 'sh-schat-messages', 'sh-schat-suggest', 'sh-schat-form',
 	'sh-schat-input', 'sh-schat-send', 'sh-schat-status', 'sh-schat-badge',
-	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close']) {
+	'sh-schat-handoff', 'sh-schat-new', 'sh-schat-close',
+	'sh-schat-menu', 'sh-schat-opt-facebook', 'sh-schat-opt-whatsapp', 'sh-schat-opt-chat']) {
 	check('shipped widget markup has #' + id, widgetPhp.includes('id="' + id + '"'));
 }
 check('chat panel is viewport-fixed, bottom-anchored and safe-area aware',
@@ -126,9 +127,23 @@ check('legacy widget API adapter maps URL-encoded sends and handoffs into the tr
 check('support service has no conversation/message pruning query', !/DELETE\s+FROM\s+support_(?:conversations|messages|handoff_events)/i.test(supportBackend + supportApi));
 
 const PAGE = `<!doctype html><html><head><title>t</title></head><body>
-<button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-controls="sh-schat-sheet" aria-label="Open customer support chat">
-  <span class="sh-schat-fab-label">Support</span><span class="sh-schat-badge" id="sh-schat-badge" hidden>0</span>
+<button type="button" class="sh-schat-fab" id="sh-schat-fab" aria-expanded="false" aria-haspopup="menu" aria-controls="sh-schat-menu" aria-label="Open support options">
+  <span class="sh-schat-badge" id="sh-schat-badge" hidden>0</span>
 </button>
+<div class="sh-schat-menu" id="sh-schat-menu" role="menu" aria-label="Support options" aria-hidden="true" hidden>
+  <a class="sh-schat-opt" id="sh-schat-opt-facebook" role="menuitem" href="https://m.me/shophaat" target="_blank" rel="noopener noreferrer nofollow" data-channel="facebook">
+    <span class="sh-schat-opt__icon sh-schat-opt__icon--messenger">f</span>
+    <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger</small></span>
+  </a>
+  <a class="sh-schat-opt" id="sh-schat-opt-whatsapp" role="menuitem" href="https://wa.me/8801700000000?text=Hi%20ShopHaat" target="_blank" rel="noopener noreferrer nofollow" data-channel="whatsapp">
+    <span class="sh-schat-opt__icon sh-schat-opt__icon--whatsapp">w</span>
+    <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp</small></span>
+  </a>
+  <button type="button" class="sh-schat-opt sh-schat-opt--chat" id="sh-schat-opt-chat" role="menuitem" data-channel="chat">
+    <span class="sh-schat-opt__icon sh-schat-opt__icon--chat">c</span>
+    <span class="sh-schat-opt__body"><strong>Live Chat</strong><small>Chat with us</small></span>
+  </button>
+</div>
 <section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
   <header class="sh-schat-head"><div class="sh-schat-headmain">
     <h2 id="sh-schat-title">Customer Support</h2></div>
@@ -207,12 +222,60 @@ const $ = (s) => window.document.querySelector(s);
 const $$ = (s) => Array.from(window.document.querySelectorAll(s));
 const reqs = (a) => requests.filter((r) => r.action === a);
 
+/* 0. Launcher menu: three options above a circular button ------------------ */
+const menuEl = $('#sh-schat-menu');
+const fabEl = $('#sh-schat-fab');
+check('the launcher shows no "Support" text label',
+	!fabEl.textContent.replace(/0/g, '').trim() || fabEl.querySelector('.sh-schat-fab-label') === null,
+	JSON.stringify(fabEl.textContent.trim()));
+check('the menu starts hidden and out of the accessibility tree',
+	menuEl.hidden === true && menuEl.getAttribute('aria-hidden') === 'true');
+check('the menu offers exactly three options (Facebook, WhatsApp, Live Chat)',
+	$$('#sh-schat-menu [role="menuitem"]').length === 3
+	&& !!$('#sh-schat-opt-facebook') && !!$('#sh-schat-opt-whatsapp') && !!$('#sh-schat-opt-chat'));
+check('external options are safe new-tab links to the configured destinations', (() => {
+	const fb = $('#sh-schat-opt-facebook');
+	const wa = $('#sh-schat-opt-whatsapp');
+	return fb.tagName === 'A' && wa.tagName === 'A'
+		&& fb.getAttribute('target') === '_blank' && wa.getAttribute('target') === '_blank'
+		&& /noopener/.test(fb.getAttribute('rel') || '') && /noreferrer/.test(wa.getAttribute('rel') || '')
+		&& fb.getAttribute('href') === 'https://m.me/shophaat'
+		&& wa.getAttribute('href') === 'https://wa.me/8801700000000?text=Hi%20ShopHaat';
+})());
+fabEl.click();
+await sleep(20);
+check('the launcher opens the menu instead of jumping into the chat',
+	menuEl.hidden === false && menuEl.classList.contains('is-open') && $('#sh-schat-sheet').hidden === true);
+check('the launcher reports the open menu', fabEl.getAttribute('aria-expanded') === 'true' && menuEl.getAttribute('aria-hidden') === 'false');
+check('opening the menu does not start a conversation', reqs('start').length === 0);
+check('focus moves to the first option for keyboard users', window.document.activeElement === $('#sh-schat-opt-facebook'));
+const menuOpts = $$('#sh-schat-menu [role="menuitem"]');
+menuOpts[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+check('ArrowDown moves to the next option', window.document.activeElement === menuOpts[1]);
+menuOpts[1].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+check('End jumps to the last option', window.document.activeElement === menuOpts[2]);
+window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('Escape closes the menu and returns focus to the launcher',
+	menuEl.classList.contains('is-open') === false && fabEl.getAttribute('aria-expanded') === 'false'
+	&& window.document.activeElement === fabEl);
+await sleep(300);
+check('a closed menu leaves the tab order', menuEl.hidden === true && menuEl.getAttribute('aria-hidden') === 'true');
+fabEl.click();
+await sleep(20);
+window.document.body.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+await sleep(10);
+check('a press outside closes the menu without opening the chat',
+	menuEl.classList.contains('is-open') === false && fabEl.getAttribute('aria-expanded') === 'false'
+	&& $('#sh-schat-sheet').hidden === true);
+
 /* 1. Open → exactly one start, panel in flow, welcome + suggestions ------- */
 check('sheet starts hidden', $('#sh-schat-sheet').hidden === true);
 const formEl = $('#sh-schat-form');
 let pageScrollIntoViewCalls = 0;
 formEl.scrollIntoView = () => { pageScrollIntoViewCalls += 1; };
-$('#sh-schat-fab').click();
+fabEl.click();
+await sleep(20);
+$('#sh-schat-opt-chat').click();
 await sleep(30);
 const sheet = $('#sh-schat-sheet');
 check('opening reveals the panel', sheet.hidden === false);
@@ -223,7 +286,9 @@ check('website scrolling stays unlocked and independent',
 	window.document.body.style.overflow === '' && window.document.documentElement.style.overflow === '');
 window.dispatchEvent(new window.Event('scroll'));
 check('a document scroll event never re-pins the panel', sheet.style.top === '' && sheet.style.getPropertyValue('--sh-schat-bottom') !== '', sheet.style.top);
-check('fab reports expanded state', $('#sh-schat-fab').getAttribute('aria-expanded') === 'true');
+check('the Live Chat option opens the existing panel and folds the menu',
+	sheet.hidden === false && menuEl.classList.contains('is-open') === false
+	&& fabEl.getAttribute('aria-expanded') === 'false');
 check('start called once with the CSRF token', reqs('start').length === 1 && reqs('start')[0].p.get('csrf_token') === 'csrf-test-token');
 check('welcome message renders', $('#sh-schat-messages').textContent.includes('Welcome to ShopHaat!'));
 check('quick suggestions render', $$('#sh-schat-suggest .sh-schat-chip').length === 2);
@@ -312,9 +377,11 @@ check('new conversation clears the old thread',
 /* 9. Escape closes; reopening does not re-start ---------------------------------- */
 window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 check('Escape closes the panel', sheet.hidden === true && $('#sh-schat-fab').getAttribute('aria-expanded') === 'false');
-$('#sh-schat-fab').click();
+fabEl.click();
 await sleep(20);
-check('reopening does not create a second start call', reqs('start').length === 1);
+$('#sh-schat-opt-chat').click();
+await sleep(20);
+check('reopening from the menu does not create a second start call', reqs('start').length === 1);
 check('Enter submits the message', (() => {
 	$('#sh-schat-input').value = 'enter test';
 	return true;

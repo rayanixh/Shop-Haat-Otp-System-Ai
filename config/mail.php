@@ -1212,10 +1212,19 @@ function sh_brevo_api_request(string $method, string $path, ?array $payload = nu
         } finally {
             restore_error_handler();
         }
-        if (isset($http_response_header[0]) && preg_match('~\s(\d{3})\s~', $http_response_header[0], $m)) {
+        // $http_response_header is deprecated in PHP 8.4 and raises the notice at
+        // compile time, so never mention it directly. This file can be loaded
+        // before includes/compat.php, hence the inline fallback.
+        if (function_exists('sh_http_last_response_headers')) {
+            $responseHeaderLines = sh_http_last_response_headers();
+        } else {
+            $responseHeaderLines = $GLOBALS['http_response_header'] ?? [];
+            $responseHeaderLines = is_array($responseHeaderLines) ? $responseHeaderLines : [];
+        }
+        if (isset($responseHeaderLines[0]) && preg_match('~\s(\d{3})\s~', (string)$responseHeaderLines[0], $m)) {
             $out['status'] = (int)$m[1];
         }
-        foreach ($http_response_header ?? [] as $headerLine) {
+        foreach ($responseHeaderLines as $headerLine) {
             if (!str_contains($headerLine, ':')) { continue; }
             [$hk, $hv] = explode(':', $headerLine, 2);
             $out['headers'][strtolower(trim($hk))] = trim($hv);

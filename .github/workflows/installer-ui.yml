@@ -1,0 +1,201 @@
+name: Installer UI
+
+on:
+  push:
+    branches:
+      - main
+      - arena/c6d8fd27-shop-haat-otp-system-ai
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  # The installation page is the first screen a new owner sees, and the only
+  # page that runs before a database exists. This job drives the ORIGINAL page
+  # in a real browser: the requirements card against the PHP build that is
+  # actually serving, the six phone widths the brief names, a complete
+  # installation through the original form, the blocked state produced by
+  # genuinely unwritable folders, and the restricted repair card on an
+  # installed store. Every phase also measures the layout: no sideways scroll,
+  # nothing outside its card, no overlap, no clipped content.
+  installer-ui:
+    name: Installer UI (real install, phone widths, screenshots)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_test_password
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      # The head branch, not the merge commit: the screenshots are committed
+      # back to it at the end of the job.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml, fileinfo, gd, curl, intl
+          coverage: none
+      # Exactly the state of a first cPanel upload: no config/database.php, no
+      # lock file, and the three folders the installer checks for writability.
+      - name: Prepare an uninstalled store
+        run: |
+          mkdir -p config uploads logs
+          rm -f config/database.php config/installed.lock
+          chmod 0755 config uploads logs
+      - name: Start the PHP web server
+        run: |
+          php -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/install/ >/tmp/install.html; then break; fi
+            sleep 1
+          done
+          if ! grep -q 'Server requirements' /tmp/install.html; then
+            echo '::error::the installer did not render its requirements section'
+            tail -n 20 /tmp/php-server.log
+            exit 1
+          fi
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Installer UI — original page, phone widths, live installation
+        env:
+          SH_INSTALL_PHASE: fresh
+          SH_INSTALL_BASE_URL: http://127.0.0.1:8080
+          SH_INSTALL_DB_HOST: 127.0.0.1
+          SH_INSTALL_DB_NAME: shophaat_installer
+          SH_INSTALL_DB_USER: root
+          SH_INSTALL_DB_PASS: root_test_password
+        run: |
+          export SH_INSTALL_EXPECT_PHP="$(php -r 'echo PHP_VERSION;')"
+          set -o pipefail
+          rc=0
+          node tests/browser/installer.mjs 2>&1 | tee /tmp/installer.log || rc=$?
+          # Where the run stopped matters as much as what failed.
+          grep -E '^[0-9]+\. ' /tmp/installer.log | tail -n 1 \
+            | while IFS= read -r line; do echo "::notice::installer-area: ${line//\%/\%25}"; done
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/installer.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::installer: ${msg//\%/\%25}"
+            tail -n 12 /tmp/php-server.log | tr "\n" "|" | cut -c1-700
+          else
+            grep -E '^Installer UI' /tmp/installer.log \
+              | while IFS= read -r line; do echo "::notice::installer: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      # The blocked state is produced, never mocked: the three folders the
+      # installer checks are copied and made read-only for the runner account,
+      # so is_writable() really returns false. The guard below refuses to treat
+      # "the folders were still writable" as a passing test.
+      - name: Installer UI — blocked requirements (genuinely unwritable folders)
+        run: |
+          rm -rf /tmp/shop-blocked
+          mkdir -p /tmp/shop-blocked
+          rsync -a --exclude node_modules --exclude .git ./ /tmp/shop-blocked/
+          rm -f /tmp/shop-blocked/config/database.php /tmp/shop-blocked/config/installed.lock
+          chmod 0555 /tmp/shop-blocked/config /tmp/shop-blocked/uploads /tmp/shop-blocked/logs
+          php -S 127.0.0.1:8081 -t /tmp/shop-blocked > /tmp/php-server-blocked.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8081/install/ >/tmp/install-blocked.html; then break; fi
+            sleep 1
+          done
+          if ! grep -q 'Not writable' /tmp/install-blocked.html; then
+            echo '::error::the read-only folders were still reported as writable — the blocked screen was not exercised'
+            exit 1
+          fi
+          set -o pipefail
+          rc=0
+          SH_INSTALL_PHASE=requirements-fail SH_INSTALL_BASE_URL=http://127.0.0.1:8081 \
+            node tests/browser/installer.mjs 2>&1 | tee /tmp/installer-blocked.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/installer-blocked.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::installer-blocked: ${msg//\%/\%25}"
+          else
+            grep -E '^Installer UI' /tmp/installer-blocked.log \
+              | while IFS= read -r line; do echo "::notice::installer-blocked: ${line//\%/\%25}"; done
+          fi
+          chmod 0755 /tmp/shop-blocked/config /tmp/shop-blocked/uploads /tmp/shop-blocked/logs || true
+          exit "$rc"
+      # A repair screen is only reachable when the store needs attention. The
+      # lock file is removed (a partial or restored file copy is the realistic
+      # cause) so the installer runs in restricted repair mode over the saved
+      # connection instead of redirecting to the storefront.
+      - name: Installer UI — repair screen on the installed store
+        env:
+          SH_INSTALL_PHASE: repair
+          SH_INSTALL_BASE_URL: http://127.0.0.1:8080
+          SH_INSTALL_DB_HOST: 127.0.0.1
+        run: |
+          rm -f config/installed.lock
+          set -o pipefail
+          rc=0
+          node tests/browser/installer.mjs 2>&1 | tee /tmp/installer-repair.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/installer-repair.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::installer-repair: ${msg//\%/\%25}"
+          else
+            grep -E '^Installer UI' /tmp/installer-repair.log \
+              | while IFS= read -r line; do echo "::notice::installer-repair: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      # The evidence has to be readable afterwards. The screenshots and the
+      # full check transcripts are committed to docs/installer-ui/, so a review
+      # can see exactly what ran without downloading anything.
+      - name: Publish the screenshots and transcripts on the branch
+        if: always()
+        run: |
+          mkdir -p docs/installer-ui
+          cp -f tests/browser/artifacts/installer/*.png docs/installer-ui/ 2>/dev/null || true
+          for f in /tmp/installer.log /tmp/installer-blocked.log /tmp/installer-repair.log; do
+            [ -f "$f" ] && cp -f "$f" "docs/installer-ui/$(basename "$f" .log).txt"
+          done
+          # The runner's own absolute paths are noise in a transcript.
+          if [ -d docs/installer-ui ]; then
+            grep -rl "/home/runner" docs/installer-ui 2>/dev/null | while IFS= read -r f; do
+              sed -i 's#/home/runner/work/[^ ]*/##g' "$f"
+            done
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/installer-ui
+          if git diff --cached --quiet; then
+            echo "::notice::no screenshot changes to publish"
+            exit 0
+          fi
+          git commit -q -m "docs: installer UI screenshots and transcripts from run ${{ github.run_id }}"
+          # The same commit triggers a push run and a pull_request run; only one
+          # of them can publish. Retrying on top of whatever landed first keeps
+          # a lost race from failing a job whose checks all passed.
+          pushed=0
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.head_ref || github.ref_name }}"; then pushed=1; break; fi
+            sleep $((attempt * 5))
+            git pull --rebase -q origin "${{ github.head_ref || github.ref_name }}" || git rebase --abort || true
+          done
+          if [ "$pushed" -ne 1 ]; then
+            echo "::warning::the screenshots could not be pushed to the branch; they are attached as an artifact instead"
+          fi
+      - name: Upload the installer screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-ui-screenshots
+          path: |
+            tests/browser/artifacts/installer/
+            /tmp/installer.log
+            /tmp/installer-blocked.log
+            /tmp/installer-repair.log
+            /tmp/php-server.log
+            /tmp/install-blocked.html
+          if-no-files-found: warn

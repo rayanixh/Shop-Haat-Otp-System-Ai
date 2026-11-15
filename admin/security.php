@@ -108,6 +108,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($form === 'phone_verification') {
         $on = sh_post('phone_verification') === '1';
         $mode = $on ? 'phone_otp' : 'email_password';
+        // Validate the provider before switching customers onto phone OTP:
+        // enabling it with an unusable driver would leave every customer on a
+        // code screen that can never complete.
+        if ($on && !sh_otp_provider_ready()) {
+            $problems = sh_otp_provider_config_errors();
+            sh_flash('error', 'Phone verification was not enabled: ' . implode(' ', array_slice($problems, 0, 2))
+                . ' Configure a working SMS provider below first.');
+            sh_redirect('admin/security.php');
+        }
         if ($mode !== sh_auth_mode()) {
             sh_setting_save('authentication_mode', $mode);
             sh_security_log('authentication_mode_changed', null, ['mode' => $mode]);
@@ -172,6 +181,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($form === 'sms') {
+        // The offline driver is a development tool: it reports success without
+        // contacting a carrier. Refuse to save it on a production install so a
+        // live store can never be left "verifying" numbers that never received
+        // a code.
+        $requestedProvider = (string)sh_post('otp_provider');
+        if ($requestedProvider === 'offline' && !sh_is_development()) {
+            sh_flash('error', 'Offline / test mode is only available on a development installation. '
+                . 'Choose TextBee or a Custom SMS API so customers can receive codes.');
+            sh_redirect('admin/security.php');
+        }
+        if (!in_array($requestedProvider, sh_otp_providers(), true)) {
+            sh_flash('error', 'Please choose a supported SMS provider.');
+            sh_redirect('admin/security.php');
+        }
         $keys = ['otp_provider', 'otp_sender_id', 'otp_message',
                  'otp_api_url', 'otp_api_method', 'otp_api_body', 'otp_api_headers',
                  'otp_api_auth', 'otp_api_key', 'otp_api_secret', 'otp_api_token',
@@ -189,6 +212,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sh_redirect('admin/security.php');
     }
 
+    // Move the OTP rate-limit pepper out of the settings table and into
+    // config/secrets.php. The value is never rendered: it is read, written and
+    // forgotten. Existing rate-limit history keeps counting because the stored
+    // copy is still recognised while it matches.
+    if ($form === 'secrets_migrate_pepper') {
+        if (!function_exists('sh_secret_write_file')) { require_once SH_ROOT . '/includes/secrets.php'; }
+        if (sh_secret_is_external(SH_OTP_PEPPER_SECRET)) {
+            sh_flash('info', 'The OTP pepper is already supplied by the server configuration. Nothing was changed.');
+            sh_redirect('admin/security.php');
+        }
+        $pepper = sh_otp_rate_pepper(false);
+        if ($pepper === '') {
+            sh_flash('error', 'There is no stored OTP pepper to move yet. Send one test code first.');
+            sh_redirect('admin/security.php');
+        }
+        $written = sh_secret_write_file([SH_OTP_PEPPER_SECRET => $pepper]);
+        if (!empty($written['ok'])) {
+            sh_security_log('otp_pepper_moved', (int)$admin['id'], ['target' => 'config/secrets.php']);
+            sh_log_line('admin', 'OTP rate-limit pepper moved to config/secrets.php by ' . $admin['email']);
+            sh_flash('success', 'The OTP pepper now comes from config/secrets.php. Existing limits keep counting; '
+                . 'delete the value from settings only after the daily window has passed.');
+        } else {
+            // The write failed: nothing changed, the pepper still resolves from
+            // the settings row and every existing rate limit keeps counting. Tell
+            // the operator exactly what to do instead of a dead end.
+            sh_security_log('otp_pepper_move_failed', (int)$admin['id'], ['error' => (string)($written['error'] ?? '')]);
+            sh_log_line('admin', 'OTP pepper could not be moved to config/secrets.php: '
+                . (string)($written['error'] ?? 'unknown error'));
+            sh_flash('error', (string)($written['error'] ?? 'The secrets file could not be written.')
+                . ' Nothing was changed and the current pepper is still in use, so verification and its'
+                . ' rate limits keep working. To finish the move by hand: copy the value that is currently'
+                . ' stored in the database (table settings, key otp_rate_pepper — it is never printed on this'
+                . ' page) into config/secrets.php with permissions 0600 as'
+                . " return ['otp_rate_pepper' => '…'];"
+                . ' then reload this page; the source above changes to config/secrets.php. If PHP has no write'
+                . ' access to config/, ask the host to restore it, or supply the pepper as the environment'
+                . ' variable SH_SECRET_OTP_RATE_PEPPER instead.');
+        }
+        sh_redirect('admin/security.php');
+    }
+
+    // Fill the trusted-proxy list from Cloudflare's published ranges (fetched
+    // live, never hardcoded) so a Cloudflare store gets correct client IPs —
+    // and therefore correct rate limits — without hand-typing ranges.
+    if ($form === 'proxy_cloudflare') {
+        if (!function_exists('sh_cloudflare_ranges')) { require_once SH_ROOT . '/includes/client-ip.php'; }
+        $ranges = sh_cloudflare_ranges(true);
+        if ($ranges === []) {
+            sh_flash('error', 'Cloudflare\'s range list could not be downloaded. Paste the ranges manually '
+                . 'in Admin → Customer Verification → Trusted proxies.');
+        } else {
+            sh_setting_save('verify_trusted_proxies', implode("\n", $ranges));
+            sh_setting_save('verify_proxy_mode', 'cloudflare');
+            sh_security_log('trusted_proxies_updated', (int)$admin['id'], ['source' => 'cloudflare', 'entries' => count($ranges)]);
+            sh_flash('success', count($ranges) . ' Cloudflare ranges saved. Client IPs are now taken from '
+                . 'CF-Connecting-IP only for those proxies.');
+        }
+        sh_redirect('admin/security.php');
+    }
+
     if ($form === 'test') {
         $phone = sh_phone_normalize(sh_post('test_phone'));
         if ($phone === '') {
@@ -197,8 +280,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $res = sh_otp_issue($phone, 'test', null);
             if ($res['ok']) {
                 $notice = 'Test message sent to ' . sh_phone_display($phone) . ' via ' . sh_otp_provider() . '.';
-                if (sh_otp_provider() === 'offline' && !empty($res['code'])) {
-                    $testCode = $res['code']; // test driver only — never a real SMS
+                if (sh_otp_allow_code_echo() && !empty($res['code'])) {
+                    // Development installations only (offline driver). On a
+                    // production store this branch cannot run, so the code is
+                    // never rendered into HTML.
+                    $testCode = (string)$res['code'];
                 }
             } else {
                 $errors['test_phone'] = $res['error'] ?? 'The test message could not be sent.';
@@ -237,6 +323,8 @@ if (!in_array($provider, $allowedProviders, true)) {
 }
 
 $phoneVerificationOn = sh_otp_enabled();
+// Readiness of the *saved* provider (the page can also preview another one).
+$providerReady = sh_otp_provider_ready($s('otp_provider', 'offline'));
 
 // Quick stats for the top of the page (only needed while verification is on).
 $stats = ['today' => 0, 'login' => 0, 'signup' => 0, 'verified' => 0, 'failed' => 0, 'expired' => 0, 'rate_limited' => 0];
@@ -309,7 +397,7 @@ endif;
 <?php endif; ?>
 <?php if ($testCode !== null): ?>
   <div class="sh-alert sh-alert--info"><?= sh_icon('key', 17) ?>
-    <span>Test mode code (shown because the provider is “offline”): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
+    <span>Development test code (offline driver — no SMS was sent): <strong style="letter-spacing:2px"><?= e($testCode) ?></strong></span></div>
 <?php endif; ?>
 
 <!-- Custom Admin URL: route discovery reduction only; the normal admin login and permissions remain required. -->
@@ -596,17 +684,33 @@ UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secre
       <h2 class="sh-panel__title"><?= sh_icon('send', 17) ?> SMS / OTP Provider</h2>
     </div>
     <div class="sh-panel__body">
-      <?php if ($provider === 'offline'): ?>
-        <div class="sh-alert sh-alert--warning"><?= sh_icon('alert', 17) ?>
-          <span><strong>No real SMS provider is selected.</strong> Customers cannot receive verification codes while the
-            provider is “Offline / test mode”. Choose TextBee, Firebase or a Custom SMS API below and save your credentials.</span></div>
+      <?php if (!$providerReady): ?>
+        <div class="sh-alert sh-alert--error"><?= sh_icon('x-circle', 17) ?>
+          <div>
+            <strong><?= $provider === 'offline' ? 'Offline / test mode is selected.' : 'This SMS provider is not ready.' ?></strong>
+            <?php if ($provider === 'offline'): ?>
+              No SMS is sent in this mode, so it is refused on a production installation and cannot be used to verify customers.
+              Choose TextBee or a Custom SMS API below, save your credentials, then run <em>Send test message</em>.
+            <?php else: ?>
+              <?= e(implode(' ', sh_otp_provider_config_errors($provider))) ?>
+            <?php endif; ?>
+            <?php if (sh_otp_enabled()): ?>
+              <br><strong>Phone sign-in is currently ON, so customers cannot complete verification until this is fixed.</strong>
+              Either repair the provider or switch to Email + Password below.
+            <?php endif; ?>
+          </div>
+        </div>
+      <?php elseif (sh_otp_enabled()): ?>
+        <div class="sh-alert sh-alert--success"><?= sh_icon('check-circle', 17) ?>
+          <span><strong>Provider ready.</strong> Phone verification requests will be delivered with
+            <strong><?= e($provider) ?></strong>. Failed deliveries still count towards the request limits.</span></div>
       <?php endif; ?>
 
       <div class="sh-grid2">
         <div class="sh-field">
           <label class="sh-field__label" for="sc-provider">SMS/OTP Provider</label>
           <select class="sh-select" id="sc-provider" name="otp_provider" data-provider-select>
-            <option value="offline" <?= $provider === 'offline' ? 'selected' : '' ?>>Offline / test mode (no real SMS)</option>
+            <option value="offline" <?= $provider === 'offline' ? 'selected' : '' ?>>Offline / test mode — DEVELOPMENT ONLY (no real SMS)</option>
             <option value="textbee" <?= $provider === 'textbee' ? 'selected' : '' ?>>TextBee</option>
             <option value="firebase" <?= $provider === 'firebase' ? 'selected' : '' ?>>Firebase</option>
             <option value="generic_http" <?= $provider === 'generic_http' ? 'selected' : '' ?>>Custom SMS API</option>
@@ -757,6 +861,90 @@ UPDATE settings SET setting_value = '' WHERE setting_key IN ('admin_access_secre
   </div>
 </div>
 <?php endif; ?>
+
+<?php
+// ---- Deployment, secrets and trusted proxies --------------------------------
+if (!function_exists('sh_trusted_proxy_entries')) { require_once SH_ROOT . '/includes/client-ip.php'; }
+$envLabel      = function_exists('sh_environment_label') ? sh_environment_label() : 'Production';
+$envName       = function_exists('sh_environment') ? sh_environment() : 'production';
+$stagingOpen   = function_exists('sh_staging_unprotected') && sh_staging_unprotected();
+$pepperSource  = function_exists('sh_secret_source') ? sh_secret_source('otp_rate_pepper') : 'none';
+$proxyMode     = function_exists('sh_proxy_mode') ? sh_proxy_mode() : 'auto';
+$proxyEntries  = sh_trusted_proxy_entries();
+$hasPepper     = sh_otp_rate_pepper(false) !== '';
+?>
+<div class="sh-panel" style="margin-top:14px">
+  <div class="sh-panel__head">
+    <h2 class="sh-panel__title"><?= sh_icon('cpu', 17) ?> Deployment, secrets and client IPs</h2>
+    <span class="sh-badge" style="margin-left:auto">Environment: <?= e($envLabel) ?></span>
+  </div>
+  <div class="sh-panel__body">
+    <?php if ($envName === 'development'): ?>
+      <p class="sh-panel__note" style="border-left:3px solid #a15c07;padding-left:10px">
+        <strong>This installation is marked as development.</strong> The offline SMS driver is available and a
+        superadmin can see test codes. Never point a development installation at live customer data.
+      </p>
+    <?php elseif ($stagingOpen): ?>
+      <p class="sh-panel__note" style="border-left:3px solid #a15c07;padding-left:10px">
+        <strong>This staging site has no access protection.</strong> Set <code>SH_STAGING_USER</code> and
+        <code>SH_STAGING_PASS</code> in <code>config/environment.php</code> (or as environment variables) to
+        require a password before any page is served.
+      </p>
+    <?php else: ?>
+      <p class="sh-panel__note">
+        A production installation. Offline test mode and OTP code display are both unavailable here.
+      </p>
+    <?php endif; ?>
+
+    <div class="sh-grid2">
+      <div class="sh-field">
+        <label class="sh-field__label">OTP rate-limit pepper</label>
+        <p class="sh-field__hint" style="margin:0 0 8px">
+          Used to hash phone numbers and IPs in the rate-limit log. It is never displayed anywhere.
+          Source: <strong><?= e($pepperSource === 'none' ? ($hasPepper ? 'database settings' : 'not created yet') : $pepperSource) ?></strong>
+        </p>
+        <?php if ($hasPepper && $pepperSource === 'none'): ?>
+          <form method="post">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="secrets_migrate_pepper">
+            <button class="sh-btn sh-btn--ghost sh-btn--sm" type="submit">
+              <?= sh_icon('key', 14) ?> Move to config/secrets.php
+            </button>
+          </form>
+          <span class="sh-field__hint">Keeps existing rate limits. The stored copy stays valid until you remove it.</span>
+        <?php else: ?>
+          <span class="sh-field__hint">Managed outside the database — nothing to do here.</span>
+        <?php endif; ?>
+      </div>
+
+      <div class="sh-field">
+        <label class="sh-field__label">Client IP source (rate limiting)</label>
+        <p class="sh-field__hint" style="margin:0 0 8px">
+          Mode <strong><?= e($proxyMode) ?></strong> —
+          <?php if ($proxyEntries === []): ?>
+            <strong>no trusted proxies configured</strong>, so the connection address is used.
+          <?php else: ?>
+            <?= count($proxyEntries) ?> trusted prox<?= count($proxyEntries) === 1 ? 'y' : 'ies' ?>.
+          <?php endif; ?>
+          Forwarded headers are ignored unless the request comes from a trusted proxy.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <form method="post">
+            <?= sh_csrf_field() ?>
+            <input type="hidden" name="form" value="proxy_cloudflare">
+            <button class="sh-btn sh-btn--ghost sh-btn--sm" type="submit">
+              <?= sh_icon('zap', 14) ?> Trust Cloudflare ranges
+            </button>
+          </form>
+          <a class="sh-btn sh-btn--ghost sh-btn--sm" href="<?= e(sh_url('admin/verification.php')) ?>#v-tp">
+            <?= sh_icon('settings', 14) ?> Edit proxy list
+          </a>
+        </div>
+        <span class="sh-field__hint">Behind Cloudflare, run this once. Behind another proxy, add its ranges manually.</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script<?= sh_csp_nonce_attr() ?>>
 (function () {

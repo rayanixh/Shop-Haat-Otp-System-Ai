@@ -14,6 +14,8 @@
  * Requires config.php (SH_BOOTSTRAPPED) to be loaded first.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 require_once __DIR__ . '/payment.php';   // sh_order_get(), sh_order_notify_payload(), sh_notify()
 require_once SH_ROOT . '/install/schema.php';
 
@@ -561,10 +563,7 @@ function sh_courier_http(string $method, string $url, array $headers = [], array
         if ($body === false) {
             return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'HTTP request failed (no cURL extension).'];
         }
-        $status = 0;
-        foreach ($http_response_header ?? [] as $line) {
-            if (preg_match('~^HTTP/\S+\s+(\d{3})~', $line, $m)) { $status = (int)$m[1]; }
-        }
+        $status = sh_http_last_status();
     }
 
     $decoded = json_decode((string)$body, true);

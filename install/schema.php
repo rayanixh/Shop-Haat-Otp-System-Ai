@@ -17,7 +17,8 @@ function sh_schema_tables(): array
         'promo_slides', 'whatsapp_messages', 'whatsapp_message_statuses',
         'telegram_admin_log', 'telegram_updates',
         'couriers', 'shipments', 'shipment_events', 'courier_test_results',
-        'otp_verifications', 'security_logs', 'password_resets',
+        'otp_verifications', 'otp_rate_limits', 'otp_rate_locks',
+        'security_logs', 'password_resets',
         'email_challenges', 'email_log',
         'support_conversations', 'support_messages', 'support_events',
         'support_faqs', 'support_rate', 'support_usage_daily',
@@ -384,7 +385,7 @@ function sh_schema_sql(): array
         PRIMARY KEY (id),
         KEY idx_payments_order (order_id),
         KEY idx_payments_status (status),
-        KEY idx_payments_transaction_id (transaction_id),
+        UNIQUE KEY uq_payments_transaction_id (transaction_id),
         UNIQUE KEY uq_payments_gwref (gateway_id, gateway_reference),
         CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_gateway FOREIGN KEY (gateway_id) REFERENCES payment_gateways (id) ON DELETE SET NULL
@@ -577,7 +578,7 @@ function sh_schema_sql(): array
         KEY idx_applogs_created (created_at)
     ) $E";
 
-    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_email_schema_sql(), sh_ai_support_schema_sql());
+    return array_merge($sql, sh_courier_schema_sql(), sh_otp_schema_sql(), sh_otp_rate_schema_sql(), sh_email_schema_sql(), sh_ai_support_schema_sql());
 }
 
 /**
@@ -916,7 +917,7 @@ function sh_email_schema_sql(): array
 // ---------------------------------------------------------------------------
 
 /** Bumped whenever the OTP schema shape changes; drives the lazy migration. */
-const SH_OTP_SCHEMA_VERSION = 4;
+const SH_OTP_SCHEMA_VERSION = 5;
 
 /**
  * Email verification schema version. Bumped when the mail tables/defaults
@@ -982,6 +983,45 @@ function sh_otp_schema_sql(): array
             CONSTRAINT fk_pwreset_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         ) $E",
 
+    ];
+}
+
+/**
+ * Rate-limit tables.
+ *
+ * Separate from otp_verifications on purpose: the limits must survive code
+ * deletion, expiry and failed SMS delivery. `otp_rate_limits` is an append-only
+ * request log (hashed phone/IP identifiers, never the number itself);
+ * `otp_rate_locks` holds one row per bucket so concurrent requests for the same
+ * number or device serialise on a row lock instead of racing.
+ *
+ * Idempotent (CREATE TABLE IF NOT EXISTS) and safe to run on every upgrade.
+ */
+function sh_otp_rate_schema_sql(): array
+{
+    $E = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return [
+        "CREATE TABLE IF NOT EXISTS otp_rate_limits (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            phone_key CHAR(64) NOT NULL,
+            ip_key CHAR(64) DEFAULT NULL,
+            purpose VARCHAR(30) NOT NULL,
+            outcome VARCHAR(20) NOT NULL DEFAULT 'pending',
+            provider VARCHAR(30) DEFAULT NULL,
+            user_id INT UNSIGNED DEFAULT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_orl_phone_time (phone_key, created_at),
+            KEY idx_orl_ip_time (ip_key, created_at),
+            KEY idx_orl_created (created_at)
+        ) $E",
+
+        "CREATE TABLE IF NOT EXISTS otp_rate_locks (
+            bucket_key CHAR(64) NOT NULL,
+            locked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (bucket_key),
+            KEY idx_orl_lock_age (locked_at)
+        ) $E",
     ];
 }
 
@@ -1138,6 +1178,9 @@ function sh_otp_schema_ensure(): void
 
         $pdo = sh_db();
         foreach (sh_otp_schema_sql() as $ddl) { $pdo->exec($ddl); }
+        // Rate-limit history lives in its own tables (v5). They are created
+        // separately so an upgrade of an older install adds only new objects.
+        foreach (sh_otp_rate_schema_sql() as $ddl) { $pdo->exec($ddl); }
 
         // Add any missing columns to existing tables.
         foreach (sh_otp_schema_columns() as $table => $defs) {
@@ -1158,9 +1201,70 @@ function sh_otp_schema_ensure(): void
         sh_otp_settings_migrate($pdo);
         sh_google_schema_migrate($pdo);
         sh_otp_seed_settings($pdo);
+        sh_otp_rate_backfill($pdo);
         sh_setting_save('otp_schema_version', (string)SH_OTP_SCHEMA_VERSION);
     } catch (Throwable $e) {
         sh_log_exception($e, 'otp-schema');
+    }
+}
+
+/**
+ * Carry existing rate-limit history into otp_rate_limits (once per install).
+ *
+ * Before v5 the per-phone / per-IP / daily windows counted rows in
+ * otp_verifications. Without this backfill, upgrading would silently reset an
+ * active block — a customer mid-abuse-window could immediately request again.
+ * Only the last 24 hours are copied (the widest configurable IP window is one
+ * day) and the run is stamped in settings so it happens exactly once.
+ *
+ * Nothing is deleted from otp_verifications: codes, attempts and verification
+ * history are preserved for the admin OTP log.
+ */
+function sh_otp_rate_backfill(PDO $pdo): void
+{
+    try {
+        if ((int)sh_val("SELECT setting_value FROM settings WHERE setting_key = 'otp_rate_backfilled' LIMIT 1", [], 0) >= 1) {
+            return;
+        }
+        $pepper = function_exists('sh_otp_rate_pepper') ? sh_otp_rate_pepper() : (string)sh_setting('otp_rate_pepper', '');
+        if ($pepper === '') { return; } // cannot key the identifiers; retry next upgrade
+
+        $read = $pdo->prepare(
+            'SELECT phone, ip_address, purpose, provider, user_id, created_at
+               FROM otp_verifications
+              WHERE created_at > DATE_SUB(NOW(), INTERVAL 1 DAY)
+              ORDER BY id DESC
+              LIMIT 2000'
+        );
+        $read->execute();
+        $rows = $read->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === []) {
+            sh_setting_save('otp_rate_backfilled', '1');
+            return;
+        }
+        $insert = $pdo->prepare(
+            'INSERT INTO otp_rate_limits (phone_key, ip_key, purpose, outcome, provider, user_id, created_at)
+             VALUES (?,?,?,?,?,?,?)'
+        );
+        foreach ($rows as $row) {
+            $phone = function_exists('sh_phone_normalize') ? sh_phone_normalize((string)$row['phone']) : (string)$row['phone'];
+            $phoneKey = hash_hmac('sha256', 'phone:' . $phone, $pepper);
+            $ipKey = ((string)($row['ip_address'] ?? '')) !== ''
+                ? hash_hmac('sha256', 'ip:' . (string)$row['ip_address'], $pepper)
+                : null;
+            $insert->execute([
+                $phoneKey,
+                $ipKey,
+                mb_substr((string)$row['purpose'], 0, 30),
+                'requested',
+                $row['provider'] !== null ? mb_substr((string)$row['provider'], 0, 30) : null,
+                $row['user_id'] !== null ? (int)$row['user_id'] : null,
+                (string)$row['created_at'],
+            ]);
+        }
+        sh_setting_save('otp_rate_backfilled', '1');
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'otp-rate-backfill');
     }
 }
 

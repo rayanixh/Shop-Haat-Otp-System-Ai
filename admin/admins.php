@@ -69,7 +69,7 @@ require __DIR__ . '/_layout.php';
   </div>
   <div class="sh-tablewrap sh-tablewrap--cards">
     <table class="sh-table">
-      <thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Last login</th><th>Created</th><th data-label="" style="text-align:right">Actions</th></tr></thead>
+      <thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Last login</th><th>Created</th><th data-label="">Actions</th></tr></thead>
       <tbody>
       <?php foreach ($list as $a): $self = (int)$a['id'] === (int)$admin['id']; ?>
         <tr>

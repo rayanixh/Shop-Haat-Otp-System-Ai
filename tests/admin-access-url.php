@@ -14,20 +14,16 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_support_db_bootstrap.php';
+require_once __DIR__ . '/_support_php_bin.php';
 require_once SH_ROOT . '/includes/admin-access.php';
 
 sh_test_schema();
 
 $src = static fn(string $rel): string => (string)file_get_contents(SH_ROOT . '/' . $rel);
-$phpBin = static function (): string {
-    $bin = getenv('SH_TEST_PHP_BIN');
-    if (is_string($bin) && $bin !== '') { return $bin; }
-    if (defined('PHP_BINARY') && PHP_BINARY !== '' && is_executable(PHP_BINARY)) { return (string)PHP_BINARY; }
-    // php-wasm CLI reports a temporary binary that is not runnable from a
-    // subprocess; fall back to a real php on PATH when one is available.
-    $fromPath = trim((string)@shell_exec('command -v php 2>/dev/null'));
-    return $fromPath !== '' ? $fromPath : (string)PHP_BINARY;
-};
+// A candidate binary is only used after it has been proven to execute a script;
+// when none can, the subprocess checks are reported BLOCKED, not FAIL.
+$php = sh_test_php_binary();
+$phpBin = static fn(): string => $php['bin'];
 /** Run PHP code in a fresh process; returns [output, exitCode]. */
 $subprocess = static function (string $code, string $env = '') use ($phpBin): array {
     $root = var_export(SH_ROOT, true);
@@ -44,8 +40,8 @@ $subprocess = static function (string $code, string $env = '') use ($phpBin): ar
 
 $collisionDir = '';
 
-[$passed, $failed] = sh_test_run('Custom Admin Access URL — real PHP + SQL', static function ($ok, $eq) use (
-    $src, $subprocess, &$collisionDir
+[$passed, $failed, $blocked] = sh_test_run('Custom Admin Access URL — real PHP + SQL', static function ($ok, $eq, $blocked) use (
+    $src, $subprocess, &$collisionDir, $php
 ) {
     echo "Engine: " . (sh_db()->isMySql ? 'MySQL/MariaDB (production DDL)' : 'SQLite (MySQL SQL translated)') . "\n\n";
 
@@ -334,28 +330,41 @@ $collisionDir = '';
         ['/admin/ai/providers.php', 'admin AJAX/provider file'],
     ];
     foreach ($blockCases as [$uri, $label]) {
+        if (!$php['ok']) {
+            $blocked('guard returns a safe 404 for ' . $label, $php['reason']);
+            continue;
+        }
         [$out] = $probe($enable
             . "\$_SERVER['SCRIPT_NAME'] = " . var_export($uri, true) . ";\n"
             . "\$_SERVER['REQUEST_URI'] = " . var_export($uri, true) . ";\n"
             . "sh_admin_access_guard_request();\n echo 'GUARD-RETURNED';\n");
         $ok($out === 'Not found.', 'guard returns a safe 404 for ' . $label);
     }
-    [$out] = $probe($enable
-        . "\$_SERVER['SCRIPT_NAME'] = '/admin/custom-route.php';\n"
-        . "\$_SERVER['REQUEST_URI'] = " . var_export('/' . $path, true) . ";\n"
-        . "sh_admin_access_guard_request();\n echo 'GUARD-RETURNED';\n");
-    $ok(str_contains($out, 'GUARD-RETURNED'), 'the verified custom-route dispatcher is not blocked by the guard');
-    [$out] = $probe("\$_SERVER['SCRIPT_NAME'] = '/admin/login.php';\n"
-        . "\$_SERVER['REQUEST_URI'] = '/admin/login.php';\n"
-        . "sh_admin_access_guard_request();\n echo 'GUARD-RETURNED';\n");
-    $ok(str_contains($out, 'GUARD-RETURNED'), 'with the feature disabled the standard admin route is reachable again');
+    if ($php['ok']) {
+        [$out] = $probe($enable
+            . "\$_SERVER['SCRIPT_NAME'] = '/admin/custom-route.php';\n"
+            . "\$_SERVER['REQUEST_URI'] = " . var_export('/' . $path, true) . ";\n"
+            . "sh_admin_access_guard_request();\n echo 'GUARD-RETURNED';\n");
+        $ok(str_contains($out, 'GUARD-RETURNED'), 'the verified custom-route dispatcher is not blocked by the guard');
+        [$out] = $probe("\$_SERVER['SCRIPT_NAME'] = '/admin/login.php';\n"
+            . "\$_SERVER['REQUEST_URI'] = '/admin/login.php';\n"
+            . "sh_admin_access_guard_request();\n echo 'GUARD-RETURNED';\n");
+        $ok(str_contains($out, 'GUARD-RETURNED'), 'with the feature disabled the standard admin route is reachable again');
+    } else {
+        $blocked('the verified custom-route dispatcher is not blocked by the guard', $php['reason']);
+        $blocked('with the feature disabled the standard admin route is reachable again', $php['reason']);
+    }
 
     /* --- 8. Authentication is independent of the URL -------------------- */
-    [$out] = $probe("require_once " . var_export(SH_ROOT . '/includes/admin-auth.php', true) . ";\n"
-        . "\$_SESSION = [];\n"
-        . "try { sh_require_admin(); echo 'NO-AUTH-CHECK'; } catch (Throwable \$e) { echo 'AUTH-REQUIRED: ' . \$e->getMessage(); }\n",
-        'SH_TEST_ADMIN_AUTH_MODE=1');
-    $ok(str_contains($out, 'AUTH-REQUIRED') && str_contains($out, 'admin/login.php'), 'unauthenticated admin request is redirected to login, never rendered');
+    if ($php['ok']) {
+        [$out] = $probe("require_once " . var_export(SH_ROOT . '/includes/admin-auth.php', true) . ";\n"
+            . "\$_SESSION = [];\n"
+            . "try { sh_require_admin(); echo 'NO-AUTH-CHECK'; } catch (Throwable \$e) { echo 'AUTH-REQUIRED: ' . \$e->getMessage(); }\n",
+            'SH_TEST_ADMIN_AUTH_MODE=1');
+        $ok(str_contains($out, 'AUTH-REQUIRED') && str_contains($out, 'admin/login.php'), 'unauthenticated admin request is redirected to login, never rendered');
+    } else {
+        $blocked('unauthenticated admin request is redirected to login, never rendered', $php['reason']);
+    }
 
     /* --- 9. Static wiring / no secret leakage ---------------------------- */
     $htaccess = $src('.htaccess');

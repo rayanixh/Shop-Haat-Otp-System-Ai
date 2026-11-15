@@ -3175,6 +3175,31 @@ sh_t('the AI navigation wraps in normal page flow and the card test area is flat
     return true;
 });
 
+sh_t('no PHP file prints stray text around its tags (that corrupts JSON API responses)', function () {
+    // A line placed before <?php is emitted as literal output. One such line in
+    // ai/providers/AIHttpClient.php prepended source code to every API response
+    // that loaded the class, so the support chat's own JSON became unparseable
+    // and the customer saw "Could not send right now… Retry" on a message the
+    // server had actually saved. Nothing may sit outside the PHP tags.
+    $offenders = [];
+    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT, FilesystemIterator::SKIP_DOTS));
+    foreach ($files as $file) {
+        if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') { continue; }
+        $path = $file->getPathname();
+        $rel = ltrim(str_replace(SH_ROOT, '', $path), '/');
+        if (str_starts_with($rel, '.git/') || str_starts_with($rel, 'node_modules/')) { continue; }
+        $source = (string)file_get_contents($path);
+        // 1. Anything before the opening tag is sent to the browser verbatim.
+        if (!str_starts_with(ltrim($source), '<?php')) { $offenders[] = $rel . ' does not start with <?php'; continue; }
+        // 2. Library and endpoint code must never emit anything of its own:
+        //    whitespace after a final closing tag becomes response output and
+        //    breaks headers and JSON. Page templates are allowed to end on a tag.
+        $library = preg_match('#^(ai|api|config|includes|cron|tools|install)/#', $rel) === 1;
+        if ($library && preg_match('/\?>\s*$/', $source) === 1) { $offenders[] = $rel . ' ends with a closing tag'; }
+    }
+    return $offenders === [] ? true : implode('; ', array_slice($offenders, 0, 3));
+});
+
 sh_t('only navigation drawers and the fixed support message log own internal scroll containers; AI content stays in page flow', function () {
     $css = (string)file_get_contents(SH_ROOT . '/assets/css/app.css');
     // Nested scrolling is allowed only inside the navigation menus, the mobile

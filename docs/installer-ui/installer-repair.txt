@@ -1,0 +1,122 @@
+ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
+
+1. An installed store serves the original restricted repair card
+  PASS  the repair screen responds with HTTP 200 — status 200
+  PASS  the screen is titled Repair this store — Repair this store
+  PASS  the repair screen shows the original restricted and unlock cards — Server requirements > Optional extensions > Restricted: this store is already installed > Store owner: unlock full setup
+  PASS  the repair form accepts no database credentials
+  PASS  the saved database password is never written into the page
+  PASS  the primary action repairs the database instead of installing
+  PASS  the owner unlock form is still offered
+  PASS  repair desktop: the redesigned step/progress/summary markup is not on the page
+  PASS  repair desktop: the stylesheet never hides content with overflow:hidden
+  PASS  repair desktop: the original brand colour, card radius and page width are unchanged — #e8501b / 10px / 820px
+  PASS  repair @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  repair @1280px: nothing sticks out of the viewport
+  PASS  repair @1280px: every element stays inside its card
+  PASS  repair @1280px: no requirement name overlaps its status
+  PASS  repair @1280px: no content is clipped by its box
+  PASS  a wrong unlock text is refused in plain language — Installation could not continue: That unlock text did not match the file on the server. Check the file content — the who
+  PASS  the refused unlock leaves the store uninstalled
+  PASS  repair after a refused unlock @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  repair after a refused unlock @1280px: nothing sticks out of the viewport
+  PASS  repair after a refused unlock @1280px: every element stays inside its card
+  PASS  repair after a refused unlock @1280px: no requirement name overlaps its status
+  PASS  repair after a refused unlock @1280px: no content is clipped by its box
+
+2. The repair screen is usable at 320–430px
+  PASS  repair @320px: the page does not scroll sideways — scrollWidth 320/320, viewport 320
+  PASS  repair @320px: nothing sticks out of the viewport
+  PASS  repair @320px: every element stays inside its card
+  PASS  repair @320px: no requirement name overlaps its status
+  PASS  repair @320px: no content is clipped by its box
+  PASS  repair @320px: the heading is unchanged — Repair this store
+  PASS  repair @320px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @320px: every status starts on the same line as its label
+  PASS  repair @320px: no status overlaps or undercuts its label
+  PASS  repair @320px: every status is right-aligned in its row
+  PASS  repair @320px: the status cells are text-aligned right — right
+  PASS  repair @320px: no button exceeds its container
+  PASS  repair @320px: every control is a comfortable touch target (>= 40px tall)
+  PASS  repair @360px: the page does not scroll sideways — scrollWidth 360/360, viewport 360
+  PASS  repair @360px: nothing sticks out of the viewport
+  PASS  repair @360px: every element stays inside its card
+  PASS  repair @360px: no requirement name overlaps its status
+  PASS  repair @360px: no content is clipped by its box
+  PASS  repair @360px: the heading is unchanged — Repair this store
+  PASS  repair @360px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @360px: every status starts on the same line as its label
+  PASS  repair @360px: no status overlaps or undercuts its label
+  PASS  repair @360px: every status is right-aligned in its row
+  PASS  repair @360px: the status cells are text-aligned right — right
+  PASS  repair @360px: no button exceeds its container
+  PASS  repair @360px: every control is a comfortable touch target (>= 40px tall)
+  PASS  repair @375px: the page does not scroll sideways — scrollWidth 375/375, viewport 375
+  PASS  repair @375px: nothing sticks out of the viewport
+  PASS  repair @375px: every element stays inside its card
+  PASS  repair @375px: no requirement name overlaps its status
+  PASS  repair @375px: no content is clipped by its box
+  PASS  repair @375px: the heading is unchanged — Repair this store
+  PASS  repair @375px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @375px: every status starts on the same line as its label
+  PASS  repair @375px: no status overlaps or undercuts its label
+  PASS  repair @375px: every status is right-aligned in its row
+  PASS  repair @375px: the status cells are text-aligned right — right
+  PASS  repair @375px: no button exceeds its container
+  PASS  repair @375px: every control is a comfortable touch target (>= 40px tall)
+  PASS  repair @390px: the page does not scroll sideways — scrollWidth 390/390, viewport 390
+  PASS  repair @390px: nothing sticks out of the viewport
+  PASS  repair @390px: every element stays inside its card
+  PASS  repair @390px: no requirement name overlaps its status
+  PASS  repair @390px: no content is clipped by its box
+  PASS  repair @390px: the heading is unchanged — Repair this store
+  PASS  repair @390px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @390px: every status starts on the same line as its label
+  PASS  repair @390px: no status overlaps or undercuts its label
+  PASS  repair @390px: every status is right-aligned in its row
+  PASS  repair @390px: the status cells are text-aligned right — right
+  PASS  repair @390px: no button exceeds its container
+  PASS  repair @390px: every control is a comfortable touch target (>= 40px tall)
+  PASS  repair @412px: the page does not scroll sideways — scrollWidth 412/412, viewport 412
+  PASS  repair @412px: nothing sticks out of the viewport
+  PASS  repair @412px: every element stays inside its card
+  PASS  repair @412px: no requirement name overlaps its status
+  PASS  repair @412px: no content is clipped by its box
+  PASS  repair @412px: the heading is unchanged — Repair this store
+  PASS  repair @412px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @412px: every status starts on the same line as its label
+  PASS  repair @412px: no status overlaps or undercuts its label
+  PASS  repair @412px: every status is right-aligned in its row
+  PASS  repair @412px: the status cells are text-aligned right — right
+  PASS  repair @412px: no button exceeds its container
+  PASS  repair @412px: every control is a comfortable touch target (>= 40px tall)
+  PASS  repair @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
+  PASS  repair @430px: nothing sticks out of the viewport
+  PASS  repair @430px: every element stays inside its card
+  PASS  repair @430px: no requirement name overlaps its status
+  PASS  repair @430px: no content is clipped by its box
+  PASS  repair @430px: the heading is unchanged — Repair this store
+  PASS  repair @430px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @430px: every status starts on the same line as its label
+  PASS  repair @430px: no status overlaps or undercuts its label
+  PASS  repair @430px: every status is right-aligned in its row
+  PASS  repair @430px: the status cells are text-aligned right — right
+  PASS  repair @430px: no button exceeds its container
+  PASS  repair @430px: every control is a comfortable touch target (>= 40px tall)
+
+3. The repair runs over the saved connection
+  PASS  the repair completed
+  PASS  the repair reports what it did —  Database repaired against shophaat_installer. The existing administrator account was left untouched
+  PASS  the repair says the administrator was left untouched —  Database repaired against shophaat_installer. The existing administrator account was left untouched — sign in with your usual credentials. The installer is loc
+  PASS  the store still loads after the repair — status 200
+  PASS  repair completion @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  repair completion @1280px: nothing sticks out of the viewport
+  PASS  repair completion @1280px: every element stays inside its card
+  PASS  repair completion @1280px: no requirement name overlaps its status
+  PASS  repair completion @1280px: no content is clipped by its box
+  PASS  the repair session: no console errors
+  PASS  the repair session: no JavaScript exceptions
+  PASS  the repair session: no failed requests (4xx/5xx/network)
+
+Installer UI (repair): 112 passed, 0 failed
+Screenshots: installer

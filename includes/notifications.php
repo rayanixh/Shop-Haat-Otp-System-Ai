@@ -9,6 +9,8 @@
  *  - Credentials are never written to notification_logs.
  */
 
+require_once __DIR__ . '/compat.php';   // sh_http_last_status(), mbstring fallbacks
+
 require_once __DIR__ . '/../config/mail.php';
 // The dedicated WhatsApp module owns encrypted-token handling and webhook
 // configuration; outbound order media reuses that same configured integration.
@@ -722,8 +724,7 @@ function sh_http_post(string $url, $body, array $headers = [], int $timeout = 15
     } finally {
         restore_error_handler();
     }
-    $code = 0;
-    if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) { $code = (int)$m[1]; }
+    $code = sh_http_last_status();
     if ($res === false) { return ['ok' => false, 'status' => $code, 'body' => '', 'error' => 'Connection failed.']; }
     return ['ok' => $code >= 200 && $code < 300, 'status' => $code, 'body' => (string)$res, 'error' => $code >= 300 ? 'HTTP ' . $code : ''];
 }

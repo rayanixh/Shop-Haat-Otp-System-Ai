@@ -44,7 +44,8 @@ function sh_support_settings_ai_audit_snapshot(): array
 function sh_support_settings_general_audit_snapshot(): array
 {
     $snapshot = [];
-    foreach (['enabled', 'handoff_enabled', 'hours', 'contact_email', 'contact_phone', 'personality', 'instructions'] as $key) {
+    foreach (['enabled', 'handoff_enabled', 'hours', 'contact_email', 'contact_phone', 'personality', 'instructions',
+              'facebook_url', 'whatsapp', 'whatsapp_message'] as $key) {
         $snapshot[$key] = sh_support_setting($key, '');
     }
     foreach (['delivery', 'payment', 'returns'] as $kind) {
@@ -231,6 +232,9 @@ $settings = [
     'daily_limit' => (int)sh_support_setting('daily_limit', '100'),
     'customer_daily_limit' => (int)sh_support_setting('customer_daily_limit', '15'),
     'context_limit' => (int)sh_support_setting('context_limit', '8'),
+    'facebook_url' => sh_support_setting('facebook_url', ''),
+    'whatsapp' => sh_support_setting('whatsapp', ''),
+    'whatsapp_message' => sh_support_setting('whatsapp_message', ''),
 ];
 foreach (['delivery', 'payment', 'returns'] as $kind) {
     foreach (['en', 'bn', 'banglish'] as $lang) {
@@ -326,6 +330,38 @@ require __DIR__ . '/_layout.php';
           <div class="sh-field"><label class="sh-field__label" for="support-email">Support email</label><input class="sh-input" id="support-email" name="contact_email" type="email" maxlength="254" value="<?= e($settings['contact_email']) ?>" placeholder="Uses store contact email when blank"></div>
           <div class="sh-field"><label class="sh-field__label" for="support-phone">Support phone</label><input class="sh-input" id="support-phone" name="contact_phone" maxlength="40" value="<?= e($settings['contact_phone']) ?>" placeholder="Uses store contact phone when blank"></div>
         </div>
+
+        <?php
+        require_once SH_ROOT . '/includes/support-links.php';
+        $channelFacebook = sh_support_facebook_url();
+        $channelWhatsapp = sh_support_whatsapp_url();
+        ?>
+        <fieldset class="sh-support-settings__policy sh-support-settings__channels">
+          <legend>Launcher menu: Facebook &amp; WhatsApp</legend>
+          <p class="sh-formcard__note">Extra options above the floating chat button on every storefront page. Blank or invalid values show the option as unavailable — the on-site chat stays available and is never replaced by these links.</p>
+          <div class="sh-grid2">
+            <div class="sh-field">
+              <label class="sh-field__label" for="support-facebook">Facebook / Messenger link</label>
+              <input class="sh-input" id="support-facebook" name="facebook_url" type="url" inputmode="url" maxlength="512" value="<?= e((string)$settings['facebook_url']) ?>" placeholder="https://m.me/yourpage">
+              <small class="sh-field__hint">https:// only — m.me, facebook.com or messenger.com.</small>
+            </div>
+            <div class="sh-field">
+              <label class="sh-field__label" for="support-whatsapp">WhatsApp number or link</label>
+              <input class="sh-input" id="support-whatsapp" name="whatsapp" maxlength="512" value="<?= e((string)$settings['whatsapp']) ?>" placeholder="+8801700000000">
+              <small class="sh-field__hint">Number with country code, or a wa.me / chat.whatsapp.com link. Never guessed.</small>
+            </div>
+            <div class="sh-field">
+              <label class="sh-field__label" for="support-whatsapp-message">Pre-filled WhatsApp message</label>
+              <input class="sh-input" id="support-whatsapp-message" name="whatsapp_message" maxlength="300" value="<?= e((string)$settings['whatsapp_message']) ?>" placeholder="Hi ShopHaat, I need help with…">
+              <small class="sh-field__hint">Optional. Customers can edit it before sending.</small>
+            </div>
+          </div>
+          <p class="sh-formcard__note">
+            <span class="sh-support-settings__state <?= $channelFacebook !== '' ? 'is-good' : 'is-bad' ?>">Facebook: <?= $channelFacebook !== '' ? 'available' : 'not configured' ?></span>
+            <span class="sh-support-settings__state <?= $channelWhatsapp !== '' ? 'is-good' : 'is-bad' ?>">WhatsApp: <?= $channelWhatsapp !== '' ? 'available' : 'not configured' ?></span>
+            <span class="sh-support-settings__state is-good">Live chat: always available</span>
+          </p>
+        </fieldset>
 
         <div class="sh-field"><label class="sh-field__label" for="support-personality">Assistant tone (style only)</label><textarea class="sh-textarea" id="support-personality" name="personality" rows="2" maxlength="500"><?= e($settings['personality']) ?></textarea></div>
         <div class="sh-field"><label class="sh-field__label" for="support-instructions">Additional store instructions</label><textarea class="sh-textarea" id="support-instructions" name="instructions" rows="4" maxlength="2500" placeholder="Do not enter credentials or private customer information."><?= e($settings['instructions']) ?></textarea><small class="sh-formcard__note">Instructions cannot override safety rules. Product/order data and customer messages are treated as untrusted content.</small></div>

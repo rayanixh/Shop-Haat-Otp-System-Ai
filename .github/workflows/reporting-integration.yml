@@ -35,6 +35,12 @@ jobs:
       # message shapes and the static CSRF/permission/no-scroll-box wiring.
       - name: AI customer support unit suite
         run: php tests/support-unit.php
+      # The floating launcher's two external options: https-only official hosts,
+      # country-code WhatsApp numbers normalised to wa.me, nothing hardcoded, no
+      # dead links when a channel is unconfigured, and the rendered markup /
+      # stylesheet contract that keeps the 56px circle and the 3-option menu.
+      - name: Support launcher link and markup contract
+        run: php tests/support-links.php
       # Real PHP service functions against real PDO SQL (SQLite in this job,
       # MySQL via SH_TEST_MYSQL_DSN elsewhere): one handoff confirmation,
       # silent human-owned follow-ups, no AI/FAQ/fallback, admin reply,
@@ -61,6 +67,26 @@ jobs:
         env:
           SH_TEST_PHP_BIN: php
         run: php tests/admin-access-url.php
+      # The shipped CLI token parser is executed with real argv/env/$_GET: the
+      # documented cPanel command resolves its token, the old
+      # `php cron/backup.php?token=…` form cannot authenticate, the HTTP header
+      # still wins over the query string, and a CLI run without a database
+      # explains itself instead of exiting silently.
+      - name: Cron CLI authentication
+        env:
+          SH_TEST_PHP_BIN: php
+        run: php tests/cron-cli-auth.php
+      # The "move the OTP pepper out of the database" button. The first run is a
+      # normal account, so every permission check really executes; the second
+      # simulates a root-like host (where chmod 0555 does not deny a write) and
+      # proves the suite reports those checks BLOCKED by name instead of failing.
+      # Both must exit 0 — a blocked check is neither a pass nor a failure.
+      - name: Secret migration (permission-enforcing account)
+        run: php tests/secrets-migration.php
+      - name: "Secret migration (root-like host: BLOCKED classification)"
+        env:
+          SH_TEST_ASSUME_NO_PERM_ENFORCEMENT: '1'
+        run: php tests/secrets-migration.php
       # Drives the real transport against local TLS servers: a matching cert
       # (STARTTLS + AUTH + real submission), a trusted-but-wrong-name cert
       # (must fail at tls_hostname with no AUTH/MAIL), a 535 server (must fail
@@ -284,3 +310,252 @@ jobs:
       # test database; no external provider or live credential is used.
       - name: AI customer support end-to-end against MySQL
         run: php tests/support-system.php
+      # MySQL-only behaviour that a SQLite mirror cannot prove: a fresh install of
+      # all 50 tables on InnoDB, an upgrade from a pre-migration store, the unique
+      # TrxID index (including the duplicate-history case that must postpone the
+      # ALTER instead of failing a customer checkout), rollback, row locking,
+      # order ownership and notification idempotency.
+      # It runs last because it drops and recreates the disposable tables. It
+      # refuses any database whose name does not look like a test database.
+      # This step is required: it passed on MySQL 8.0 (run 43621578351) and a
+      # regression must fail the build.
+      - name: MySQL integration (schema, migration, locking, idempotency)
+        env:
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ALLOW_DROP: '1'
+          SH_TEST_REQUIRE_ENGINE: '1'
+        run: |
+          set -o pipefail
+          rc=0
+          php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( { grep -E "BLOCKED|FAIL|REFUSED|Error" /tmp/engine.log | head -n 8; tail -n 4 /tmp/engine.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::engine: ${msg//\%/\%25}"
+          fi
+          exit "$rc"
+      # Runs last on purpose: the annotation list keeps the most recent entries,
+      # so a summary printed here survives while one printed earlier is evicted.
+      - name: Publish the engine result
+        if: always()
+        run: |
+          if [ -f /tmp/engine.log ]; then
+            msg=$( { grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|BLOCKED' /tmp/engine.log | head -n 4; } \
+              | tr '\n' '|' | cut -c1-900 )
+          else
+            msg="no engine log was produced"
+          fi
+          echo "::notice::engine: ${msg//\%/\%25}"
+      # The rehearsal this project has never been able to run: the application
+      # creates a real backup of the disposable store, the tool imports it into a
+      # NEW scratch database, verifies tables/indexes/relationships/settings and a
+      # representative order, points the application at the restored copy and asks
+      # it to read the data, then drops the scratch database. The scratch database
+      # is created by root because the application account is granted its own
+      # database only — as on shared hosting. The refusal matrix (missing dump,
+      # empty dump, a .gz that is not gzip, a dump with no tables, a production
+      # name, the live name) runs in the same suite.
+      - name: Backup to restore rehearsal against a scratch database
+        env:
+          SH_TEST_PHP_BIN: php
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ROOT_USER: root
+          SH_TEST_MYSQL_ROOT_PASS: root_test_password
+        # The step's log is only visible in the Actions UI; mirroring the tail as
+        # ::error:: annotations means the reason is also attached to the run for
+        # anyone (or anything) reading it through the API.
+        # The runner runs this with bash -e: a bare `cmd | tee` would abort the
+        # step the moment the command failed and the diagnostics below would
+        # never run. `|| rc=$?` keeps the shell alive long enough to report why.
+        run: |
+          set -o pipefail
+          rc=0
+          php tests/restore-rehearsal.php 2>&1 | tee /tmp/rehearsal.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            # One annotation, not forty: a run can only hold so many, and a
+            # message that gets dropped explains nothing.
+            msg=$( { grep -E "FAIL|BLOCKED|REFUSED|Error" /tmp/rehearsal.log | head -n 6; tail -n 5 /tmp/rehearsal.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::rehearsal: ${msg//\%/\%25}"
+          else
+            grep -E "Backup restore|Real rehearsal|BLOCKED" /tmp/rehearsal.log | tail -n 6 \
+              | while IFS= read -r line; do echo "::notice::rehearsal: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+
+  # ========================================================================
+  # MariaDB is a different engine, not a different version of MySQL:
+  # information_schema details, index limits, NOWAIT support and duplicate-key
+  # behaviour after a rollback all differ. cPanel hosts ship either one, so the
+  # same eleven-scenario suite runs here against MariaDB 10.6.
+  # ========================================================================
+  mariadb-integration:
+    name: MariaDB 10.6 engine suite
+    needs: security-regression
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_DATABASE: shophaat_staging_test
+          MARIADB_USER: shophaat_test
+          MARIADB_PASSWORD: shophaat_test_password
+          MARIADB_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml
+      # Same suite, different engine: fresh install of all 50 tables, the
+      # upgrade path from a pre-migration store, the unique TrxID index (and the
+      # duplicate-history case that must postpone the ALTER), rollback, row
+      # locking, OTP replay/expiry, order ownership, notification idempotency and
+      # backup metadata. The engine and version are printed in the output, so a
+      # MariaDB result can never be quoted as a MySQL result or the reverse.
+      - name: MariaDB engine suite (schema, migration, locking, idempotency)
+        env:
+          SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_staging_test;charset=utf8mb4'
+          SH_TEST_MYSQL_USER: shophaat_test
+          SH_TEST_MYSQL_PASS: shophaat_test_password
+          SH_TEST_MYSQL_ALLOW_DROP: '1'
+          SH_TEST_REQUIRE_ENGINE: '1'
+        run: |
+          set -o pipefail
+          rc=0
+          php tests/mysql-integration.php 2>&1 | tee /tmp/engine.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( { grep -E "BLOCKED|FAIL|REFUSED|Error" /tmp/engine.log | head -n 8; tail -n 4 /tmp/engine.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::engine: ${msg//\%/\%25}"
+          fi
+          exit "$rc"
+      # Runs last on purpose: the annotation list keeps the most recent entries,
+      # so a summary printed here survives while one printed earlier is evicted.
+      - name: Publish the engine result
+        if: always()
+        run: |
+          if [ -f /tmp/engine.log ]; then
+            msg=$( { grep -E '^Server +:|^PASS [0-9]+|^engine tested|^REFUSED|BLOCKED' /tmp/engine.log | head -n 4; } \
+              | tr '\n' '|' | cut -c1-900 )
+          else
+            msg="no engine log was produced"
+          fi
+          echo "::notice::engine: ${msg//\%/\%25}"
+
+  # ========================================================================
+  # The only environment in this project that has a real browser, a real web
+  # server and a real database at the same time. Chromium (Playwright) drives the
+  # storefront and the admin panel against `php -S` and a disposable MySQL store
+  # seeded through the application's own installer path.
+  #
+  # It checks what only a browser can: console errors, JavaScript exceptions,
+  # failed requests, CSP violation reports, whether gallery images really decode
+  # (naturalWidth > 0), whether the gallery controls actually change state, and
+  # horizontal overflow at a 390x844 phone viewport. Screenshots of each flow are
+  # uploaded as an artifact.
+  # ========================================================================
+  browser-regression:
+    name: Real browser regression (Chromium, MySQL, php -S)
+    needs: security-regression
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: shophaat_browser_test
+          MYSQL_USER: shophaat_test
+          MYSQL_PASSWORD: shophaat_test_password
+          MYSQL_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, dom, libxml, fileinfo, gd, curl
+      - name: Point the checkout at the disposable database
+        run: |
+          php -r 'file_put_contents("config/database.php", "<?php\nreturn " . var_export([            "host" => "127.0.0.1", "port" => 3306, "name" => "shophaat_browser_test",            "user" => "shophaat_test", "pass" => "shophaat_test_password",            "charset" => "utf8mb4"], true) . ";\n");'
+          php -l config/database.php
+      - name: Seed the store through the application installer path
+        env:
+          SH_BROWSER_SEED: '1'
+          SH_BROWSER_HOST: 127.0.0.1:8080
+        # The seed's counts decide whether an empty storefront is a seeding
+        # problem or a rendering problem, so they go on the run, not in the log.
+        run: |
+          set -o pipefail
+          rc=0
+          php -d display_errors=1 -d error_reporting=E_ALL tests/browser/seed.php 2>&1 | tee /tmp/seed.log || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            msg=$( { grep -E "FAIL|ERROR|EXCEPTION|REFUSED|SQLSTATE" /tmp/seed.log | grep -v "^<" | head -n 6; tail -n 5 /tmp/seed.log; } \
+              | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::seed: ${msg//\%/\%25}"
+          else
+            grep -E "^  (PASS|FAIL)" /tmp/seed.log | head -n 10 \
+              | while IFS= read -r line; do echo "::notice::seed: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      - name: Start the PHP web server
+        run: |
+          php -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/index.php >/tmp/home.html; then break; fi
+            sleep 1
+          done
+          head -c 300 /tmp/home.html; echo
+          ! grep -qi "fatal error\|uncaught" /tmp/home.html
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+      - name: Browser regression (storefront, admin, mobile, CSP)
+        env:
+          SH_BROWSER_BASE_URL: http://127.0.0.1:8080
+          SH_BROWSER_ADMIN_PASSWORD: AdminTest!2026
+          SH_BROWSER_CUSTOMER_PASSWORD: Customer!2026
+        run: |
+          set -o pipefail
+          rc=0
+          node tests/browser/smoke.mjs 2>&1 | tee /tmp/browser.log || rc=$?
+          # Where the run stopped matters as much as what failed: the area
+          # markers go out first so a truncated log is still diagnostic.
+          grep -E '^[0-9]+\. ' /tmp/browser.log | tail -n 3 \
+            | while IFS= read -r line; do echo "::notice::browser-area: ${line//\%/\%25}"; done
+          if [ "$rc" -ne 0 ]; then
+            msg=$( sed -n '/^Failures:/,$p' /tmp/browser.log | tr "\n" "|" | cut -c1-1400 )
+            echo "::error::browser: ${msg//\%/\%25}"
+            srv=$( tail -n 12 /tmp/php-server.log 2>/dev/null | tr "\n" "|" | cut -c1-800 )
+            echo "::error::php: ${srv//\%/\%25}"
+          else
+            grep -E '^Browser regression|^Base URL' /tmp/browser.log \
+              | while IFS= read -r line; do echo "::notice::browser: ${line//\%/\%25}"; done
+          fi
+          exit "$rc"
+      - name: Upload screenshots and the PHP server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-artifacts
+          path: |
+            tests/browser/artifacts/
+            /tmp/php-server.log
+          if-no-files-found: warn

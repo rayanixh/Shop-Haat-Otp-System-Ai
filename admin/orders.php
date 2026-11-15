@@ -200,7 +200,7 @@ if ($viewId > 0) {
           <div class="sh-panel__head"><h2 class="sh-panel__title"><?= sh_icon('credit-card', 17) ?> Payment records</h2></div>
           <div class="sh-tablewrap">
             <table class="sh-table">
-              <thead><tr><th>Method</th><th>Transaction</th><th>Amount</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
+              <thead><tr><th>Method</th><th>Transaction</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
               <?php if (!$payments): ?><tr class="sh-table--empty"><td colspan="5">No payment submitted yet.</td></tr>
               <?php else: foreach ($payments as $p): ?>
@@ -210,7 +210,7 @@ if ($viewId > 0) {
                     <?php if ($p['sender_phone']): ?><div class="sh-table__meta">From <?= e($p['sender_phone']) ?></div><?php endif; ?></td>
                   <td><?= e(sh_money($p['amount'])) ?></td>
                   <td><span class="sh-badge <?= e(sh_status_class($p['status'])) ?>"><?= e(sh_status_label($p['status'])) ?></span></td>
-                  <td style="text-align:right">
+                  <td>
                     <?php if ($p['status'] === 'pending' && $p['transaction_id']): ?>
                       <a class="sh-btn sh-btn--sm" href="<?= e(sh_url('admin/payments.php?id=' . (int)$p['id'])) ?>">Review</a>
                     <?php endif; ?>

@@ -123,7 +123,7 @@ require dirname(__DIR__) . '/_layout.php';
   </div>
   <div class="sh-tablewrap">
     <table class="sh-table">
-      <thead><tr><th>Type</th><th>Reference</th><th>Status</th><th>Provider</th><th>Model</th><th>Tokens</th><th>Cost</th><th>When</th><th style="text-align:right">Action</th></tr></thead>
+      <thead><tr><th>Type</th><th>Reference</th><th>Status</th><th>Provider</th><th>Model</th><th>Tokens</th><th>Cost</th><th>When</th><th>Action</th></tr></thead>
       <tbody>
       <?php if (!$rows): ?>
         <tr class="sh-table--empty"><td colspan="9">No generations recorded yet.</td></tr>
@@ -139,7 +139,7 @@ require dirname(__DIR__) . '/_layout.php';
           <td class="sh-table__meta"><?= number_format((int)$g['tokens_used']) ?></td>
           <td class="sh-table__meta"><?= isset($g['cost']) && $g['cost'] !== null ? '$' . rtrim(rtrim(number_format((float)$g['cost'], 6, '.', ''), '0'), '.') : '—' ?></td>
           <td class="sh-table__meta"><?= e(date('d M, H:i', strtotime((string)$g['created_at']))) ?></td>
-          <td style="text-align:right">
+          <td>
             <a class="sh-btn sh-btn--sm sh-btn--ghost"
                href="<?= e(sh_url('admin/ai/history.php?view=' . (int)$g['id'])) ?>">View</a></td>
         </tr>
