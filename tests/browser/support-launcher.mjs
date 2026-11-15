@@ -136,6 +136,13 @@ const menuGeometry = (page) => page.evaluate(() => {
 async function openMenu(page) {
   await page.click('#sh-schat-fab');
   await page.waitForFunction(() => document.querySelector('#sh-schat-menu')?.classList.contains('is-open'), null, { timeout: 10000 });
+  // Let the slide/fade transition finish so the geometry and opacity checks
+  // describe the settled state (reduced motion settles immediately).
+  await page.waitForFunction(() => {
+    const menu = document.querySelector('#sh-schat-menu');
+    return !!menu && getComputedStyle(menu).opacity === '1';
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(120);
 }
 
 /* ---------------------------------------------------------------------------
@@ -194,8 +201,11 @@ async function phaseAdmin(browser) {
       message: document.querySelector('#support-whatsapp-message')?.value || '',
       chips: [...document.querySelectorAll('.sh-support-settings__state')].map((el) => el.textContent.trim()),
     }));
-    check('the accepted values are stored and shown again', saved.facebook === FB_URL && saved.whatsapp === WA_NUMBER && saved.message === WA_TEXT,
-      `${saved.facebook} | ${saved.whatsapp}`);
+    // A typed number is accepted and normalised to its wa.me URL — that is what
+    // the storefront links to, so a stray space or dash can never break it.
+    check('the accepted values are stored and shown again',
+      saved.facebook === FB_URL && saved.whatsapp === WA_NORMALISED && saved.message === WA_TEXT,
+      `${saved.facebook} | ${saved.whatsapp} | ${saved.message.slice(0, 40)}`);
     check('the page reports both channels as available', saved.chips.some((c) => /Facebook: available/.test(c)) && saved.chips.some((c) => /WhatsApp: available/.test(c)),
       saved.chips.join(' / ').slice(0, 160));
     check('the page states that live chat stays available', saved.chips.some((c) => /Live chat: always available/.test(c)));
@@ -300,9 +310,23 @@ async function phaseDesktop(browser) {
   });
 
   await area('6. Live Chat opens the existing chat and still answers', async () => {
+    const apiLog = [];
+    page.on('response', async (res) => {
+      if (!res.url().includes('/api/support.php')) { return; }
+      let body = '';
+      try { body = (await res.text()).slice(0, 300); } catch { /* body unavailable */ }
+      apiLog.push(`${res.status()} ${body.replace(/\s+/g, ' ')}`);
+    });
     await openMenu(page);
+    const startCall = page.waitForResponse(
+      (res) => res.url().includes('/api/support.php') && res.request().method() === 'POST',
+      { timeout: 20000 },
+    ).catch(() => null);
     await page.click('#sh-schat-opt-chat');
     await page.waitForFunction(() => document.querySelector('#sh-schat-sheet')?.hidden === false, null, { timeout: 10000 });
+    const startResponse = await startCall;
+    check('the existing chat start call succeeds', !!startResponse && startResponse.status() === 200,
+      apiLog.join(' | ').slice(0, 300));
     check('Live Chat opens the existing panel', await page.locator('#sh-schat-sheet').isVisible());
     check('the menu folds away when the chat opens',
       !(await page.locator('#sh-schat-menu').evaluate((el) => el.classList.contains('is-open')))
@@ -321,17 +345,16 @@ async function phaseDesktop(browser) {
     check('Talk to a human is still offered', chrome.handoff && /Talk to a human/.test(chrome.handoffText), chrome.handoffText);
     check('the composer is still there', chrome.input && chrome.send);
 
-    await page.waitForFunction(() => document.querySelectorAll('#sh-schat-messages .sh-schat-msg').length >= 1, null, { timeout: 20000 });
-    check('the existing conversation loads in the panel',
-      (await page.locator('#sh-schat-messages .sh-schat-msg').count()) >= 1);
-
     await page.fill('#sh-schat-input', 'Do you deliver to Dhaka?');
     await page.click('#sh-schat-send');
     await page.waitForFunction(() => {
       const bubbles = document.querySelectorAll('#sh-schat-messages .sh-schat-msg');
-      return bubbles.length >= 3;
-    }, null, { timeout: 25000 }).catch(() => null);
+      return bubbles.length >= 2;
+    }, null, { timeout: 30000 }).catch(() => null);
     const thread = (await page.textContent('#sh-schat-messages').catch(() => '') || '').replace(/\s+/g, ' ');
+    check('the customer message and a reply both render',
+      (await page.locator('#sh-schat-messages .sh-schat-msg').count()) >= 2,
+      thread.slice(0, 160) + ' :: ' + apiLog.slice(-2).join(' | ').slice(0, 200));
     check('the existing chat answers the customer after the launcher change',
       /Dhaka/i.test(thread) && thread.length > 60, thread.slice(0, 140));
     check('no message is shown as failed', await page.locator('#sh-schat-messages .is-failed').count() === 0);

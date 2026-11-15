@@ -3127,8 +3127,9 @@ button.sh-schat-opt:hover, button.sh-schat-opt:focus-visible { background: var(-
 .sh-schat-opt.is-off, .sh-schat-opt.is-off:hover { background: transparent; cursor: default; opacity: .58; }
 .sh-schat-opt.is-off .sh-schat-opt__icon { background: #aeb5c0; }
 @media (prefers-reduced-motion: reduce) {
-  /* Menus still open and close, they just do not slide, fade or scale. */
-  .sh-schat-fab, .sh-schat-menu, .sh-schat-opt { transition: none; }
+  /* Menus still open and close, they just do not slide, fade or scale.
+     .is-open is listed explicitly because it sets its own transition. */
+  .sh-schat-fab, .sh-schat-menu, .sh-schat-menu.is-open, .sh-schat-opt { transition: none; }
   .sh-schat-menu, .sh-schat-menu.is-open { transform: none; }
   .sh-schat-fab:hover, .sh-schat-fab:active { transform: none; }
 }
