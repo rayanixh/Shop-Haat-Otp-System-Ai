@@ -1,7 +1,7 @@
 # 20 — Installation page restored, overflow fixed
 
 Branch `arena/c6d8fd27-shop-haat-otp-system-ai` · PR #16
-Browser evidence: Installer UI run **`43690682363`** — **fresh 123, blocked 64, repair 82 checks; 0 failures**
+Browser evidence: Installer UI run **`43699174539`** — **fresh 159, blocked 94, repair 112 checks; 0 failures**
 
 ---
 
@@ -118,13 +118,13 @@ layout: for every state and every width it measures the rendered page.
 | original design | `--brand` ≠ `#e8501b`, card radius ≠ 10 px, page width ≠ 820 px |
 | **no redesign** | any of 22 redesign-only selectors present (`.steps`, `.progress`, `.summary`, `.verdict`, `.actionbar`, `.panel`, `.opt-grid`, `.chip`, `.badge`, `.callout`, …) |
 
-Run in CI (`43690682363`) against MySQL 8.0.46 and PHP 8.2:
+Run in CI (`43699174539`, after the status-row refinement) against MySQL 8.0.46 and PHP 8.2:
 
 | Phase | Result |
 | --- | --- |
-| fresh — original requirements card, optional list, form fields/CSRF/labels, desktop, **320/360/375/390/412/430 px**, a complete real installation, the completion screen at 1280/320/430, lock file, redirect, storefront, admin sign-in | **123 passed, 0 failed** |
-| blocked — `config/`, `uploads/`, `logs/` genuinely `chmod 0555`: three red “Not writable” rows, install button disabled, all six phone widths | **64 passed, 0 failed** |
-| repair — restricted card, no credential fields, no stored password in the markup, a wrong unlock text refused in plain language, the unlock card at all six phone widths, a real repair over the saved connection | **82 passed, 0 failed** |
+| fresh — original requirements card, optional list, form fields/CSRF/labels, desktop, **320/360/375/390/412/430 px**, a complete real installation, the completion screen at 1280/320/430, lock file, redirect, storefront, admin sign-in | **159 passed, 0 failed** |
+| blocked — `config/`, `uploads/`, `logs/` genuinely `chmod 0555`: three red “Not writable” rows, install button disabled, all six phone widths | **94 passed, 0 failed** |
+| repair — restricted card, no credential fields, no stored password in the markup, a wrong unlock text refused in plain language, the unlock card at all six phone widths, a real repair over the saved connection | **112 passed, 0 failed** |
 
 Other suites re-run on this branch after the restore:
 
