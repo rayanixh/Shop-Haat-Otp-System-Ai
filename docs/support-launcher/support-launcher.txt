@@ -54,6 +54,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  Escape returns focus to the launcher
   PASS  the shop page is still visible after closing the menu
   PASS  an outside click closes the menu without opening the chat
+  PASS  the outside click did not navigate the shop away — http://127.0.0.1:8080/index.php -> http://127.0.0.1:8080/index.php
 
 6. Live Chat opens the existing chat and still answers
   PASS  the existing chat start call succeeds
@@ -62,15 +63,15 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the customer message and a reply both render — You4:17 AMDo you deliver to Dhaka?···Support is checking the store data… :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
-  PASS  the existing chat answers the customer after the launcher change — You4:17 AMDo you deliver to Dhaka?···Support is checking the store data…
+  PASS  the customer message and a real reply both render — You4:26 AMDo you deliver to Dhaka?···Support is checking the store data… :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
+  PASS  the existing chat answers the customer after the launcher change — You4:26 AMDo you deliver to Dhaka?···Support is checking the store data…
   PASS  no message is shown as failed
   PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
   PASS  the desktop storefront session: no console errors
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
   PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
-  note  the desktop storefront session: 13 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the desktop storefront session: 46 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -88,7 +89,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
   PASS  320px: no CSP violation comes from the support launcher — []
-  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  320px: 48 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -106,7 +107,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  360px: no JavaScript exceptions
   PASS  360px: no failed requests (4xx/5xx/network)
   PASS  360px: no CSP violation comes from the support launcher — []
-  note  360px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  360px: 48 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 375px phone
   PASS  375px: the launcher is still a circle — 56x56
@@ -142,7 +143,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  390px: no JavaScript exceptions
   PASS  390px: no failed requests (4xx/5xx/network)
   PASS  390px: no CSP violation comes from the support launcher — []
-  note  390px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  390px: 46 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 412px phone
   PASS  412px: the launcher is still a circle — 56x56
@@ -193,7 +194,7 @@ Keyboard control
   PASS  the keyboard session: no JavaScript exceptions
   PASS  the keyboard session: no failed requests (4xx/5xx/network)
   PASS  the keyboard session: no CSP violation comes from the support launcher — []
-  note  the keyboard session: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the keyboard session: 39 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Reduced motion
   PASS  reduced motion: the menu still opens
@@ -210,10 +211,10 @@ Unconfigured channels degrade honestly, Live Chat keeps working
   PASS  the unconfigured storefront: no JavaScript exceptions
   PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
   PASS  the unconfigured storefront: no CSP violation comes from the support launcher — []
-  note  the unconfigured storefront: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the unconfigured storefront: 48 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Restore the configuration for the next run
   PASS  the store is left configured
 
-Support launcher UI: 174 passed, 0 failed
+Support launcher UI: 175 passed, 0 failed
 Screenshots: support-launcher
