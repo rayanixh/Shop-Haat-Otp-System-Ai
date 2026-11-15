@@ -65,8 +65,8 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much is the Kitchmate 1.8L Electric Kettle?","at":"2026-11-15 09:37:33","ai":false}],"suggestions":[]}
-  PASS  the customer message renders in the panel — You9:37 AMHow much is the Kitchmate 1.8L Electric Kettle?
+  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much is the Kitchmate 1.8L Electric Kettle?","at":"2026-11-15 14:32:51","ai":false}],"suggestions":[]}
+  PASS  the customer message renders in the panel — You2:32 PMHow much is the Kitchmate 1.8L Electric Kettle?
   PASS  with AI unconfigured the panel invents no answer — reply:  ·  Customer chat is enabled. AI Auto Work is not installed; install it before configuring a provider. 
   PASS  with AI unconfigured the message is still saved and acknowledged — {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much 
   PASS  no message is shown as failed
@@ -75,7 +75,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
   PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
-  note  the desktop storefront session: 413 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the desktop storefront session: 414 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -93,7 +93,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
   PASS  320px: no CSP violation comes from the support launcher — []
-  note  320px: 52 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -129,7 +129,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  375px: no JavaScript exceptions
   PASS  375px: no failed requests (4xx/5xx/network)
   PASS  375px: no CSP violation comes from the support launcher — []
-  note  375px: 53 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  375px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 390px phone
   PASS  390px: the launcher is still a circle — 56x56
@@ -183,7 +183,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  430px: no JavaScript exceptions
   PASS  430px: no failed requests (4xx/5xx/network)
   PASS  430px: no CSP violation comes from the support launcher — []
-  note  430px: 53 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  430px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Keyboard control
   PASS  the launcher is reachable by keyboard — sh-schat-fab
@@ -198,7 +198,7 @@ Keyboard control
   PASS  the keyboard session: no JavaScript exceptions
   PASS  the keyboard session: no failed requests (4xx/5xx/network)
   PASS  the keyboard session: no CSP violation comes from the support launcher — []
-  note  the keyboard session: 42 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the keyboard session: 41 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Reduced motion
   PASS  reduced motion: the menu still opens
