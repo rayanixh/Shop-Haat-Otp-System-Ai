@@ -60,9 +60,34 @@ async function area(label, fn) {
   }
 }
 
-function watch(page) {
-  const seen = { console: [], pageErrors: [], requests: [] };
-  page.on('console', (msg) => { if (msg.type() === 'error') { seen.console.push(msg.text().slice(0, 200)); } });
+/**
+ * Console/exception/network watcher.
+ *
+ * The store ships a Report-Only CSP in this environment, so Chromium logs
+ * "[Report Only] Refused to evaluate a string as JavaScript" whenever the
+ * harness itself uses an in-page predicate. Those are recorded separately and
+ * reported with their source, and the run asserts that none of them comes from
+ * the launcher's own scripts — a real widget error would still fail.
+ */
+async function watch(page) {
+  const seen = { console: [], reportOnly: [], pageErrors: [], requests: [], page };
+  await page.addInitScript(() => {
+    window.__shCspReports = [];
+    document.addEventListener('securitypolicyviolation', (event) => {
+      window.__shCspReports.push({
+        directive: String(event.violatedDirective || ''),
+        blocked: String(event.blockedURI || ''),
+        sample: String(event.sample || '').slice(0, 120),
+        source: `${String(event.sourceFile || '').split('/').pop()}:${event.lineNumber || 0}`,
+      });
+    });
+  });
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') { return; }
+    const text = msg.text().slice(0, 220);
+    if (/\[Report Only\]/.test(text)) { seen.reportOnly.push(text); return; }
+    seen.console.push(text);
+  });
   page.on('pageerror', (err) => { seen.pageErrors.push(String(err).slice(0, 200)); });
   page.on('response', (res) => {
     if (res.status() >= 400 && !/favicon/.test(res.url())) { seen.requests.push(`${res.status()} ${res.url().replace(BASE, '')}`); }
@@ -76,10 +101,29 @@ function watch(page) {
   return seen;
 }
 
-function report(errors, label) {
+async function report(errors, label) {
+  const csp = await errors.page.evaluate(() => window.__shCspReports || []).catch(() => []);
+  const fromLauncher = csp.filter((c) => /support-chat\.js/.test(c.source) || /sh-schat/.test(c.sample) || /sh-schat/.test(c.blocked));
   check(`${label}: no console errors`, errors.console.length === 0, errors.console.slice(0, 3).join(' | '));
   check(`${label}: no JavaScript exceptions`, errors.pageErrors.length === 0, errors.pageErrors.slice(0, 3).join(' | '));
   check(`${label}: no failed requests (4xx/5xx/network)`, errors.requests.length === 0, errors.requests.slice(0, 3).join(' | '));
+  check(`${label}: no CSP violation comes from the support launcher`, fromLauncher.length === 0,
+    JSON.stringify(fromLauncher.slice(0, 2)));
+  if (csp.length) {
+    console.log(`  note  ${label}: ${csp.length} Report-Only CSP notice(s), first: ` + JSON.stringify(csp[0]));
+  }
+}
+
+/** Wait for the store's page-transition overlay to finish before measuring. */
+async function settle(page) {
+  await page.waitForFunction(() => {
+    const doc = document.documentElement;
+    if (doc.classList.contains('sh-pt-hold') || doc.classList.contains('sh-pt-enter')) { return false; }
+    const overlay = document.getElementById('sh-pt');
+    if (!overlay) { return true; }
+    return !overlay.classList.contains('is-on') && !overlay.classList.contains('is-hold');
+  }, null, { timeout: 15000 }).catch(() => null);
+  await page.waitForTimeout(120);
 }
 
 async function snap(page, name, fullPage = false) {
@@ -151,7 +195,7 @@ async function openMenu(page) {
 async function phaseAdmin(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  const errors = watch(page);
+  const errors = await watch(page);
 
   await area('1. The channels are configured in the existing support settings page', async () => {
     await page.goto(url('/admin/login.php'), { waitUntil: 'load' });
@@ -210,7 +254,7 @@ async function phaseAdmin(browser) {
       saved.chips.join(' / ').slice(0, 160));
     check('the page states that live chat stays available', saved.chips.some((c) => /Live chat: always available/.test(c)));
     await snap(page, 'support-launcher-admin-desktop-1280');
-    report(errors, 'the admin settings session');
+    await report(errors, 'the admin settings session');
   });
 
   await context.close();
@@ -226,10 +270,11 @@ async function phaseDesktop(browser) {
   await context.route('https://m.me/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Messenger stub</title>' }));
   await context.route('https://wa.me/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>WhatsApp stub</title>' }));
   const page = await context.newPage();
-  const errors = watch(page);
+  const errors = await watch(page);
 
   await area('2. The launcher is a compact circle on desktop', async () => {
     await page.goto(url('/index.php'), { waitUntil: 'load' });
+    await settle(page);
     const fab = await fabGeometry(page);
     check('the launcher exists on the storefront', !!fab);
     if (!fab) { return; }
@@ -370,7 +415,7 @@ async function phaseDesktop(browser) {
     check('Talk to a human still escalates the same conversation',
       human.human === '1' && human.handoffHidden === true && human.notice.length > 0, human.notice.slice(0, 120));
     await snap(page, 'support-launcher-desktop-1280-handoff');
-    report(errors, 'the desktop storefront session');
+    await report(errors, 'the desktop storefront session');
   });
 
   // The chat opened above must not leak into the other viewports.
@@ -388,8 +433,9 @@ async function phaseMobile(browser) {
     await area(`${width}px phone`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 720 } });
       const page = await context.newPage();
-      const errors = watch(page);
+      const errors = await watch(page);
       await page.goto(url('/index.php'), { waitUntil: 'load' });
+      await settle(page);
 
       const fab = await fabGeometry(page);
       check(`${width}px: the launcher is still a circle`, !!fab && Math.abs(fab.width - fab.height) < 0.6 && fab.width >= 48, fab ? `${fab.width}x${fab.height}` : 'missing');
@@ -414,7 +460,7 @@ async function phaseMobile(browser) {
       await page.waitForFunction(() => !document.querySelector('#sh-schat-menu')?.classList.contains('is-open'), null, { timeout: 5000 });
       check(`${width}px: Escape closes the menu`, (await fabGeometry(page)).expanded === 'false');
       check(`${width}px: the closed menu leaves no overflow`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
-      report(errors, `${width}px`);
+      await report(errors, `${width}px`);
       await context.close();
     });
   }
@@ -427,8 +473,9 @@ async function phaseKeyboard(browser) {
   await area('Keyboard control', async () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 720 } });
     const page = await context.newPage();
-    const errors = watch(page);
+    const errors = await watch(page);
     await page.goto(url('/index.php'), { waitUntil: 'load' });
+    await settle(page);
 
     await page.focus('#sh-schat-fab');
     const focused = await page.evaluate(() => {
@@ -453,7 +500,7 @@ async function phaseKeyboard(browser) {
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('#sh-schat-menu')?.classList.contains('is-open'), null, { timeout: 5000 });
     check('Escape closes and refocuses the launcher', await page.evaluate(() => document.activeElement?.id === 'sh-schat-fab'));
-    report(errors, 'the keyboard session');
+    await report(errors, 'the keyboard session');
     await context.close();
   });
 
@@ -461,6 +508,7 @@ async function phaseKeyboard(browser) {
     const context = await browser.newContext({ viewport: { width: 390, height: 720 }, reducedMotion: 'reduce' });
     const page = await context.newPage();
     await page.goto(url('/index.php'), { waitUntil: 'load' });
+    await settle(page);
     await openMenu(page);
     const menu = await menuGeometry(page);
     check('reduced motion: the menu still opens', menu.open && menu.visibility === 'visible' && menu.opacity === '1');
@@ -501,8 +549,9 @@ async function phaseUnconfigured(browser) {
 
     const context = await browser.newContext({ viewport: { width: 390, height: 720 } });
     const page = await context.newPage();
-    const errors = watch(page);
+    const errors = await watch(page);
     await page.goto(url('/index.php'), { waitUntil: 'load' });
+    await settle(page);
     await openMenu(page);
     const menu = await menuGeometry(page);
     check('an unconfigured store still shows three options', menu.items.length === 3);
@@ -513,7 +562,7 @@ async function phaseUnconfigured(browser) {
     await page.click('#sh-schat-opt-chat');
     await page.waitForFunction(() => document.querySelector('#sh-schat-sheet')?.hidden === false, null, { timeout: 10000 });
     check('Live Chat opens even when nothing else is configured', await page.locator('#sh-schat-sheet').isVisible());
-    report(errors, 'the unconfigured storefront');
+    await report(errors, 'the unconfigured storefront');
     await context.close();
   });
 
