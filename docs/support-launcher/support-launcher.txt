@@ -8,11 +8,12 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the accepted values are stored and shown again — https://m.me/ShopHaatSupport | https://wa.me/8801712345678 | Hi ShopHaat, I need help with my order.
   PASS  the page reports both channels as available — Facebook: available / WhatsApp: available / Live chat: always available / Human-support SMS notifications are disabled. No message was sent.
   PASS  the page states that live chat stays available
+  note  store AI state:  Customer chat is enabled. AI Auto Work is not installed; install it before configuring a provider. 
   PASS  the admin settings session: no console errors
   PASS  the admin settings session: no JavaScript exceptions
   PASS  the admin settings session: no failed requests (4xx/5xx/network)
   PASS  the admin settings session: no CSP violation comes from the support launcher — []
-  note  the admin settings session: 45 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the admin settings session: 43 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 2. The launcher is a compact circle on desktop
   PASS  the launcher exists on the storefront
@@ -64,16 +65,17 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much is the Kitchmate 1.8L Electric Kettle?","at":"2026-11-15 04:54:44","ai":false}],"suggestions":[]}
-  PASS  the customer message renders in the panel — You4:54 AMHow much is the Kitchmate 1.8L Electric Kettle?
-  FAIL  the existing chat still answers with verified store data — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
+  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much is the Kitchmate 1.8L Electric Kettle?","at":"2026-11-15 05:06:01","ai":false}],"suggestions":[]}
+  PASS  the customer message renders in the panel — You5:06 AMHow much is the Kitchmate 1.8L Electric Kettle?
+  PASS  with AI unconfigured the panel invents no answer — reply:  ·  Customer chat is enabled. AI Auto Work is not installed; install it before configuring a provider. 
+  PASS  with AI unconfigured the message is still saved and acknowledged — {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much 
   PASS  no message is shown as failed
   PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
   PASS  the desktop storefront session: no console errors
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
   PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
-  note  the desktop storefront session: 1853 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the desktop storefront session: 410 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -91,7 +93,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
   PASS  320px: no CSP violation comes from the support launcher — []
-  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  320px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -109,7 +111,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  360px: no JavaScript exceptions
   PASS  360px: no failed requests (4xx/5xx/network)
   PASS  360px: no CSP violation comes from the support launcher — []
-  note  360px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  360px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 375px phone
   PASS  375px: the launcher is still a circle — 56x56
@@ -127,7 +129,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  375px: no JavaScript exceptions
   PASS  375px: no failed requests (4xx/5xx/network)
   PASS  375px: no CSP violation comes from the support launcher — []
-  note  375px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  375px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 390px phone
   PASS  390px: the launcher is still a circle — 56x56
@@ -145,7 +147,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  390px: no JavaScript exceptions
   PASS  390px: no failed requests (4xx/5xx/network)
   PASS  390px: no CSP violation comes from the support launcher — []
-  note  390px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  390px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 412px phone
   PASS  412px: the launcher is still a circle — 56x56
@@ -163,7 +165,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  412px: no JavaScript exceptions
   PASS  412px: no failed requests (4xx/5xx/network)
   PASS  412px: no CSP violation comes from the support launcher — []
-  note  412px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  412px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 430px phone
   PASS  430px: the launcher is still a circle — 56x56
@@ -181,7 +183,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  430px: no JavaScript exceptions
   PASS  430px: no failed requests (4xx/5xx/network)
   PASS  430px: no CSP violation comes from the support launcher — []
-  note  430px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  430px: 48 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Keyboard control
   PASS  the launcher is reachable by keyboard — sh-schat-fab
@@ -196,7 +198,7 @@ Keyboard control
   PASS  the keyboard session: no JavaScript exceptions
   PASS  the keyboard session: no failed requests (4xx/5xx/network)
   PASS  the keyboard session: no CSP violation comes from the support launcher — []
-  note  the keyboard session: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the keyboard session: 37 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Reduced motion
   PASS  reduced motion: the menu still opens
@@ -213,12 +215,10 @@ Unconfigured channels degrade honestly, Live Chat keeps working
   PASS  the unconfigured storefront: no JavaScript exceptions
   PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
   PASS  the unconfigured storefront: no CSP violation comes from the support launcher — []
-  note  the unconfigured storefront: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the unconfigured storefront: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Restore the configuration for the next run
   PASS  the store is left configured
 
-Support launcher UI: 175 passed, 1 failed
-Failures:
-  - the existing chat still answers with verified store data — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
+Support launcher UI: 177 passed, 0 failed
 Screenshots: support-launcher
