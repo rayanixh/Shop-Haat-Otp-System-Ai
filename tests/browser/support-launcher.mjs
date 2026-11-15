@@ -94,9 +94,13 @@ async function watch(page) {
   });
   page.on('requestfailed', (req) => {
     const failure = req.failure();
-    if (failure && /ERR_ABORTED/i.test(failure.errorText)) { return; }
+    const text = failure ? failure.errorText : 'unknown';
+    const isApi = /api\/support\.php/.test(req.url());
+    // A cancelled image on a navigating page is the harness's own timing, but an
+    // aborted support API call is a real customer-visible failure.
+    if (/ERR_ABORTED/i.test(text) && !isApi) { return; }
     if (!req.url().startsWith(BASE)) { return; }
-    seen.requests.push(`failed ${req.url().replace(BASE, '')}`);
+    seen.requests.push(`failed ${req.url().replace(BASE, '')} (${text})`);
   });
   return seen;
 }
@@ -253,6 +257,7 @@ async function phaseAdmin(browser) {
     check('the page reports both channels as available', saved.chips.some((c) => /Facebook: available/.test(c)) && saved.chips.some((c) => /WhatsApp: available/.test(c)),
       saved.chips.join(' / ').slice(0, 160));
     check('the page states that live chat stays available', saved.chips.some((c) => /Live chat: always available/.test(c)));
+    await settle(page);
     await snap(page, 'support-launcher-admin-desktop-1280');
     await report(errors, 'the admin settings session');
   });
@@ -402,16 +407,26 @@ async function phaseDesktop(browser) {
     check('the composer is still there', chrome.input && chrome.send);
 
     await page.fill('#sh-schat-input', 'Do you deliver to Dhaka?');
+    const sendCall = page.waitForResponse(
+      (res) => res.url().includes('/api/support.php') && /action=send/.test(res.request().postData() || ''),
+      { timeout: 45000 },
+    ).catch(() => null);
     await page.click('#sh-schat-send');
+    const sendResponse = await sendCall;
+    let sendBody = '';
+    if (sendResponse) { try { sendBody = (await sendResponse.text()).slice(0, 500); } catch { /* body unavailable */ } }
+    check('the existing chat accepts a customer message',
+      !!sendResponse && sendResponse.status() === 200 && /"ok":true/.test(sendBody),
+      `${sendResponse ? sendResponse.status() : 'no response'} ${sendBody}`);
     await page.waitForFunction(() => document.querySelectorAll('#sh-schat-messages .sh-schat-msg.is-customer').length >= 1, null, { timeout: 15000 }).catch(() => null);
     // The typing indicator is not a reply: wait for a real assistant/agent line.
-    await page.waitForFunction(() => document.querySelectorAll(
+    await page.waitForFunction(() => [...document.querySelectorAll(
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
-    ).length >= 1, null, { timeout: 30000 }).catch(() => null);
+    )].some((row) => row.id !== 'sh-schat-typing'), null, { timeout: 30000 }).catch(() => null);
     const thread = (await page.textContent('#sh-schat-messages').catch(() => '') || '').replace(/\s+/g, ' ');
-    const replyBubbles = await page.evaluate(() => document.querySelectorAll(
+    const replyBubbles = await page.evaluate(() => [...document.querySelectorAll(
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
-    ).length);
+    )].filter((row) => row.id !== 'sh-schat-typing').length);
     check('the customer message and a real reply both render',
       (await page.locator('#sh-schat-messages .sh-schat-msg.is-customer').count()) >= 1 && replyBubbles >= 1,
       thread.slice(0, 160) + ' :: ' + apiLog.slice(-2).join(' | ').slice(0, 200));

@@ -78,7 +78,7 @@ jobs:
           exit "$rc"
       - name: Start the PHP web server
         run: |
-          php -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
+          php -d log_errors=1 -d error_log=/tmp/php-errors.log -S 127.0.0.1:8080 -t . > /tmp/php-server.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/index.php >/tmp/home.html; then break; fi
             sleep 1
@@ -137,7 +137,7 @@ jobs:
         run: |
           mkdir -p docs/support-launcher
           cp -f tests/browser/artifacts/support-launcher/*.png docs/support-launcher/ 2>/dev/null || true
-          for f in /tmp/support-launcher.log /tmp/support-links.log /tmp/seed.log; do
+          for f in /tmp/support-launcher.log /tmp/support-links.log /tmp/seed.log /tmp/php-errors.log; do
             [ -f "$f" ] && cp -f "$f" "docs/support-launcher/$(basename "$f" .log).txt"
           done
           if [ -d docs/support-launcher ]; then
