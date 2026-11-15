@@ -64,16 +64,16 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"Do you deliver to Dhaka?","at":"2026-11-15 04:46:21","ai":false}],"suggestions":[]}
-  FAIL  the customer message and a real reply both render — You4:46 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
-  FAIL  the existing chat answers the customer after the launcher change — You4:46 AMDo you deliver to Dhaka?
+  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"How much is the Kitchmate 1.8L Electric Kettle?","at":"2026-11-15 04:54:44","ai":false}],"suggestions":[]}
+  PASS  the customer message renders in the panel — You4:54 AMHow much is the Kitchmate 1.8L Electric Kettle?
+  FAIL  the existing chat still answers with verified store data — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
   PASS  no message is shown as failed
   PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
   PASS  the desktop storefront session: no console errors
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
   PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
-  note  the desktop storefront session: 1850 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the desktop storefront session: 1853 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -91,7 +91,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
   PASS  320px: no CSP violation comes from the support launcher — []
-  note  320px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -181,7 +181,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  430px: no JavaScript exceptions
   PASS  430px: no failed requests (4xx/5xx/network)
   PASS  430px: no CSP violation comes from the support launcher — []
-  note  430px: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  430px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Keyboard control
   PASS  the launcher is reachable by keyboard — sh-schat-fab
@@ -213,13 +213,12 @@ Unconfigured channels degrade honestly, Live Chat keeps working
   PASS  the unconfigured storefront: no JavaScript exceptions
   PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
   PASS  the unconfigured storefront: no CSP violation comes from the support launcher — []
-  note  the unconfigured storefront: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the unconfigured storefront: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Restore the configuration for the next run
   PASS  the store is left configured
 
-Support launcher UI: 174 passed, 2 failed
+Support launcher UI: 175 passed, 1 failed
 Failures:
-  - the customer message and a real reply both render — You4:46 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
-  - the existing chat answers the customer after the launcher change — You4:46 AMDo you deliver to Dhaka?
+  - the existing chat still answers with verified store data — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
 Screenshots: support-launcher
