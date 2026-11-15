@@ -35,6 +35,12 @@ jobs:
       # message shapes and the static CSRF/permission/no-scroll-box wiring.
       - name: AI customer support unit suite
         run: php tests/support-unit.php
+      # The floating launcher's two external options: https-only official hosts,
+      # country-code WhatsApp numbers normalised to wa.me, nothing hardcoded, no
+      # dead links when a channel is unconfigured, and the rendered markup /
+      # stylesheet contract that keeps the 56px circle and the 3-option menu.
+      - name: Support launcher link and markup contract
+        run: php tests/support-links.php
       # Real PHP service functions against real PDO SQL (SQLite in this job,
       # MySQL via SH_TEST_MYSQL_DSN elsewhere): one handoff confirmation,
       # silent human-owned follow-ups, no AI/FAQ/fallback, admin reply,

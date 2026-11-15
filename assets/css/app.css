@@ -3037,20 +3037,100 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
    Both nodes are direct children of <body>, so no transformed/overflow
    parent can create a containing block or clip the fixed panel.
    ========================================================================== */
-.sh-schat-fab {
-  position: fixed; right: 16px; bottom: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 1000;
-  display: inline-flex; align-items: center; gap: 8px;
-  background: var(--sh-brand); color: #fff; border: 0; border-radius: 999px;
-  padding: 11px 18px; font: inherit; font-weight: 600; font-size: 14px;
-  box-shadow: 0 8px 24px rgba(20, 26, 40, .25); cursor: pointer;
+/* Launcher: a compact, perfectly round 56px button. No text label; the only
+   extra element is the unread badge, pinned inside the circle so the shape,
+   the alignment and the tap target never change. */
+.sh-schat-fab, .sh-schat-menu {
+  --sh-schat-size: 56px;   /* launcher diameter */
+  --sh-schat-edge: 16px;   /* distance from the right viewport edge */
+  --sh-schat-clear: 16px;  /* distance from the bottom edge, before safe area */
+  --sh-schat-gap: 12px;    /* gap between the menu and the launcher */
 }
-.sh-schat-fab:hover, .sh-schat-fab:focus-visible { background: var(--sh-brand-dark); }
-.sh-schat-fab:focus-visible { outline: 2px solid var(--sh-accent); outline-offset: 2px; }
+.sh-schat-fab {
+  position: fixed; right: var(--sh-schat-edge); bottom: var(--sh-schat-clear);
+  bottom: calc(var(--sh-schat-clear) + env(safe-area-inset-bottom, 0px));
+  z-index: 1000;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--sh-schat-size); height: var(--sh-schat-size);
+  min-width: var(--sh-schat-size); max-width: var(--sh-schat-size);
+  aspect-ratio: 1 / 1; flex: none; box-sizing: border-box;
+  margin: 0; padding: 0;
+  background: var(--sh-brand); color: #fff; border: 0; border-radius: 50%;
+  font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 10px 26px rgba(20, 26, 40, .26), 0 2px 6px rgba(20, 26, 40, .16);
+  transition: background-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.sh-schat-fab > svg { width: 24px; height: 24px; flex: none; }
+.sh-schat-fab > svg.sh-icon { stroke-width: 1.9; }
+.sh-schat-fab:hover, .sh-schat-fab:focus-visible { background: var(--sh-brand-dark); transform: translateY(-1px); }
+.sh-schat-fab:active { transform: translateY(0) scale(.97); }
+.sh-schat-fab:focus-visible { outline: 2px solid var(--sh-accent); outline-offset: 3px; }
+.sh-schat-fab[aria-expanded="true"] { background: var(--sh-brand-dark); }
 .sh-schat-badge {
-  background: #fff; color: var(--sh-brand-dark); border-radius: 999px;
+  position: absolute; top: -4px; right: -4px; box-sizing: border-box;
   min-width: 20px; height: 20px; padding: 0 5px; display: inline-flex;
-  align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  align-items: center; justify-content: center;
+  background: #fff; color: var(--sh-brand-dark); border: 2px solid var(--sh-brand);
+  border-radius: 999px; font-size: 11.5px; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 4px rgba(20, 26, 40, .28);
+}
+.sh-schat-badge[hidden] { display: none; }
+
+/* Launcher menu: three compact rows stacked directly above the button. It
+   slides up with a short fade and a slight scale from its bottom-right corner;
+   closing runs the same transition in reverse. Fixed positioning keeps it in
+   the visible viewport and clear of the mobile bottom navigation. */
+.sh-schat-menu {
+  position: fixed; right: var(--sh-schat-edge);
+  bottom: calc(var(--sh-schat-clear) + env(safe-area-inset-bottom, 0px) + var(--sh-schat-size) + var(--sh-schat-gap));
+  z-index: 1000; width: min(248px, calc(100vw - 32px)); box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 6px;
+  background: var(--sh-surface, #fff); border: 1px solid var(--sh-line, #e5e7eb);
+  border-radius: 16px;
+  box-shadow: 0 18px 44px rgba(20, 26, 40, .24), 0 2px 8px rgba(20, 26, 40, .10);
+  transform-origin: 100% 100%; opacity: 0;
+  transform: translateY(10px) scale(.96); visibility: hidden;
+  /* visibility flips after the fade on close (so the reverse transition is
+     seen) and immediately on open. */
+  transition: opacity .16s ease, transform .22s cubic-bezier(.22, .9, .28, 1), visibility 0s .22s;
+}
+.sh-schat-menu[hidden] { display: none; }
+.sh-schat-menu.is-open {
+  opacity: 1; transform: translateY(0) scale(1); visibility: visible;
+  transition: opacity .16s ease, transform .22s cubic-bezier(.22, .9, .28, 1), visibility 0s;
+}
+.sh-schat-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box;
+  min-height: 46px; padding: 6px 9px; margin: 0;
+  border: 0; border-radius: 11px; background: transparent; color: var(--sh-ink, #172033);
+  font: inherit; font-size: 13.5px; text-align: left; text-decoration: none; cursor: pointer;
+  transition: background-color .14s ease;
+}
+a.sh-schat-opt:hover, a.sh-schat-opt:focus-visible,
+button.sh-schat-opt:hover, button.sh-schat-opt:focus-visible { background: var(--sh-bg-2, #f4f6f8); }
+.sh-schat-opt:focus-visible { outline: 2px solid var(--sh-accent); outline-offset: -2px; }
+.sh-schat-opt__icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 32px; height: 32px; border-radius: 50%; color: #fff;
+}
+.sh-schat-opt__icon--messenger { background: linear-gradient(180deg, #2bb3ff, #0068ff); }
+.sh-schat-opt__icon--whatsapp { background: linear-gradient(180deg, #5be07a, #25d366); }
+.sh-schat-opt__icon--chat { background: var(--sh-brand); }
+.sh-schat-opt__icon > svg { display: block; }
+.sh-schat-opt__body { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
+.sh-schat-opt__body strong { font-size: 13.5px; font-weight: 650; line-height: 1.25; color: var(--sh-ink, #172033); overflow-wrap: anywhere; }
+.sh-schat-opt__body small { font-size: 11.5px; line-height: 1.3; color: var(--sh-muted, #667085); overflow-wrap: anywhere; }
+.sh-schat-opt__go { flex: none; color: var(--sh-muted, #667085); }
+.sh-schat-opt--chat { background: var(--sh-brand-soft, #fdeee8); }
+.sh-schat-opt--chat:hover, .sh-schat-opt--chat:focus-visible { background: #fbdfd2; }
+.sh-schat-opt--chat .sh-schat-opt__body strong { color: var(--sh-brand-dark, #c9410f); }
+.sh-schat-opt.is-off, .sh-schat-opt.is-off:hover { background: transparent; cursor: default; opacity: .58; }
+.sh-schat-opt.is-off .sh-schat-opt__icon { background: #aeb5c0; }
+@media (prefers-reduced-motion: reduce) {
+  /* Menus still open and close, they just do not slide, fade or scale. */
+  .sh-schat-fab, .sh-schat-menu, .sh-schat-opt { transition: none; }
+  .sh-schat-menu, .sh-schat-menu.is-open { transform: none; }
+  .sh-schat-fab:hover, .sh-schat-fab:active { transform: none; }
 }
 .sh-schat-sheet {
   --sh-schat-vh: 100vh;
@@ -3147,7 +3227,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-schat-avail { min-width: 0; font-size: 12.5px; color: var(--sh-muted); overflow-wrap: anywhere; }
 @media (max-width: 900px) {
   /* Clear the mobile bottom navigation bar and its safe-area padding. */
-  .sh-schat-fab { bottom: 74px; bottom: calc(74px + env(safe-area-inset-bottom, 0px)); right: 12px; padding: 10px 15px; }
+  .sh-schat-fab, .sh-schat-menu { --sh-schat-clear: 74px; --sh-schat-edge: 12px; }
   .sh-schat-sheet { right: 8px; left: 8px; width: auto; }
 }
 @media (max-width: 420px) {

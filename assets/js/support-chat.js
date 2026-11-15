@@ -6,6 +6,11 @@
  * it and never gets locked. Only the message log scrolls internally; the
  * website outside the chat keeps its own independent scroll. Sends are
  * idempotent: every message carries a client_msg_id the server dedupes.
+ *
+ * The launcher is a circular button that opens a three-option menu (Facebook,
+ * WhatsApp, Live Chat). The menu is only a launcher: "Live Chat" calls the same
+ * open() path as before, and the two external options are ordinary links that
+ * the browser opens. No chat logic, endpoint or state lives here.
  */
 (function () {
   'use strict';
@@ -14,12 +19,16 @@
   var sheet = document.getElementById('sh-schat-sheet');
   if (!fab || !sheet) { return; }
 
+  var menu = document.getElementById('sh-schat-menu');
+  var liveOpt = document.getElementById('sh-schat-opt-chat');
+
   // A position:fixed element is only viewport-fixed when no ancestor creates
   // a containing block (transform/filter/perspective/contain) or clips it.
   // Keep both nodes direct children of <body> regardless of where the theme
   // mounted the widget partial.
   if (document.body) {
     if (fab.parentNode !== document.body) { document.body.appendChild(fab); }
+    if (menu && menu.parentNode !== document.body) { document.body.appendChild(menu); }
     if (sheet.parentNode !== document.body) { document.body.appendChild(sheet); }
   }
 
@@ -46,6 +55,7 @@
 
   var convId = 0, lastId = 0, started = false, isOpen = false, human = false;
   var pollTimer = null, seen = {}, unread = 0, sentOnce = false;
+  var menuOpen = false, menuHideTimer = null;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -277,13 +287,63 @@
     if (pollTimer) { window.clearInterval(pollTimer); pollTimer = null; }
   }
 
+  /* ---- Launcher menu ---------------------------------------------------
+     Three compact options above the launch button. The menu never replaces
+     the chat: it only forwards "Live Chat" to open() below.
+     ------------------------------------------------------------------- */
+  function menuItems() {
+    if (!menu) { return []; }
+    return Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])'));
+  }
+
+  function openMenu(focusFirst) {
+    if (!menu || menuOpen) { return; }
+    menuOpen = true;
+    if (menuHideTimer) { window.clearTimeout(menuHideTimer); menuHideTimer = null; }
+    menu.hidden = false;
+    menu.setAttribute('aria-hidden', 'false');
+    fab.setAttribute('aria-expanded', 'true');
+    // Flush the closed styles so the slide-up transition actually runs
+    // instead of snapping straight to the open state.
+    void menu.offsetWidth;
+    menu.classList.add('is-open');
+    if (focusFirst) {
+      var items = menuItems();
+      if (items.length) { items[0].focus(); }
+    }
+  }
+
+  function closeMenu() {
+    if (!menu || !menuOpen) { return; }
+    menuOpen = false;
+    // Move focus out BEFORE the menu leaves the accessibility tree, otherwise
+    // aria-hidden would land on an element that still holds focus.
+    if (menu.contains(document.activeElement)) { fab.focus(); }
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+    fab.setAttribute('aria-expanded', 'false');
+    if (menuHideTimer) { window.clearTimeout(menuHideTimer); }
+    // Keep the node mounted for the reverse transition, then remove it from
+    // the accessibility tree and the tab order entirely.
+    menuHideTimer = window.setTimeout(function () {
+      menuHideTimer = null;
+      if (!menuOpen) { menu.hidden = true; }
+    }, 240);
+  }
+
+  function toggleMenu() {
+    if (menuOpen) { closeMenu(); } else { openMenu(true); }
+  }
+
   function open() {
+    closeMenu();
     isOpen = true;
     unread = 0; setBadge();
     syncViewport();
     // No inline top/left/bottom is written: CSS owns the fixed bottom anchor.
+    // aria-expanded belongs to the launcher MENU (aria-controls), so opening
+    // the panel leaves it collapsed; the dialog announces itself instead.
     sheet.hidden = false;
-    fab.setAttribute('aria-expanded', 'true');
     start();
     startPolling();
     keepInputVisible();
@@ -293,7 +353,6 @@
   function close() {
     isOpen = false;
     sheet.hidden = true;
-    fab.setAttribute('aria-expanded', 'false');
     stopPolling();
     fab.focus();
   }
@@ -369,7 +428,41 @@
     }).catch(function (err) { setStatus(errorText(err), true); });
   });
 
-  fab.addEventListener('click', function () { isOpen ? close() : open(); });
+  // The launcher opens the support menu; it no longer jumps straight into the
+  // chat. "Live Chat" in the menu is the single path into the existing panel.
+  fab.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (isOpen) { close(); return; }
+    // No menu markup (an older cached partial) still opens the chat directly.
+    if (!menu) { open(); return; }
+    toggleMenu();
+  });
+  if (liveOpt) {
+    liveOpt.addEventListener('click', function (e) {
+      e.preventDefault();
+      closeMenu();
+      open();
+    });
+  }
+  if (menu) {
+    menu.addEventListener('keydown', function (e) {
+      var items = menuItems();
+      if (!items.length) { return; }
+      var at = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); items[(at + 1) % items.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+      else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+      else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (e.key === 'Tab') { closeMenu(); }
+    });
+  }
+  // A press anywhere outside the menu and the launcher closes it.
+  document.addEventListener('pointerdown', function (e) {
+    if (!menuOpen) { return; }
+    var target = e.target;
+    if ((menu && menu.contains(target)) || (fab && fab.contains(target))) { return; }
+    closeMenu();
+  }, true);
   document.getElementById('sh-schat-close').addEventListener('click', close);
   // Re-measure when the viewport changes. Plain page scrolling is deliberately
   // NOT listened to: a fixed panel must not move with the document.
@@ -380,7 +473,9 @@
     window.visualViewport.addEventListener('scroll', function () { if (isOpen) { syncViewport(); } });
   }
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && isOpen) { close(); }
+    if (e.key !== 'Escape') { return; }
+    if (menuOpen) { closeMenu(); }
+    if (isOpen) { close(); }
   });
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) { poll(); }

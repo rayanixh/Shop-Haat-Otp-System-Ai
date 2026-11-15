@@ -2299,6 +2299,25 @@ function sh_support_settings_save(int $adminId, array $input, bool $allowAiConfi
         if ($key === 'contact_phone') { $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value) ?? ''; }
         $values[$key] = $value;
     }
+
+    // Launcher menu channels (Facebook Messenger + WhatsApp). Only https links on
+    // the official hosts are stored; numbers are normalised to https://wa.me/…
+    // An empty value hides the option instead of publishing a dead link.
+    require_once SH_ROOT . '/includes/support-links.php';
+    $facebookLink = sh_support_link_check_facebook((string)($input['facebook_url'] ?? ''));
+    if (empty($facebookLink['ok'])) {
+        return ['ok' => false, 'error' => 'Facebook link: ' . (string)($facebookLink['error'] ?? 'Enter a valid https link.')];
+    }
+    $whatsappLink = sh_support_link_check_whatsapp((string)($input['whatsapp'] ?? ''));
+    if (empty($whatsappLink['ok'])) {
+        return ['ok' => false, 'error' => 'WhatsApp: ' . (string)($whatsappLink['error'] ?? 'Enter a valid number or https link.')];
+    }
+    $whatsappMessage = sh_support_clean_text((string)($input['whatsapp_message'] ?? ''), 300);
+    $whatsappMessage = trim(preg_replace('/\s+/u', ' ', $whatsappMessage) ?? '');
+    $values['facebook_url'] = (string)$facebookLink['url'];
+    $values['whatsapp'] = (string)$whatsappLink['url'];
+    $values['whatsapp_message'] = $whatsappMessage;
+
     $aiValues = [];
     $providerIdToSave = null;
     $modelToSave = '';
