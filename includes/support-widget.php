@@ -35,7 +35,7 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
   <?php if ($schatFacebook !== ''): ?>
     <a class="sh-schat-opt" id="sh-schat-opt-facebook" role="menuitem" href="<?= e($schatFacebook) ?>" target="_blank" rel="noopener noreferrer nofollow" data-channel="facebook">
       <span class="sh-schat-opt__icon sh-schat-opt__icon--messenger" aria-hidden="true"><?= $schatIconMessenger ?></span>
-      <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger</small></span>
+      <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
   <?php else: ?>
@@ -47,7 +47,7 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
   <?php if ($schatWhatsapp !== ''): ?>
     <a class="sh-schat-opt" id="sh-schat-opt-whatsapp" role="menuitem" href="<?= e($schatWhatsapp) ?>" target="_blank" rel="noopener noreferrer nofollow" data-channel="whatsapp">
       <span class="sh-schat-opt__icon sh-schat-opt__icon--whatsapp" aria-hidden="true"><?= $schatIconWhatsapp ?></span>
-      <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp</small></span>
+      <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
   <?php else: ?>

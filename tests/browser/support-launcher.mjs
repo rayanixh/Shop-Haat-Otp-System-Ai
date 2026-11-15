@@ -406,7 +406,7 @@ async function phaseDesktop(browser) {
     check('Talk to a human is still offered', chrome.handoff && /Talk to a human/.test(chrome.handoffText), chrome.handoffText);
     check('the composer is still there', chrome.input && chrome.send);
 
-    await page.fill('#sh-schat-input', 'Do you deliver to Dhaka?');
+    await page.fill('#sh-schat-input', 'How much is the Kitchmate 1.8L Electric Kettle?');
     const sendCall = page.waitForResponse(
       (res) => res.url().includes('/api/support.php') && /action=send/.test(res.request().postData() || ''),
       { timeout: 45000 },
@@ -424,14 +424,15 @@ async function phaseDesktop(browser) {
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
     )].some((row) => row.id !== 'sh-schat-typing'), null, { timeout: 30000 }).catch(() => null);
     const thread = (await page.textContent('#sh-schat-messages').catch(() => '') || '').replace(/\s+/g, ' ');
-    const replyBubbles = await page.evaluate(() => [...document.querySelectorAll(
+    const replyText = await page.evaluate(() => [...document.querySelectorAll(
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
-    )].filter((row) => row.id !== 'sh-schat-typing').length);
-    check('the customer message and a real reply both render',
-      (await page.locator('#sh-schat-messages .sh-schat-msg.is-customer').count()) >= 1 && replyBubbles >= 1,
-      thread.slice(0, 160) + ' :: ' + apiLog.slice(-2).join(' | ').slice(0, 200));
-    check('the existing chat answers the customer after the launcher change',
-      /Dhaka/i.test(thread) && thread.length > 60, thread.slice(0, 140));
+    )].filter((row) => row.id !== 'sh-schat-typing').map((row) => row.textContent.trim()).join(' | '));
+    check('the customer message renders in the panel',
+      (await page.locator('#sh-schat-messages .sh-schat-msg.is-customer').count()) >= 1, thread.slice(0, 120));
+    // The store answers from verified catalogue facts (no invented policy), so a
+    // product question must come back with a real price/stock line.
+    check('the existing chat still answers with verified store data',
+      replyText.length > 20 && /৳|BDT|stock|price/i.test(replyText), replyText.slice(0, 200) || apiLog.slice(-1).join('').slice(0, 200));
     check('no message is shown as failed', await page.locator('#sh-schat-messages .is-failed').count() === 0);
     await snap(page, 'support-launcher-desktop-1280-chat');
 
