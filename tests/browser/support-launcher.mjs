@@ -47,6 +47,14 @@ const WA_NORMALISED = 'https://wa.me/8801712345678';
 const MOBILE = [320, 360, 375, 390, 412, 430];
 const DESKTOP = 1280;
 
+// Read from the support settings page during the admin phase: whether this store
+// is configured to answer with a model at all. A seeded store has no provider,
+// and the application then deliberately saves the message without inventing an
+// answer, so the browser check asserts the correct behaviour for the real state
+// instead of pretending a provider is configured.
+let storeAiAvailable = false;
+let storeAiState = '';
+
 const checks = [];
 function check(name, ok, detail = '') {
   checks.push({ name, ok: !!ok, detail });
@@ -257,6 +265,10 @@ async function phaseAdmin(browser) {
     check('the page reports both channels as available', saved.chips.some((c) => /Facebook: available/.test(c)) && saved.chips.some((c) => /WhatsApp: available/.test(c)),
       saved.chips.join(' / ').slice(0, 160));
     check('the page states that live chat stays available', saved.chips.some((c) => /Live chat: always available/.test(c)));
+    const alertText = (await page.textContent('.sh-support-settings__alert').catch(() => '') || '').replace(/\s+/g, ' ');
+    storeAiAvailable = /AI is enabled/i.test(alertText);
+    storeAiState = alertText.slice(0, 200);
+    console.log(`  note  store AI state: ${storeAiState}`);
     await settle(page);
     await snap(page, 'support-launcher-admin-desktop-1280');
     await report(errors, 'the admin settings session');
@@ -422,17 +434,26 @@ async function phaseDesktop(browser) {
     // The typing indicator is not a reply: wait for a real assistant/agent line.
     await page.waitForFunction(() => [...document.querySelectorAll(
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
-    )].some((row) => row.id !== 'sh-schat-typing'), null, { timeout: 30000 }).catch(() => null);
+    )].some((row) => row.id !== 'sh-schat-typing'), null, { timeout: storeAiAvailable ? 30000 : 6000 }).catch(() => null);
     const thread = (await page.textContent('#sh-schat-messages').catch(() => '') || '').replace(/\s+/g, ' ');
     const replyText = await page.evaluate(() => [...document.querySelectorAll(
       '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
     )].filter((row) => row.id !== 'sh-schat-typing').map((row) => row.textContent.trim()).join(' | '));
     check('the customer message renders in the panel',
       (await page.locator('#sh-schat-messages .sh-schat-msg.is-customer').count()) >= 1, thread.slice(0, 120));
-    // The store answers from verified catalogue facts (no invented policy), so a
-    // product question must come back with a real price/stock line.
-    check('the existing chat still answers with verified store data',
-      replyText.length > 20 && /৳|BDT|stock|price/i.test(replyText), replyText.slice(0, 200) || apiLog.slice(-1).join('').slice(0, 200));
+    if (storeAiAvailable) {
+      // A configured model answers from verified catalogue facts.
+      check('the existing chat still answers with verified store data',
+        replyText.length > 20 && /৳|BDT|stock|price/i.test(replyText), replyText.slice(0, 200) || apiLog.slice(-1).join('').slice(0, 200));
+    } else {
+      // With no provider the application deliberately saves the message and
+      // invents nothing (see sh_support_process_customer_message). Proving that
+      // keeps the "no fabricated answers" promise visible in the browser too.
+      check('with AI unconfigured the panel invents no answer',
+        replyText === '', `reply: ${replyText.slice(0, 160)} · ${storeAiState}`);
+      check('with AI unconfigured the message is still saved and acknowledged',
+        /"ok":true/.test(sendBody) && /"kind":"customer"/.test(sendBody), sendBody.slice(0, 160));
+    }
     check('no message is shown as failed', await page.locator('#sh-schat-messages .is-failed').count() === 0);
     await snap(page, 'support-launcher-desktop-1280-chat');
 
