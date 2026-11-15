@@ -12,7 +12,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the admin settings session: no JavaScript exceptions
   PASS  the admin settings session: no failed requests (4xx/5xx/network)
   PASS  the admin settings session: no CSP violation comes from the support launcher — []
-  note  the admin settings session: 46 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the admin settings session: 45 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 2. The launcher is a compact circle on desktop
   PASS  the launcher exists on the storefront
@@ -64,18 +64,16 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the existing chat accepts a customer message — 200 
-require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_status()
-{"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"Do you deliver to Dhaka?","at":"2026-11-15 04:33:35","ai":false}],"suggestions":[]}
-  FAIL  the customer message and a real reply both render — You4:33 AMDo you deliver to Dhaka?RetryYou4:33 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
-  PASS  the existing chat answers the customer after the launcher change — You4:33 AMDo you deliver to Dhaka?RetryYou4:33 AMDo you deliver to Dhaka?
-  FAIL  no message is shown as failed
+  PASS  the existing chat accepts a customer message — 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[{"id":1,"kind":"customer","body":"Do you deliver to Dhaka?","at":"2026-11-15 04:46:21","ai":false}],"suggestions":[]}
+  FAIL  the customer message and a real reply both render — You4:46 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
+  FAIL  the existing chat answers the customer after the launcher change — You4:46 AMDo you deliver to Dhaka?
+  PASS  no message is shown as failed
   PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
   PASS  the desktop storefront session: no console errors
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
   PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
-  note  the desktop storefront session: 1851 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the desktop storefront session: 1850 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -93,7 +91,7 @@ require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_sta
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
   PASS  320px: no CSP violation comes from the support launcher — []
-  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  320px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -129,7 +127,7 @@ require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_sta
   PASS  375px: no JavaScript exceptions
   PASS  375px: no failed requests (4xx/5xx/network)
   PASS  375px: no CSP violation comes from the support launcher — []
-  note  375px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  375px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 390px phone
   PASS  390px: the launcher is still a circle — 56x56
@@ -147,7 +145,7 @@ require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_sta
   PASS  390px: no JavaScript exceptions
   PASS  390px: no failed requests (4xx/5xx/network)
   PASS  390px: no CSP violation comes from the support launcher — []
-  note  390px: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  390px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 412px phone
   PASS  412px: the launcher is still a circle — 56x56
@@ -165,7 +163,7 @@ require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_sta
   PASS  412px: no JavaScript exceptions
   PASS  412px: no failed requests (4xx/5xx/network)
   PASS  412px: no CSP violation comes from the support launcher — []
-  note  412px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  412px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 430px phone
   PASS  430px: the launcher is still a circle — 56x56
@@ -183,7 +181,7 @@ require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_sta
   PASS  430px: no JavaScript exceptions
   PASS  430px: no failed requests (4xx/5xx/network)
   PASS  430px: no CSP violation comes from the support launcher — []
-  note  430px: 47 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  430px: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Keyboard control
   PASS  the launcher is reachable by keyboard — sh-schat-fab
@@ -198,7 +196,7 @@ Keyboard control
   PASS  the keyboard session: no JavaScript exceptions
   PASS  the keyboard session: no failed requests (4xx/5xx/network)
   PASS  the keyboard session: no CSP violation comes from the support launcher — []
-  note  the keyboard session: 41 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the keyboard session: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Reduced motion
   PASS  reduced motion: the menu still opens
@@ -215,13 +213,13 @@ Unconfigured channels degrade honestly, Live Chat keeps working
   PASS  the unconfigured storefront: no JavaScript exceptions
   PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
   PASS  the unconfigured storefront: no CSP violation comes from the support launcher — []
-  note  the unconfigured storefront: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
+  note  the unconfigured storefront: 49 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Restore the configuration for the next run
   PASS  the store is left configured
 
 Support launcher UI: 174 passed, 2 failed
 Failures:
-  - the customer message and a real reply both render — You4:33 AMDo you deliver to Dhaka?RetryYou4:33 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
-  - no message is shown as failed
+  - the customer message and a real reply both render — You4:46 AMDo you deliver to Dhaka? :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]} | 200 {"ok":true,"conversation":{"id":1,"status":"open","hu
+  - the existing chat answers the customer after the launcher change — You4:46 AMDo you deliver to Dhaka?
 Screenshots: support-launcher
