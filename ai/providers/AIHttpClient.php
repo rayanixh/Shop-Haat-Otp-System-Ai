@@ -1,6 +1,6 @@
-
-require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_status()
 <?php
+require_once dirname(__DIR__, 2) . '/includes/compat.php';   // sh_http_last_status()
+
 /**
  * AI Auto Work — shared HTTPS client for every provider adapter.
  *
