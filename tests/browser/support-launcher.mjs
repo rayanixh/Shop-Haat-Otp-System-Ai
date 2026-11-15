@@ -348,10 +348,17 @@ async function phaseDesktop(browser) {
     check('the shop page is still visible after closing the menu', await page.locator('#sh-schat-sheet').isHidden());
 
     await openMenu(page);
-    await page.mouse.click(20, 200);
+    const urlBeforeOutsideClick = page.url();
+    // The middle of the announcement strip: a real click on the page that is
+    // not a link, so the menu closes without navigating anywhere.
+    const barSpot = await page.evaluate(() => ({ x: Math.round(window.innerWidth / 2), y: 12 }));
+    await page.mouse.click(barSpot.x, barSpot.y);
     await page.waitForFunction(() => !document.querySelector('#sh-schat-menu')?.classList.contains('is-open'), null, { timeout: 5000 });
+    await settle(page);
     check('an outside click closes the menu without opening the chat',
       (await fabGeometry(page)).expanded === 'false' && await page.locator('#sh-schat-sheet').isHidden());
+    check('the outside click did not navigate the shop away', page.url() === urlBeforeOutsideClick,
+      `${urlBeforeOutsideClick} -> ${page.url()}`);
   });
 
   await area('6. Live Chat opens the existing chat and still answers', async () => {
@@ -362,6 +369,10 @@ async function phaseDesktop(browser) {
       try { body = (await res.text()).slice(0, 300); } catch { /* body unavailable */ }
       apiLog.push(`${res.status()} ${body.replace(/\s+/g, ' ')}`);
     });
+    // A fresh document, so no page-transition navigation from the previous
+    // step can abort an in-flight chat request.
+    await page.goto(url('/index.php'), { waitUntil: 'load' });
+    await settle(page);
     await openMenu(page);
     const startCall = page.waitForResponse(
       (res) => res.url().includes('/api/support.php') && res.request().method() === 'POST',
@@ -392,13 +403,17 @@ async function phaseDesktop(browser) {
 
     await page.fill('#sh-schat-input', 'Do you deliver to Dhaka?');
     await page.click('#sh-schat-send');
-    await page.waitForFunction(() => {
-      const bubbles = document.querySelectorAll('#sh-schat-messages .sh-schat-msg');
-      return bubbles.length >= 2;
-    }, null, { timeout: 30000 }).catch(() => null);
+    await page.waitForFunction(() => document.querySelectorAll('#sh-schat-messages .sh-schat-msg.is-customer').length >= 1, null, { timeout: 15000 }).catch(() => null);
+    // The typing indicator is not a reply: wait for a real assistant/agent line.
+    await page.waitForFunction(() => document.querySelectorAll(
+      '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
+    ).length >= 1, null, { timeout: 30000 }).catch(() => null);
     const thread = (await page.textContent('#sh-schat-messages').catch(() => '') || '').replace(/\s+/g, ' ');
-    check('the customer message and a reply both render',
-      (await page.locator('#sh-schat-messages .sh-schat-msg').count()) >= 2,
+    const replyBubbles = await page.evaluate(() => document.querySelectorAll(
+      '#sh-schat-messages .sh-schat-msg.is-assistant, #sh-schat-messages .sh-schat-msg.is-agent, #sh-schat-messages .sh-schat-notice'
+    ).length);
+    check('the customer message and a real reply both render',
+      (await page.locator('#sh-schat-messages .sh-schat-msg.is-customer').count()) >= 1 && replyBubbles >= 1,
       thread.slice(0, 160) + ' :: ' + apiLog.slice(-2).join(' | ').slice(0, 200));
     check('the existing chat answers the customer after the launcher change',
       /Dhaka/i.test(thread) && thread.length > 60, thread.slice(0, 140));
