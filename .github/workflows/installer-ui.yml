@@ -174,7 +174,18 @@ jobs:
             exit 0
           fi
           git commit -q -m "docs: installer UI screenshots and transcripts from run ${{ github.run_id }}"
-          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
+          # The same commit triggers a push run and a pull_request run; only one
+          # of them can publish. Retrying on top of whatever landed first keeps
+          # a lost race from failing a job whose checks all passed.
+          pushed=0
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${{ github.head_ref || github.ref_name }}"; then pushed=1; break; fi
+            sleep $((attempt * 5))
+            git pull --rebase -q origin "${{ github.head_ref || github.ref_name }}" || git rebase --abort || true
+          done
+          if [ "$pushed" -ne 1 ]; then
+            echo "::warning::the screenshots could not be pushed to the branch; they are attached as an artifact instead"
+          fi
       - name: Upload the installer screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
