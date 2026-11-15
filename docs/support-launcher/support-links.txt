@@ -1,0 +1,160 @@
+Support launcher links (no DB)
+
+Facebook link validation
+  PASS  Facebook accepts https://m.me/shophaat
+  PASS  Facebook keeps https://m.me/shophaat unchanged (expected 'https://m.me/shophaat', got 'https://m.me/shophaat')
+  PASS  Facebook accepts https://m.me/shophaat?text=hi
+  PASS  Facebook keeps https://m.me/shophaat?text=hi unchanged (expected 'https://m.me/shophaat?text=hi', got 'https://m.me/shophaat?text=hi')
+  PASS  Facebook accepts https://facebook.com/shophaat
+  PASS  Facebook keeps https://facebook.com/shophaat unchanged (expected 'https://facebook.com/shophaat', got 'https://facebook.com/shophaat')
+  PASS  Facebook accepts https://www.facebook.com/shophaat/posts/1
+  PASS  Facebook keeps https://www.facebook.com/shophaat/posts/1 unchanged (expected 'https://www.facebook.com/shophaat/posts/1', got 'https://www.facebook.com/shophaat/posts/1')
+  PASS  Facebook accepts https://web.facebook.com/shophaat
+  PASS  Facebook keeps https://web.facebook.com/shophaat unchanged (expected 'https://web.facebook.com/shophaat', got 'https://web.facebook.com/shophaat')
+  PASS  Facebook accepts https://www.messenger.com/t/shophaat
+  PASS  Facebook keeps https://www.messenger.com/t/shophaat unchanged (expected 'https://www.messenger.com/t/shophaat', got 'https://www.messenger.com/t/shophaat')
+  PASS  Facebook accepts https://fb.me/shophaat
+  PASS  Facebook keeps https://fb.me/shophaat unchanged (expected 'https://fb.me/shophaat', got 'https://fb.me/shophaat')
+  PASS  Facebook rejects: plain http is rejected
+  PASS  Facebook rejection has no URL and says why: plain http is rejected
+  PASS  Facebook rejects: a missing scheme is rejected
+  PASS  Facebook rejection has no URL and says why: a missing scheme is rejected
+  PASS  Facebook rejects: a non-Facebook host is rejected
+  PASS  Facebook rejection has no URL and says why: a non-Facebook host is rejected
+  PASS  Facebook rejects: a look-alike host is rejected
+  PASS  Facebook rejection has no URL and says why: a look-alike host is rejected
+  PASS  Facebook rejects: a page-less Facebook link is rejected
+  PASS  Facebook rejection has no URL and says why: a page-less Facebook link is rejected
+  PASS  Facebook rejects: a page-less Messenger link is rejected
+  PASS  Facebook rejection has no URL and says why: a page-less Messenger link is rejected
+  PASS  Facebook rejects: a javascript: URL is rejected
+  PASS  Facebook rejection has no URL and says why: a javascript: URL is rejected
+  PASS  Facebook rejects: embedded credentials are rejected
+  PASS  Facebook rejection has no URL and says why: embedded credentials are rejected
+  PASS  Facebook rejects: an injected attribute is rejected
+  PASS  Facebook rejection has no URL and says why: an injected attribute is rejected
+  PASS  a blank Facebook field is allowed and clears the link (expected array (
+  'ok' => true,
+  'url' => '',
+  'error' => '',
+), got array (
+  'ok' => true,
+  'url' => '',
+  'error' => '',
+))
+
+WhatsApp number and link validation
+  PASS  WhatsApp accepts +8801700000000
+  PASS  WhatsApp normalises +8801700000000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts 8801700000000
+  PASS  WhatsApp normalises 8801700000000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts +880 170 000 0000
+  PASS  WhatsApp normalises +880 170 000 0000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts (+880) 170-000-0000
+  PASS  WhatsApp normalises (+880) 170-000-0000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts 008801700000000
+  PASS  WhatsApp normalises 008801700000000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts https://wa.me/8801700000000
+  PASS  WhatsApp normalises https://wa.me/8801700000000 (expected 'https://wa.me/8801700000000', got 'https://wa.me/8801700000000')
+  PASS  WhatsApp accepts https://wa.me/8801700000000?text=Hello
+  PASS  WhatsApp normalises https://wa.me/8801700000000?text=Hello (expected 'https://wa.me/8801700000000?text=Hello', got 'https://wa.me/8801700000000?text=Hello')
+  PASS  WhatsApp accepts https://api.whatsapp.com/send?phone=8801700000000&text=Hello
+  PASS  WhatsApp normalises https://api.whatsapp.com/send?phone=8801700000000&text=Hello (expected 'https://api.whatsapp.com/send?phone=8801700000000&text=Hello', got 'https://api.whatsapp.com/send?phone=8801700000000&text=Hello')
+  PASS  WhatsApp accepts https://chat.whatsapp.com/AbCdEf123456
+  PASS  WhatsApp normalises https://chat.whatsapp.com/AbCdEf123456 (expected 'https://chat.whatsapp.com/AbCdEf123456', got 'https://chat.whatsapp.com/AbCdEf123456')
+  PASS  WhatsApp rejects: a too-short number is rejected
+  PASS  WhatsApp rejection stores no URL: a too-short number is rejected
+  PASS  WhatsApp rejects: a number without a country code is rejected
+  PASS  WhatsApp rejection stores no URL: a number without a country code is rejected
+  PASS  WhatsApp rejects: a too-long number is rejected
+  PASS  WhatsApp rejection stores no URL: a too-long number is rejected
+  PASS  WhatsApp rejects: free text is rejected
+  PASS  WhatsApp rejection stores no URL: free text is rejected
+  PASS  WhatsApp rejects: plain http is rejected
+  PASS  WhatsApp rejection stores no URL: plain http is rejected
+  PASS  WhatsApp rejects: a wa.me link without a number is rejected
+  PASS  WhatsApp rejection stores no URL: a wa.me link without a number is rejected
+  PASS  WhatsApp rejects: an incomplete group invite is rejected
+  PASS  WhatsApp rejection stores no URL: an incomplete group invite is rejected
+  PASS  WhatsApp rejects: a non-WhatsApp host is rejected
+  PASS  WhatsApp rejection stores no URL: a non-WhatsApp host is rejected
+  PASS  WhatsApp rejects: a javascript: URL is rejected
+  PASS  WhatsApp rejection stores no URL: a javascript: URL is rejected
+  PASS  a blank WhatsApp field is allowed and hides the option (expected array (
+  'ok' => true,
+  'url' => '',
+  'error' => '',
+), got array (
+  'ok' => true,
+  'url' => '',
+  'error' => '',
+))
+
+Rendered launcher menu
+  PASS  an unconfigured store still renders exactly three options (expected 3, got 3)
+  PASS  unconfigured Facebook and WhatsApp render as unavailable, not dead links (expected 2, got 2)
+  PASS  the unavailable options explain themselves (expected 2, got 2)
+  PASS  no external link is emitted without a configured destination
+  PASS  Live Chat stays a real, enabled button when nothing else is configured
+  PASS  the launcher has an accessible label
+  PASS  the launcher markup contains no "Support" wording next to the icon
+  PASS  the old wide pill label element is gone
+  PASS  the launcher exposes its collapsed state
+  PASS  the launcher declares a popup menu
+  PASS  the launcher controls the options menu
+  PASS  the options menu exists with a menu role
+  PASS  the menu starts hidden
+  PASS  exactly two official brand marks are inline (Facebook + WhatsApp)
+  PASS  no phone number or page link is rendered when nothing is configured
+  PASS  a configured store renders exactly three options (expected 3, got 3)
+  PASS  configured options are real controls (expected 0, got 0)
+  PASS  a configured store shows no unavailable state (expected 0, got 0)
+  PASS  the Facebook option links to the configured Messenger page
+  PASS  the WhatsApp option carries the configured pre-filled message
+  PASS  both external options open in a new tab (expected 2, got 2)
+  PASS  external options are opened with noopener/noreferrer (expected 2, got 2)
+  PASS  Live Chat is still offered alongside the external channels
+  PASS  the existing chat panel is rendered unchanged
+  PASS  an invalid stored value is never rendered as a link
+  PASS  invalid stored values fall back to the unavailable state (expected 2, got 2)
+  PASS  Live Chat survives an invalid configuration
+
+Existing chat contract
+  PASS  the chat panel still ships sh-schat-title
+  PASS  the chat panel still ships sh-schat-new
+  PASS  the chat panel still ships sh-schat-close
+  PASS  the chat panel still ships sh-schat-messages
+  PASS  the chat panel still ships sh-schat-suggest
+  PASS  the chat panel still ships sh-schat-form
+  PASS  the chat panel still ships sh-schat-input
+  PASS  the chat panel still ships sh-schat-send
+  PASS  the chat panel still ships sh-schat-status
+  PASS  the chat panel still ships sh-schat-handoff
+  PASS  the chat panel still ships sh-schat-badge
+  PASS  the chat panel still ships api/support.php
+  PASS  the widget partial still contains markup only
+
+Settings wiring
+  PASS  the save handler uses the Facebook validator
+  PASS  the save handler uses the WhatsApp validator
+  PASS  the pre-filled WhatsApp message is stored
+  PASS  the existing support settings form has name="facebook_url"
+  PASS  the existing support settings form has name="whatsapp"
+  PASS  the existing support settings form has name="whatsapp_message"
+  PASS  the settings page reads the saved Facebook link
+  PASS  the link settings live in the existing settings page (no duplicate page)
+
+Stylesheet contract
+  PASS  the launcher has a stylesheet rule
+  PASS  the launcher is a fixed 56px square with a locked 1:1 ratio
+  PASS  the launcher is a perfect circle
+  PASS  the launcher stays fixed to the viewport
+  PASS  the menu has a stylesheet rule
+  PASS  the menu has an open state for the slide-up animation
+  PASS  the menu animates upward from the launcher
+  PASS  the stylesheet honours prefers-reduced-motion
+  PASS  reduced motion also covers the launcher menu
+
+------------------------------------------------------------
+Passed: 127  Failed: 0
+All support launcher link checks passed.

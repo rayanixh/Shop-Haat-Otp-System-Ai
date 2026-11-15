@@ -11,6 +11,7 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the admin settings session: no console errors
   PASS  the admin settings session: no JavaScript exceptions
   PASS  the admin settings session: no failed requests (4xx/5xx/network)
+  PASS  the admin settings session: no CSP violation comes from the support launcher — []
 
 2. The launcher is a compact circle on desktop
   PASS  the launcher exists on the storefront
@@ -61,13 +62,15 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
   PASS  Talk to a human is still offered — Talk to a human
   PASS  the composer is still there
-  PASS  the customer message and a reply both render — You4:08 AMDo you deliver to Dhaka?···Support is checking the store data… :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
-  PASS  the existing chat answers the customer after the launcher change — You4:08 AMDo you deliver to Dhaka?···Support is checking the store data…
+  PASS  the customer message and a reply both render — You4:17 AMDo you deliver to Dhaka?···Support is checking the store data… :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
+  PASS  the existing chat answers the customer after the launcher change — You4:17 AMDo you deliver to Dhaka?···Support is checking the store data…
   PASS  no message is shown as failed
   PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
-  FAIL  the desktop storefront session: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2
+  PASS  the desktop storefront session: no console errors
   PASS  the desktop storefront session: no JavaScript exceptions
   PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
+  PASS  the desktop storefront session: no CSP violation comes from the support launcher — []
+  note  the desktop storefront session: 13 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 320px phone
   PASS  320px: the launcher is still a circle — 56x56
@@ -81,9 +84,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  320px: all three options are present and readable — 13.5/13.5/13.5
   PASS  320px: Escape closes the menu
   PASS  320px: the closed menu leaves no overflow
-  FAIL  320px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ
+  PASS  320px: no console errors
   PASS  320px: no JavaScript exceptions
   PASS  320px: no failed requests (4xx/5xx/network)
+  PASS  320px: no CSP violation comes from the support launcher — []
+  note  320px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 360px phone
   PASS  360px: the launcher is still a circle — 56x56
@@ -97,9 +102,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  360px: all three options are present and readable — 13.5/13.5/13.5
   PASS  360px: Escape closes the menu
   PASS  360px: the closed menu leaves no overflow
-  FAIL  360px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99
+  PASS  360px: no console errors
   PASS  360px: no JavaScript exceptions
   PASS  360px: no failed requests (4xx/5xx/network)
+  PASS  360px: no CSP violation comes from the support launcher — []
+  note  360px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 375px phone
   PASS  375px: the launcher is still a circle — 56x56
@@ -113,9 +120,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  375px: all three options are present and readable — 13.5/13.5/13.5
   PASS  375px: Escape closes the menu
   PASS  375px: the closed menu leaves no overflow
-  FAIL  375px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy
+  PASS  375px: no console errors
   PASS  375px: no JavaScript exceptions
   PASS  375px: no failed requests (4xx/5xx/network)
+  PASS  375px: no CSP violation comes from the support launcher — []
+  note  375px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 390px phone
   PASS  390px: the launcher is still a circle — 56x56
@@ -129,9 +138,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  390px: all three options are present and readable — 13.5/13.5/13.5
   PASS  390px: Escape closes the menu
   PASS  390px: the closed menu leaves no overflow
-  FAIL  390px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV
+  PASS  390px: no console errors
   PASS  390px: no JavaScript exceptions
   PASS  390px: no failed requests (4xx/5xx/network)
+  PASS  390px: no CSP violation comes from the support launcher — []
+  note  390px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 412px phone
   PASS  412px: the launcher is still a circle — 56x56
@@ -145,9 +156,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  412px: all three options are present and readable — 13.5/13.5/13.5
   PASS  412px: Escape closes the menu
   PASS  412px: the closed menu leaves no overflow
-  FAIL  412px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5
+  PASS  412px: no console errors
   PASS  412px: no JavaScript exceptions
   PASS  412px: no failed requests (4xx/5xx/network)
+  PASS  412px: no CSP violation comes from the support launcher — []
+  note  412px: 50 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 430px phone
   PASS  430px: the launcher is still a circle — 56x56
@@ -161,9 +174,11 @@ ShopHaat support launcher — real browser run against http://127.0.0.1:8080
   PASS  430px: all three options are present and readable — 13.5/13.5/13.5
   PASS  430px: Escape closes the menu
   PASS  430px: the closed menu leaves no overflow
-  FAIL  430px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO
+  PASS  430px: no console errors
   PASS  430px: no JavaScript exceptions
   PASS  430px: no failed requests (4xx/5xx/network)
+  PASS  430px: no CSP violation comes from the support launcher — []
+  note  430px: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Keyboard control
   PASS  the launcher is reachable by keyboard — sh-schat-fab
@@ -177,6 +192,8 @@ Keyboard control
   PASS  the keyboard session: no console errors
   PASS  the keyboard session: no JavaScript exceptions
   PASS  the keyboard session: no failed requests (4xx/5xx/network)
+  PASS  the keyboard session: no CSP violation comes from the support launcher — []
+  note  the keyboard session: 40 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Reduced motion
   PASS  reduced motion: the menu still opens
@@ -189,21 +206,14 @@ Unconfigured channels degrade honestly, Live Chat keeps working
   PASS  the unconfigured options are marked unavailable
   PASS  Live Chat stays enabled
   PASS  Live Chat opens even when nothing else is configured
-  FAIL  the unconfigured storefront: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT
+  PASS  the unconfigured storefront: no console errors
   PASS  the unconfigured storefront: no JavaScript exceptions
   PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
+  PASS  the unconfigured storefront: no CSP violation comes from the support launcher — []
+  note  the unconfigured storefront: 51 Report-Only CSP notice(s), first: {"directive":"script-src","blocked":"eval","sample":"","source":":11"}
 
 Restore the configuration for the next run
   PASS  the store is left configured
 
-Support launcher UI: 156 passed, 8 failed
-Failures:
-  - the desktop storefront session: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2
-  - 320px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ
-  - 360px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99
-  - 375px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy
-  - 390px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV
-  - 412px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5
-  - 430px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO
-  - the unconfigured storefront: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT
+Support launcher UI: 174 passed, 0 failed
 Screenshots: support-launcher
