@@ -324,7 +324,7 @@ require dirname(__DIR__) . '/_layout.php';
       <span class="sh-aiprov-empty__icon"><?= sh_icon('cpu', 26) ?></span>
       <h2 class="sh-aiprov-empty__title">No AI provider yet</h2>
       <p class="sh-aiprov-empty__text">Add OpenAI, OpenRouter, Google Gemini, Anthropic Claude or any OpenAI-compatible endpoint. Nothing is generated until you add one.</p>
-      <div class="sh-actions" style="justify-content:center">
+      <div class="sh-actions">
         <button class="sh-btn" type="button" data-modal-open="sh-aiprov-add"><?= sh_icon('plus', 15) ?> Add your first provider</button>
       </div>
     </div>
