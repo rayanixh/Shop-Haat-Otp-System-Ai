@@ -1,5 +1,13 @@
 # 18 — Installation wizard UI redesign
 
+> **SUPERSEDED — the owner asked for the original installation page back.**
+> The redesign described below was reverted in `install/index.php`; the page is
+> the original one again, with only overflow, box and responsive fixes plus the
+> removal of duplicated helper text. See
+> [report 20](20-installer-restore-and-overflow-fix.md) for what was restored,
+> what was fixed, and the browser evidence. This report is kept as a record of
+> the work that was undone.
+
 **Scope: presentation only.** The wizard keeps the installation engine it already had. What changed
 is the markup, the stylesheet and the layout of `install/index.php`, plus a browser harness that
 proves the new interface still installs a real store.

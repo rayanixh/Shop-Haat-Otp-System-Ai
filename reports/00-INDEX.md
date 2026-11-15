@@ -89,7 +89,9 @@ either backed by a command whose output is quoted, by the shipped code, or it is
 | 15 | [Final integration](15-final-integration.md) | **PASSED** — 1,738 checks, 241/241 files lint clean, security scan clean |
 | 16 | [Final verification and production decision](16-final-verification.md) | **CONDITIONALLY READY** — its three conditions are discharged by report 17 |
 | 17 | [The final four blockers](17-final-four-blockers.md) | **READY** — secrets, MySQL 8.0.46 + MariaDB 10.6.28, restore rehearsal 23/0, browser regression; seven defects fixed, six of them in the harness |
-| 18 | [Installation wizard UI redesign](18-installer-ui-redesign.md) | **DELIVERED** — presentation-only redesign, 162 browser checks (ready / blocked / repair) across desktop and six phone widths; engine, validation and CSRF unchanged |
+| 18 | [Installation wizard UI redesign](18-installer-ui-redesign.md) | **SUPERSEDED** — the redesign was reverted at the owner's request; see report 20 |
+| 19 | [Support launcher and three-channel menu](19-support-launcher-menu.md) | **DELIVERED** — 56 px circular launcher, Facebook/WhatsApp/Live Chat menu, 177 browser checks; the chat engine is untouched |
+| 20 | [Installation page restored, overflow fixed](20-installer-restore-and-overflow-fix.md) | **DELIVERED** — original page restored; overflow, containment and responsive fixes only; 172 browser checks across desktop and six phone widths |
 
 ## Environment facts behind the "NOT EXECUTED" rows
 

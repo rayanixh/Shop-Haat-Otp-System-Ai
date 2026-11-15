@@ -1,16 +1,17 @@
 /**
- * Real browser verification of the ShopHaat installation wizard.
+ * Real browser verification of the ShopHaat installation page.
  *
- * Everything asserted here is observed in Chromium against a real PHP web
- * server and a real MySQL database:
+ * The page keeps its original design. What is verified here, in Chromium
+ * against a real PHP web server and a real MySQL database, is that the
+ * original layout still holds at every phone width the brief names and that
+ * nothing overflows, overlaps, is clipped or is hidden:
  *
- *   fresh              the requirements screen, the refresh action, the phone
+ *   fresh              the original requirements + form screen, the phone
  *                      viewport matrix, and a complete installation driven
- *                      through the redesigned form
- *   repair             the restricted repair screen on an installed store
- *   requirements-fail  the blocked screen, produced by making config/, uploads/
- *                      and logs/ genuinely unwritable rather than by faking a
- *                      status in the markup
+ *                      through the original form
+ *   repair             the original restricted repair card and the owner
+ *                      unlock card on an installed store
+ *   requirements-fail  the same screen with genuinely unwritable folders
  *
  *   SH_INSTALL_BASE_URL=http://127.0.0.1:8080 \
  *   SH_INSTALL_DB_PASS=… SH_INSTALL_EXPECT_PHP=8.2.29 \
@@ -46,14 +47,20 @@ const EXPECT_PHP = (process.env.SH_INSTALL_EXPECT_PHP || '').trim();
 
 // Every viewport the brief names. 320 is the narrowest phone still in use.
 const MOBILE = [320, 360, 375, 390, 412, 430];
+const DESKTOP = 1280;
 
-const OPTIONAL_NAMES = ['mbstring', 'DOM / libxml', 'cURL', 'OpenSSL', 'GD', 'fileinfo', 'intl'];
+// The original page, verbatim: seven required checks and seven optional ones.
 const REQUIRED_NAMES = [
-  'PHP version', 'PDO extension', 'pdo_mysql driver', 'JSON extension',
-  '/config directory', '/uploads directory', '/logs directory',
+  'PHP 8.1 or newer', 'PDO extension', 'pdo_mysql driver', 'JSON extension',
+  '/config writable', '/uploads writable', '/logs writable',
 ];
-const STEP_LABELS = [
-  'Server requirements', 'Database configuration', 'Store configuration', 'Installation complete',
+// Classes that only ever existed in the discarded redesign. Their absence is a
+// check of its own: the page must stay the one it always was.
+const REDESIGN_ONLY = [
+  '.steps', '.step', '.progress', '.progress__fill', '.summary', '.metric',
+  '.verdict', '.actionbar', '.panel', '.panel--done', '.opt-grid', '.opt',
+  '.req-list', '.req__name', '.req__value', '.req__badge', '.chip', '.badge',
+  '.callout', '.callout--bad', '.callout--ok', '.done__notice', '.sr-only',
 ];
 
 const checks = [];
@@ -70,7 +77,7 @@ async function area(label, fn) {
 }
 
 function watch(page) {
-  const seen = { console: [], pageErrors: [], requests: [], csp: [] };
+  const seen = { console: [], pageErrors: [], requests: [] };
   page.on('console', (msg) => { if (msg.type() === 'error') { seen.console.push(msg.text().slice(0, 200)); } });
   page.on('pageerror', (err) => { seen.pageErrors.push(String(err).slice(0, 200)); });
   page.on('response', (res) => {
@@ -96,155 +103,186 @@ async function snap(page, name, fullPage = true) {
 
 const url = (path) => BASE + path;
 
-/** Every element must stay inside the viewport: no sideways scroll, no clipping. */
-async function overflowScan(page) {
+/**
+ * Geometry of the page as the browser really laid it out.
+ *
+ *  - nothing sticks out of the viewport and the page has no sideways scroll;
+ *  - every element inside a card stays inside that card's content box (so a
+ *    long requirement name cannot push the card, the status or the page);
+ *  - a requirement's name and its status never overlap each other;
+ *  - no element is clipped by its own box;
+ *  - the stylesheet never hides overflow.
+ */
+async function layoutScan(page) {
   return page.evaluate(() => {
     const vw = window.innerWidth;
-    const bad = [];
+    const out = { scroll: { doc: document.documentElement.scrollWidth, body: document.body.scrollWidth, vw },
+      outsideViewport: [], outsideCard: [], overlaps: [], clipped: [] };
+
     for (const el of document.querySelectorAll('body *')) {
-      if (el.classList.contains('sprite')) { continue; }
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) { continue; }
       if (rect.right > vw + 1 || rect.left < -1) {
         const cls = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
-        bad.push(`${el.tagName.toLowerCase()}${cls ? '.' + cls : ''} [${rect.left.toFixed(0)}–${rect.right.toFixed(0)}] vw=${vw}`);
+        out.outsideViewport.push(`${el.tagName.toLowerCase()}${cls ? '.' + cls : ''} [${rect.left.toFixed(0)}–${rect.right.toFixed(0)}] vw=${vw}`);
       }
     }
-    return { docScroll: document.documentElement.scrollWidth, bodyScroll: document.body.scrollWidth, innerWidth: vw, bad: bad.slice(0, 6), total: bad.length };
+
+    for (const card of document.querySelectorAll('.card')) {
+      const style = getComputedStyle(card);
+      const box = card.getBoundingClientRect();
+      const left = box.left + parseFloat(style.paddingLeft || '0');
+      const right = box.right - parseFloat(style.paddingRight || '0');
+      const title = (card.querySelector('h2') || {}).textContent || '(card)';
+      for (const el of card.querySelectorAll('*')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) { continue; }
+        if (rect.left < left - 1 || rect.right > right + 1) {
+          const cls = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
+          out.outsideCard.push(`${title.trim()}>${el.tagName.toLowerCase()}${cls ? '.' + cls : ''} [${rect.left.toFixed(0)}–${rect.right.toFixed(0)}] card=[${left.toFixed(0)}–${right.toFixed(0)}]`);
+        }
+      }
+    }
+
+    for (const row of document.querySelectorAll('.req li')) {
+      const cells = [...row.children].map((el) => el.getBoundingClientRect());
+      if (cells.length < 2) { continue; }
+      const [a, b] = cells;
+      const overlap = !(a.right <= b.left + 1 || b.right <= a.left + 1 || a.bottom <= b.top + 1 || b.bottom <= a.top + 1);
+      if (overlap) { out.overlaps.push(`"${row.textContent.trim().slice(0, 40)}"`); }
+    }
+
+    for (const el of document.querySelectorAll('.card, .card *')) {
+      // Form controls scroll their own content natively; that is not page layout.
+      if (['INPUT', 'SELECT', 'TEXTAREA', 'svg', 'SVG'].includes(el.tagName)) { continue; }
+      const style = getComputedStyle(el);
+      const clippedX = /hidden|clip|auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth + 1;
+      const clippedY = /hidden|clip|auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1;
+      if (clippedX || clippedY) {
+        const cls = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
+        out.clipped.push(`${el.tagName.toLowerCase()}${cls ? '.' + cls : ''} ${el.scrollWidth}>${el.clientWidth}`);
+      }
+    }
+
+    for (const key of Object.keys(out)) {
+      if (Array.isArray(out[key])) { out[key] = [...new Set(out[key])].slice(0, 6); }
+    }
+    return out;
   });
 }
 
-async function phoneMatrix(browser, label, pathFor = () => '/install/') {
+async function assertLayout(page, label) {
+  const scan = await layoutScan(page);
+  check(`${label}: the page does not scroll sideways`,
+    scan.scroll.doc <= scan.scroll.vw + 1 && scan.scroll.body <= scan.scroll.vw + 1,
+    `scrollWidth ${scan.scroll.doc}/${scan.scroll.body}, viewport ${scan.scroll.vw}`);
+  check(`${label}: nothing sticks out of the viewport`, scan.outsideViewport.length === 0, scan.outsideViewport.join(' | '));
+  check(`${label}: every element stays inside its card`, scan.outsideCard.length === 0, scan.outsideCard.join(' | '));
+  check(`${label}: no requirement name overlaps its status`, scan.overlaps.length === 0, scan.overlaps.join(' | '));
+  check(`${label}: no content is clipped by its box`, scan.clipped.length === 0, scan.clipped.join(' | '));
+  return scan;
+}
+
+async function phoneMatrix(browser, label, pathFor = () => '/install/', expectHeading = null) {
   for (const width of MOBILE) {
-    const page = await browser.newPage({ viewport: { width, height: 720 } });
+    const page = await browser.newPage({ viewport: { width, height: 760 } });
     await page.goto(url(pathFor()), { waitUntil: 'load' });
-    const scan = await overflowScan(page);
-    check(`${label} @${width}px: the page does not scroll sideways`, scan.docScroll <= scan.innerWidth + 1 && scan.bodyScroll <= scan.innerWidth + 1,
-      `scrollWidth ${scan.docScroll}/${scan.bodyScroll}, viewport ${scan.innerWidth}`);
-    check(`${label} @${width}px: no element overflows the viewport`, scan.total === 0, scan.bad.join(' | '));
-    const tap = await page.evaluate(() => {
-      const targets = [...document.querySelectorAll('.btn, .radio, .input')].map((el) => {
-        const r = el.getBoundingClientRect();
-        return { tag: el.tagName.toLowerCase(), cls: (el.className || '').toString().split(' ')[0], h: Math.round(r.height) };
-      });
-      return targets.filter((t) => t.h > 0 && t.h < 40);
-    });
-    check(`${label} @${width}px: every control is a comfortable touch target (>= 40px tall)`, tap.length === 0,
-      tap.slice(0, 4).map((t) => `${t.tag}.${t.cls}=${t.h}px`).join(' | '));
-    const squeezed = await page.evaluate(() => {
-      const bad = [];
-      for (const el of document.querySelectorAll('.opt__name, .req__name, .step__label, .badge, .chip')) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.width < 48) {
-          bad.push(`${(el.className || '').toString().split(' ')[0]}="${el.textContent.trim().slice(0, 14)}" ${Math.round(rect.width)}px`);
-        }
-      }
-      return bad.slice(0, 5);
-    });
-    check(`${label} @${width}px: no label is squeezed into a sliver`, squeezed.length === 0, squeezed.join(' | '));
-    const optCols = await page.$eval('.opt-grid', (el) => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);
-    check(`${label} @${width}px: the optional extensions are a single column`, optCols === 1, `${optCols} column(s)`);
+    await assertLayout(page, `${label} @${width}px`);
+    if (expectHeading) {
+      const h1 = (await page.textContent('h1') || '').trim();
+      check(`${label} @${width}px: the heading is unchanged`, h1 === expectHeading, h1);
+    }
+    // A button may never be wider than the card it sits in, and it must stay a
+    // comfortable target.
+    const buttons = await page.evaluate(() => [...document.querySelectorAll('.btn, .actions a')].map((el) => {
+      const rect = el.getBoundingClientRect();
+      const parent = el.parentElement.getBoundingClientRect();
+      return { text: el.textContent.trim().slice(0, 24), w: Math.round(rect.width), pw: Math.round(parent.width), h: Math.round(rect.height), left: rect.left, right: rect.right, pleft: parent.left, pright: parent.right };
+    }));
+    const overflowing = buttons.filter((b) => b.w > b.pw + 1 || b.left < b.pleft - 1 || b.right > b.pright + 1);
+    check(`${label} @${width}px: no button exceeds its container`, overflowing.length === 0,
+      overflowing.map((b) => `${b.text}=${b.w}px in ${b.pw}px`).join(' | '));
+    const small = buttons.filter((b) => b.h > 0 && b.h < 40);
+    check(`${label} @${width}px: every control is a comfortable touch target (>= 40px tall)`, small.length === 0,
+      small.map((b) => `${b.text}=${b.h}px`).join(' | '));
     await snap(page, `installer-${label}-${width}px`);
     await page.close();
   }
+}
+
+/** The discarded redesign is gone: no element, class or stylesheet rule of it. */
+async function assertOriginalDesign(page, label) {
+  const found = await page.evaluate((selectors) => selectors.filter((sel) => document.querySelector(sel) !== null), REDESIGN_ONLY);
+  check(`${label}: the redesigned step/progress/summary markup is not on the page`, found.length === 0, found.join(', '));
+  const css = await page.$eval('style', (el) => el.textContent || '');
+  check(`${label}: the stylesheet never hides content with overflow:hidden`, !/overflow\s*:\s*hidden/i.test(css),
+    (css.match(/overflow\s*:\s*hidden[^;]*/i) || [''])[0]);
+  const brand = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const card = getComputedStyle(document.querySelector('.card'));
+    const wrap = getComputedStyle(document.querySelector('.wrap'));
+    return { brand: root.getPropertyValue('--brand').trim(), radius: card.borderRadius, maxWidth: wrap.maxWidth };
+  });
+  check(`${label}: the original brand colour, card radius and page width are unchanged`,
+    brand.brand === '#e8501b' && brand.radius === '10px' && brand.maxWidth === '820px',
+    `${brand.brand} / ${brand.radius} / ${brand.maxWidth}`);
 }
 
 // ---------------------------------------------------------------------------
 // Phase: fresh install
 // ---------------------------------------------------------------------------
 async function phaseFresh(browser) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: DESKTOP, height: 900 } });
   const errors = watch(page);
 
-  await area('1. Server requirements show what this server really reports', async () => {
+  await area('1. The original requirements card reports what this server really has', async () => {
     const res = await page.goto(url('/install/'), { waitUntil: 'load' });
     check('the installer responds with HTTP 200', res && res.status() === 200, `status ${res && res.status()}`);
-
     const h1 = (await page.textContent('h1') || '').trim();
-    check('the page presents the installation title', h1 === 'Install your store', h1);
+    check('the page keeps its original title', h1 === 'Install your store', h1);
 
-    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => {
-      // The screen-reader state suffix is part of the accessible name but not
-      // part of the visible step label.
-      const label = el.querySelector('.step__label').cloneNode(true);
-      label.querySelectorAll('.sr-only').forEach((node) => node.remove());
-      return { label: label.textContent.trim(), cls: el.className, current: el.getAttribute('aria-current') };
-    }));
-    check('the step indicator lists the four real steps', JSON.stringify(steps.map((s) => s.label)) === JSON.stringify(STEP_LABELS),
-      steps.map((s) => s.label).join(' > '));
-    check('step 1 is complete because every required check passed', /step--complete/.test(steps[0].cls), steps[0].cls);
-    check('step 2 is the current step', steps[1].current === 'step' && /step--current/.test(steps[1].cls), `${steps[1].cls} aria-current=${steps[1].current}`);
-    check('steps 3 and 4 are still pending', /step--pending/.test(steps[2].cls) && /step--pending/.test(steps[3].cls));
+    const headings = await page.$$eval('.card h2', (els) => els.map((el) => el.textContent.trim()));
+    check('the cards are the original ones, in the original order',
+      JSON.stringify(headings) === JSON.stringify(['Server requirements', 'Optional extensions', 'Database connection', 'Website', 'Administrator account']),
+      headings.join(' > '));
+    const h1s = await page.$$eval('h1', (els) => els.length);
+    const h2s = await page.$$eval('.card h2', (els) => els.length);
+    check('there is exactly one page heading and no duplicate headings', h1s === 1 && h2s === headings.length, `${h1s} h1, ${h2s} h2`);
 
-    const progress = await page.$eval('.progress', (el) => ({
-      now: el.getAttribute('aria-valuenow'),
-      width: el.querySelector('.progress__fill').style.width,
-    }));
-    check('the progress bar reports the state that was really reached (1 of 4 = 25%)',
-      progress.now === '25' && progress.width === '25%', `aria-valuenow=${progress.now} width=${progress.width}`);
-    const meta = (await page.textContent('.progress__meta') || '').replace(/\s+/g, ' ');
-    check('the progress line names the current step', /Step 2 of 4 . Database configuration/.test(meta), meta.slice(0, 80));
-
-    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => {
-      // The threshold that sits inside the name cell ("8.1 or newer") is not
-      // part of the name itself.
-      const name = el.querySelector('.req__name').cloneNode(true);
-      name.querySelectorAll('.req__need').forEach((node) => node.remove());
-      return {
-        name: name.textContent.trim(),
-        value: el.querySelector('.req__value').textContent.trim(),
-        badge: el.querySelector('.req__badge').textContent.trim(),
-        badgeCls: el.querySelector('.req__badge').className,
-      };
-    }));
-    check('all seven required checks are listed', rows.length === 7, rows.map((r) => r.name).join(', '));
-    check('the seven required checks are the documented ones', JSON.stringify(rows.map((r) => r.name)) === JSON.stringify(REQUIRED_NAMES),
-      rows.map((r) => r.name).join(' | '));
-    check('every required row shows a detected value', rows.every((r) => r.value.length > 0), rows.map((r) => `${r.name}=${r.value}`).join(', '));
-    check('every required row is reported as passed (this host meets the requirements)', rows.every((r) => r.badge === 'Passed'),
-      rows.filter((r) => r.badge !== 'Passed').map((r) => `${r.name}:${r.badge}`).join(', '));
+    const rows = await page.$$eval('.req', (lists) => lists.map((list) => [...list.querySelectorAll('li')].map((li) => ({
+      name: li.children[0].textContent.trim(),
+      value: li.children[1].textContent.trim(),
+      valueCls: li.children[1].className,
+    }))));
+    check('the page has the two original lists (required and optional)', rows.length === 2, `${rows.length} list(s)`);
+    const required = rows[0];
+    check('all seven required checks are listed', required.length === 7, required.map((r) => r.name).join(', '));
+    check('the seven required checks are the original ones', JSON.stringify(required.map((r) => r.name)) === JSON.stringify(REQUIRED_NAMES),
+      required.map((r) => r.name).join(' | '));
+    check('every required row is detected as passed on this host', required.every((r) => r.valueCls === 'ok' && /Enabled|Writable|^\d+\.\d+/.test(r.value)),
+      required.map((r) => `${r.name}=${r.value}`).join(', '));
     if (EXPECT_PHP) {
-      check('the PHP row shows the version the server actually runs, not a hardcoded string',
-        rows[0].value === EXPECT_PHP, `${rows[0].value} vs expected ${EXPECT_PHP}`);
+      check('the PHP row shows the version the server actually runs', required[0].value === EXPECT_PHP, `${required[0].value} vs expected ${EXPECT_PHP}`);
     } else {
-      check('the PHP row shows a real version string', /^\d+\.\d+\.\d+/.test(rows[0].value), rows[0].value);
+      check('the PHP row shows a real version string', /^\d+\.\d+\.\d+/.test(required[0].value), required[0].value);
     }
-
-    const verdict = (await page.textContent('.verdict') || '').trim();
-    check('the overall verdict says the server is ready', verdict === 'Ready to install', verdict);
-
-    const metrics = await page.$$eval('.summary .metric', (els) => els.map((el) => ({
-      label: el.querySelector('.metric__label').textContent.trim(),
-      value: el.querySelector('.metric__value').textContent.trim(),
-    })));
-    const byLabel = Object.fromEntries(metrics.map((m) => [m.label, m.value]));
-    check('the summary counts the required passes from the rendered rows', byLabel['Required passed'] === '7/7', JSON.stringify(byLabel));
-    check('the summary reports no failed required check', byLabel['Required failed'] === '0', byLabel['Required failed']);
-    check('the summary reports overall readiness', byLabel['Overall readiness'] === 'Ready', byLabel['Overall readiness']);
-    check('the summary counts the optional extensions from the rendered grid',
-      /^\d\/7$/.test(byLabel['Optional available'] || ''), byLabel['Optional available']);
   });
 
-  await area('2. Optional extensions are separate, complete and never blocking', async () => {
-    const opts = await page.$$eval('.opt-grid .opt', (els) => els.map((el) => ({
-      name: el.querySelector('.opt__name').textContent.trim(),
-      purpose: (el.querySelector('.opt__purpose') || {}).textContent?.trim() || '',
-      chip: (el.querySelector('.chip') || {}).textContent?.trim() || '',
+  await area('2. Optional extensions stay separate, complete and never blocking', async () => {
+    const optional = await page.$$eval('.req', (lists) => [...lists[1].querySelectorAll('li')].map((li) => ({
+      name: li.children[0].textContent.trim(),
+      value: li.children[1].textContent.trim(),
+      valueCls: li.children[1].className,
     })));
-    check('all seven optional extensions are listed', opts.length === 7, opts.map((o) => o.name).join(', '));
-    check('the optional extension names match the shipped fallbacks', JSON.stringify(opts.map((o) => o.name)) === JSON.stringify(OPTIONAL_NAMES),
-      opts.map((o) => o.name).join(' | '));
-    check('every optional extension explains its purpose', opts.every((o) => o.purpose.length > 6), opts.map((o) => `${o.name}:${o.purpose}`).join(', '));
-    check('every optional extension carries an availability chip', opts.every((o) => o.chip === 'Available' || o.chip === 'Fallback'),
-      opts.map((o) => `${o.name}:${o.chip}`).join(', '));
-    const heading = (await page.textContent('#optional-title') || '').trim();
-    check('the section is labelled as optional', heading === 'Optional extensions', heading);
-    const cols = await page.$eval('.opt-grid', (el) => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length);
-    check('the optional grid is two columns on desktop', cols === 2, `${cols} column(s)`);
-    const usingFallback = opts.filter((o) => o.chip === 'Fallback').length;
-    const errorBadges = await page.$$eval('.opt-grid .badge--bad, .opt-grid .metric--bad', (els) => els.length);
-    check('no optional extension is presented as an error', errorBadges === 0,
-      `${opts.length - usingFallback} available, ${usingFallback} using a documented fallback, ${errorBadges} error badge(s)`);
+    check('all seven optional extensions are listed', optional.length === 7, optional.map((o) => o.name).join(', '));
+    check('every optional row names the extension and its purpose', optional.every((o) => o.name.includes(' — ') && o.name.length > 12),
+      optional[0].name);
+    check('every optional row says what is used instead when it is missing',
+      optional.every((o) => /^(Enabled|Fallback: .+|Not enabled)$/.test(o.value)), optional.map((o) => o.value).join(', '));
+    check('no optional extension is presented as an error', optional.every((o) => o.valueCls === 'ok' || o.valueCls === 'warn'),
+      optional.filter((o) => o.valueCls !== 'ok' && o.valueCls !== 'warn').map((o) => o.name).join(', '));
+    const blurb = (await page.$$eval('.card p', (els) => els.map((el) => el.textContent.replace(/\s+/g, ' ').trim()))).find((t) => /Recommended, not required/.test(t));
+    check('the optional section keeps one short explanation, no repeated guide text', !!blurb && blurb.length < 90, blurb || 'missing');
   });
 
   await area('3. The form keeps the existing fields, naming and CSRF protection', async () => {
@@ -260,36 +298,28 @@ async function phaseFresh(browser) {
       .filter((el) => !el.closest('label') && !(el.id && document.querySelector(`label[for="${el.id}"]`)))
       .map((el) => el.id || el.name));
     check('every input is associated with a label', unlabelled.length === 0, unlabelled.join(', '));
-    const inlineStyles = await page.$$eval('[style]', (els) => els.map((el) => el.tagName.toLowerCase()));
-    check('only the dynamic progress width is an inline style', inlineStyles.length === 1 && inlineStyles[0] === 'div',
-      `${inlineStyles.length}: ${inlineStyles.slice(0, 5).join(', ')}`);
-    const css = await page.$eval('style', (el) => el.textContent || '');
-    check('the stylesheet never hides content with overflow:hidden', !/overflow\s*:\s*hidden/i.test(css),
-      (css.match(/overflow\s*:\s*hidden[^;]*/i) || [''])[0]);
+    const radios = await page.$$eval('input[name="demo_data"]', (els) => els.map((el) => el.value));
+    check('Demo Data is still the explicit ON/OFF pair', JSON.stringify(radios.sort()) === JSON.stringify(['0', '1']), radios.join(', '));
+    check('the catalogue is off unless the operator turns it on', !(await page.isChecked('#demo_on')));
+    const hints = await page.$$eval('p.hint', (els) => els.map((el) => el.textContent.replace(/\s+/g, ' ').trim()));
+    check('helper text stays to one short line per field', hints.every((h) => h.length <= 110), hints.map((h) => h.length).join(', '));
     const html = await page.content();
     check('no server path leaks into the page', !/\/home\/[a-z]|\/var\/www|C:\\\\inetpub/.test(html),
       (html.match(/\/home\/[a-z]|\/var\/www/g) || []).slice(0, 2).join(', '));
   });
 
-  await area('4. The action area offers a real refresh and a real continue', async () => {
-    const refresh = page.locator('.actionbar__buttons form button');
-    check('the action area has a Refresh requirements button', await refresh.count() === 1);
-    const cont = page.locator('button[form="install-form"]');
-    check('the action area has the primary Continue button', await cont.count() === 1);
-    check('Continue is enabled because every required check passed', await cont.isEnabled());
-    await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), refresh.click()]);
-    const after = (await page.textContent('.panel__sub') || '').match(/Checked on this server at ([^.]+)\./);
-    check('Refresh requirements re-runs the checks on the server', !!after && after[1].trim().length > 0, `checked at ${after ? after[1].trim() : 'unknown'}`);
-    check('the refreshed page still reports a ready server', (await page.textContent('.verdict') || '').trim() === 'Ready to install');
+  await area('4. The original design is intact on desktop', async () => {
+    await assertOriginalDesign(page, 'desktop');
+    await assertLayout(page, 'desktop @1280px');
     await snap(page, 'installer-desktop-1280px');
     report(errors, 'the requirements screen');
   });
 
   await area('5. Phone viewports 320–430px', async () => {
-    await phoneMatrix(browser, 'requirements');
+    await phoneMatrix(browser, 'requirements', () => '/install/', 'Install your store');
   });
 
-  await area('6. A complete installation runs through the redesigned form', async () => {
+  await area('6. A complete installation runs through the original form', async () => {
     await page.goto(url('/install/'), { waitUntil: 'load' });
     check('no database configuration exists before the install', !existsSync(join(ROOT, 'config', 'database.php')));
     check('the store is not installed before the install', !existsSync(join(ROOT, 'config', 'installed.lock')));
@@ -306,28 +336,27 @@ async function phaseFresh(browser) {
 
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'load', timeout: 180000 }).catch(() => null),
-      page.click('button[form="install-form"]'),
+      page.click('button.btn'),
     ]);
-    const done = await page.waitForSelector('.panel--done', { timeout: 180000 }).catch(() => null);
+    const done = await page.waitForSelector('.card.done', { timeout: 180000 }).catch(() => null);
     if (!done) {
-      const failure = (await page.textContent('.callout--bad').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 300);
-      check('the installation completed through the redesigned form', false, failure || 'no completion panel appeared');
+      const failure = (await page.textContent('.alert--bad').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 300);
+      check('the installation completed through the original form', false, failure || 'no completion card appeared');
       await snap(page, 'installer-install-failed');
       return;
     }
-    check('the installation completed through the redesigned form', true);
+    check('the installation completed through the original form', true);
 
     const h1 = (await page.textContent('h1') || '').trim();
     check('the completion screen is titled Installation complete', h1 === 'Installation complete', h1);
-    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => el.className));
-    check('all four steps are shown as complete', steps.length === 4 && steps.every((c) => /step--complete/.test(c)), steps.join(' | '));
-    const progress = await page.$eval('.progress', (el) => el.getAttribute('aria-valuenow'));
-    check('the progress bar is at 100% and not before', progress === '100', `aria-valuenow=${progress}`);
-    const notice = (await page.textContent('.callout--ok').catch(() => '') || '').trim();
-    check('the completion notice is rendered (it used to be computed and never shown)',
-      /Installation completed successfully/.test(notice), notice.slice(0, 90));
-    const warn = (await page.textContent('.done__notice') || '').replace(/\s+/g, ' ');
-    check('the completion screen still tells the owner to delete /install', /Delete the \/install folder/.test(warn), warn.slice(0, 80));
+    const doneHeadings = await page.$$eval('.card h2', (els) => els.length);
+    check('the completion card carries no second heading', doneHeadings === 0, `${doneHeadings} heading(s)`);
+    const doneText = (await page.textContent('.card.done') || '').replace(/\s+/g, ' ');
+    check('the completion screen reports the result the server computed', /Installation completed successfully/.test(doneText), doneText.slice(0, 90));
+    check('the completion screen still tells the owner to delete /install', /Delete the \/install<\/code>?\s*folder|Delete the \/install folder/.test(doneText), doneText.slice(0, 120));
+    check('the completion screen still links to the store and the admin panel',
+      (await page.locator('.actions a').count()) === 2);
+    await assertLayout(page, 'completion @1280px');
     await snap(page, 'installer-done-desktop-1280px');
 
     check('the installer wrote config/database.php', existsSync(join(ROOT, 'config', 'database.php')));
@@ -346,16 +375,13 @@ async function phaseFresh(browser) {
     const admin = await page.request.get(url('/admin/login.php'));
     check('the admin sign-in page loads', admin.status() === 200, `status ${admin.status()}`);
 
-    // The completion screen at phone widths: the same document, re-laid out.
     for (const width of [320, 430]) {
-      await page.setViewportSize({ width, height: 720 });
+      await page.setViewportSize({ width, height: 760 });
       await page.waitForTimeout(120);
-      const scan = await overflowScan(page);
-      check(`the completion screen @${width}px: no sideways scroll`, scan.docScroll <= scan.innerWidth + 1, `${scan.docScroll}/${scan.innerWidth}`);
-      check(`the completion screen @${width}px: no element overflows`, scan.total === 0, scan.bad.join(' | '));
+      await assertLayout(page, `completion @${width}px`);
       await snap(page, `installer-done-${width}px`);
     }
-    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.setViewportSize({ width: DESKTOP, height: 900 });
   });
 
   report(errors, 'the whole fresh-install session');
@@ -366,50 +392,32 @@ async function phaseFresh(browser) {
 // Phase: blocked requirements (real unwritable directories)
 // ---------------------------------------------------------------------------
 async function phaseRequirementsFail(browser) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: DESKTOP, height: 900 } });
   const errors = watch(page);
 
   await area('1. Genuinely failed checks block the installation', async () => {
     const res = await page.goto(url('/install/'), { waitUntil: 'load' });
     check('the installer still responds with HTTP 200 when checks fail', res && res.status() === 200, `status ${res && res.status()}`);
-    const verdict = (await page.textContent('.verdict') || '').trim();
-    check('the verdict asks for action', verdict === 'Action required', verdict);
-
-    const rows = await page.$$eval('.req-list .req', (els) => els.map((el) => {
-      const name = el.querySelector('.req__name').cloneNode(true);
-      name.querySelectorAll('.req__need').forEach((node) => node.remove());
-      return {
-        name: name.textContent.trim(),
-        value: el.querySelector('.req__value').textContent.trim(),
-        badge: el.querySelector('.req__badge').textContent.trim(),
-      };
-    }));
-    const failed = rows.filter((r) => r.badge === 'Failed');
-    check('the unwritable directories are reported as failed', failed.length >= 3, failed.map((r) => `${r.name}=${r.value}`).join(', '));
+    const required = await page.$$eval('.req', (lists) => [...lists[0].querySelectorAll('li')].map((li) => ({
+      name: li.children[0].textContent.trim(),
+      value: li.children[1].textContent.trim(),
+      valueCls: li.children[1].className,
+    })));
+    const failed = required.filter((r) => r.valueCls === 'bad');
+    check('the unwritable folders are reported as failed', failed.length >= 3, failed.map((r) => `${r.name}=${r.value}`).join(', '));
     check('a failed row states what was detected', failed.every((r) => /Not writable/.test(r.value)), failed.map((r) => r.value).join(', '));
-
-    const metrics = await page.$$eval('.summary .metric', (els) => Object.fromEntries(els.map((el) => [
-      el.querySelector('.metric__label').textContent.trim(), el.querySelector('.metric__value').textContent.trim(),
-    ])));
-    check('the summary counts the failures', metrics['Required failed'] === String(failed.length), JSON.stringify(metrics));
-    check('overall readiness is blocked', metrics['Overall readiness'] === 'Blocked', metrics['Overall readiness']);
-    const cont = page.locator('button[form="install-form"]');
-    check('Continue is disabled while a required check fails', await cont.isDisabled());
-
-    const progress = await page.$eval('.progress', (el) => el.getAttribute('aria-valuenow'));
-    check('progress stays at 0% when step 1 has not passed', progress === '0', `aria-valuenow=${progress}`);
-    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => ({ cls: el.className, current: el.getAttribute('aria-current') })));
-    check('step 1 is marked as the current step', steps[0].current === 'step' && /step--current/.test(steps[0].cls), steps[0].cls);
-
-    const fixes = await page.textContent('.callout--bad') || '';
-    check('the failed checks are explained in plain language', failed.every((r) => fixes.includes(r.name)), fixes.replace(/\s+/g, ' ').slice(0, 120));
-    check('the fix text names no server path', !/\/home\/[a-z]|\/var\/www/.test(fixes));
+    const button = page.locator('button.btn');
+    check('the install button is disabled while a required check fails', await button.isDisabled());
+    const hint = (await page.textContent('h1') || '').trim();
+    check('the screen is still the original one', hint === 'Install your store', hint);
+    await assertOriginalDesign(page, 'blocked desktop');
+    await assertLayout(page, 'blocked @1280px');
     await snap(page, 'installer-blocked-desktop-1280px');
     report(errors, 'the blocked screen');
   });
 
   await area('2. The blocked screen is usable at 320–430px', async () => {
-    await phoneMatrix(browser, 'blocked');
+    await phoneMatrix(browser, 'blocked', () => '/install/', 'Install your store');
   });
 
   await page.close();
@@ -419,50 +427,68 @@ async function phaseRequirementsFail(browser) {
 // Phase: repair mode on an installed store
 // ---------------------------------------------------------------------------
 async function phaseRepair(browser) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: DESKTOP, height: 900 } });
   const errors = watch(page);
 
-  await area('1. An installed store serves the restricted repair screen', async () => {
+  await area('1. An installed store serves the original restricted repair card', async () => {
     const res = await page.goto(url('/install/'), { waitUntil: 'load' });
     check('the repair screen responds with HTTP 200', res && res.status() === 200, `status ${res && res.status()}`);
     const h1 = (await page.textContent('h1') || '').trim();
     check('the screen is titled Repair this store', h1 === 'Repair this store', h1);
-    const chip = (await page.textContent('.chip--mode') || '').trim();
-    check('the header names repair mode', /Repair mode/.test(chip), chip);
-    check('the restricted panel is present', (await page.textContent('#repair-title') || '').includes('already installed'));
-    check('the unlock panel is still offered to the owner', await page.locator('#unlock-form').count() === 1);
-    const steps = await page.$$eval('.steps .step', (els) => els.map((el) => el.className));
-    check('store configuration is shown as not part of a repair', /step--skipped/.test(steps[2]), steps[2]);
+    const headings = await page.$$eval('.card h2', (els) => els.map((el) => el.textContent.trim()));
+    check('the repair screen shows the original restricted and unlock cards',
+      JSON.stringify(headings) === JSON.stringify([
+        'Server requirements', 'Optional extensions',
+        'Restricted: this store is already installed', 'Store owner: unlock full setup',
+      ]), headings.join(' > '));
+
     // A repair works over the saved connection: the page must not offer a way
     // to enter different database credentials, and it must not echo the stored
     // password back into the markup.
-    const credentialFields = await page.$$eval('#repair-form input', (els) => els
+    const credentialFields = await page.$$eval('input', (els) => els
       .map((el) => el.getAttribute('name') || '')
       .filter((name) => ['db_host', 'db_name', 'db_user', 'db_pass'].includes(name)));
     check('the repair form accepts no database credentials', credentialFields.length === 0, credentialFields.join(', '));
-    const repairHtml = await page.content();
-    check('the saved database password is never written into the page',
-      !/not-a-real-password|root_test_password/.test(repairHtml));
-    const primary = page.locator('button[form="repair-form"]');
-    check('the primary action repairs the database instead of installing', (await primary.textContent() || '').includes('Repair database tables'));
-    check('the repair action is enabled', await primary.isEnabled());
+    const html = await page.content();
+    check('the saved database password is never written into the page', !/not-a-real-password|root_test_password/.test(html));
+    const repair = page.locator('button.btn').first();
+    check('the primary action repairs the database instead of installing', (await repair.textContent() || '').includes('Repair database tables'));
+    check('the owner unlock form is still offered', await page.locator('#install_unlock').count() === 1);
+
+    await assertOriginalDesign(page, 'repair desktop');
+    await assertLayout(page, 'repair @1280px');
+
+    // A wrong unlock text is refused with a plain message and changes nothing.
+    await page.fill('#install_unlock', 'definitely-not-the-token');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'load' }).catch(() => null), page.locator('button.btn').last().click()]);
+    const refusal = (await page.textContent('.alert--bad').catch(() => '') || '').replace(/\s+/g, ' ');
+    check('a wrong unlock text is refused in plain language', /did not match the file on the server/.test(refusal), refusal.slice(0, 120));
+    check('the refused unlock leaves the store uninstalled', !existsSync(join(ROOT, 'config', 'installed.lock')));
+
+    await assertLayout(page, 'repair after a refused unlock @1280px');
     await snap(page, 'installer-repair-desktop-1280px');
   });
 
-  await area('2. The repair runs over the saved connection', async () => {
+  await area('2. The repair screen is usable at 320–430px', async () => {
+    await phoneMatrix(browser, 'repair', () => '/install/', 'Repair this store');
+  });
+
+  await area('3. The repair runs over the saved connection', async () => {
+    await page.goto(url('/install/'), { waitUntil: 'load' });
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'load', timeout: 60000 }).catch(() => null),
-      page.click('button[form="repair-form"]'),
+      page.locator('button.btn').first().click(),
     ]);
-    const done = await page.waitForSelector('.panel--done', { timeout: 60000 }).catch(() => null);
-    const bad = (await page.textContent('.callout--bad').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 200);
+    const done = await page.waitForSelector('.card.done', { timeout: 60000 }).catch(() => null);
+    const bad = (await page.textContent('.alert--bad').catch(() => '') || '').replace(/\s+/g, ' ').slice(0, 200);
     check('the repair completed', !!done, done ? '' : bad);
     if (done) {
-      const notice = (await page.textContent('.callout--ok').catch(() => '') || '').replace(/\s+/g, ' ');
+      const notice = (await page.textContent('.card.done') || '').replace(/\s+/g, ' ');
       check('the repair reports what it did', /Database repaired against/.test(notice), notice.slice(0, 100));
-      check('the repair says the administrator was left untouched', /administrator account was left untouched/.test(notice), notice.slice(0, 140));
+      check('the repair says the administrator was left untouched', /administrator account was left untouched/.test(notice), notice.slice(0, 160));
       const store = await page.request.get(url('/index.php'));
       check('the store still loads after the repair', store.status() === 200, `status ${store.status()}`);
+      await assertLayout(page, 'repair completion @1280px');
     }
     await snap(page, 'installer-repair-done-desktop-1280px');
     report(errors, 'the repair session');

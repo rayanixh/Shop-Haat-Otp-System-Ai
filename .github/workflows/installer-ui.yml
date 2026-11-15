@@ -11,12 +11,14 @@ permissions:
   contents: write
 
 jobs:
-  # The installation wizard is the first screen a new owner sees, and the only
-  # page that runs before a database exists. This job drives it in a real
-  # browser: the requirements screen against the PHP build that is actually
-  # serving, the six phone widths the brief names, a complete installation
-  # through the redesigned form, the blocked screen produced by genuinely
-  # unwritable folders, and the restricted repair screen on the installed store.
+  # The installation page is the first screen a new owner sees, and the only
+  # page that runs before a database exists. This job drives the ORIGINAL page
+  # in a real browser: the requirements card against the PHP build that is
+  # actually serving, the six phone widths the brief names, a complete
+  # installation through the original form, the blocked state produced by
+  # genuinely unwritable folders, and the restricted repair card on an
+  # installed store. Every phase also measures the layout: no sideways scroll,
+  # nothing outside its card, no overlap, no clipped content.
   installer-ui:
     name: Installer UI (real install, phone widths, screenshots)
     runs-on: ubuntu-latest
@@ -67,7 +69,7 @@ jobs:
         run: |
           npm install --no-save --no-package-lock playwright@1.49.1
           npx playwright install --with-deps chromium
-      - name: Installer UI — requirements, phone widths, live installation
+      - name: Installer UI — original page, phone widths, live installation
         env:
           SH_INSTALL_PHASE: fresh
           SH_INSTALL_BASE_URL: http://127.0.0.1:8080
@@ -92,7 +94,7 @@ jobs:
               | while IFS= read -r line; do echo "::notice::installer: ${line//\%/\%25}"; done
           fi
           exit "$rc"
-      # The blocked screen is produced, never mocked: the three folders the
+      # The blocked state is produced, never mocked: the three folders the
       # installer checks are copied and made read-only for the runner account,
       # so is_writable() really returns false. The guard below refuses to treat
       # "the folders were still writable" as a passing test.
