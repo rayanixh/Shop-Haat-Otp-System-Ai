@@ -25,6 +25,11 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @320px: no requirement name overlaps its status
   PASS  blocked @320px: no content is clipped by its box
   PASS  blocked @320px: the heading is unchanged — Install your store
+  PASS  blocked @320px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @320px: every status starts on the same line as its label
+  PASS  blocked @320px: no status overlaps or undercuts its label
+  PASS  blocked @320px: every status is right-aligned in its row
+  PASS  blocked @320px: the status cells are text-aligned right — right
   PASS  blocked @320px: no button exceeds its container
   PASS  blocked @320px: every control is a comfortable touch target (>= 40px tall)
   PASS  blocked @360px: the page does not scroll sideways — scrollWidth 360/360, viewport 360
@@ -33,6 +38,11 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @360px: no requirement name overlaps its status
   PASS  blocked @360px: no content is clipped by its box
   PASS  blocked @360px: the heading is unchanged — Install your store
+  PASS  blocked @360px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @360px: every status starts on the same line as its label
+  PASS  blocked @360px: no status overlaps or undercuts its label
+  PASS  blocked @360px: every status is right-aligned in its row
+  PASS  blocked @360px: the status cells are text-aligned right — right
   PASS  blocked @360px: no button exceeds its container
   PASS  blocked @360px: every control is a comfortable touch target (>= 40px tall)
   PASS  blocked @375px: the page does not scroll sideways — scrollWidth 375/375, viewport 375
@@ -41,6 +51,11 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @375px: no requirement name overlaps its status
   PASS  blocked @375px: no content is clipped by its box
   PASS  blocked @375px: the heading is unchanged — Install your store
+  PASS  blocked @375px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @375px: every status starts on the same line as its label
+  PASS  blocked @375px: no status overlaps or undercuts its label
+  PASS  blocked @375px: every status is right-aligned in its row
+  PASS  blocked @375px: the status cells are text-aligned right — right
   PASS  blocked @375px: no button exceeds its container
   PASS  blocked @375px: every control is a comfortable touch target (>= 40px tall)
   PASS  blocked @390px: the page does not scroll sideways — scrollWidth 390/390, viewport 390
@@ -49,6 +64,11 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @390px: no requirement name overlaps its status
   PASS  blocked @390px: no content is clipped by its box
   PASS  blocked @390px: the heading is unchanged — Install your store
+  PASS  blocked @390px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @390px: every status starts on the same line as its label
+  PASS  blocked @390px: no status overlaps or undercuts its label
+  PASS  blocked @390px: every status is right-aligned in its row
+  PASS  blocked @390px: the status cells are text-aligned right — right
   PASS  blocked @390px: no button exceeds its container
   PASS  blocked @390px: every control is a comfortable touch target (>= 40px tall)
   PASS  blocked @412px: the page does not scroll sideways — scrollWidth 412/412, viewport 412
@@ -57,6 +77,11 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @412px: no requirement name overlaps its status
   PASS  blocked @412px: no content is clipped by its box
   PASS  blocked @412px: the heading is unchanged — Install your store
+  PASS  blocked @412px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @412px: every status starts on the same line as its label
+  PASS  blocked @412px: no status overlaps or undercuts its label
+  PASS  blocked @412px: every status is right-aligned in its row
+  PASS  blocked @412px: the status cells are text-aligned right — right
   PASS  blocked @412px: no button exceeds its container
   PASS  blocked @412px: every control is a comfortable touch target (>= 40px tall)
   PASS  blocked @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
@@ -65,8 +90,13 @@ ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:808
   PASS  blocked @430px: no requirement name overlaps its status
   PASS  blocked @430px: no content is clipped by its box
   PASS  blocked @430px: the heading is unchanged — Install your store
+  PASS  blocked @430px: every list row has a label and a status cell — 14 row(s)
+  PASS  blocked @430px: every status starts on the same line as its label
+  PASS  blocked @430px: no status overlaps or undercuts its label
+  PASS  blocked @430px: every status is right-aligned in its row
+  PASS  blocked @430px: the status cells are text-aligned right — right
   PASS  blocked @430px: no button exceeds its container
   PASS  blocked @430px: every control is a comfortable touch target (>= 40px tall)
 
-Installer UI (requirements-fail): 64 passed, 0 failed
+Installer UI (requirements-fail): 94 passed, 0 failed
 Screenshots: installer

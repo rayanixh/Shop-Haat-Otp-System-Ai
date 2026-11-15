@@ -31,6 +31,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @320px: no requirement name overlaps its status
   PASS  repair @320px: no content is clipped by its box
   PASS  repair @320px: the heading is unchanged — Repair this store
+  PASS  repair @320px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @320px: every status starts on the same line as its label
+  PASS  repair @320px: no status overlaps or undercuts its label
+  PASS  repair @320px: every status is right-aligned in its row
+  PASS  repair @320px: the status cells are text-aligned right — right
   PASS  repair @320px: no button exceeds its container
   PASS  repair @320px: every control is a comfortable touch target (>= 40px tall)
   PASS  repair @360px: the page does not scroll sideways — scrollWidth 360/360, viewport 360
@@ -39,6 +44,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @360px: no requirement name overlaps its status
   PASS  repair @360px: no content is clipped by its box
   PASS  repair @360px: the heading is unchanged — Repair this store
+  PASS  repair @360px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @360px: every status starts on the same line as its label
+  PASS  repair @360px: no status overlaps or undercuts its label
+  PASS  repair @360px: every status is right-aligned in its row
+  PASS  repair @360px: the status cells are text-aligned right — right
   PASS  repair @360px: no button exceeds its container
   PASS  repair @360px: every control is a comfortable touch target (>= 40px tall)
   PASS  repair @375px: the page does not scroll sideways — scrollWidth 375/375, viewport 375
@@ -47,6 +57,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @375px: no requirement name overlaps its status
   PASS  repair @375px: no content is clipped by its box
   PASS  repair @375px: the heading is unchanged — Repair this store
+  PASS  repair @375px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @375px: every status starts on the same line as its label
+  PASS  repair @375px: no status overlaps or undercuts its label
+  PASS  repair @375px: every status is right-aligned in its row
+  PASS  repair @375px: the status cells are text-aligned right — right
   PASS  repair @375px: no button exceeds its container
   PASS  repair @375px: every control is a comfortable touch target (>= 40px tall)
   PASS  repair @390px: the page does not scroll sideways — scrollWidth 390/390, viewport 390
@@ -55,6 +70,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @390px: no requirement name overlaps its status
   PASS  repair @390px: no content is clipped by its box
   PASS  repair @390px: the heading is unchanged — Repair this store
+  PASS  repair @390px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @390px: every status starts on the same line as its label
+  PASS  repair @390px: no status overlaps or undercuts its label
+  PASS  repair @390px: every status is right-aligned in its row
+  PASS  repair @390px: the status cells are text-aligned right — right
   PASS  repair @390px: no button exceeds its container
   PASS  repair @390px: every control is a comfortable touch target (>= 40px tall)
   PASS  repair @412px: the page does not scroll sideways — scrollWidth 412/412, viewport 412
@@ -63,6 +83,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @412px: no requirement name overlaps its status
   PASS  repair @412px: no content is clipped by its box
   PASS  repair @412px: the heading is unchanged — Repair this store
+  PASS  repair @412px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @412px: every status starts on the same line as its label
+  PASS  repair @412px: no status overlaps or undercuts its label
+  PASS  repair @412px: every status is right-aligned in its row
+  PASS  repair @412px: the status cells are text-aligned right — right
   PASS  repair @412px: no button exceeds its container
   PASS  repair @412px: every control is a comfortable touch target (>= 40px tall)
   PASS  repair @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
@@ -71,6 +96,11 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  repair @430px: no requirement name overlaps its status
   PASS  repair @430px: no content is clipped by its box
   PASS  repair @430px: the heading is unchanged — Repair this store
+  PASS  repair @430px: every list row has a label and a status cell — 14 row(s)
+  PASS  repair @430px: every status starts on the same line as its label
+  PASS  repair @430px: no status overlaps or undercuts its label
+  PASS  repair @430px: every status is right-aligned in its row
+  PASS  repair @430px: the status cells are text-aligned right — right
   PASS  repair @430px: no button exceeds its container
   PASS  repair @430px: every control is a comfortable touch target (>= 40px tall)
 
@@ -88,5 +118,5 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
   PASS  the repair session: no JavaScript exceptions
   PASS  the repair session: no failed requests (4xx/5xx/network)
 
-Installer UI (repair): 82 passed, 0 failed
+Installer UI (repair): 112 passed, 0 failed
 Screenshots: installer
