@@ -1,0 +1,72 @@
+ShopHaat installer UI — phase "requirements-fail" against http://127.0.0.1:8081
+
+1. Genuinely failed checks block the installation
+  PASS  the installer still responds with HTTP 200 when checks fail — status 200
+  PASS  the unwritable folders are reported as failed — /config writable=Not writable, /uploads writable=Not writable, /logs writable=Not writable
+  PASS  a failed row states what was detected — Not writable, Not writable, Not writable
+  PASS  the install button is disabled while a required check fails
+  PASS  the screen is still the original one — Install your store
+  PASS  blocked desktop: the redesigned step/progress/summary markup is not on the page
+  PASS  blocked desktop: the stylesheet never hides content with overflow:hidden
+  PASS  blocked desktop: the original brand colour, card radius and page width are unchanged — #e8501b / 10px / 820px
+  PASS  blocked @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  blocked @1280px: nothing sticks out of the viewport
+  PASS  blocked @1280px: every element stays inside its card
+  PASS  blocked @1280px: no requirement name overlaps its status
+  PASS  blocked @1280px: no content is clipped by its box
+  PASS  the blocked screen: no console errors
+  PASS  the blocked screen: no JavaScript exceptions
+  PASS  the blocked screen: no failed requests (4xx/5xx/network)
+
+2. The blocked screen is usable at 320–430px
+  PASS  blocked @320px: the page does not scroll sideways — scrollWidth 320/320, viewport 320
+  PASS  blocked @320px: nothing sticks out of the viewport
+  PASS  blocked @320px: every element stays inside its card
+  PASS  blocked @320px: no requirement name overlaps its status
+  PASS  blocked @320px: no content is clipped by its box
+  PASS  blocked @320px: the heading is unchanged — Install your store
+  PASS  blocked @320px: no button exceeds its container
+  PASS  blocked @320px: every control is a comfortable touch target (>= 40px tall)
+  PASS  blocked @360px: the page does not scroll sideways — scrollWidth 360/360, viewport 360
+  PASS  blocked @360px: nothing sticks out of the viewport
+  PASS  blocked @360px: every element stays inside its card
+  PASS  blocked @360px: no requirement name overlaps its status
+  PASS  blocked @360px: no content is clipped by its box
+  PASS  blocked @360px: the heading is unchanged — Install your store
+  PASS  blocked @360px: no button exceeds its container
+  PASS  blocked @360px: every control is a comfortable touch target (>= 40px tall)
+  PASS  blocked @375px: the page does not scroll sideways — scrollWidth 375/375, viewport 375
+  PASS  blocked @375px: nothing sticks out of the viewport
+  PASS  blocked @375px: every element stays inside its card
+  PASS  blocked @375px: no requirement name overlaps its status
+  PASS  blocked @375px: no content is clipped by its box
+  PASS  blocked @375px: the heading is unchanged — Install your store
+  PASS  blocked @375px: no button exceeds its container
+  PASS  blocked @375px: every control is a comfortable touch target (>= 40px tall)
+  PASS  blocked @390px: the page does not scroll sideways — scrollWidth 390/390, viewport 390
+  PASS  blocked @390px: nothing sticks out of the viewport
+  PASS  blocked @390px: every element stays inside its card
+  PASS  blocked @390px: no requirement name overlaps its status
+  PASS  blocked @390px: no content is clipped by its box
+  PASS  blocked @390px: the heading is unchanged — Install your store
+  PASS  blocked @390px: no button exceeds its container
+  PASS  blocked @390px: every control is a comfortable touch target (>= 40px tall)
+  PASS  blocked @412px: the page does not scroll sideways — scrollWidth 412/412, viewport 412
+  PASS  blocked @412px: nothing sticks out of the viewport
+  PASS  blocked @412px: every element stays inside its card
+  PASS  blocked @412px: no requirement name overlaps its status
+  PASS  blocked @412px: no content is clipped by its box
+  PASS  blocked @412px: the heading is unchanged — Install your store
+  PASS  blocked @412px: no button exceeds its container
+  PASS  blocked @412px: every control is a comfortable touch target (>= 40px tall)
+  PASS  blocked @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
+  PASS  blocked @430px: nothing sticks out of the viewport
+  PASS  blocked @430px: every element stays inside its card
+  PASS  blocked @430px: no requirement name overlaps its status
+  PASS  blocked @430px: no content is clipped by its box
+  PASS  blocked @430px: the heading is unchanged — Install your store
+  PASS  blocked @430px: no button exceeds its container
+  PASS  blocked @430px: every control is a comfortable touch target (>= 40px tall)
+
+Installer UI (requirements-fail): 64 passed, 0 failed
+Screenshots: installer

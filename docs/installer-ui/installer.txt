@@ -1,0 +1,139 @@
+ShopHaat installer UI — phase "fresh" against http://127.0.0.1:8080
+
+1. The original requirements card reports what this server really has
+  PASS  the installer responds with HTTP 200 — status 200
+  PASS  the page keeps its original title — Install your store
+  PASS  the cards are the original ones, in the original order — Server requirements > Optional extensions > Database connection > Website > Administrator account
+  PASS  there is exactly one page heading and no duplicate headings — 1 h1, 5 h2
+  PASS  the page has the two original lists (required and optional) — 2 list(s)
+  PASS  all seven required checks are listed — PHP 8.1 or newer, PDO extension, pdo_mysql driver, JSON extension, /config writable, /uploads writable, /logs writable
+  PASS  the seven required checks are the original ones — PHP 8.1 or newer | PDO extension | pdo_mysql driver | JSON extension | /config writable | /uploads writable | /logs writable
+  PASS  every required row is detected as passed on this host — PHP 8.1 or newer=8.2.35, PDO extension=Enabled, pdo_mysql driver=Enabled, JSON extension=Enabled, /config writable=Writable, /uploads writable=Writable, /logs writable=Writable
+  PASS  the PHP row shows the version the server actually runs — 8.2.35 vs expected 8.2.35
+
+2. Optional extensions stay separate, complete and never blocking
+  PASS  all seven optional extensions are listed — mbstring — Character-safe length/truncation, DOM / libxml — HTML sanitising for AI drafts, cURL — SMS + payment HTTP gateways, OpenSSL — SMTP TLS + secure tokens, GD — Image resizing / cropping, fileinfo — Upload MIME inspection, intl — Locale-aware formatting
+  PASS  every optional row names the extension and its purpose — mbstring — Character-safe length/truncation
+  PASS  every optional row says what is used instead when it is missing — Enabled, Enabled, Enabled, Enabled, Enabled, Enabled, Enabled
+  PASS  no optional extension is presented as an error
+  PASS  the optional section keeps one short explanation, no repeated guide text — Recommended, not required. Each row shows what is used when it is missing.
+
+3. The form keeps the existing fields, naming and CSRF protection
+  PASS  the form still contains #db_host — 1 match(es)
+  PASS  the form still contains #db_name — 1 match(es)
+  PASS  the form still contains #db_user — 1 match(es)
+  PASS  the form still contains #db_pass — 1 match(es)
+  PASS  the form still contains #site_name — 1 match(es)
+  PASS  the form still contains #site_logo — 1 match(es)
+  PASS  the form still contains #demo_on — 1 match(es)
+  PASS  the form still contains #demo_off — 1 match(es)
+  PASS  the form still contains #admin_email — 1 match(es)
+  PASS  the form still contains #admin_password — 1 match(es)
+  PASS  the form still contains #admin_password2 — 1 match(es)
+  PASS  the CSRF token is present in the form — 90f8a45f7f9e…
+  PASS  every input is associated with a label
+  PASS  Demo Data is still the explicit ON/OFF pair — 0, 1
+  PASS  the catalogue is off unless the operator turns it on
+  PASS  helper text stays to one short line per field — 18, 23, 75, 48
+  PASS  no server path leaks into the page
+
+4. The original design is intact on desktop
+  PASS  desktop: the redesigned step/progress/summary markup is not on the page
+  PASS  desktop: the stylesheet never hides content with overflow:hidden
+  PASS  desktop: the original brand colour, card radius and page width are unchanged — #e8501b / 10px / 820px
+  PASS  desktop @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  desktop @1280px: nothing sticks out of the viewport
+  PASS  desktop @1280px: every element stays inside its card
+  PASS  desktop @1280px: no requirement name overlaps its status
+  PASS  desktop @1280px: no content is clipped by its box
+  PASS  the requirements screen: no console errors
+  PASS  the requirements screen: no JavaScript exceptions
+  PASS  the requirements screen: no failed requests (4xx/5xx/network)
+
+5. Phone viewports 320–430px
+  PASS  requirements @320px: the page does not scroll sideways — scrollWidth 320/320, viewport 320
+  PASS  requirements @320px: nothing sticks out of the viewport
+  PASS  requirements @320px: every element stays inside its card
+  PASS  requirements @320px: no requirement name overlaps its status
+  PASS  requirements @320px: no content is clipped by its box
+  PASS  requirements @320px: the heading is unchanged — Install your store
+  PASS  requirements @320px: no button exceeds its container
+  PASS  requirements @320px: every control is a comfortable touch target (>= 40px tall)
+  PASS  requirements @360px: the page does not scroll sideways — scrollWidth 360/360, viewport 360
+  PASS  requirements @360px: nothing sticks out of the viewport
+  PASS  requirements @360px: every element stays inside its card
+  PASS  requirements @360px: no requirement name overlaps its status
+  PASS  requirements @360px: no content is clipped by its box
+  PASS  requirements @360px: the heading is unchanged — Install your store
+  PASS  requirements @360px: no button exceeds its container
+  PASS  requirements @360px: every control is a comfortable touch target (>= 40px tall)
+  PASS  requirements @375px: the page does not scroll sideways — scrollWidth 375/375, viewport 375
+  PASS  requirements @375px: nothing sticks out of the viewport
+  PASS  requirements @375px: every element stays inside its card
+  PASS  requirements @375px: no requirement name overlaps its status
+  PASS  requirements @375px: no content is clipped by its box
+  PASS  requirements @375px: the heading is unchanged — Install your store
+  PASS  requirements @375px: no button exceeds its container
+  PASS  requirements @375px: every control is a comfortable touch target (>= 40px tall)
+  PASS  requirements @390px: the page does not scroll sideways — scrollWidth 390/390, viewport 390
+  PASS  requirements @390px: nothing sticks out of the viewport
+  PASS  requirements @390px: every element stays inside its card
+  PASS  requirements @390px: no requirement name overlaps its status
+  PASS  requirements @390px: no content is clipped by its box
+  PASS  requirements @390px: the heading is unchanged — Install your store
+  PASS  requirements @390px: no button exceeds its container
+  PASS  requirements @390px: every control is a comfortable touch target (>= 40px tall)
+  PASS  requirements @412px: the page does not scroll sideways — scrollWidth 412/412, viewport 412
+  PASS  requirements @412px: nothing sticks out of the viewport
+  PASS  requirements @412px: every element stays inside its card
+  PASS  requirements @412px: no requirement name overlaps its status
+  PASS  requirements @412px: no content is clipped by its box
+  PASS  requirements @412px: the heading is unchanged — Install your store
+  PASS  requirements @412px: no button exceeds its container
+  PASS  requirements @412px: every control is a comfortable touch target (>= 40px tall)
+  PASS  requirements @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
+  PASS  requirements @430px: nothing sticks out of the viewport
+  PASS  requirements @430px: every element stays inside its card
+  PASS  requirements @430px: no requirement name overlaps its status
+  PASS  requirements @430px: no content is clipped by its box
+  PASS  requirements @430px: the heading is unchanged — Install your store
+  PASS  requirements @430px: no button exceeds its container
+  PASS  requirements @430px: every control is a comfortable touch target (>= 40px tall)
+
+6. A complete installation runs through the original form
+  PASS  no database configuration exists before the install
+  PASS  the store is not installed before the install
+  PASS  the installation completed through the original form
+  PASS  the completion screen is titled Installation complete — Installation complete
+  PASS  the completion card carries no second heading — 0 heading(s)
+  PASS  the completion screen reports the result the server computed —  Installation completed successfully. The installer is locked and will not run again. Dele
+  PASS  the completion screen still tells the owner to delete /install —  Installation completed successfully. The installer is locked and will not run again. Delete the /install folder from yo
+  PASS  the completion screen still links to the store and the admin panel
+  PASS  completion @1280px: the page does not scroll sideways — scrollWidth 1280/1280, viewport 1280
+  PASS  completion @1280px: nothing sticks out of the viewport
+  PASS  completion @1280px: every element stays inside its card
+  PASS  completion @1280px: no requirement name overlaps its status
+  PASS  completion @1280px: no content is clipped by its box
+  PASS  the installer wrote config/database.php
+  PASS  the installer wrote config/installed.lock
+  PASS  the lock file records the real installation — { "installed_at": "2026-11-15T13:37:04+06:00", "version": "1.0.0", "php": "8.2.35" }
+  PASS  a locked store no longer serves the installer — status 302 → /index.php
+  PASS  the storefront it just installed loads — status 200
+  PASS  the storefront shows the configured site name — Installer Test Store
+  PASS  the admin sign-in page loads — status 200
+  PASS  completion @320px: the page does not scroll sideways — scrollWidth 320/320, viewport 320
+  PASS  completion @320px: nothing sticks out of the viewport
+  PASS  completion @320px: every element stays inside its card
+  PASS  completion @320px: no requirement name overlaps its status
+  PASS  completion @320px: no content is clipped by its box
+  PASS  completion @430px: the page does not scroll sideways — scrollWidth 430/430, viewport 430
+  PASS  completion @430px: nothing sticks out of the viewport
+  PASS  completion @430px: every element stays inside its card
+  PASS  completion @430px: no requirement name overlaps its status
+  PASS  completion @430px: no content is clipped by its box
+  PASS  the whole fresh-install session: no console errors
+  PASS  the whole fresh-install session: no JavaScript exceptions
+  PASS  the whole fresh-install session: no failed requests (4xx/5xx/network)
+
+Installer UI (fresh): 123 passed, 0 failed
+Screenshots: installer
