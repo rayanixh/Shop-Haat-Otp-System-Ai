@@ -1,0 +1,209 @@
+ShopHaat support launcher — real browser run against http://127.0.0.1:8080
+
+1. The channels are configured in the existing support settings page
+  PASS  the administrator is signed in — /admin/dashboard.php
+  PASS  the existing settings page hosts the Facebook, WhatsApp and pre-filled message fields
+  PASS  the channel fields belong to the existing save_settings form (no second settings page)
+  PASS  a plain-http Facebook link is rejected with an explanation —  Facebook link: Only https:// Facebook links are accepted. Copy the secure link again. 
+  PASS  the accepted values are stored and shown again — https://m.me/ShopHaatSupport | https://wa.me/8801712345678 | Hi ShopHaat, I need help with my order.
+  PASS  the page reports both channels as available — Facebook: available / WhatsApp: available / Live chat: always available / Human-support SMS notifications are disabled. No message was sent.
+  PASS  the page states that live chat stays available
+  PASS  the admin settings session: no console errors
+  PASS  the admin settings session: no JavaScript exceptions
+  PASS  the admin settings session: no failed requests (4xx/5xx/network)
+
+2. The launcher is a compact circle on desktop
+  PASS  the launcher exists on the storefront
+  PASS  the launcher is a perfect circle (equal width and height) — 56x56
+  PASS  the launcher is compact (48–60px) — 56px
+  PASS  the launcher is round (border-radius 50%) — 50%
+  PASS  the launcher shows a chat icon only — no "Support" text — ""
+  PASS  the launcher has an accessible name — Open support options
+  PASS  the launcher is fixed and bottom-right anchored — right gap 16.0 bottom gap 16.0
+  PASS  the unread badge starts hidden
+  PASS  the launcher is collapsed before any interaction
+  PASS  the launcher menu starts hidden
+  PASS  the chat panel starts closed
+  PASS  exactly one launcher exists on the page
+  PASS  the brand colour is used for the circle — rgb(232, 80, 27)
+
+3. The menu slides up with exactly three options
+  PASS  the menu opens on launcher click
+  PASS  the launcher reports the open menu
+  PASS  the menu animates (opacity + transform transition) — opacity, transform, visibility
+  PASS  the menu is fully visible once open — 1
+  PASS  the menu sits directly above the launcher — menu bottom 816.0 / launcher top 827.0
+  PASS  exactly three options are offered — 3
+  PASS  the options are labelled Facebook, WhatsApp and Live Chat — Facebook,WhatsApp,Live Chat
+  PASS  every option has a brand icon
+  PASS  the labels stay readable — 13.5/13.5/13.5
+  PASS  the menu stays inside the viewport — top 660 right 1264 / vw 1280
+  PASS  opening the menu does not open the chat
+
+4. Facebook and WhatsApp really navigate to the configured destinations
+  PASS  Facebook points at the configured Messenger link — https://m.me/ShopHaatSupport
+  PASS  WhatsApp points at the configured number with the pre-filled message — https://wa.me/8801712345678?text=Hi%20ShopHaat%2C%20I%20need%20help%20with%20my%20order.
+  PASS  external options open in a new tab with noopener
+  PASS  Live Chat is a real button, not a link
+  PASS  clicking Facebook opens the Messenger destination — https://m.me/ShopHaatSupport
+  PASS  clicking WhatsApp opens the wa.me destination — https://wa.me/8801712345678?text=Hi%20ShopHaat%2C%20I%20need%20help%20with%20my%20order.
+
+5. The menu closes on selection, Escape and an outside click
+  PASS  Escape closes the menu
+  PASS  Escape returns focus to the launcher
+  PASS  the shop page is still visible after closing the menu
+  PASS  an outside click closes the menu without opening the chat
+
+6. Live Chat opens the existing chat and still answers
+  PASS  the existing chat start call succeeds
+  PASS  Live Chat opens the existing panel
+  PASS  the menu folds away when the chat opens
+  PASS  the existing chat header, new-conversation and close controls are intact — Customer Support
+  PASS  Talk to a human is still offered — Talk to a human
+  PASS  the composer is still there
+  PASS  the customer message and a reply both render — You4:08 AMDo you deliver to Dhaka?···Support is checking the store data… :: 200 {"ok":true,"conversation":{"id":1,"status":"open","human":false,"ai_paused":false,"assigned_admin_id":0},"messages":[],"suggestions":[]}
+  PASS  the existing chat answers the customer after the launcher change — You4:08 AMDo you deliver to Dhaka?···Support is checking the store data…
+  PASS  no message is shown as failed
+  PASS  Talk to a human still escalates the same conversation — Your request has been recorded in the support inbox. This is not a live-availability indicator; the team will review it 
+  FAIL  the desktop storefront session: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2
+  PASS  the desktop storefront session: no JavaScript exceptions
+  PASS  the desktop storefront session: no failed requests (4xx/5xx/network)
+
+320px phone
+  PASS  320px: the launcher is still a circle — 56x56
+  PASS  320px: the launcher keeps a safe right margin — 12.0px
+  PASS  320px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  320px: no page-wide horizontal scroll — 320 / 320
+  PASS  320px: the launcher shows no "Support" text — ""
+  PASS  320px: the open menu stays inside the viewport — top 422 left 60 right 308 bottom 578
+  PASS  320px: the menu clears the launcher
+  PASS  320px: the menu never widens the page — 320 / 320
+  PASS  320px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  320px: Escape closes the menu
+  PASS  320px: the closed menu leaves no overflow
+  FAIL  320px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ
+  PASS  320px: no JavaScript exceptions
+  PASS  320px: no failed requests (4xx/5xx/network)
+
+360px phone
+  PASS  360px: the launcher is still a circle — 56x56
+  PASS  360px: the launcher keeps a safe right margin — 12.0px
+  PASS  360px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  360px: no page-wide horizontal scroll — 360 / 360
+  PASS  360px: the launcher shows no "Support" text — ""
+  PASS  360px: the open menu stays inside the viewport — top 422 left 100 right 348 bottom 578
+  PASS  360px: the menu clears the launcher
+  PASS  360px: the menu never widens the page — 360 / 360
+  PASS  360px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  360px: Escape closes the menu
+  PASS  360px: the closed menu leaves no overflow
+  FAIL  360px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99
+  PASS  360px: no JavaScript exceptions
+  PASS  360px: no failed requests (4xx/5xx/network)
+
+375px phone
+  PASS  375px: the launcher is still a circle — 56x56
+  PASS  375px: the launcher keeps a safe right margin — 12.0px
+  PASS  375px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  375px: no page-wide horizontal scroll — 375 / 375
+  PASS  375px: the launcher shows no "Support" text — ""
+  PASS  375px: the open menu stays inside the viewport — top 422 left 115 right 363 bottom 578
+  PASS  375px: the menu clears the launcher
+  PASS  375px: the menu never widens the page — 375 / 375
+  PASS  375px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  375px: Escape closes the menu
+  PASS  375px: the closed menu leaves no overflow
+  FAIL  375px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy
+  PASS  375px: no JavaScript exceptions
+  PASS  375px: no failed requests (4xx/5xx/network)
+
+390px phone
+  PASS  390px: the launcher is still a circle — 56x56
+  PASS  390px: the launcher keeps a safe right margin — 12.0px
+  PASS  390px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  390px: no page-wide horizontal scroll — 390 / 390
+  PASS  390px: the launcher shows no "Support" text — ""
+  PASS  390px: the open menu stays inside the viewport — top 422 left 130 right 378 bottom 578
+  PASS  390px: the menu clears the launcher
+  PASS  390px: the menu never widens the page — 390 / 390
+  PASS  390px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  390px: Escape closes the menu
+  PASS  390px: the closed menu leaves no overflow
+  FAIL  390px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV
+  PASS  390px: no JavaScript exceptions
+  PASS  390px: no failed requests (4xx/5xx/network)
+
+412px phone
+  PASS  412px: the launcher is still a circle — 56x56
+  PASS  412px: the launcher keeps a safe right margin — 12.0px
+  PASS  412px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  412px: no page-wide horizontal scroll — 412 / 412
+  PASS  412px: the launcher shows no "Support" text — ""
+  PASS  412px: the open menu stays inside the viewport — top 422 left 152 right 400 bottom 578
+  PASS  412px: the menu clears the launcher
+  PASS  412px: the menu never widens the page — 412 / 412
+  PASS  412px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  412px: Escape closes the menu
+  PASS  412px: the closed menu leaves no overflow
+  FAIL  412px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5
+  PASS  412px: no JavaScript exceptions
+  PASS  412px: no failed requests (4xx/5xx/network)
+
+430px phone
+  PASS  430px: the launcher is still a circle — 56x56
+  PASS  430px: the launcher keeps a safe right margin — 12.0px
+  PASS  430px: the launcher keeps a safe bottom margin — 74.0px
+  PASS  430px: no page-wide horizontal scroll — 430 / 430
+  PASS  430px: the launcher shows no "Support" text — ""
+  PASS  430px: the open menu stays inside the viewport — top 422 left 170 right 418 bottom 578
+  PASS  430px: the menu clears the launcher
+  PASS  430px: the menu never widens the page — 430 / 430
+  PASS  430px: all three options are present and readable — 13.5/13.5/13.5
+  PASS  430px: Escape closes the menu
+  PASS  430px: the closed menu leaves no overflow
+  FAIL  430px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO
+  PASS  430px: no JavaScript exceptions
+  PASS  430px: no failed requests (4xx/5xx/network)
+
+Keyboard control
+  PASS  the launcher is reachable by keyboard — sh-schat-fab
+  PASS  the focused launcher shows a visible focus ring — solid 2px
+  PASS  Enter opens the menu
+  PASS  focus moves into the menu
+  PASS  ArrowDown moves to the next option
+  PASS  ArrowUp moves back
+  PASS  End jumps to the last option
+  PASS  Escape closes and refocuses the launcher
+  PASS  the keyboard session: no console errors
+  PASS  the keyboard session: no JavaScript exceptions
+  PASS  the keyboard session: no failed requests (4xx/5xx/network)
+
+Reduced motion
+  PASS  reduced motion: the menu still opens
+  PASS  reduced motion: the slide/fade transition is removed — none
+  PASS  reduced motion: the menu still closes
+
+Unconfigured channels degrade honestly, Live Chat keeps working
+  PASS  clearing both links is accepted — Facebook: not configured / WhatsApp: not configured / Live chat: always available / Human-support SMS notifications are disabled. No message was sent.
+  PASS  an unconfigured store still shows three options
+  PASS  the unconfigured options are marked unavailable
+  PASS  Live Chat stays enabled
+  PASS  Live Chat opens even when nothing else is configured
+  FAIL  the unconfigured storefront: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT
+  PASS  the unconfigured storefront: no JavaScript exceptions
+  PASS  the unconfigured storefront: no failed requests (4xx/5xx/network)
+
+Restore the configuration for the next run
+  PASS  the store is left configured
+
+Support launcher UI: 156 passed, 8 failed
+Failures:
+  - the desktop storefront session: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-TbTu07O2
+  - 320px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-rcVByHhZ
+  - 360px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-epXERL99
+  - 375px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-qUBw3gcy
+  - 390px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-lZFwQ6mV
+  - 412px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5 | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-E5-Ipwr5
+  - 430px: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-vyChTrxO
+  - the unconfigured storefront: no console errors — [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT | [Report Only] Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source of script in the following Content Security Policy directive: "script-src 'self' 'nonce-g1ntyGpT
+Screenshots: support-launcher
