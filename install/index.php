@@ -412,7 +412,7 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
 .btn:hover{background:#cf4415}
 .btn[disabled]{background:#b9bec9;cursor:not-allowed}
 .req{list-style:none;margin:0;padding:0}
-.req li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13.5px;flex-wrap:wrap}
+.req li{display:grid;grid-template-columns:minmax(0,1fr) fit-content(50%);column-gap:14px;align-items:start;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
 .req li:last-child{border-bottom:0}
 .ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}.warn{color:#a15c07;font-weight:600}
 .alert{border-radius:7px;padding:12px 14px;font-size:13.5px;margin-bottom:16px;border:1px solid}
@@ -436,10 +436,8 @@ label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
    hidden — the row simply grows taller, and the status keeps its own space. */
 .wrap{width:100%;min-width:0}
 .card{min-width:0}
-.req li{gap:6px 12px;align-items:baseline}
 .req li>span{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
-.req li>span:first-child{flex:1 1 auto}
-.req li>span:last-child{flex:0 1 auto;margin-left:auto;text-align:right}
+.req li>span:last-child{justify-self:end;text-align:right;white-space:normal}
 .card h2,.head h1,.head p,.card p,.alert,.hint,label,.check,.done{overflow-wrap:anywhere}
 code{overflow-wrap:anywhere;word-break:break-word}
 .btn{max-width:100%;white-space:normal}
@@ -487,9 +485,6 @@ code{overflow-wrap:anywhere;word-break:break-word}
       <?php endforeach; ?>
     </ul>
     <h2 style="margin-top:18px">Optional extensions</h2>
-    <p style="margin:0 0 10px;font-size:12.5px;color:#5b6472">
-      Recommended, not required. Each row shows what is used when it is missing.
-    </p>
     <ul class="req">
       <?php foreach ($optionalRequirements as $r): ?>
         <li><span><?= e($r['label']) ?></span><span class="<?= $r['ok'] ? 'ok' : 'warn' ?>"><?= e($r['value']) ?></span></li>

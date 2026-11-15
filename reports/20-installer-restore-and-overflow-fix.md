@@ -69,13 +69,12 @@ matters — the status column — is geometry-checked (see §4).
 * The completion card repeated the page title: `<h1>Installation complete</h1>` was
   followed by `<h2>Setup finished</h2>`. The second heading is gone; the two sentences
   under it stay.
-* The optional-extensions paragraph was two lines saying the same thing twice
-  (“These are recommended, not required. Each row shows the behaviour used when the
-  extension is missing; nothing is silently disabled.”) and is now one line:
-  “Recommended, not required. Each row shows what is used when it is missing.”
-* Nothing else was trimmed: every requirement row, every install instruction, the
+* The optional-extensions paragraph (two lines of explanation under the heading)
+  was removed entirely on request — the list now follows its heading directly.
+  Nothing else was trimmed: every requirement row, every install instruction, the
   restricted-repair explanation and the owner-unlock instructions are intact, and all
   error messages remain.
+
 
 ### The result the server computed is now shown
 
@@ -112,6 +111,7 @@ layout: for every state and every width it measures the rendered page.
 | viewport containment | any element’s box outside `[0, viewport]` |
 | **card containment** | any element inside a card outside that card’s content box (padding-aware) |
 | **overlap** | a requirement’s name box intersecting its status box |
+| **status row** | a status whose top differs from its label’s top by more than 2 px (it wrapped underneath), a status not flush to its row’s right edge, a status that is not right-aligned |
 | clipping | any element whose `scrollWidth` exceeds its `clientWidth` under a clipping `overflow` |
 | buttons | any `.btn` / `.actions a` wider than its parent or outside it; any control under 40 px tall |
 | stylesheet | any `overflow:hidden` rule |
@@ -154,11 +154,10 @@ pass unchanged.
 
 ## 6. Residual notes
 
-* At 320 px a long optional-extension name takes the full width of its row and the
-  status moves to the right of the second line (visible in
-  `installer-requirements-320px.png`). That is the original flex-wrap behaviour; the
-  alternative — shrinking the status — is what produced the squeezing the brief
-  complains about.
+* The rows are a two-column grid (`minmax(0,1fr) fit-content(50%)`), so a wrapped
+  label never pushes its status onto another line: the status stays on the row and at
+  the right edge by construction, and only very long status text (an optional
+  extension's “Fallback: …” sentence) wraps inside its own column.
 * The page has no JavaScript beyond the original password-length hint, so there is
   nothing else that can overflow at runtime.
 * `reports/18-installer-ui-redesign.md` is kept as a record and marked superseded.

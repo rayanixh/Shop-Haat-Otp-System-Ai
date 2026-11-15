@@ -183,6 +183,40 @@ async function assertLayout(page, label) {
   return scan;
 }
 
+/**
+ * Every status belongs to its own row: it starts on the same horizontal line
+ * as the label it describes, sits at the right edge of that row and is
+ * right-aligned. A wrapped label must never push the status underneath it.
+ */
+async function assertStatusRows(page, label) {
+  const rows = await page.evaluate(() => [...document.querySelectorAll('.req li')].map((li) => {
+    const name = li.children[0].getBoundingClientRect();
+    const status = li.children[1].getBoundingClientRect();
+    const row = li.getBoundingClientRect();
+    return {
+      text: li.children[0].textContent.trim().slice(0, 44),
+      value: li.children[1].textContent.trim().slice(0, 24),
+      nameTop: Math.round(name.top), statusTop: Math.round(status.top),
+      statusLeft: status.left, nameRight: name.right,
+      statusRight: status.right, rowRight: row.right,
+      align: getComputedStyle(li.children[1]).textAlign,
+    };
+  }));
+  check(`${label}: every list row has a label and a status cell`, rows.length === 14, `${rows.length} row(s)`);
+  const wrapped = rows.filter((r) => Math.abs(r.statusTop - r.nameTop) > 2);
+  check(`${label}: every status starts on the same line as its label`, wrapped.length === 0,
+    wrapped.map((r) => `${r.text}… [label ${r.nameTop} vs status ${r.statusTop}]`).join(' | '));
+  const beside = rows.filter((r) => r.statusLeft < r.nameRight - 1);
+  check(`${label}: no status overlaps or undercuts its label`, beside.length === 0,
+    beside.map((r) => r.text).join(' | '));
+  const notRight = rows.filter((r) => Math.abs(r.statusRight - r.rowRight) > 1.5);
+  check(`${label}: every status is right-aligned in its row`, notRight.length === 0,
+    notRight.map((r) => `${r.value} [${Math.round(r.statusRight)} vs ${Math.round(r.rowRight)}]`).join(' | '));
+  check(`${label}: the status cells are text-aligned right`, rows.every((r) => r.align === 'right'),
+    [...new Set(rows.map((r) => r.align))].join(', '));
+  return rows;
+}
+
 async function phoneMatrix(browser, label, pathFor = () => '/install/', expectHeading = null) {
   for (const width of MOBILE) {
     const page = await browser.newPage({ viewport: { width, height: 760 } });
@@ -192,6 +226,7 @@ async function phoneMatrix(browser, label, pathFor = () => '/install/', expectHe
       const h1 = (await page.textContent('h1') || '').trim();
       check(`${label} @${width}px: the heading is unchanged`, h1 === expectHeading, h1);
     }
+    await assertStatusRows(page, `${label} @${width}px`);
     // A button may never be wider than the card it sits in, and it must stay a
     // comfortable target.
     const buttons = await page.evaluate(() => [...document.querySelectorAll('.btn, .actions a')].map((el) => {
@@ -281,8 +316,18 @@ async function phaseFresh(browser) {
       optional.every((o) => /^(Enabled|Fallback: .+|Not enabled)$/.test(o.value)), optional.map((o) => o.value).join(', '));
     check('no optional extension is presented as an error', optional.every((o) => o.valueCls === 'ok' || o.valueCls === 'warn'),
       optional.filter((o) => o.valueCls !== 'ok' && o.valueCls !== 'warn').map((o) => o.name).join(', '));
-    const blurb = (await page.$$eval('.card p', (els) => els.map((el) => el.textContent.replace(/\s+/g, ' ').trim()))).find((t) => /Recommended, not required/.test(t));
-    check('the optional section keeps one short explanation, no repeated guide text', !!blurb && blurb.length < 90, blurb || 'missing');
+    // The optional list explains itself: the explanatory paragraph under the
+    // heading was removed on request and must not come back.
+    const optionalCard = (await page.textContent('.card') || '').replace(/\s+/g, ' ');
+    check('the optional-extensions blurb is gone', !/Recommended, not required|These are recommended/i.test(optionalCard),
+      (optionalCard.match(/[^.]*recommended[^.]*\./i) || [''])[0].slice(0, 90));
+    const afterHeading = await page.evaluate(() => {
+      const heading = [...document.querySelectorAll('.card h2')].find((el) => /Optional extensions/i.test(el.textContent));
+      if (!heading) { return null; }
+      const next = heading.nextElementSibling;
+      return next ? next.tagName.toLowerCase() : null;
+    });
+    check('the optional list follows its heading directly', afterHeading === 'ul', afterHeading || 'nothing after the heading');
   });
 
   await area('3. The form keeps the existing fields, naming and CSRF protection', async () => {
@@ -311,6 +356,7 @@ async function phaseFresh(browser) {
   await area('4. The original design is intact on desktop', async () => {
     await assertOriginalDesign(page, 'desktop');
     await assertLayout(page, 'desktop @1280px');
+    await assertStatusRows(page, 'desktop @1280px');
     await snap(page, 'installer-desktop-1280px');
     report(errors, 'the requirements screen');
   });
