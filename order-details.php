@@ -115,8 +115,10 @@ require_once SH_ROOT . '/includes/header.php';
         <a class="sh-btn sh-btn--block" style="margin-top:12px" href="<?= e(sh_url('payment.php?id=' . $orderId)) ?>">
           <?= sh_icon('credit-card', 15) ?> Complete payment</a>
       <?php endif; ?>
+      <?php if (!empty($shSupportVisibility['show_support_links'])): ?>
       <a class="sh-btn sh-btn--ghost sh-btn--block" style="margin-top:8px" href="<?= e(sh_url('support.php')) ?>">
         <?= sh_icon('headphones', 15) ?> Need help with this order</a>
+      <?php endif; ?>
     </aside>
   </div>
 </div>

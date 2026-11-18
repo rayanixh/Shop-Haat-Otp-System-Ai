@@ -91,13 +91,13 @@ if ($dsn === '') {
     $looksLikeTest = preg_match('~(test|testing|staging|stage|scratch|ci|tmp|sandbox)~i', $dbName) === 1;
     $looksProduction = preg_match('~(^|[^a-z])(prod|production|live|main|master)([^a-z]|$)~i', $dbName) === 1;
 
-    if ($looksProduction && getenv('SH_TEST_MYSQL_FORCE') !== '1') {
+    if ($looksProduction) {
         $refuse("the database is named \"{$dbName}\", which looks like real data. "
-            . 'Use a scratch database such as shophaat_staging_test.');
+            . 'Production-looking database names cannot be overridden. Use a dedicated scratch database.');
     }
-    if (!$looksLikeTest && getenv('SH_TEST_ALLOW_ANY_DB') !== '1') {
+    if (!$looksLikeTest) {
         $refuse("the database \"{$dbName}\" is not named like a test database (test/staging/scratch/ci). "
-            . 'Set SH_TEST_ALLOW_ANY_DB=1 only if you are certain it is disposable.');
+            . 'Production safety cannot be overridden for this destructive suite.');
     }
     mi_pass('target database is identifiable as disposable', $dbName);
 
@@ -206,7 +206,9 @@ if ($pdo === null) {
         mi_blocked($scenario, 'no MySQL/MariaDB connection in this environment');
     }
     mi_summary();
-    exit(0);
+    // This is a MySQL/MariaDB integration suite, not an optional SQLite suite.
+    // Returning success here made an unavailable database look like a green CI run.
+    exit(4);
 }
 
 // ---------------------------------------------------------------------------
@@ -568,5 +570,7 @@ function mi_summary(): void
     echo "\nA pass here proves this engine. It does NOT prove the other one:\n"
         . "MySQL and MariaDB differ in information_schema, index limits, NOWAIT support and\n"
         . "DUPLICATE-KEY behaviour after a rollback. Run the suite once on each before claiming both.\n";
-    exit($GLOBALS['fail'] > 0 ? 1 : 0);
+    exit($GLOBALS['fail'] > 0
+        || (getenv('SH_TEST_REQUIRE_ENGINE') === '1' && $GLOBALS['blocked'] > 0)
+        ? 1 : 0);
 }

@@ -30,6 +30,10 @@ jobs:
         run: php tools/security-scan.php --fail-on=high
       - name: Security regression suite
         run: php tests/security-regression.php
+      - name: Backup scheduler failure, retry, lock and retention checks
+        run: php tests/backup-scheduler.php
+      - name: Upload content and Apache/LiteSpeed execution guards
+        run: php tests/uploads.php
       # Pure support-chat logic with no database or network: language/intent
       # routing, verified-fact composition, the AI output guard, secret-safe
       # message shapes and the static CSRF/permission/no-scroll-box wiring.
@@ -66,6 +70,7 @@ jobs:
       - name: Custom Admin Access URL integration
         env:
           SH_TEST_PHP_BIN: php
+          SH_TEST_FAIL_ON_BLOCKED: '1'
         run: php tests/admin-access-url.php
       # The shipped CLI token parser is executed with real argv/env/$_GET: the
       # documented cPanel command resolves its token, the old
@@ -75,6 +80,7 @@ jobs:
       - name: Cron CLI authentication
         env:
           SH_TEST_PHP_BIN: php
+          SH_TEST_FAIL_ON_BLOCKED: '1'
         run: php tests/cron-cli-auth.php
       # The "move the OTP pepper out of the database" button. The first run is a
       # normal account, so every permission check really executes; the second
@@ -199,6 +205,9 @@ jobs:
     name: PHP and MySQL reports and timeline workflow
     needs: security-regression
     runs-on: ubuntu-latest
+    env:
+      SH_TEST_ALLOW_DESTRUCTIVE: '1'
+      SH_TEST_FAIL_ON_BLOCKED: '1'
     services:
       mysql:
         image: mysql:8.0
@@ -360,6 +369,9 @@ jobs:
       - name: Backup to restore rehearsal against a scratch database
         env:
           SH_TEST_PHP_BIN: php
+          SH_TEST_ALLOW_DESTRUCTIVE: '1'
+          SH_TEST_REQUIRE_MYSQL: '1'
+          SH_TEST_MYSQL_ALLOW_DROP: '1'
           SH_TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=shophaat_reporting_test;charset=utf8mb4'
           SH_TEST_MYSQL_USER: shophaat_test
           SH_TEST_MYSQL_PASS: shophaat_test_password
@@ -498,6 +510,7 @@ jobs:
       - name: Seed the store through the application installer path
         env:
           SH_BROWSER_SEED: '1'
+          SH_TEST_ALLOW_DESTRUCTIVE: '1'
           SH_BROWSER_HOST: 127.0.0.1:8080
         # The seed's counts decide whether an empty storefront is a seeding
         # problem or a rendering problem, so they go on the run, not in the log.

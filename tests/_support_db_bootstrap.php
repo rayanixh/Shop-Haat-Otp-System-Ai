@@ -87,8 +87,29 @@ class ShTestPDO extends PDO
 
 $GLOBALS['sh_test_mysql'] = false;
 $dsn = getenv('SH_TEST_MYSQL_DSN');
-if (is_string($dsn) && $dsn !== '' && extension_loaded('pdo_mysql')) {
-    $pdo = new ShTestPDO($dsn, (string)getenv('SH_TEST_MYSQL_USER'), (string)getenv('SH_TEST_MYSQL_PASS'));
+if (is_string($dsn) && $dsn !== '') {
+    if (!extension_loaded('pdo_mysql')) {
+        fwrite(STDERR, "BLOCKED: SH_TEST_MYSQL_DSN was supplied but pdo_mysql is unavailable; refusing SQLite substitution.\n");
+        exit(2);
+    }
+    if (preg_match('~dbname=([^;]+)~', $dsn, $dbMatch) !== 1
+        || preg_match('/(?:^|[_-])(?:test|testing|ci|scratch|disposable)(?:$|[_-])/i', trim($dbMatch[1] ?? '')) !== 1
+        || preg_match('/(?:^|[_-])(?:prod|production|live|master|main)(?:$|[_-])/i', trim($dbMatch[1] ?? '')) === 1
+        || getenv('SH_TEST_ALLOW_DESTRUCTIVE') !== '1') {
+        fwrite(STDERR, "BLOCKED: destructive MySQL test requires an unambiguously disposable DSN and SH_TEST_ALLOW_DESTRUCTIVE=1.\n");
+        exit(3);
+    }
+    try {
+        $pdo = new ShTestPDO($dsn, (string)getenv('SH_TEST_MYSQL_USER'), (string)getenv('SH_TEST_MYSQL_PASS'));
+        $actualDb = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        if (!hash_equals(trim($dbMatch[1]), $actualDb)) {
+            fwrite(STDERR, "BLOCKED: connected MySQL database does not match the disposable DSN.\n");
+            exit(3);
+        }
+    } catch (Throwable $e) {
+        fwrite(STDERR, "BLOCKED: real MySQL preflight failed; no test mutations were started.\n");
+        exit(2);
+    }
     $GLOBALS['sh_test_mysql'] = true;
 } elseif (extension_loaded('pdo_sqlite')) {
     $pdo = new ShTestPDO('sqlite::memory:');
@@ -269,6 +290,21 @@ function sh_test_uuid(): string
     return substr($h, 0, 8) . '-' . substr($h, 8, 4) . '-' . substr($h, 12, 4) . '-' . substr($h, 16, 4) . '-' . substr($h, 20);
 }
 
+/** Detect the application's generic HTML 500 response in a test transcript. */
+function sh_test_contains_generic_500(string $output): bool
+{
+    return preg_match('~<p\b[^>]*class=["\'][^"\']*\berror-code\b[^"\']*["\'][^>]*>\s*Error\s+500\b~i', $output) === 1
+        || preg_match('~<title>\s*Something went wrong\s*\|\s*ShopHaat\s*</title>~i', $output) === 1;
+}
+
+/** Required suites may opt in to a non-zero result if any check is blocked. */
+function sh_test_exit_code(int $failed, int $blocked): int
+{
+    if ($failed > 0) { return 1; }
+    if ($blocked > 0 && getenv('SH_TEST_FAIL_ON_BLOCKED') === '1') { return 4; }
+    return 0;
+}
+
 /** Minimal assertion runner shared by both suites. */
 function sh_test_run(string $title, callable $fn): array
 {
@@ -278,6 +314,10 @@ function sh_test_run(string $title, callable $fn): array
         $failed++; $failures[] = $msg; echo "  FAIL  $msg\n";
     };
     $eq = static function ($expected, $actual, string $msg) use ($ok): void {
+        if (is_string($actual) && sh_test_contains_generic_500($actual)) {
+            $ok(false, $msg . ' (received generic Error 500 HTML, not a successful response)');
+            return;
+        }
         $ok($expected === $actual, $msg . ' (expected ' . var_export($expected, true) . ', got ' . var_export($actual, true) . ')');
     };
     // BLOCKED is not a failure of the application: the environment could not run
@@ -290,7 +330,21 @@ function sh_test_run(string $title, callable $fn): array
         echo '  BLOCKED ' . $msg . ($reason !== '' ? ' — ' . $reason : '') . "\n";
     };
     echo $title . "\n" . str_repeat('-', min(72, strlen($title))) . "\n";
-    $fn($ok, $eq, $blockedFn);
+    ob_start();
+    try {
+        $fn($ok, $eq, $blockedFn);
+    } catch (Throwable $e) {
+        $failed++;
+        $failures[] = 'test harness threw ' . get_class($e);
+        echo "  FAIL  test harness threw " . get_class($e) . "\n";
+    }
+    $transcript = (string)ob_get_clean();
+    if (sh_test_contains_generic_500($transcript)) {
+        $failed++;
+        $failures[] = 'generic Error 500 HTML was emitted during the test';
+        echo "  FAIL  generic Error 500 HTML was emitted during the test; response is not a pass\n";
+    }
+    echo $transcript;
     echo "\n$title: passed $passed, failed $failed" . ($blocked > 0 ? ", blocked $blocked" : '') . "\n";
     if ($failures) { echo "Failures:\n - " . implode("\n - ", $failures) . "\n"; }
     if ($blocks) { echo "Blocked:\n - " . implode("\n - ", $blocks) . "\n"; }

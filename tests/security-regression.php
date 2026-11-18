@@ -3175,29 +3175,68 @@ sh_t('the AI navigation wraps in normal page flow and the card test area is flat
     return true;
 });
 
-sh_t('no PHP file prints stray text around its tags (that corrupts JSON API responses)', function () {
-    // A line placed before <?php is emitted as literal output. One such line in
-    // ai/providers/AIHttpClient.php prepended source code to every API response
-    // that loaded the class, so the support chat's own JSON became unparseable
-    // and the customer saw "Could not send right now… Retry" on a message the
-    // server had actually saved. Nothing may sit outside the PHP tags.
+function sh_security_php_file_kind(string $relativePath): string
+{
+    // Explicit mixed PHP/HTML views inside otherwise PHP-only directories.
+    $viewPartials = [
+        'includes/account-nav.php', 'includes/footer.php', 'includes/header.php',
+        'includes/otp-modal.php', 'includes/product-card.php', 'includes/support-widget.php',
+        'install/index.php',
+    ];
+    if (in_array($relativePath, $viewPartials, true)) { return 'template'; }
+    if (preg_match('#^(?:ai|api|config|includes|cron|tools|install|lib)/#', $relativePath) === 1) {
+        return 'php-only';
+    }
+    return 'page-template-or-test';
+}
+
+function sh_security_php_inline_output(string $source, string $kind): ?string
+{
+    if (!str_starts_with(ltrim($source), '<?php')) { return 'content before opening PHP tag'; }
+    $hasMarkup = false;
+    foreach (token_get_all($source) as $token) {
+        if (!is_array($token) || $token[0] !== T_INLINE_HTML || $token[1] === '') { continue; }
+        if (trim($token[1]) !== '') { $hasMarkup = true; }
+        // PHP-only code (especially APIs, config, cron and libraries) must not
+        // emit even whitespace outside PHP: it can corrupt headers and JSON.
+        if ($kind === 'php-only') { return 'inline output outside PHP tags'; }
+    }
+    if ($kind === 'template' && !$hasMarkup) { return 'expected mixed-view markup was not found'; }
+    return null;
+}
+
+sh_t('PHP-only libraries and endpoints cannot emit output; view templates may render HTML', function () {
+    // The support widget is a mixed PHP/HTML view. APIs, configuration, cron
+    // scripts and libraries remain PHP-only, where even a closing-tag newline
+    // can corrupt headers or JSON.
+    if (sh_security_php_file_kind('includes/support-widget.php') !== 'template') {
+        return 'includes/support-widget.php must be classified as an intentional template';
+    }
+    foreach (['api/support.php', 'config/config.php', 'cron/backup.php', 'includes/functions.php'] as $phpOnly) {
+        if (sh_security_php_file_kind($phpOnly) !== 'php-only') {
+            return $phpOnly . ' must remain in the PHP-only output scan';
+        }
+    }
+    // Exercise the scanner contract itself: a PHP-only closing tag followed by
+    // whitespace is real output; markup in a declared template is expected.
+    if (sh_security_php_inline_output("<?php header('Content-Type: application/json'); ?>\n", 'php-only') === null) {
+        return 'the probe did not detect whitespace emitted by a PHP-only endpoint';
+    }
+    if (sh_security_php_inline_output("<?php \$value = 1; ?>\n<div>view</div>\n<?php /* end */ ?>\n", 'template') !== null) {
+        return 'the probe rejected valid mixed PHP/HTML template output';
+    }
     $offenders = [];
     $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(SH_ROOT, FilesystemIterator::SKIP_DOTS));
     foreach ($files as $file) {
         if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') { continue; }
-        $path = $file->getPathname();
-        $rel = ltrim(str_replace(SH_ROOT, '', $path), '/');
+        $rel = ltrim(str_replace(SH_ROOT, '', $file->getPathname()), '/');
         if (str_starts_with($rel, '.git/') || str_starts_with($rel, 'node_modules/')) { continue; }
-        $source = (string)file_get_contents($path);
-        // 1. Anything before the opening tag is sent to the browser verbatim.
-        if (!str_starts_with(ltrim($source), '<?php')) { $offenders[] = $rel . ' does not start with <?php'; continue; }
-        // 2. Library and endpoint code must never emit anything of its own:
-        //    whitespace after a final closing tag becomes response output and
-        //    breaks headers and JSON. Page templates are allowed to end on a tag.
-        $library = preg_match('#^(ai|api|config|includes|cron|tools|install)/#', $rel) === 1;
-        if ($library && preg_match('/\?>\s*$/', $source) === 1) { $offenders[] = $rel . ' ends with a closing tag'; }
+        $source = (string)file_get_contents($file->getPathname());
+        $kind = sh_security_php_file_kind($rel);
+        $problem = sh_security_php_inline_output($source, $kind);
+        if ($problem !== null) { $offenders[] = $rel . ': ' . $problem; }
     }
-    return $offenders === [] ? true : implode('; ', array_slice($offenders, 0, 3));
+    return $offenders === [] ? true : implode('; ', array_slice($offenders, 0, 5));
 });
 
 sh_t('only navigation drawers and the fixed support message log own internal scroll containers; AI content stays in page flow', function () {

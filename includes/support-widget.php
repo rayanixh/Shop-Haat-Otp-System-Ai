@@ -14,10 +14,13 @@
  * All chat state and replies still come from api/support.php; nothing is faked
  * client-side and no second chat system exists.
  */
-if (!function_exists('sh_setting') || sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) !== '1') { return; }
+if (!function_exists('sh_setting')) { return; }
 require_once SH_ROOT . '/includes/support-links.php';
-$schatChannels = sh_support_channels();
-if (!$schatChannels['ai'] && !$schatChannels['messenger'] && !$schatChannels['whatsapp']) { return; }
+$schatVisibility = isset($shSupportVisibility) && is_array($shSupportVisibility)
+    ? $shSupportVisibility
+    : sh_support_visibility(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')));
+if (empty($schatVisibility['show_launcher'])) { return; }
+$schatChannels = $schatVisibility['channels'];
 $schatMax = max(200, min(8000, (int)sh_setting('support_chat_max_input', sh_setting('support_max_input', '2000'))));
 $schatAvail = trim((string)sh_setting('support_chat_hours', sh_setting('support_availability', '')));
 $schatHandoffEnabled = sh_setting('support_chat_handoff_enabled', sh_setting('support_handoff_enabled', '1')) === '1';
@@ -37,26 +40,27 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
   <?php if ($schatFacebook !== ''): ?>
     <a class="sh-schat-opt" id="sh-schat-opt-facebook" role="menuitem" href="<?= e($schatFacebook) ?>" target="_blank" rel="noopener noreferrer nofollow" data-channel="facebook">
       <span class="sh-schat-opt__icon sh-schat-opt__icon--messenger" aria-hidden="true"><?= $schatIconMessenger ?></span>
-      <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger<span class="sh-sr-only"> — opens in a new tab</span></small></span>
+      <span class="sh-schat-opt__body"><strong>Messenger Support</strong><small>Message us on Messenger<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
   <?php endif; ?>
   <?php if ($schatWhatsapp !== ''): ?>
     <a class="sh-schat-opt" id="sh-schat-opt-whatsapp" role="menuitem" href="<?= e($schatWhatsapp) ?>" target="_blank" rel="noopener noreferrer nofollow" data-channel="whatsapp">
       <span class="sh-schat-opt__icon sh-schat-opt__icon--whatsapp" aria-hidden="true"><?= $schatIconWhatsapp ?></span>
-      <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp<span class="sh-sr-only"> — opens in a new tab</span></small></span>
+      <span class="sh-schat-opt__body"><strong>WhatsApp Support</strong><small>Chat with us on WhatsApp<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
   <?php endif; ?>
   <?php if ($schatChannels['ai']): ?>
     <button type="button" class="sh-schat-opt sh-schat-opt--chat" id="sh-schat-opt-chat" role="menuitem" data-channel="chat">
       <span class="sh-schat-opt__icon sh-schat-opt__icon--chat" aria-hidden="true"><?= sh_icon('message', 17) ?></span>
-      <span class="sh-schat-opt__body"><strong>Live Chat</strong><small>Chat with us</small></span>
+      <span class="sh-schat-opt__body"><strong>AI Assistant Support</strong><small>Chat with our AI Assistant</small></span>
       <?= sh_icon('chevron-right', 13, 'sh-schat-opt__go') ?>
     </button>
   <?php endif; ?>
 </div>
 
+<?php if ($schatChannels['ai']): ?>
 <section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config="<?= e((string)json_encode($schatCfg)) ?>" hidden>
   <header class="sh-schat-head">
     <div class="sh-schat-headmain">
@@ -85,3 +89,4 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
     <?php if ($schatAvail !== ''): ?><span class="sh-schat-avail"><?= e($schatAvail) ?></span><?php endif; ?>
   </div>
 </section>
+<?php endif; ?>

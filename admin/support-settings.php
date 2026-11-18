@@ -335,10 +335,12 @@ require __DIR__ . '/_layout.php';
         require_once SH_ROOT . '/includes/support-links.php';
         $channelFacebook = sh_support_facebook_url();
         $channelWhatsapp = sh_support_whatsapp_url();
+        $channelMessengerEnabled = sh_setting('messenger_enabled', '0') === '1' && $channelFacebook !== '';
+        $channelWhatsappEnabled = sh_setting('whatsapp_enabled', '0') === '1' && $channelWhatsapp !== '';
         ?>
         <fieldset class="sh-support-settings__policy sh-support-settings__channels">
           <legend>Launcher menu: Facebook &amp; WhatsApp</legend>
-          <p class="sh-formcard__note">Extra options above the floating chat button on every storefront page. Blank or invalid values show the option as unavailable — the on-site chat stays available and is never replaced by these links.</p>
+          <p class="sh-formcard__note">A customer-facing Messenger or WhatsApp option appears only when its integration is enabled on the matching Admin integration page and a valid support destination is saved here. Blank or invalid destinations keep that channel hidden. AI Assistant visibility follows the separate “Enable AI replies” setting below.</p>
           <div class="sh-grid2">
             <div class="sh-field">
               <label class="sh-field__label" for="support-facebook">Facebook / Messenger link</label>
@@ -357,9 +359,9 @@ require __DIR__ . '/_layout.php';
             </div>
           </div>
           <p class="sh-formcard__note">
-            <span class="sh-support-settings__state <?= $channelFacebook !== '' ? 'is-good' : 'is-bad' ?>">Facebook: <?= $channelFacebook !== '' ? 'available' : 'not configured' ?></span>
-            <span class="sh-support-settings__state <?= $channelWhatsapp !== '' ? 'is-good' : 'is-bad' ?>">WhatsApp: <?= $channelWhatsapp !== '' ? 'available' : 'not configured' ?></span>
-            <span class="sh-support-settings__state is-good">Live chat: always available</span>
+            <span class="sh-support-settings__state <?= $channelMessengerEnabled ? 'is-good' : 'is-bad' ?>">Messenger Support: <?= $channelMessengerEnabled ? 'enabled' : 'disabled or not configured' ?></span>
+            <span class="sh-support-settings__state <?= $channelWhatsappEnabled ? 'is-good' : 'is-bad' ?>">WhatsApp Support: <?= $channelWhatsappEnabled ? 'enabled' : 'disabled or not configured' ?></span>
+            <span class="sh-support-settings__state <?= $settings['ai_enabled'] === '1' ? 'is-good' : '' ?>">AI Assistant: <?= $settings['ai_enabled'] === '1' ? 'enabled' : 'disabled' ?></span>
           </p>
         </fieldset>
 

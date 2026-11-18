@@ -1,13 +1,1 @@
-  PASS   schema created: 50 tables
-  PASS   sign-in gates: {"email_verify_required_login":"0"}
-  PASS   administrator account: 1
-  PASS   storefront products: 29
-  PASS   categories: 7
-  PASS   active payment methods: 4
-  PASS   extra gallery images on "Voltaro Pulse 60 Wireless Headphones": 2
-  PASS   customer seeded: customer@example.test
-  PASS   customer seeded: customer2@example.test
-
-Seed complete: http://127.0.0.1:8080
-admin@example.test / AdminTest!2026 · customer@example.test / Customer!2026
-{"products":29,"categories":7,"galleryImages":2,"galleryProductUrl":"\/product.php?slug=voltaro-pulse-60-wireless-headphones","categoryUrl":"\/category.php?slug=electronics","admin":"admin@example.test","customer":"customer@example.test","password":"Customer!2026","admin_password":"AdminTest!2026"}
+BLOCKED browser-seed: destructive safety refusal: set SH_TEST_ALLOW_DESTRUCTIVE=1 only for a disposable test database

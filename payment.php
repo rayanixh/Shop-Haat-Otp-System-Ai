@@ -152,7 +152,7 @@ require_once SH_ROOT . '/includes/header.php';
             </div>
             <div class="sh-actions" style="margin-top:12px">
               <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('checkout.php?retry_order=' . $orderId)) ?>">Return to Checkout</a>
-              <a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('support.php')) ?>">Contact support</a>
+              <?php if (!empty($shSupportVisibility['show_support_links'])): ?><a class="sh-btn sh-btn--ghost" href="<?= e(sh_url('support.php')) ?>">Contact support</a><?php endif; ?>
             </div>
 
           <?php elseif ((string)$route['kind'] === 'gateway'):

@@ -28,6 +28,8 @@ $_SERVER['HTTP_HOST'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 
 require_once dirname(__DIR__) . '/config/config.php';
+require_once __DIR__ . '/_test_database_guard.php';
+$pdo = sh_test_require_disposable_mysql('courier-connection-tests');
 require_once SH_ROOT . '/install/schema.php';
 require_once SH_ROOT . '/includes/courier.php';
 require_once SH_ROOT . '/ai/schema.php';
