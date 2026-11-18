@@ -7,20 +7,66 @@
  * website outside the chat keeps its own independent scroll. Sends are
  * idempotent: every message carries a client_msg_id the server dedupes.
  *
- * The launcher is a circular button that opens a three-option menu (Facebook,
- * WhatsApp, Live Chat). The menu is only a launcher: "Live Chat" calls the same
- * open() path as before, and the two external options are ordinary links that
- * the browser opens. No chat logic, endpoint or state lives here.
+ * The launcher is a circular button that opens only the configured support
+ * channels. The AI Assistant option uses the existing chat panel; configured
+ * Messenger and WhatsApp options remain ordinary external links.
  */
 (function () {
   'use strict';
 
   var fab = document.getElementById('sh-schat-fab');
   var sheet = document.getElementById('sh-schat-sheet');
-  if (!fab || !sheet) { return; }
+  if (!fab) { return; }
 
   var menu = document.getElementById('sh-schat-menu');
   var liveOpt = document.getElementById('sh-schat-opt-chat');
+
+  // Stores with only Messenger and/or WhatsApp have a launcher menu but no AI
+  // popup or chat API configuration. Keep those external links usable without
+  // emitting an empty panel or running any chat behavior.
+  if (!sheet) {
+    var externalMenuOpen = false;
+    function closeExternalMenu() {
+      if (!menu || !externalMenuOpen) { return; }
+      externalMenuOpen = false;
+      if (menu.contains(document.activeElement)) { fab.focus(); }
+      menu.classList.remove('is-open');
+      menu.setAttribute('aria-hidden', 'true');
+      fab.setAttribute('aria-expanded', 'false');
+      window.setTimeout(function () { if (!externalMenuOpen) { menu.hidden = true; } }, 240);
+    }
+    fab.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (!menu) { return; }
+      if (externalMenuOpen) { closeExternalMenu(); return; }
+      externalMenuOpen = true;
+      menu.hidden = false;
+      menu.setAttribute('aria-hidden', 'false');
+      fab.setAttribute('aria-expanded', 'true');
+      void menu.offsetWidth;
+      menu.classList.add('is-open');
+      var first = menu.querySelector('[role="menuitem"]');
+      if (first) { first.focus(); }
+    });
+    if (menu) {
+      menu.addEventListener('keydown', function (event) {
+        var items = Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]'));
+        var at = items.indexOf(document.activeElement);
+        if (!items.length) { return; }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+        } else if (event.key === 'Escape' || event.key === 'Tab') { closeExternalMenu(); }
+      });
+    }
+    document.addEventListener('pointerdown', function (event) {
+      if (externalMenuOpen && !menu.contains(event.target) && !fab.contains(event.target)) { closeExternalMenu(); }
+    }, true);
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') { closeExternalMenu(); }
+    });
+    return;
+  }
 
   // A position:fixed element is only viewport-fixed when no ancestor creates
   // a containing block (transform/filter/perspective/contain) or clips it.

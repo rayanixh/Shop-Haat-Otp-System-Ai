@@ -153,6 +153,22 @@ sl_ok(!str_contains($bare, 'Not set up'), 'no unavailable-state placeholders');
 sl_ok(!str_contains($bare, 'aria-disabled="true"'), 'no disabled controls');
 sl_ok(!str_contains($bare, 'sh-schat-fab'), 'the launcher button is absent');
 sl_ok(!str_contains($bare, 'sh-schat-menu'), 'the options menu is absent');
+sl_ok(!str_contains($bare, 'sh-schat-sheet'), 'no empty support popup is emitted');
+
+/* The shared decision blocks support affordances on every protected flow. */
+foreach (['cart.php', 'orders.php', 'order-details.php', 'track.php', 'account.php', 'addresses.php',
+          'login.php', 'register.php', 'forgot-password.php', 'reset-password.php', 'verify-email.php', 'otp.php'] as $restrictedPage) {
+    $visibility = sh_support_visibility($restrictedPage);
+    sl_ok(!$visibility['show_launcher'] && !$visibility['show_support_links'],
+        'no launcher or support links on ' . $restrictedPage);
+}
+$disabledMaster = sl_render([
+    'support_chat_enabled' => '0',
+    'support_chat_ai_enabled' => '1',
+    'support_chat_facebook_url' => 'https://m.me/shophaat',
+    'support_chat_whatsapp' => '+8801700000000',
+]);
+sl_eq('', $disabledMaster, 'the saved master switch hides every support channel');
 
 /* --- Only AI enabled ----------------------------------------------------- */
 echo "\nAI only\n";
@@ -164,35 +180,84 @@ sl_ok(!str_contains($aiOnly, 'data-channel="facebook"'), 'no Facebook when not c
 sl_ok(!str_contains($aiOnly, 'data-channel="whatsapp"'), 'no WhatsApp when not configured');
 sl_ok(str_contains($aiOnly, 'sh-schat-fab'), 'the launcher button is present');
 sl_ok(str_contains($aiOnly, 'sh-schat-menu'), 'the options menu is present');
+sl_ok(str_contains($aiOnly, 'AI Assistant Support'), 'AI channel uses its customer-facing label');
+sl_ok(!str_contains($aiOnly, 'Messenger Support') && !str_contains($aiOnly, 'WhatsApp Support'),
+    'AI-only configuration emits no disabled external channel labels');
+$aiWithDisabledExternalLinks = sl_render([
+    'support_chat_ai_enabled' => '1',
+    'messenger_enabled' => '0',
+    'whatsapp_enabled' => '0',
+    'support_chat_facebook_url' => 'https://m.me/shophaat',
+    'support_chat_whatsapp' => '+8801700000000',
+]);
+sl_eq(1, substr_count($aiWithDisabledExternalLinks, 'role="menuitem"'),
+    'AI remains available when both external Admin integration switches are off');
+sl_ok(!str_contains($aiWithDisabledExternalLinks, 'Messenger Support')
+    && !str_contains($aiWithDisabledExternalLinks, 'WhatsApp Support'),
+    'valid destinations do not bypass disabled Messenger or WhatsApp switches');
+
+/* --- AI + Messenger, WhatsApp disabled ---------------------------------- */
+echo "\nAI and Messenger\n";
+$aiMessenger = sl_render([
+    'support_chat_ai_enabled' => '1',
+    'messenger_enabled' => '1',
+    'support_chat_facebook_url' => 'https://m.me/shophaat',
+]);
+sl_eq(2, substr_count($aiMessenger, 'role="menuitem"'), 'AI plus Messenger renders exactly two options');
+sl_ok(str_contains($aiMessenger, 'AI Assistant Support') && str_contains($aiMessenger, 'Messenger Support'),
+    'AI and Messenger options are present');
+sl_ok(!str_contains($aiMessenger, 'WhatsApp Support') && !str_contains($aiMessenger, 'data-channel="whatsapp"'),
+    'disabled WhatsApp is absent from markup');
+
+/* --- AI + WhatsApp, Messenger disabled ---------------------------------- */
+echo "\nAI and WhatsApp\n";
+$aiWhatsapp = sl_render([
+    'support_chat_ai_enabled' => '1',
+    'whatsapp_enabled' => '1',
+    'support_chat_whatsapp' => '+8801700000000',
+]);
+sl_eq(2, substr_count($aiWhatsapp, 'role="menuitem"'), 'AI plus WhatsApp renders exactly two options');
+sl_ok(str_contains($aiWhatsapp, 'AI Assistant Support') && str_contains($aiWhatsapp, 'WhatsApp Support'),
+    'AI and WhatsApp options are present');
+sl_ok(!str_contains($aiWhatsapp, 'Messenger Support') && !str_contains($aiWhatsapp, 'data-channel="facebook"'),
+    'disabled Messenger is absent from markup');
 
 /* --- Only Messenger enabled --------------------------------------------- */
 echo "\nMessenger only\n";
 $msgOnly = sl_render([
     'support_chat_ai_enabled' => '0',
+    'messenger_enabled' => '1',
     'support_chat_facebook_url' => 'https://m.me/shophaat',
 ]);
 sl_eq(1, substr_count($msgOnly, 'role="menuitem"'), 'Messenger-only store renders exactly Messenger');
 sl_ok(str_contains($msgOnly, 'data-channel="facebook"'), 'Facebook menu item present');
 sl_ok(str_contains($msgOnly, 'href="https://m.me/shophaat"'), 'Facebook links to configured page');
-sl_ok(!str_contains($msgOnly, 'id="sh-schat-opt-chat"'), 'no Live Chat when AI is disabled');
+sl_ok(!str_contains($msgOnly, 'id="sh-schat-opt-chat"'), 'no AI option when AI is disabled');
 sl_ok(!str_contains($msgOnly, 'data-channel="whatsapp"'), 'no WhatsApp when not configured');
+sl_ok(!str_contains($msgOnly, 'sh-schat-sheet') && str_contains($msgOnly, 'Messenger Support'),
+    'Messenger-only renders its link without an empty AI popup');
 
 /* --- Only WhatsApp enabled ---------------------------------------------- */
 echo "\nWhatsApp only\n";
 $waOnly = sl_render([
     'support_chat_ai_enabled' => '0',
+    'whatsapp_enabled' => '1',
     'support_chat_whatsapp' => '+8801700000000',
 ]);
 sl_eq(1, substr_count($waOnly, 'role="menuitem"'), 'WhatsApp-only store renders exactly WhatsApp');
 sl_ok(str_contains($waOnly, 'data-channel="whatsapp"'), 'WhatsApp menu item present');
 sl_ok(str_contains($waOnly, 'href="https://wa.me/8801700000000"'), 'WhatsApp normalises to wa.me link');
-sl_ok(!str_contains($waOnly, 'id="sh-schat-opt-chat"'), 'no Live Chat when AI is disabled');
-sl_ok(!str_contains($waOnly, 'data-channel="facebook"'), 'no Facebook when not configured');
+sl_ok(!str_contains($waOnly, 'id="sh-schat-opt-chat"'), 'no AI option when AI is disabled');
+sl_ok(!str_contains($waOnly, 'data-channel="facebook"'), 'no Messenger when not configured');
+sl_ok(!str_contains($waOnly, 'sh-schat-sheet') && str_contains($waOnly, 'WhatsApp Support'),
+    'WhatsApp-only renders its link without an empty AI popup');
 
 /* --- AI + Messenger + WhatsApp ------------------------------------------ */
 echo "\nAll three channels\n";
 $full = sl_render([
     'support_chat_ai_enabled' => '1',
+    'messenger_enabled' => '1',
+    'whatsapp_enabled' => '1',
     'support_chat_facebook_url' => 'https://m.me/shophaat',
     'support_chat_whatsapp' => '+8801700000000',
     'support_chat_whatsapp_message' => 'Hi ShopHaat, I need help with an order.',
@@ -212,6 +277,8 @@ sl_ok(str_contains($full, 'sh-schat-sheet') && str_contains($full, 'id="sh-schat
 echo "\nInvalid stored values\n";
 $invalid = sl_render([
     'support_chat_ai_enabled' => '0',
+    'messenger_enabled' => '1',
+    'whatsapp_enabled' => '1',
     'support_chat_facebook_url' => 'http://m.me/shophaat',
     'support_chat_whatsapp' => 'javascript:alert(1)',
     'support_chat_whatsapp_message' => 'Hi',
@@ -220,6 +287,14 @@ sl_eq('', $invalid, 'no valid channels means no launcher markup is emitted');
 sl_ok(!str_contains($invalid, 'href="http://m.me/shophaat"') && !str_contains($invalid, 'javascript:alert'),
     'an invalid stored value is never rendered as a link');
 sl_ok(!str_contains($invalid, 'aria-disabled="true"'), 'no disabled controls when nothing is valid');
+$externalsDisabled = sl_render([
+    'support_chat_ai_enabled' => '0',
+    'messenger_enabled' => '0',
+    'whatsapp_enabled' => '0',
+    'support_chat_facebook_url' => 'https://m.me/shophaat',
+    'support_chat_whatsapp' => '+8801700000000',
+]);
+sl_eq('', $externalsDisabled, 'valid support destinations stay hidden when Admin channel switches are off');
 
 /* --- The existing chat is untouched ------------------------------------- */
 echo "\nExisting chat contract\n";

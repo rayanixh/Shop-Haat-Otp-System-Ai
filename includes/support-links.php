@@ -215,8 +215,10 @@ if (!function_exists('sh_support_channels')) {
     /** Which customer-facing support channels are actually available.
      *
      * ai     – AI Assistant replies enabled in Admin → Support → Settings
-     * messenger – Facebook / Messenger link configured and valid
-     * whatsapp  – WhatsApp link/number configured and valid
+     * messenger – the Admin Messenger integration is enabled and its separate
+     *             customer-support destination is configured and valid
+     * whatsapp  – the Admin WhatsApp integration is enabled and its separate
+     *             customer-support destination is configured and valid
      *
      * @return array{ai:bool,messenger:bool,whatsapp:bool}
      */
@@ -224,8 +226,8 @@ if (!function_exists('sh_support_channels')) {
     {
         return [
             'ai'        => sh_setting('support_chat_ai_enabled', '0') === '1',
-            'messenger' => sh_support_facebook_url() !== '',
-            'whatsapp'  => sh_support_whatsapp_url() !== '',
+            'messenger' => sh_setting('messenger_enabled', '0') === '1' && sh_support_facebook_url() !== '',
+            'whatsapp'  => sh_setting('whatsapp_enabled', '0') === '1' && sh_support_whatsapp_url() !== '',
         ];
     }
 }
@@ -240,28 +242,47 @@ if (!function_exists('sh_support_any_channel')) {
 }
 
 if (!function_exists('sh_support_page_allowed')) {
-    /** Server-side decision: should the floating support launcher appear on this page?
-     *
-     * Support is kept off checkout / order / account / authentication pages so
-     * those flows stay focused. It remains on browsing pages (home, category,
-     * product, help, static pages, etc.) where a customer may need assistance.
-     *
-     * @param string $currentPage basename of the current PHP script
-     * @return bool
-     */
+    /** Server-side page policy shared by every storefront support entry point. */
     function sh_support_page_allowed(string $currentPage): bool
     {
+        $page = strtolower(basename(trim($currentPage)));
         $excluded = [
-            // Checkout / order flow — must stay focused on purchase
+            // Cart, checkout, order management and tracking
             'cart.php', 'checkout.php', 'payment.php', 'order-success.php',
-            // Order management — no support widget inside order views
-            'orders.php', 'order-details.php',
-            // Account / profile pages
-            'account.php', 'addresses.php', 'password.php',
-            // Authentication — must stay clean
-            'login.php', 'register.php', 'forgot-password.php',
-            'reset-password.php', 'otp.php', 'verify-email.php',
+            'orders.php', 'order-details.php', 'track.php',
+            // Profile/account and authentication flows
+            'account.php', 'addresses.php', 'password.php', 'profile.php',
+            'login.php', 'register.php', 'signup.php', 'forgot-password.php',
+            'reset-password.php', 'otp.php', 'verify-email.php', 'email-verification.php',
         ];
-        return !in_array($currentPage, $excluded, true);
+        if (in_array($page, $excluded, true)) { return false; }
+        // Keep future account/auth route files clean without requiring another
+        // per-page widget exception whenever a related page is added.
+        return preg_match('/^(?:auth|account|profile|login|register|signup|forgot|reset|verify|email-verification)(?:[-_.]|$)/', $page) !== 1;
+    }
+}
+
+if (!function_exists('sh_support_visibility')) {
+    /**
+     * The single server-side customer-facing support decision. Messenger and
+     * WhatsApp are enabled only by a valid saved destination; AI is enabled by
+     * its saved Admin setting. The overall customer-chat switch gates all
+     * three, and restricted pages get neither the launcher nor support links.
+     *
+     * @return array{channels:array{ai:bool,messenger:bool,whatsapp:bool},show_launcher:bool,show_support_links:bool}
+     */
+    function sh_support_visibility(string $currentPage): array
+    {
+        $channels = sh_support_channels();
+        $enabled = sh_support_chat_on();
+        if (!$enabled) { $channels = ['ai' => false, 'messenger' => false, 'whatsapp' => false]; }
+        $hasChannel = $channels['ai'] || $channels['messenger'] || $channels['whatsapp'];
+        $pageAllowed = sh_support_page_allowed($currentPage);
+        $isDedicatedPage = strtolower(basename(trim($currentPage))) === 'support.php';
+        return [
+            'channels' => $channels,
+            'show_launcher' => $enabled && $pageAllowed && !$isDedicatedPage && $hasChannel,
+            'show_support_links' => $enabled && $pageAllowed && $hasChannel,
+        ];
     }
 }

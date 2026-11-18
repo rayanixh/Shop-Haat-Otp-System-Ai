@@ -50,7 +50,7 @@ $fCats = $shCategories ?? sh_categories();
         <ul class="sh-footer__links">
           <li><a href="<?= e(sh_url('help.php')) ?>">Help Centre</a></li>
           <li><a href="<?= e(sh_url('track.php')) ?>">Track Your Order</a></li>
-          <li><a href="<?= e(sh_url('support.php')) ?>">Contact Support</a></li>
+          <?php if (!empty($shSupportVisibility['show_support_links'])): ?><li><a href="<?= e(sh_url('support.php')) ?>">Contact Support</a></li><?php endif; ?>
           <li><a href="<?= e(sh_url('page.php?p=returns')) ?>">Returns &amp; Refunds</a></li>
           <li><a href="<?= e(sh_url('page.php?p=shipping')) ?>">Shipping Information</a></li>
         </ul>
@@ -109,14 +109,13 @@ $fCats = $shCategories ?? sh_categories();
 </nav>
 
 <?php
-require_once SH_ROOT . '/includes/support-links.php';
-$shDedicatedSupportPage = basename((string)($_SERVER['SCRIPT_NAME'] ?? '')) === 'support.php';
-$shCurrentPage = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
-$shShowSupport = !$shDedicatedSupportPage
-    && function_exists('sh_setting')
-    && sh_support_chat_on()
-    && sh_support_page_allowed($shCurrentPage)
-    && sh_support_any_channel();
+// Reuse the shared server-side decision calculated with the public header.
+// The fallback supports templates that include the footer on its own.
+if (!isset($shSupportVisibility) || !is_array($shSupportVisibility)) {
+    require_once SH_ROOT . '/includes/support-links.php';
+    $shSupportVisibility = sh_support_visibility(basename((string)($_SERVER['SCRIPT_NAME'] ?? '')));
+}
+$shShowSupport = !empty($shSupportVisibility['show_launcher']);
 if ($shShowSupport) { include __DIR__ . '/support-widget.php'; }
 ?>
 

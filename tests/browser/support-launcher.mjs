@@ -10,16 +10,16 @@
  *   desktop   the launcher is a 56px circle with no "Support" text, the menu
  *             slides up with three options, Facebook and WhatsApp really open
  *             the configured destinations in a new tab, Escape / outside click
- *             close it, and Live Chat still opens the untouched chat panel
- *             (including a real reply and a real Talk-to-a-human escalation)
+ *             close it, and AI Assistant Support still opens the untouched
+ *             chat panel (including a real reply and human-support handoff)
  *   mobile    320 / 360 / 375 / 390 / 412 / 430 px and 1280 px desktop: the
  *             circle never stretches, nothing overflows sideways, the open menu
  *             stays inside the viewport and clears the launcher, labels stay
  *             readable, and there are no console errors
  *   keyboard  Enter opens, arrows move, Escape closes and refocuses the launcher
  *   reduced   prefers-reduced-motion still opens and closes the menu
- *   fallback  an unconfigured store shows the unavailable state while Live
- *             Chat keeps working
+ *   fallback  when every channel is disabled the launcher and popup are absent
+ *   visibility cart/order/account/auth routes contain no support UI or links
  *
  *   SH_SUPPORT_BASE_URL=http://127.0.0.1:8080 node tests/browser/support-launcher.mjs
  *
@@ -53,6 +53,7 @@ const DESKTOP = 1280;
 // answer, so the browser check asserts the correct behaviour for the real state
 // instead of pretending a provider is configured.
 let storeAiAvailable = false;
+let storeAiChannelEnabled = false;
 let storeAiState = '';
 
 const checks = [];
@@ -219,7 +220,33 @@ async function phaseAdmin(browser) {
     ]);
     check('the administrator is signed in', /dashboard/i.test(page.url()), page.url().replace(BASE, ''));
 
+    // The support URLs are separate from each integration's saved Admin ON/OFF
+    // switch. Enable the two real channels before testing their customer links.
+    for (const [route, selector, button] of [
+      ['/admin/messenger.php', 'input[name="messenger_enabled"]', 'Save Messenger settings'],
+      ['/admin/whatsapp.php', 'input[name="whatsapp_enabled"]', 'Save WhatsApp settings'],
+    ]) {
+      await page.goto(url(route), { waitUntil: 'load' });
+      const toggle = page.locator(selector);
+      if (await toggle.count()) {
+        if (!(await toggle.isChecked())) { await toggle.check(); }
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => null),
+          page.click(`button:has-text("${button}")`),
+        ]);
+      }
+    }
+
     await page.goto(url('/admin/support-settings.php'), { waitUntil: 'load' });
+    const masterToggle = page.locator('input[type="checkbox"][name="enabled"]');
+    if (await masterToggle.count() && !(await masterToggle.isChecked())) {
+      await masterToggle.check();
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => null),
+        page.click('button:has-text("Save support settings")'),
+      ]);
+      await page.goto(url('/admin/support-settings.php'), { waitUntil: 'load' });
+    }
     const fields = await page.evaluate(() => ({
       facebook: !!document.querySelector('#support-facebook'),
       whatsapp: !!document.querySelector('#support-whatsapp'),
@@ -231,6 +258,21 @@ async function phaseAdmin(browser) {
       fields.facebook && fields.whatsapp && fields.message);
     check('the channel fields belong to the existing save_settings form (no second settings page)',
       fields.inExistingForm && fields.existingSections === 2);
+
+    // Enable the existing AI Assistant setting where this installation exposes
+    // the AI controls, preserving the existing provider/model fields.
+    await page.locator('#ai').evaluate((section) => { section.open = true; });
+    const aiToggle = page.locator('input[type="checkbox"][name="ai_enabled"][value="1"]');
+    if (await aiToggle.count()) {
+      if (!(await aiToggle.isChecked())) {
+        await aiToggle.check();
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => null),
+          page.click('button[name="form"][value="save_ai_settings"]'),
+        ]);
+        await page.goto(url('/admin/support-settings.php'), { waitUntil: 'load' });
+      }
+    }
 
     // A non-https link must be refused, not silently stored.
     await page.fill('#support-facebook', 'http://m.me/ShopHaatSupport');
@@ -255,6 +297,7 @@ async function phaseAdmin(browser) {
       facebook: document.querySelector('#support-facebook')?.value || '',
       whatsapp: document.querySelector('#support-whatsapp')?.value || '',
       message: document.querySelector('#support-whatsapp-message')?.value || '',
+      aiEnabled: document.querySelector('input[type="checkbox"][name="ai_enabled"][value="1"]')?.checked || false,
       chips: [...document.querySelectorAll('.sh-support-settings__state')].map((el) => el.textContent.trim()),
     }));
     // A typed number is accepted and normalised to its wa.me URL — that is what
@@ -262,9 +305,13 @@ async function phaseAdmin(browser) {
     check('the accepted values are stored and shown again',
       saved.facebook === FB_URL && saved.whatsapp === WA_NORMALISED && saved.message === WA_TEXT,
       `${saved.facebook} | ${saved.whatsapp} | ${saved.message.slice(0, 40)}`);
-    check('the page reports both channels as available', saved.chips.some((c) => /Facebook: available/.test(c)) && saved.chips.some((c) => /WhatsApp: available/.test(c)),
+    storeAiChannelEnabled = saved.aiEnabled;
+    check('Admin Messenger and WhatsApp switches plus valid destinations enable those support channels',
+      saved.chips.some((c) => /Messenger Support: enabled/.test(c))
+        && saved.chips.some((c) => /WhatsApp Support: enabled/.test(c)),
       saved.chips.join(' / ').slice(0, 160));
-    check('the page states that live chat stays available', saved.chips.some((c) => /Live chat: always available/.test(c)));
+    check('the AI Assistant state matches the saved AI replies switch',
+      saved.chips.some((c) => new RegExp(`AI Assistant: ${saved.aiEnabled ? 'enabled' : 'disabled'}`).test(c)));
     const alertText = (await page.textContent('.sh-support-settings__alert').catch(() => '') || '').replace(/\s+/g, ' ');
     storeAiAvailable = /AI is enabled/i.test(alertText);
     storeAiState = alertText.slice(0, 200);
@@ -321,8 +368,8 @@ async function phaseDesktop(browser) {
     check('the menu is fully visible once open', menu.opacity === '1', menu.opacity);
     check('the menu sits directly above the launcher', menu.bottom <= menu.fabTop + 1, `menu bottom ${menu.bottom.toFixed(1)} / launcher top ${menu.fabTop.toFixed(1)}`);
     check('exactly three options are offered', menu.items.length === 3, String(menu.items.length));
-    check('the options are labelled Facebook, WhatsApp and Live Chat',
-      menu.items.map((i) => i.text).join(',') === 'Facebook,WhatsApp,Live Chat', menu.items.map((i) => i.text).join(','));
+    check('only enabled channels are labelled AI Assistant, Messenger and WhatsApp Support',
+      menu.items.map((i) => i.text).join(',') === 'Messenger Support,WhatsApp Support,AI Assistant Support', menu.items.map((i) => i.text).join(','));
     check('every option has a brand icon', menu.items.every((i) => i.icon));
     check('the labels stay readable', menu.items.every((i) => i.fontSize >= 12), menu.items.map((i) => i.fontSize).join('/'));
     check('the menu stays inside the viewport',
@@ -574,13 +621,13 @@ async function phaseKeyboard(browser) {
 }
 
 /* ---------------------------------------------------------------------------
- * Phase 5 — an unconfigured store: unavailable state, Live Chat intact
+ * Phase 5 — all channels disabled: no launcher or empty popup
  * ------------------------------------------------------------------------ */
 async function phaseUnconfigured(browser) {
   const adminContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const admin = await adminContext.newPage();
 
-  await area('Unconfigured channels degrade honestly, Live Chat keeps working', async () => {
+  await area('All-disabled support has no launcher or popup', async () => {
     await admin.goto(url('/admin/login.php'), { waitUntil: 'load' });
     await admin.fill('#ad-email', ADMIN_EMAIL);
     await admin.fill('#ad-pass', ADMIN_PASSWORD);
@@ -597,24 +644,33 @@ async function phaseUnconfigured(browser) {
       admin.click('button:has-text("Save support settings")'),
     ]);
     const states = await admin.evaluate(() => [...document.querySelectorAll('.sh-support-settings__state')].map((el) => el.textContent.trim()));
-    check('clearing both links is accepted', states.some((s) => /Facebook: not configured/.test(s)) && states.some((s) => /WhatsApp: not configured/.test(s)), states.join(' / ').slice(0, 160));
+    check('clearing both destinations is accepted and keeps external channels disabled',
+      states.some((s) => /Messenger Support: disabled or not configured/.test(s))
+        && states.some((s) => /WhatsApp Support: disabled or not configured/.test(s)), states.join(' / ').slice(0, 180));
+
+    // Exercise the all-channels-off case: even the AI launcher/popup must be
+    // absent when both external destinations are blank and AI is disabled.
+    await admin.locator('#ai').evaluate((section) => { section.open = true; });
+    const aiToggle = admin.locator('input[type="checkbox"][name="ai_enabled"][value="1"]');
+    if (await aiToggle.count() && await aiToggle.isChecked()) {
+      await aiToggle.uncheck();
+      await Promise.all([
+        admin.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => null),
+        admin.click('button[name="form"][value="save_ai_settings"]'),
+      ]);
+    }
 
     const context = await browser.newContext({ viewport: { width: 390, height: 720 } });
     const page = await context.newPage();
     const errors = await watch(page);
     await page.goto(url('/index.php'), { waitUntil: 'load' });
     await settle(page);
-    await openMenu(page);
-    const menu = await menuGeometry(page);
-    check('an unconfigured store still shows three options', menu.items.length === 3);
-    check('the unconfigured options are marked unavailable',
-      menu.items[0].disabled && menu.items[1].disabled && !menu.items[0].href && !menu.items[1].href);
-    check('Live Chat stays enabled', !menu.items[2].disabled);
-    await snap(page, 'support-launcher-unconfigured-390px-open');
-    await page.click('#sh-schat-opt-chat');
-    await page.waitForFunction(() => document.querySelector('#sh-schat-sheet')?.hidden === false, null, { timeout: 10000 });
-    check('Live Chat opens even when nothing else is configured', await page.locator('#sh-schat-sheet').isVisible());
-    await report(errors, 'the unconfigured storefront');
+    check('no launcher or empty popup renders when all saved channels are off',
+      await page.locator('#sh-schat-fab').count() === 0
+        && await page.locator('#sh-schat-menu').count() === 0
+        && await page.locator('#sh-schat-sheet').count() === 0);
+    await snap(page, 'support-launcher-all-disabled-390px');
+    await report(errors, 'the all-disabled storefront');
     await context.close();
   });
 
@@ -629,6 +685,17 @@ async function phaseUnconfigured(browser) {
       admin.click('button:has-text("Save support settings")'),
     ]);
     await admin.goto(url('/admin/support-settings.php'), { waitUntil: 'load' });
+    if (storeAiChannelEnabled) {
+      await admin.locator('#ai').evaluate((section) => { section.open = true; });
+      const aiToggle = admin.locator('input[type="checkbox"][name="ai_enabled"][value="1"]');
+      if (await aiToggle.count() && !(await aiToggle.isChecked())) {
+        await aiToggle.check();
+        await Promise.all([
+          admin.waitForNavigation({ waitUntil: 'load', timeout: 30000 }).catch(() => null),
+          admin.click('button[name="form"][value="save_ai_settings"]'),
+        ]);
+      }
+    }
     check('the store is left configured', (await admin.inputValue('#support-facebook')) === FB_URL);
   });
 
