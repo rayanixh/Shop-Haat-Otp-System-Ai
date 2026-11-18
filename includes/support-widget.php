@@ -16,11 +16,13 @@
  */
 if (!function_exists('sh_setting') || sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) !== '1') { return; }
 require_once SH_ROOT . '/includes/support-links.php';
+$schatChannels = sh_support_channels();
+if (!$schatChannels['ai'] && !$schatChannels['messenger'] && !$schatChannels['whatsapp']) { return; }
 $schatMax = max(200, min(8000, (int)sh_setting('support_chat_max_input', sh_setting('support_max_input', '2000'))));
 $schatAvail = trim((string)sh_setting('support_chat_hours', sh_setting('support_availability', '')));
 $schatHandoffEnabled = sh_setting('support_chat_handoff_enabled', sh_setting('support_handoff_enabled', '1')) === '1';
-$schatFacebook = sh_support_facebook_url();
-$schatWhatsapp = sh_support_whatsapp_href();
+$schatFacebook = $schatChannels['messenger'] ? sh_support_facebook_url() : '';
+$schatWhatsapp = $schatChannels['whatsapp'] ? sh_support_whatsapp_href() : '';
 $schatCfg = ['endpoint' => sh_url('api/support.php'), 'max' => $schatMax];
 // Official brand marks (filled, single colour) — not generic substitutes.
 $schatIconMessenger = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" height="17" fill="currentColor" fill-rule="evenodd" aria-hidden="true" focusable="false"><path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.654V24l4.088-2.242c1.092.301 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26L10.732 8.1l3.131 3.26 5.888-3.26z"/></svg>';
@@ -38,11 +40,6 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
       <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
-  <?php else: ?>
-    <span class="sh-schat-opt is-off" id="sh-schat-opt-facebook" role="menuitem" aria-disabled="true" data-channel="facebook">
-      <span class="sh-schat-opt__icon sh-schat-opt__icon--messenger" aria-hidden="true"><?= $schatIconMessenger ?></span>
-      <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Not set up</small></span>
-    </span>
   <?php endif; ?>
   <?php if ($schatWhatsapp !== ''): ?>
     <a class="sh-schat-opt" id="sh-schat-opt-whatsapp" role="menuitem" href="<?= e($schatWhatsapp) ?>" target="_blank" rel="noopener noreferrer nofollow" data-channel="whatsapp">
@@ -50,17 +47,14 @@ $schatIconWhatsapp = '<svg class="sh-brandglyph" viewBox="0 0 24 24" width="17" 
       <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp<span class="sh-sr-only"> — opens in a new tab</span></small></span>
       <?= sh_icon('external', 13, 'sh-schat-opt__go') ?>
     </a>
-  <?php else: ?>
-    <span class="sh-schat-opt is-off" id="sh-schat-opt-whatsapp" role="menuitem" aria-disabled="true" data-channel="whatsapp">
-      <span class="sh-schat-opt__icon sh-schat-opt__icon--whatsapp" aria-hidden="true"><?= $schatIconWhatsapp ?></span>
-      <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Not set up</small></span>
-    </span>
   <?php endif; ?>
-  <button type="button" class="sh-schat-opt sh-schat-opt--chat" id="sh-schat-opt-chat" role="menuitem" data-channel="chat">
-    <span class="sh-schat-opt__icon sh-schat-opt__icon--chat" aria-hidden="true"><?= sh_icon('message', 17) ?></span>
-    <span class="sh-schat-opt__body"><strong>Live Chat</strong><small>Chat with us</small></span>
-    <?= sh_icon('chevron-right', 13, 'sh-schat-opt__go') ?>
-  </button>
+  <?php if ($schatChannels['ai']): ?>
+    <button type="button" class="sh-schat-opt sh-schat-opt--chat" id="sh-schat-opt-chat" role="menuitem" data-channel="chat">
+      <span class="sh-schat-opt__icon sh-schat-opt__icon--chat" aria-hidden="true"><?= sh_icon('message', 17) ?></span>
+      <span class="sh-schat-opt__body"><strong>Live Chat</strong><small>Chat with us</small></span>
+      <?= sh_icon('chevron-right', 13, 'sh-schat-opt__go') ?>
+    </button>
+  <?php endif; ?>
 </div>
 
 <section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config="<?= e((string)json_encode($schatCfg)) ?>" hidden>
