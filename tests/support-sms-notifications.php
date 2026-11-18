@@ -91,7 +91,7 @@ $settingsSrc = (string)file_get_contents(SH_ROOT . '/admin/support-settings.php'
 $smsSrc = (string)file_get_contents(SH_ROOT . '/includes/support-sms.php');
 $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
 
-[$passed, $failed] = sh_test_run('Human Support Notifications — real PHP + SQL', static function ($ok, $eq) use (
+[$passed, $failed, $blocked] = sh_test_run('Human Support Notifications — real PHP + SQL', static function ($ok, $eq) use (
     $owner, $resetRate, $newConversation, $handoff, $send, $enable, $disable, $callCount,
     $apiSrc, $settingsSrc, $smsSrc, $phoneOtpSrc, $key
 ) {
@@ -363,4 +363,4 @@ $phoneOtpSrc = (string)file_get_contents(SH_ROOT . '/includes/phone-otp.php');
     $eq('disabled', sh_support_sms_ready()['reason'], 'channel is disabled again at the end of the suite');
 });
 
-exit($failed > 0 ? 1 : 0);
+exit(sh_test_exit_code($failed, $blocked));

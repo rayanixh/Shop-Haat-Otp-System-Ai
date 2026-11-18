@@ -203,6 +203,26 @@ if (!function_exists('sh_support_whatsapp_href')) {
     }
 }
 
+if (!function_exists('sh_support_validate_channel_links')) {
+    /** Validate both saved external support destinations before any setting write.
+     * @return array{ok:bool,facebook:string,whatsapp:string,error:string}
+     */
+    function sh_support_validate_channel_links(string $facebookRaw, string $whatsappRaw): array
+    {
+        $facebook = sh_support_link_check_facebook($facebookRaw);
+        if (empty($facebook['ok'])) {
+            return ['ok' => false, 'facebook' => '', 'whatsapp' => '',
+                'error' => 'Facebook link: ' . (string)($facebook['error'] ?? 'Enter a valid https link.')];
+        }
+        $whatsapp = sh_support_link_check_whatsapp($whatsappRaw);
+        if (empty($whatsapp['ok'])) {
+            return ['ok' => false, 'facebook' => '', 'whatsapp' => '',
+                'error' => 'WhatsApp: ' . (string)($whatsapp['error'] ?? 'Enter a valid number or https link.')];
+        }
+        return ['ok' => true, 'facebook' => (string)$facebook['url'], 'whatsapp' => (string)$whatsapp['url'], 'error' => ''];
+    }
+}
+
 if (!function_exists('sh_support_chat_on')) {
     /** Overall customer chat master switch (same value the widget already checks). */
     function sh_support_chat_on(): bool

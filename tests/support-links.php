@@ -2,8 +2,8 @@
 /**
  * Support launcher menu — link validation and markup contract (no database).
  *
- * The floating launcher offers three options: Facebook, WhatsApp and the
- * existing Live Chat. Disabled or unconfigured channels are never rendered.
+ * The launcher emits only the configured AI Assistant, Messenger and WhatsApp
+ * options. Disabled or unconfigured channels are never rendered.
  * If no channel is available, the launcher is omitted entirely.
  *
  *     php tests/support-links.php
@@ -287,6 +287,17 @@ sl_eq('', $invalid, 'no valid channels means no launcher markup is emitted');
 sl_ok(!str_contains($invalid, 'href="http://m.me/shophaat"') && !str_contains($invalid, 'javascript:alert'),
     'an invalid stored value is never rendered as a link');
 sl_ok(!str_contains($invalid, 'aria-disabled="true"'), 'no disabled controls when nothing is valid');
+$unsafeFacebookWithSafeWhatsApp = sl_render([
+    'support_chat_ai_enabled' => '0',
+    'messenger_enabled' => '1',
+    'whatsapp_enabled' => '1',
+    'support_chat_facebook_url' => 'javascript:alert(1)',
+    'support_chat_whatsapp' => '+8801700000000',
+]);
+sl_ok(str_contains($unsafeFacebookWithSafeWhatsApp, 'data-channel="whatsapp"')
+    && !str_contains($unsafeFacebookWithSafeWhatsApp, 'javascript:alert(1)')
+    && !str_contains($unsafeFacebookWithSafeWhatsApp, 'data-channel="facebook"'),
+    'an unsafe destination is never rendered even when another safe channel keeps the launcher available');
 $externalsDisabled = sl_render([
     'support_chat_ai_enabled' => '0',
     'messenger_enabled' => '0',
@@ -309,9 +320,38 @@ sl_ok(!str_contains($widget, 'support-links.js') && !str_contains($widget, 'fetc
 /* --- Settings wiring ----------------------------------------------------- */
 echo "\nSettings wiring\n";
 $save = (string)file_get_contents(SH_ROOT . '/includes/ai-support.php');
-sl_ok(str_contains($save, "sh_support_link_check_facebook((string)(\$input['facebook_url'])"), 'the save handler uses the Facebook validator');
-sl_ok(str_contains($save, "sh_support_link_check_whatsapp((string)(\$input['whatsapp'])"), 'the save handler uses the WhatsApp validator');
+sl_ok(str_contains($save, 'sh_support_validate_channel_links('), 'the Admin save handler calls the shared channel-link validator');
+sl_ok(str_contains($save, "\$values['facebook_url'] = (string)\$channelLinks['facebook']")
+    && str_contains($save, "\$values['whatsapp'] = (string)\$channelLinks['whatsapp']"),
+    'the Admin save handler stores only the validator-normalized destinations');
 sl_ok(str_contains($save, "\$values['whatsapp_message']"), 'the pre-filled WhatsApp message is stored');
+$rejectInvalidAt = strpos($save, "if (empty(\$channelLinks['ok']))");
+$persistAt = strpos($save, 'foreach ($values as $key => $value) { sh_setting_save');
+sl_ok($rejectInvalidAt !== false && $persistAt !== false && $rejectInvalidAt < $persistAt,
+    'invalid destination validation returns before any saved setting is written');
+$facebookCheck = sh_support_link_check_facebook('https://m.me/shophaat');
+$whatsappCheck = sh_support_link_check_whatsapp('+880 170 000 0000');
+$channelSave = sh_support_validate_channel_links('https://m.me/shophaat', '+880 170 000 0000');
+sl_ok($facebookCheck['ok'] && $facebookCheck['url'] === 'https://m.me/shophaat',
+    'the actual Facebook validation function accepts a supported https destination');
+sl_ok($whatsappCheck['ok'] && $whatsappCheck['url'] === 'https://wa.me/8801700000000',
+    'the actual WhatsApp validation function normalizes an international number to wa.me');
+sl_ok($channelSave['ok'] && $channelSave['facebook'] === $facebookCheck['url']
+    && $channelSave['whatsapp'] === $whatsappCheck['url'],
+    'the save-time validator persists the normalized results from both actual channel validators');
+foreach ([
+    ['javascript:alert(1)', '+8801700000000', 'JavaScript Facebook value is not saveable'],
+    ['https://evil.example/m.me/shophaat', '+8801700000000', 'unsupported Facebook host is not saveable'],
+    ['https://m.me/shophaat', 'https://evil.example/8801700000000', 'unsupported WhatsApp host is not saveable'],
+    ['https://m.me/shophaat', '+88012', 'invalid WhatsApp number is not saveable'],
+] as [$fbInput, $waInput, $message]) {
+    $rejectedSave = sh_support_validate_channel_links($fbInput, $waInput);
+    sl_ok(!$rejectedSave['ok'] && $rejectedSave['facebook'] === '' && $rejectedSave['whatsapp'] === '',
+        $message . ' (rejection returns no values to persist)');
+}
+$blankSave = sh_support_validate_channel_links('', '');
+sl_ok($blankSave['ok'] && $blankSave['facebook'] === '' && $blankSave['whatsapp'] === '',
+    'blank saved destinations clear and disable both external support channels');
 $admin = (string)file_get_contents(SH_ROOT . '/admin/support-settings.php');
 foreach (['name="facebook_url"', 'name="whatsapp"', 'name="whatsapp_message"'] as $field) {
     sl_ok(str_contains($admin, $field), 'the existing support settings form has ' . $field);

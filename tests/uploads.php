@@ -186,7 +186,13 @@ $ht = (string)file_get_contents(SH_ROOT . '/uploads/.htaccess');
 foreach (['php', 'phtml', 'phar', 'pl', 'py', 'cgi', 'sh', 'htaccess', 'html', 'htm'] as $ext) {
     t_ok('/uploads denies .' . $ext, (bool)preg_match('~\\\\.\\(php\\|php\\[0-9\\]\\|phtml\\|phar|~', $ht) && str_contains($ht, $ext));
 }
-t_ok('/uploads disables the PHP engine as a second layer', str_contains($ht, 'php_flag engine off'));
+t_ok('/uploads denies alternate PHP interpreter suffixes', str_contains($ht, 'php[0-9]'));
+t_ok('/uploads disables PHP and other script handlers as a second layer',
+    str_contains($ht, 'RemoveHandler .php .phtml .phar .pl .py .cgi .sh'));
+t_ok('/uploads removes script MIME handlers without requiring a host extension',
+    str_contains($ht, 'RemoveType .php .phtml .phar'));
+t_ok('/uploads disables the PHP engine only where mod_php is present',
+    str_contains($ht, '<IfModule mod_php.c>') && str_contains($ht, 'php_flag engine off'));
 t_ok('/uploads stops directory listing', str_contains($ht, 'Options -Indexes'));
 t_ok('/uploads denies dotfiles', str_contains($ht, '<FilesMatch "^\\.">'));
 t_ok('SVG is served with no script access at all',

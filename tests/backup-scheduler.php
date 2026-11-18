@@ -243,8 +243,9 @@ t_ok('an abandoned lease (2 hours old) does not block retention forever', !sh_ba
 reset_state(['backup_keep' => '1']);
 add_backup('failed.sql', 'failed');
 $kept = sh_backup_prune(1);
-t_ok('a failed backup row is not treated as a retained backup', $kept === 0 || true);
-t_ok('failed rows are ignored by retention', in_array('failed.sql', array_column($GLOBALS['backups'], 'file_name'), true));
+$completedCount = count(array_filter($GLOBALS['backups'], static fn($row) => ($row['status'] ?? '') === 'completed'));
+t_ok('failed rows do not count toward completed-backup retention', $kept === 0 && $completedCount === 0);
+t_ok('failed rows are ignored by retention and remain available for diagnosis', in_array('failed.sql', array_column($GLOBALS['backups'], 'file_name'), true));
 
 // ===========================================================================
 t_sec('6. A failed run must not delete good backups');
@@ -256,6 +257,23 @@ $r = sh_backup_run_scheduled(make_creator('never.sql.gz', 0, false));
 t_ok('the run failed', ($r['ok'] ?? true) === false);
 t_eq('no backup was pruned after a failure', 2, count($GLOBALS['backups']));
 t_ok('the last good backup still has its file', is_file(sh_backup_dir() . '/old-but-good.sql'));
+
+// Retention is allowed only after a new, verified backup has become the newest
+// known-good row. The old backup may then be removed under the configured limit.
+reset_state(['backup_keep' => '1']);
+$oldGoodId = add_backup('previous-good.sql');
+$r = sh_backup_run_scheduled(function () {
+    $file = 'new-good.sql';
+    file_put_contents(sh_backup_dir() . '/' . $file, "-- verified backup\n");
+    add_backup($file);
+    return ['ok' => true, 'id' => 2, 'file' => $file, 'size' => 18, 'tables' => 1];
+});
+t_ok('a verified new backup succeeds before retention starts', ($r['ok'] ?? false) === true);
+t_ok('successful backup runs retention', (int)($r['pruned'] ?? 0) === 1);
+t_ok('the newest known-good backup is retained', is_file(sh_backup_dir() . '/new-good.sql'));
+t_ok('the previous backup is pruned only after its replacement is verified',
+    !is_file(sh_backup_dir() . '/previous-good.sql')
+    && !in_array($oldGoodId, array_column($GLOBALS['backups'], 'id'), true));
 
 // ===========================================================================
 t_sec('7. Cron authentication wiring');

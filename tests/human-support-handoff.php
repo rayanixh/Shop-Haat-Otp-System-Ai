@@ -71,7 +71,7 @@ $newConversation = static function (string $status = 'open', int $paused = 0) us
     ]);
 };
 
-[$passed, $failed] = sh_test_run('Human support state machine — real PHP + SQL', static function ($ok, $eq) use (
+[$passed, $failed, $blocked] = sh_test_run('Human support state machine — real PHP + SQL', static function ($ok, $eq) use (
     $owner, $adminId, $countMsg, $countEvent, $countConfirm, $conv, $send, $handoff, $adminReply, $adminTransition,
     $newConversation, $resetRate, $now
 ) {
@@ -402,4 +402,4 @@ $newConversation = static function (string $status = 'open', int $paused = 0) us
     $ok(str_contains($apiSrc, '$allowedTransitions'), 'browser cannot invent an ownership/AI transition');
 });
 
-exit($failed > 0 ? 1 : 0);
+exit(sh_test_exit_code($failed, $blocked));

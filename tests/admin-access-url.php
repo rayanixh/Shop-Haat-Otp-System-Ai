@@ -502,4 +502,4 @@ $collisionDir = '';
 });
 
 if ($collisionDir !== '' && is_dir($collisionDir)) { @rmdir($collisionDir); }
-exit($failed > 0 ? 1 : 0);
+exit(sh_test_exit_code($failed, $blocked));

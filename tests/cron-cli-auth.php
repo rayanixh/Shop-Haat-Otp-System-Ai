@@ -42,6 +42,11 @@ cron_extract_function($cronSource, 'sh_cron_given_token');
 $php = sh_test_php_binary();
 
 [$passed, $failed, $blocked] = sh_test_run('Cron / shared-hosting authentication (real argument parsing)', static function ($ok, $eq, $blocked) use ($cronSource, $cronPath, $php) {
+    $ok(sh_test_contains_generic_500('<p class="error-code">Error 500</p><h1>Something went wrong</h1>'),
+        'generic Error 500 HTML is recognized as an error, not a successful test response');
+    $ok(!sh_test_contains_generic_500('<title>Backup complete | ShopHaat</title><main>OK</main>'),
+        'ordinary successful HTML is not classified as the generic Error 500 page');
+
     $resolve = static function (bool $cli, array $argv, array $get = [], array $server = []): string {
         $_GET = $get;
         $_SERVER = $server;
@@ -183,12 +188,15 @@ $php = sh_test_php_binary();
             'a CLI run without a database explains itself instead of exiting silently');
         $ok(str_contains($out, 'config/database.php') || str_contains($out, 'installer'),
             'the CLI message names the cause and the next step');
+        preg_match('~(?:^|\\R)RC=(\\d+)\\s*$~', trim($out), $exitMatch);
+        $ok((int)($exitMatch[1] ?? -1) === 1,
+            'the CLI database preflight returns a non-zero process status');
+        $ok(!sh_test_contains_generic_500($out),
+            'a generic Error 500 HTML page is never accepted as the CLI failure response');
         $ok(!str_contains($out, 'Fatal error') && !str_contains($out, 'Uncaught'),
             'the CLI entry point fails cleanly (no fatal error or uncaught exception)');
     }
 });
 
 echo "\nResult: passed {$passed}, failed {$failed}" . ($blocked > 0 ? ", blocked {$blocked}" : '') . "\n";
-echo "Note: php-wasm always reports exit code 0, so the shell status of cron/backup.php\n"
-    . "      could not be observed here; the message text and the reply routing were.\n";
-exit($failed > 0 ? 1 : 0);
+exit(sh_test_exit_code($failed, $blocked));

@@ -157,7 +157,12 @@ file_put_contents($good, "SET NAMES utf8mb4;\n-- ShopHaat database backup\n"
     }
     preg_match('~dbname=([^;]+)~', $dsn, $m);
     $appDb = trim($m[1] ?? '');
-    if (preg_match('~(test|staging|scratch|ci)~i', $appDb) !== 1) {
+    if (getenv('SH_TEST_MYSQL_ALLOW_DROP') !== '1') {
+        $blocked('the real rehearsal runs against a staging database', 'SH_TEST_MYSQL_ALLOW_DROP=1 is required');
+        return;
+    }
+    if (preg_match('~(?:^|[_-])(?:test|testing|ci|scratch|disposable)(?:$|[_-])~i', $appDb) !== 1
+        || preg_match('~(?:^|[_-])(?:prod|production|live|master|main)(?:$|[_-])~i', $appDb) === 1) {
         $blocked('the real rehearsal runs against a staging database',
             'the configured database "' . $appDb . '" is not named like a test database');
         return;
@@ -200,4 +205,6 @@ file_put_contents($good, "SET NAMES utf8mb4;\n-- ShopHaat database backup\n"
 @rmdir($tmp);
 
 echo "\nResult: passed {$passed}, failed {$failed}" . ($blocked > 0 ? ", blocked {$blocked}" : '') . "\n";
-exit($failed > 0 ? 1 : 0);
+if ($failed > 0) { exit(1); }
+if ($blocked > 0 && getenv('SH_TEST_REQUIRE_MYSQL') === '1') { exit(4); }
+exit(0);
