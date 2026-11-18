@@ -202,3 +202,66 @@ if (!function_exists('sh_support_whatsapp_href')) {
         return $url . (str_contains($url, '?') ? '&' : '?') . 'text=' . rawurlencode($message);
     }
 }
+
+if (!function_exists('sh_support_chat_on')) {
+    /** Overall customer chat master switch (same value the widget already checks). */
+    function sh_support_chat_on(): bool
+    {
+        return sh_setting('support_chat_enabled', sh_setting('support_enabled', '1')) === '1';
+    }
+}
+
+if (!function_exists('sh_support_channels')) {
+    /** Which customer-facing support channels are actually available.
+     *
+     * ai     – AI Assistant replies enabled in Admin → Support → Settings
+     * messenger – Facebook / Messenger link configured and valid
+     * whatsapp  – WhatsApp link/number configured and valid
+     *
+     * @return array{ai:bool,messenger:bool,whatsapp:bool}
+     */
+    function sh_support_channels(): array
+    {
+        return [
+            'ai'        => sh_setting('support_chat_ai_enabled', '0') === '1',
+            'messenger' => sh_support_facebook_url() !== '',
+            'whatsapp'  => sh_support_whatsapp_url() !== '',
+        ];
+    }
+}
+
+if (!function_exists('sh_support_any_channel')) {
+    /** True when at least one support channel is available for customers. */
+    function sh_support_any_channel(): bool
+    {
+        $ch = sh_support_channels();
+        return $ch['ai'] || $ch['messenger'] || $ch['whatsapp'];
+    }
+}
+
+if (!function_exists('sh_support_page_allowed')) {
+    /** Server-side decision: should the floating support launcher appear on this page?
+     *
+     * Support is kept off checkout / order / account / authentication pages so
+     * those flows stay focused. It remains on browsing pages (home, category,
+     * product, help, static pages, etc.) where a customer may need assistance.
+     *
+     * @param string $currentPage basename of the current PHP script
+     * @return bool
+     */
+    function sh_support_page_allowed(string $currentPage): bool
+    {
+        $excluded = [
+            // Checkout / order flow — must stay focused on purchase
+            'cart.php', 'checkout.php', 'payment.php', 'order-success.php',
+            // Order management — no support widget inside order views
+            'orders.php', 'order-details.php',
+            // Account / profile pages
+            'account.php', 'addresses.php', 'password.php',
+            // Authentication — must stay clean
+            'login.php', 'register.php', 'forgot-password.php',
+            'reset-password.php', 'otp.php', 'verify-email.php',
+        ];
+        return !in_array($currentPage, $excluded, true);
+    }
+}

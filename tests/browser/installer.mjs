@@ -278,7 +278,7 @@ async function phaseFresh(browser) {
 
     const headings = await page.$$eval('.card h2', (els) => els.map((el) => el.textContent.trim()));
     check('the cards are the original ones, in the original order',
-      JSON.stringify(headings) === JSON.stringify(['Server requirements', 'Optional extensions', 'Database connection', 'Website', 'Administrator account']),
+      JSON.stringify(headings) === JSON.stringify(['Server requirements', 'Database connection', 'Website', 'Administrator account']),
       headings.join(' > '));
     const h1s = await page.$$eval('h1', (els) => els.length);
     const h2s = await page.$$eval('.card h2', (els) => els.length);
@@ -321,13 +321,8 @@ async function phaseFresh(browser) {
     const optionalCard = (await page.textContent('.card') || '').replace(/\s+/g, ' ');
     check('the optional-extensions blurb is gone', !/Recommended, not required|These are recommended/i.test(optionalCard),
       (optionalCard.match(/[^.]*recommended[^.]*\./i) || [''])[0].slice(0, 90));
-    const afterHeading = await page.evaluate(() => {
-      const heading = [...document.querySelectorAll('.card h2')].find((el) => /Optional extensions/i.test(el.textContent));
-      if (!heading) { return null; }
-      const next = heading.nextElementSibling;
-      return next ? next.tagName.toLowerCase() : null;
-    });
-    check('the optional list follows its heading directly', afterHeading === 'ul', afterHeading || 'nothing after the heading');
+    const optionalHeadings = await page.$$eval('.card h2', (els) => els.filter((el) => /Optional extensions/i.test(el.textContent)).map((el) => el.textContent.trim()));
+    check('the "Optional extensions" heading is removed from the page', optionalHeadings.length === 0, optionalHeadings.join(', '));
   });
 
   await area('3. The form keeps the existing fields, naming and CSRF protection', async () => {
@@ -484,7 +479,7 @@ async function phaseRepair(browser) {
     const headings = await page.$$eval('.card h2', (els) => els.map((el) => el.textContent.trim()));
     check('the repair screen shows the original restricted and unlock cards',
       JSON.stringify(headings) === JSON.stringify([
-        'Server requirements', 'Optional extensions',
+        'Server requirements',
         'Restricted: this store is already installed', 'Store owner: unlock full setup',
       ]), headings.join(' > '));
 

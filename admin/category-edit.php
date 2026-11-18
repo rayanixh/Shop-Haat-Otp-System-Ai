@@ -297,7 +297,7 @@ require __DIR__ . '/_layout.php';
             <span class="sh-catimage__cap" id="cat-preview-cap"><?= $curImage !== '' ? 'Current image' : 'No image — placeholder shown' ?></span>
             <button type="button" class="sh-btn sh-btn--sm" id="btn-crop-image"
                     data-orig-src="<?= e($curOrigImage) ?>"
-                    style="margin-top:8px; width:100%; justify-content:center; <?= $curImage === '' ? 'display:none;' : '' ?>">
+                    style="margin-top:8px; width:100%; <?= $curImage === '' ? 'display:none;' : '' ?>">
               <?= sh_icon('crop', 14) ?> Edit / Crop Image
             </button>
             <span class="sh-badge" id="cat-crop-indicator"

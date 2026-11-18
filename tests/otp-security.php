@@ -924,8 +924,8 @@ t_ok('DOM is optional and documents its fallback',
     !$ext['dom']['required'] && str_contains($ext['dom']['fallback'], 'Allow-list'));
 t_ok('the installer no longer blocks on mbstring',
     !preg_match("~'mbstring extension'~", (string)file_get_contents(SH_ROOT . '/install/index.php')));
-t_ok('the installer reports optional extensions separately',
-    str_contains((string)file_get_contents(SH_ROOT . '/install/index.php'), 'Optional extensions'));
+t_ok('the installer still reports optional extensions separately',
+    str_contains((string)file_get_contents(SH_ROOT . '/install/index.php'), '$optionalRequirements'));
 t_ok('system health reports required and optional extensions apart',
     str_contains((string)file_get_contents(SH_ROOT . '/admin/system-health.php'), 'sh_extension_summary()'));
 

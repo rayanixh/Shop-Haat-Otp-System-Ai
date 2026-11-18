@@ -3,7 +3,7 @@ ShopHaat installer UI — phase "repair" against http://127.0.0.1:8080
 1. An installed store serves the original restricted repair card
   PASS  the repair screen responds with HTTP 200 — status 200
   PASS  the screen is titled Repair this store — Repair this store
-  PASS  the repair screen shows the original restricted and unlock cards — Server requirements > Optional extensions > Restricted: this store is already installed > Store owner: unlock full setup
+  PASS  the repair screen shows the original restricted and unlock cards — Server requirements > Restricted: this store is already installed > Store owner: unlock full setup
   PASS  the repair form accepts no database credentials
   PASS  the saved database password is never written into the page
   PASS  the primary action repairs the database instead of installing

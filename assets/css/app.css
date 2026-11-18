@@ -476,7 +476,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-toolbar { display: flex; align-items: center; gap: 10px; background: var(--sh-card); border-radius: var(--sh-radius); padding: 10px 13px; box-shadow: var(--sh-shadow); margin-bottom: 12px; flex-wrap: wrap; }
 .sh-toolbar__count { font-size: 13px; color: var(--sh-muted); }
 .sh-toolbar__count b { color: var(--sh-ink); }
-.sh-toolbar__right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.sh-toolbar__right { display: flex; align-items: center; gap: 8px; }
 .sh-toolbar__select { padding: 7px 10px; border: 1px solid var(--sh-line); border-radius: 6px; font-size: 13px; background: #fff; }
 .sh-mobile-tools { display: none; gap: 8px; margin-bottom: 12px; }
 .sh-mobile-tools button, .sh-mobile-tools select {
@@ -1332,7 +1332,7 @@ h1, h2, h3, h4, h5, h6 { color: var(--sh-heading); }
 .sh-modal__head { display: flex; align-items: center; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--sh-line-2); }
 .sh-modal__title { font-size: 15.5px; font-weight: 800; flex: 1; }
 .sh-modal__body { padding: 17px; }
-.sh-modal__foot { padding: 13px 17px; border-top: 1px solid var(--sh-line-2); display: flex; gap: 9px; justify-content: flex-end; flex-wrap: wrap; }
+.sh-modal__foot { padding: 13px 17px; border-top: 1px solid var(--sh-line-2); display: flex; gap: 9px; justify-content: flex-start; flex-wrap: wrap; }
 
 .sh-toasts { position: fixed; right: 14px; bottom: 78px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: calc(100vw - 28px); }
 .sh-toast {
@@ -2374,7 +2374,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 #customer-verification .sh-cv__label { line-height: 1.2; }
 #customer-verification .sh-cv__who { row-gap: 4px; line-height: 1.4; }
 
-.sh-cv__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sh-cv__head { display: flex; align-items: center; justify-content: flex-start; gap: 10px; flex-wrap: wrap; }
 .sh-cv__tools { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .sh-cv__tools .sh-btn { flex: 0 1 auto; min-width: 0; white-space: normal; }
 .sh-cv { display: flex; flex-direction: column; gap: 12px; font-size: 13.2px; min-width: 0; }
@@ -2462,7 +2462,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-admin-bell__btn em { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--sh-bad); color: #fff; font-size: 10.5px; font-weight: 800; font-style: normal; display: grid; place-items: center; }
 .sh-admin-bell__menu { position: absolute; right: 0; top: calc(100% + 8px); width: 340px; max-width: calc(100vw - 24px); background: #fff; border: 1px solid var(--sh-line); border-radius: 10px; box-shadow: 0 12px 30px rgba(15,23,42,.14); z-index: 60; overflow: hidden; }
 .sh-admin-bell__menu[hidden] { display: none; }
-.sh-admin-bell__head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--sh-line); font-size: 13px; }
+.sh-admin-bell__head { display: flex; align-items: center; justify-content: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--sh-line); font-size: 13px; }
 .sh-admin-bell__head button { background: none; border: 0; color: var(--sh-brand); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .sh-admin-bell__empty { margin: 0; padding: 22px 12px; text-align: center; color: var(--sh-muted); font-size: 13px; }
 .sh-admin-bell__item { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--sh-line-2); color: inherit; }
@@ -2480,7 +2480,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-inbox__icon { width: 34px; height: 34px; border-radius: 9px; background: #fff; border: 1px solid var(--sh-line); color: var(--sh-ink-2); display: grid; place-items: center; flex: none; }
 .sh-inbox__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; overflow-wrap: break-word; }
 .sh-inbox__text small { color: var(--sh-muted); font-size: 11.5px; }
-.sh-inbox__actions { display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.sh-inbox__actions { display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-start; }
 .sh-search-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .sh-prodcell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .sh-prodcell img { width: 40px; height: 40px; border-radius: 8px; object-fit: contain; padding: 2px; border: 1px solid var(--sh-line); background: #fff; flex: none; }
@@ -2488,7 +2488,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-input--xs { width: 84px; padding: 6px 8px; font-size: 13px; }
 .sh-input--sm { width: 180px; padding: 6px 8px; font-size: 13px; }
 .sh-select--sm { padding: 6px 28px 6px 8px; font-size: 12.5px; }
-.sh-panel__head--wrap { justify-content: space-between; }
+.sh-panel__head--wrap { justify-content: flex-start; }
 .sh-seg { display: flex; flex-wrap: wrap; gap: 4px; background: #f3f4f6; border-radius: 8px; padding: 3px; }
 .sh-seg__item { padding: 6px 11px; border-radius: 6px; font-size: 12.5px; font-weight: 700; color: var(--sh-muted); }
 .sh-seg__item.is-active { background: #fff; color: var(--sh-ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
@@ -2708,7 +2708,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-admin-body :is(.sh-health-row, .sh-inbox__item, .sh-action-row, .sh-ocard__head, .sh-ohero, .sh-cv__head, .sh-perm-head, .sh-dash-card__head, .sh-chancard__head, .sh-stat, .sh-alert, .sh-table__cell, .sh-prodcell) { flex-wrap: wrap; }
 .sh-admin-body :is(.sh-stat, .sh-prodcell, .sh-table__cell) { flex-wrap: nowrap; }
 .sh-admin-body :is(.sh-health-row, .sh-inbox__item, .sh-ocard__head, .sh-cv__head) > :first-child { flex: 1 1 200px; }
-.sh-admin-body .sh-actions, .sh-admin-body .sh-table__actions, .sh-admin-body .sh-panel__actions, .sh-admin-body .sh-ocard__actions, .sh-admin-body .sh-inbox__actions, .sh-admin-body .sh-form__actions, .sh-admin-body .sh-btn-row { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.sh-admin-body .sh-actions, .sh-admin-body .sh-table__actions, .sh-admin-body .sh-panel__actions, .sh-admin-body .sh-ocard__actions, .sh-admin-body .sh-inbox__actions, .sh-admin-body .sh-form__actions, .sh-admin-body .sh-btn-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; max-width: 100%; }
 .sh-admin-body .sh-btn, .sh-admin-body button { max-width: 100%; overflow-wrap: break-word; }
 .sh-admin-body .sh-btn svg { flex: none; }
 /* 8. Badges / pills: wrap text when too long rather than crossing the border. */
@@ -2716,7 +2716,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 /* 9. Cards / panels: contain by layout, not clipping. */
 .sh-admin-body :is(.sh-panel, .sh-card, .sh-stat, .sh-ocard, .sh-dash-card, .sh-chancard, .sh-inbox__item, .sh-perm-group, .sh-health-card, .sh-cv, .sh-aiprov, .sh-tp__card, .sh-setting-box) { max-width: 100%; min-width: 0; }
 .sh-admin-body .sh-panel__body, .sh-admin-body .sh-panel__head, .sh-admin-body .sh-ocard__body { min-width: 0; max-width: 100%; }
-.sh-admin-body .sh-panel__head > .sh-panel__title { flex: 1 1 auto; min-width: 0; }
+.sh-admin-body .sh-panel__head > .sh-panel__title { flex: 0 1 auto; min-width: 0; }
 .sh-admin-body .sh-panel__actions { max-width: 100%; }
 /* 10. Tables: the scroller is the ONLY thing allowed to scroll; the card never widens. */
 .sh-admin-body .sh-tablewrap, .sh-admin-body .sh-table-wrap { max-width: 100%; width: 100%; }
@@ -2802,7 +2802,7 @@ html.sh-pt-hold .sh-pt-page { animation: sh-pt-in 400ms ease 6s forwards; }
 .sh-mx__name { display: block; min-width: 0; color: var(--sh-ink-2); font-size: 12.8px; font-weight: 500; line-height: 1.25; }
 .sh-mx__toggle { display: inline-flex; flex: 0 0 auto; margin: 0; }
 .sh-mx__toggle .sh-toggle__track { flex: 0 0 auto; }
-.sh-mx__save { display: flex; justify-content: flex-end; min-width: 0; margin-top: 12px; }
+.sh-mx__save { display: flex; justify-content: flex-start; min-width: 0; margin-top: 12px; }
 .sh-mx__save .sh-btn { min-height: 39px; padding: 8px 18px; }
 
 /* Preserve the compact 2×2 channel layout on narrow phones; collapse only
@@ -3325,7 +3325,7 @@ button.sh-schat-opt:hover, button.sh-schat-opt:focus-visible { background: var(-
 .sh-brand { min-width: 0; }
 .sh-brand { flex: 0 1 auto; }
 .sh-brand__text { min-width: 0; overflow-wrap: anywhere; }
-.sh-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.sh-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-start; min-width: 0; }
 .sh-action, .sh-action__label { min-width: 0; overflow-wrap: anywhere; }
 /* Hero copy keeps its designed max width but never exceeds its column. */
 .sh-slide__title { max-width: min(460px, 100%); min-width: 0; }
@@ -3431,7 +3431,7 @@ button.sh-schat-opt:hover, button.sh-schat-opt:focus-visible { background: var(-
   min-height: 0;
 }
 #sh-verify-providers.sh-panel--compact .sh-cv__head .sh-panel__title { min-width: 0; margin: 0; }
-#sh-verify-providers.sh-panel--compact .sh-cv__tools { justify-content: flex-end; }
+#sh-verify-providers.sh-panel--compact .sh-cv__tools { justify-content: flex-start; }
 .sh-empty--compact {
   display: flex; flex-direction: row; align-items: center; justify-content: flex-start;
   gap: 10px; padding: 8px 2px 4px; text-align: left;
@@ -3620,7 +3620,7 @@ button.sh-schat-opt:hover, button.sh-schat-opt:focus-visible { background: var(-
 .sh-pc__row { display: grid; grid-template-columns: minmax(0, 1fr) 44px 34px; gap: 6px; align-items: center; }
 .sh-pc__row input[type="text"] { min-width: 0; }
 .sh-pc__row input[type="color"] { width: 44px; height: 36px; padding: 2px; border: 1px solid var(--sh-line); border-radius: 6px; background: #fff; }
-.sh-pc__tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+.sh-pc__tools { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
 .sh-pc__summary { font-size: 11.5px; color: var(--sh-muted); min-width: 0; }
 .sh-pc__summary strong { color: var(--sh-ink-2); }
 
