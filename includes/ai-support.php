@@ -2304,18 +2304,17 @@ function sh_support_settings_save(int $adminId, array $input, bool $allowAiConfi
     // the official hosts are stored; numbers are normalised to https://wa.me/…
     // An empty value hides the option instead of publishing a dead link.
     require_once SH_ROOT . '/includes/support-links.php';
-    $facebookLink = sh_support_link_check_facebook((string)($input['facebook_url'] ?? ''));
-    if (empty($facebookLink['ok'])) {
-        return ['ok' => false, 'error' => 'Facebook link: ' . (string)($facebookLink['error'] ?? 'Enter a valid https link.')];
-    }
-    $whatsappLink = sh_support_link_check_whatsapp((string)($input['whatsapp'] ?? ''));
-    if (empty($whatsappLink['ok'])) {
-        return ['ok' => false, 'error' => 'WhatsApp: ' . (string)($whatsappLink['error'] ?? 'Enter a valid number or https link.')];
+    $channelLinks = sh_support_validate_channel_links(
+        (string)($input['facebook_url'] ?? ''),
+        (string)($input['whatsapp'] ?? '')
+    );
+    if (empty($channelLinks['ok'])) {
+        return ['ok' => false, 'error' => (string)($channelLinks['error'] ?? 'Enter valid support channel destinations.')];
     }
     $whatsappMessage = sh_support_clean_text((string)($input['whatsapp_message'] ?? ''), 300);
     $whatsappMessage = trim(preg_replace('/\s+/u', ' ', $whatsappMessage) ?? '');
-    $values['facebook_url'] = (string)$facebookLink['url'];
-    $values['whatsapp'] = (string)$whatsappLink['url'];
+    $values['facebook_url'] = (string)$channelLinks['facebook'];
+    $values['whatsapp'] = (string)$channelLinks['whatsapp'];
     $values['whatsapp_message'] = $whatsappMessage;
 
     $aiValues = [];

@@ -25,6 +25,7 @@ require_once SH_ROOT . '/includes/auth.php';
 require_once SH_ROOT . '/includes/cart.php';
 require_once SH_ROOT . '/includes/catalog.php';
 require_once SH_ROOT . '/includes/transition.php';
+require_once SH_ROOT . '/includes/support-links.php';
 
 sh_session_start();
 
@@ -72,6 +73,8 @@ $shFavicon    = sh_logo_image((string)sh_setting('site_favicon', ''));
 $shFlash      = sh_flash_pull();
 $shSearchQ    = sh_get('q');
 $shTransition = sh_transition_config();
+$shCurrentPage = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+$shSupportVisibility = sh_support_visibility($shCurrentPage);
 ?>
 <!doctype html>
 <html lang="<?= e((string)$shSeo['lang']) ?>">
@@ -105,7 +108,7 @@ $shTransition = sh_transition_config();
       <nav class="sh-utility__links" aria-label="Utility">
         <a href="<?= e(sh_url('help.php')) ?>"><?= sh_icon('help', 14) ?> Help</a>
         <a href="<?= e(sh_url('track.php')) ?>"><?= sh_icon('package', 14) ?> Track Order</a>
-        <a href="<?= e(sh_url('support.php')) ?>"><?= sh_icon('headphones', 14) ?> Customer Support</a>
+        <?php if ($shSupportVisibility['show_support_links']): ?><a href="<?= e(sh_url('support.php')) ?>"><?= sh_icon('headphones', 14) ?> Customer Support</a><?php endif; ?>
         <?php if ($shUser): ?>
           <a href="<?= e(sh_url('account.php')) ?>"><?= sh_icon('user', 14) ?> Hi, <?= e(explode(' ', $shUser['name'])[0]) ?></a>
           <a href="<?= e(sh_url('logout.php')) ?>"><?= sh_icon('log-out', 14) ?> Sign out</a>
@@ -241,7 +244,7 @@ $shTransition = sh_transition_config();
         <li><a href="<?= e(sh_url('orders.php')) ?>"><?= sh_icon('package', 17) ?><span>My Orders</span></a></li>
         <li><a href="<?= e(sh_url('wishlist.php')) ?>"><?= sh_icon('heart', 17) ?><span>Wishlist</span></a></li>
         <li><a href="<?= e(sh_url('track.php')) ?>"><?= sh_icon('map-pin', 17) ?><span>Track Order</span></a></li>
-        <li><a href="<?= e(sh_url('support.php')) ?>"><?= sh_icon('headphones', 17) ?><span>Customer Support</span></a></li>
+        <?php if ($shSupportVisibility['show_support_links']): ?><li><a href="<?= e(sh_url('support.php')) ?>"><?= sh_icon('headphones', 17) ?><span>Customer Support</span></a></li><?php endif; ?>
         <?php if ($shUser): ?>
           <li><a href="<?= e(sh_url('account.php')) ?>"><?= sh_icon('user', 17) ?><span>My Account</span></a></li>
           <li><a href="<?= e(sh_url('logout.php')) ?>"><?= sh_icon('log-out', 17) ?><span>Sign out</span></a></li>

@@ -23,6 +23,8 @@ $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SESSION = [];
 
 require_once dirname(__DIR__) . '/config/config.php';
+require_once __DIR__ . '/_test_database_guard.php';
+sh_test_require_disposable_mysql('support-system');
 require_once SH_ROOT . '/install/schema.php';
 require_once SH_ROOT . '/includes/support.php';
 

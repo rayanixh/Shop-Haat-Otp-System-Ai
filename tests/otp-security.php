@@ -142,8 +142,29 @@ class ShOtpTestPDO extends PDO
 
 $GLOBALS['sh_test_is_mysql'] = false;
 $dsn = getenv('SH_TEST_MYSQL_DSN');
+if (is_string($dsn) && $dsn !== '' && !extension_loaded('pdo_mysql')) {
+    fwrite(STDERR, "BLOCKED OTP security suite: SH_TEST_MYSQL_DSN was set but pdo_mysql is unavailable; refusing SQLite substitution.\n");
+    exit(2);
+}
 if (is_string($dsn) && $dsn !== '' && extension_loaded('pdo_mysql')) {
-    $pdo = new ShOtpTestPDO($dsn, (string)getenv('SH_TEST_MYSQL_USER'), (string)getenv('SH_TEST_MYSQL_PASS'));
+    if (preg_match('~dbname=([^;]+)~', $dsn, $dbMatch) !== 1
+        || preg_match('/(?:^|[_-])(?:test|testing|ci|scratch|disposable)(?:$|[_-])/i', trim($dbMatch[1] ?? '')) !== 1
+        || preg_match('/(?:^|[_-])(?:prod|production|live|master|main)(?:$|[_-])/i', trim($dbMatch[1] ?? '')) === 1
+        || getenv('SH_TEST_MYSQL_ALLOW_DROP') !== '1') {
+        fwrite(STDERR, "BLOCKED OTP security suite: refuse MySQL mutation without an explicitly disposable DSN and SH_TEST_MYSQL_ALLOW_DROP=1.\n");
+        exit(3);
+    }
+    try {
+        $pdo = new ShOtpTestPDO($dsn, (string)getenv('SH_TEST_MYSQL_USER'), (string)getenv('SH_TEST_MYSQL_PASS'));
+        $actualDb = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        if (!hash_equals(trim($dbMatch[1]), $actualDb)) {
+            fwrite(STDERR, "BLOCKED OTP security suite: connected database does not match the disposable DSN.\n");
+            exit(3);
+        }
+    } catch (Throwable $e) {
+        fwrite(STDERR, "BLOCKED OTP security suite: MySQL connection preflight failed.\n");
+        exit(2);
+    }
     $GLOBALS['sh_test_is_mysql'] = true;
 } elseif (extension_loaded('pdo_sqlite')) {
     // A file (not :memory:) database so the concurrency cases can open a second
@@ -158,6 +179,10 @@ if (is_string($dsn) && $dsn !== '' && extension_loaded('pdo_mysql')) {
     exit(2);
 }
 $GLOBALS['sh_test_pdo'] = $pdo;
+echo 'Engine: ' . ($GLOBALS['sh_test_is_mysql'] ? 'real MySQL/MariaDB' : 'SQLite compatibility backend') . "\n";
+if (!$GLOBALS['sh_test_is_mysql']) {
+    echo "BLOCKED MySQL/MariaDB engine parity, row locking and concurrent request verification: this run uses SQLite.\n";
+}
 
 function sh_db(): PDO { return $GLOBALS['sh_test_pdo']; }
 function sh_db_config(): array { return ['host' => 'localhost', 'name' => 'shophaat_test', 'user' => 'test', 'pass' => 'test']; }
@@ -1118,8 +1143,13 @@ if (!sh_otp_test_is_mysql() && !empty($GLOBALS['sh_test_db_file'])) {
 foreach (glob(SH_TEST_LOG_DIR . '/*') ?: [] as $f) { @unlink($f); }
 @rmdir(SH_TEST_LOG_DIR);
 if ($GLOBALS['t_fail'] > 0) {
-    echo "OTP SECURITY SUITE: FAILURES PRESENT\n";
+    echo "OTP SECURITY SUITE: FAIL\n";
     exit(1);
 }
-echo "OTP SECURITY SUITE: ALL CHECKS PASSED\n";
+if (!$GLOBALS['sh_test_is_mysql']) {
+    echo "OTP SECURITY SUITE: PASS (SQLite compatibility checks); MySQL/MariaDB: NOT TESTED\n";
+    if (getenv('SH_TEST_REQUIRE_MYSQL') === '1') { exit(4); }
+    exit(0);
+}
+echo "OTP SECURITY SUITE: PASS (real MySQL/MariaDB)\n";
 exit(0);

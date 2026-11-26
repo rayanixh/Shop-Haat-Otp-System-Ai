@@ -24,6 +24,8 @@ $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 $_SERVER['REQUEST_SCHEME'] = 'http';
 
 require_once dirname(__DIR__, 2) . '/config/config.php';
+require_once dirname(__DIR__) . '/_test_database_guard.php';
+sh_test_require_disposable_mysql('browser-seed');
 require_once SH_ROOT . '/install/schema.php';
 // sh_install_create_store() calls sh_install_demo_data() when demo data is
 // requested; the installer page always loads the demo module next to the

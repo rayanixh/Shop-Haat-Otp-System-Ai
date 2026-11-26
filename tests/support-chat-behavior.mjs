@@ -133,15 +133,15 @@ const PAGE = `<!doctype html><html><head><title>t</title></head><body>
 <div class="sh-schat-menu" id="sh-schat-menu" role="menu" aria-label="Support options" aria-hidden="true" hidden>
   <a class="sh-schat-opt" id="sh-schat-opt-facebook" role="menuitem" href="https://m.me/shophaat" target="_blank" rel="noopener noreferrer nofollow" data-channel="facebook">
     <span class="sh-schat-opt__icon sh-schat-opt__icon--messenger">f</span>
-    <span class="sh-schat-opt__body"><strong>Facebook</strong><small>Messenger</small></span>
+    <span class="sh-schat-opt__body"><strong>Messenger Support</strong><small>Message us on Messenger</small></span>
   </a>
   <a class="sh-schat-opt" id="sh-schat-opt-whatsapp" role="menuitem" href="https://wa.me/8801700000000?text=Hi%20ShopHaat" target="_blank" rel="noopener noreferrer nofollow" data-channel="whatsapp">
     <span class="sh-schat-opt__icon sh-schat-opt__icon--whatsapp">w</span>
-    <span class="sh-schat-opt__body"><strong>WhatsApp</strong><small>Chat on WhatsApp</small></span>
+    <span class="sh-schat-opt__body"><strong>WhatsApp Support</strong><small>Chat with us on WhatsApp</small></span>
   </a>
   <button type="button" class="sh-schat-opt sh-schat-opt--chat" id="sh-schat-opt-chat" role="menuitem" data-channel="chat">
     <span class="sh-schat-opt__icon sh-schat-opt__icon--chat">c</span>
-    <span class="sh-schat-opt__body"><strong>Live Chat</strong><small>Chat with us</small></span>
+    <span class="sh-schat-opt__body"><strong>AI Assistant Support</strong><small>Chat with our AI Assistant</small></span>
   </button>
 </div>
 <section class="sh-schat-sheet" id="sh-schat-sheet" role="dialog" aria-labelledby="sh-schat-title" data-human="0" data-config='{"endpoint":"/api/support.php","max":2000}' hidden>
@@ -230,7 +230,7 @@ check('the launcher shows no "Support" text label',
 	JSON.stringify(fabEl.textContent.trim()));
 check('the menu starts hidden and out of the accessibility tree',
 	menuEl.hidden === true && menuEl.getAttribute('aria-hidden') === 'true');
-check('the menu offers exactly three options (Facebook, WhatsApp, Live Chat)',
+check('the menu offers exactly three configured support channels',
 	$$('#sh-schat-menu [role="menuitem"]').length === 3
 	&& !!$('#sh-schat-opt-facebook') && !!$('#sh-schat-opt-whatsapp') && !!$('#sh-schat-opt-chat'));
 check('external options are safe new-tab links to the configured destinations', (() => {
@@ -286,7 +286,7 @@ check('website scrolling stays unlocked and independent',
 	window.document.body.style.overflow === '' && window.document.documentElement.style.overflow === '');
 window.dispatchEvent(new window.Event('scroll'));
 check('a document scroll event never re-pins the panel', sheet.style.top === '' && sheet.style.getPropertyValue('--sh-schat-bottom') !== '', sheet.style.top);
-check('the Live Chat option opens the existing panel and folds the menu',
+check('the AI Assistant option opens the existing panel and folds the menu',
 	sheet.hidden === false && menuEl.classList.contains('is-open') === false
 	&& fabEl.getAttribute('aria-expanded') === 'false');
 check('start called once with the CSRF token', reqs('start').length === 1 && reqs('start')[0].p.get('csrf_token') === 'csrf-test-token');
