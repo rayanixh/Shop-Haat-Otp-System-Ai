@@ -26,11 +26,12 @@ require_once SH_ROOT . '/includes/order-tracking.php';
 require_once SH_ROOT . '/ai/AIManager.php';
 
 // The repository retains a separate legacy support service in ai-support.php.
-// They intentionally expose overlapping helper names and must never be loaded
-// in the same request; fail explicitly before PHP raises a redeclaration fatal.
-if (function_exists('sh_support_seed_faqs')) {
+// Use a module sentinel (not function_exists: PHP registers declarations from
+// this file before executing it) to stop co-loading before redeclarations.
+if (defined('SH_CURRENT_SUPPORT_MODULE_LOADED')) {
     throw new LogicException('Legacy and current support service modules cannot be loaded together.');
 }
+define('SH_LEGACY_SUPPORT_MODULE_LOADED', true);
 
 /* ------------------------------------------------------------------ *\
  * Schema (additive, lazy) + seed FAQs

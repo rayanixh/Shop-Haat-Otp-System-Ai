@@ -468,10 +468,13 @@ sh_t('HTML and JSON public tracking share the atomic limiter and minimize fields
     $html = (string)@file_get_contents(SH_ROOT . '/track.php');
     $api = (string)@file_get_contents(SH_ROOT . '/api/orders.php');
     $timeline = (string)@file_get_contents(SH_ROOT . '/includes/order-timeline.php');
-    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true", 'sh_file_rate_limit_cleanup($dir, 24)'] as $needle) {
+    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true"] as $needle) {
         if (!str_contains($policy, $needle)) { return 'tracking limiter policy is missing ' . $needle; }
     }
     $security = (string)@file_get_contents(SH_ROOT . '/includes/security.php');
+    if (!str_contains($security, 'sh_file_rate_limit_cleanup($dir, 24)')) {
+        return 'rate limiter no longer invokes bounded cleanup';
+    }
     foreach (['flock($lock, LOCK_EX)', 'LOCK_EX | LOCK_NB', 'min(32, $budget)', '/.locks', 'cleanup-queue.lck', 'state.json', 'job-', 'sh_rate_limit_cleanup_enqueue_locked'] as $needle) {
         if (!str_contains($security, $needle)) { return 'counter cleanup/lock/rotation contract is missing ' . $needle; }
     }
@@ -3238,7 +3241,13 @@ function sh_security_php_inline_output(string $source, string $kind): ?string
     if (!str_starts_with(ltrim($source), '<?php')) { return 'content before opening PHP tag'; }
     $hasMarkup = false;
     foreach (token_get_all($source) as $token) {
-        if (!is_array($token) || $token[0] !== T_INLINE_HTML || $token[1] === '') { continue; }
+        if (!is_array($token)) { continue; }
+        // The tokenizer attaches following whitespace to T_CLOSE_TAG rather
+        // than returning it as a separate T_INLINE_HTML token.
+        if ($token[0] === T_CLOSE_TAG && $kind === 'php-only' && substr($token[1], 2) !== '') {
+            return 'inline output outside PHP tags';
+        }
+        if ($token[0] !== T_INLINE_HTML || $token[1] === '') { continue; }
         if (trim($token[1]) !== '') { $hasMarkup = true; }
         // PHP-only code (especially APIs, config, cron and libraries) must not
         // emit even whitespace outside PHP: it can corrupt headers and JSON.
@@ -3265,7 +3274,8 @@ sh_t('PHP-only libraries and endpoints cannot emit output; view templates may re
     if (sh_security_php_inline_output("<?php header('Content-Type: application/json'); ?>\n", 'php-only') === null) {
         return 'the probe did not detect whitespace emitted by a PHP-only endpoint';
     }
-    if (sh_security_php_inline_output("<?php \$value = 1; ?>\n<div>view</div>\n<?php /* end */ ?>\n", 'template') !== null) {
+    $validTemplateProbe = '<?php $value = 1; ?>' . "\n<div>view</div>\n<?php /* end */ ?>\n";
+    if (sh_security_php_inline_output($validTemplateProbe, 'template') !== null) {
         return 'the probe rejected valid mixed PHP/HTML template output';
     }
     $offenders = [];

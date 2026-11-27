@@ -4,9 +4,16 @@
 
 ## Summary
 
-Phase 1 implementation changes are present in the working tree. Customer-facing account, address, and order reads now derive identity from the authenticated session and use owner-constrained lookups. Customer payment writes include the owner predicate in their locked order lookup and update. The public HTML and JSON order trackers share a file-backed atomic rate limiter and return reduced order data. New order references use cryptographic randomness instead of embedding a database ID. Customer-support order lookups were also tightened: signed-in support lookups require order ownership, internal numeric IDs are no longer accepted as order references, and anonymous support lookups share the public tracking rate budget.
+Phase 1 changes were reviewed and the requested source-level test suites were executed under an isolated PHP-WASM 8.5.12 CLI. The bounded cleanup test actually removed 100 expired counters in 15 repeated sweeps while preserving five active counters, with 105 total queued jobs inspected and the configured per-sweep budget maintained. The cross-process cursor and concurrent-worker cases were blocked because the WASM runtime could not execute child PHP processes. MySQL-backed, HTTP Customer A/B, public-tracking response/threshold, and business-workflow tests were not run.
 
-No PHP application tests, database-backed tests, browser tests, or synthetic Customer A/B request tests were executed. A PHP syntax-parser pass and source-level checks did run successfully; these do not establish runtime authorization or workflow behavior.
+This is partial runtime evidence from PHP-WASM, not a native PHP/cPanel host or database verification. No production credentials or customer data were used. Phase 1 is not claimed verified or approved.
+
+## Runtime environment and isolation
+
+- Native `php`, `mysql`, `mariadb`, `mysqld`, Docker and Podman were unavailable. The workspace has no `config/database.php`, disposable test DSN or staging URL. No production configuration or customer data was accessed.
+- Installed `@php-wasm/cli` 3.1.66 only under `/tmp`; it ran PHP 8.5.12 with `pdo_mysql` listed, but no MySQL/MariaDB server was available. `tests/_support_php_bin.php` reported no runnable child PHP binary, so `proc_open` worker tests cannot run in this WASM CLI.
+- The WASM CLI reports host exit status 0 even when a PHP script requests a nonzero exit (`php-wasm-cli -r 'exit(7);'` returned host status 0). Therefore the test suite's printed PASS/FAIL/BLOCKED summary is recorded alongside the host command status; host status alone is not treated as a pass.
+- A disposable MySQL/HTTP environment could not safely be provisioned in this workspace. The database tests have destructive guards; they were not bypassed.
 
 ## Implemented changes
 
@@ -37,8 +44,8 @@ No PHP application tests, database-backed tests, browser tests, or synthetic Cus
 
 ### Regression checks
 
-- Expanded `tests/idor-scan.php`, `tests/security-regression.php`, and `tests/support-unit.php` with source assertions for owner-scoped customer access, tracking minimization, reference entropy/collision retry, and support SQL privacy. Expanded `tests/rate-limit-failsafe.php` with a 100-expired-plus-5-active repeated-sweep case, per-sweep inspection budget checks, separate-process cursor advancement, active-counter preservation, and concurrent cleanup/counter-update workers. These are test cases added; runtime outcomes are not claimed because PHP CLI is unavailable.
-- The added PHP tests have **not** been executed because no PHP runtime is available in the workspace; they are not reported as passing.
+- Updated `tests/idor-scan.php`'s payment route classification to assert both authenticated manual submission and verified server-to-server callback controls. Updated `tests/security-regression.php` to assert cleanup wiring from the correct source file and to detect trailing whitespace attached to `T_CLOSE_TAG`. Updated `tests/support-unit.php` assertions for the SQL-pushed ownership rules and module sentinels.
+- Expanded `tests/rate-limit-failsafe.php` with 100 expired and five active counters, repeated bounded sweeps, per-sweep inspection counts, separate-process cursor persistence and concurrent update/cleanup worker cases. The repeated-sweep portion was executed under PHP-WASM; process/concurrency cases were explicitly blocked because no runnable child PHP binary exists.
 
 ## Files changed
 
@@ -69,61 +76,67 @@ Pre-edit copies of affected existing files were saved under `/tmp/shophaat-phase
 
 ## Exact files changed in this final review
 
-- `includes/security.php` — persistent bounded queue/cursor cleanup and post-shard-lock index registration.
-- `includes/support.php` — session-derived owner predicate and anonymous reference-plus-phone SQL projection.
-- `includes/ai-support.php` — explicit guard against co-loading the separate legacy/current support modules, which have overlapping global helper names.
-- `tests/rate-limit-failsafe.php` — repeated 100-counter cleanup, budget, process-persistence, and concurrent update/cleanup cases.
-- `tests/support-unit.php` — source assertions for session-derived SQL authorization, minimal projections, and module co-load guards.
-- `tests/security-regression.php` — source assertions for persistent rotation and the no-directory-walk invariant.
+- `includes/support.php` — corrected the module sentinel guard and retained session-derived owner/phone-filtered SQL lookup.
+- `includes/ai-support.php` — corrected the reciprocal module sentinel guard for overlapping legacy/current helper declarations.
+- `tests/rate-limit-failsafe.php` — added child-process availability detection, corrected blocked-case accounting, and emitted measured repeated-sweep counts; child-process checks report BLOCKED when no runnable subprocess exists.
+- `tests/idor-scan.php` — classify the mixed manual-payment/gateway callback endpoint by its actual controls.
+- `tests/support-unit.php` — source assertions for session-derived SQL authorization, minimal projections, and module sentinels.
+- `tests/security-regression.php` — source assertions for queue rotation and a tokenizer-correct trailing-output probe.
 - `SHOP_HAAT_PHASE_1_SECURITY_REPORT.md` — this final review, checks, risks, and blocked-test record.
 
-Other reviewed files (`includes/order-tracking.php`, `track.php`, `api/orders.php`, `includes/payment.php`, `includes/functions.php`) were inspected for wiring/signature compatibility and were not changed by this final review. Declaration inspection found six overlapping global helper names in the legacy `includes/support.php` and current `includes/ai-support.php` modules, with differing signatures; production routes load only the current module, while legacy test files load only the legacy module. Both entry files now stop explicitly before declarations if the other module was loaded first, preventing an opaque redeclaration fatal.
+Other reviewed files (`includes/order-tracking.php`, `track.php`, `api/orders.php`, `includes/payment.php`, `includes/functions.php`) were inspected for wiring/signature compatibility and were not changed by this final review. Declaration inspection found six overlapping global helper names in the legacy `includes/support.php` and current `includes/ai-support.php` modules, with differing signatures; production routes load only the current module, while legacy test files load only the legacy module. Both entry files now use distinct module sentinel constants to stop before declarations if the other module was loaded first, preventing an opaque redeclaration fatal.
 
 ## Checks executed and results
 
-| Check | Result |
+Commands below used `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli` (PHP 8.5.12 WASM), except the explicit Node/jsdom behavior suites. The WASM host does not propagate PHP `exit()` status; results therefore include both the host exit code and the script's printed summary.
+
+Initial WASM runs exposed test-harness issues rather than application runtime results: support-module guards used `function_exists()` (which sees declarations registered from the same file), the tokenizer probe did not account for whitespace attached to `T_CLOSE_TAG`, and the IDOR allowlist omitted the mixed manual-payment/gateway-callback controls. Those harness issues were corrected and the four requested suites were rerun; the final outputs below are from the corrected files.
+
+| Exact command/check | Result |
 |---|---|
-| Prior ZIP/source parity review | Passed: 7 reviewed files (tracking limiter, tracking routes, support lookup, AI-support, and report) matched the committed pre-review source byte-for-byte before these final fixes. |
-| `git diff --check` | Passed; no whitespace errors reported. |
-| PHP 8.3 syntax parsing using the `php-parser` npm package in `/tmp` (not added to project dependencies) | Passed: 22/22 working-tree PHP files in the Phase 1 change set and requested source review parsed successfully. This is a parser check, not PHP CLI lint or runtime execution. |
-| Custom Python source assertions: cleanup queue/cursor/lock contract, budgets, configured tracking limits, support SQL ownership, include wiring, co-load guards, and regression harness wiring | Passed: 15/15. These are textual/source checks only. |
-| Function declaration/include/signature review across the eight requested files | No duplicate declarations within an individual file and no missing shared-tracker includes found. Six same-named helper functions exist across the separate legacy/current support modules with incompatible signatures; both modules now throw an explicit `LogicException` before declaring if the other is already loaded. Existing callers of `sh_file_rate_limit_cleanup()` and `sh_support_tool_order()` remain compatible; the cleanup's optional third by-reference inspection output does not change its two-argument callers. |
-| `tests/idor-scan.php` | Not run: PHP CLI unavailable. |
-| `tests/rate-limit-failsafe.php` (100-file repeated sweeps, budget checks, cursor persistence across processes, and concurrent cleanup/counter updates) | Not run: PHP CLI unavailable; repeated-sweep, cross-process, and concurrency results are NOT RUN. Test cases are present but no runtime outcome is claimed. |
-| `tests/security-regression.php` | Not run: PHP CLI unavailable. |
-| `tests/support-unit.php` (including new SQL ownership/projection source assertions) | Not run: PHP CLI unavailable. |
-| PHP built-in lint / application execution | Not run: PHP CLI/runtime unavailable. |
-| MySQL/MariaDB-backed checks | Not run: no database runtime was available. |
-| Synthetic Customer A/B cross-account access checks | Not run: no authorized disposable local/staging database and browser/request environment was established. |
-| Browser/UI regression and live public-tracker rate-limit tests | Not run. |
-| PHP integration check of public timeline SQL and anonymous support response parity | Not run: no PHP/database runtime. |
-| Final project ZIP integrity and changed-file coverage | Passed: 417 archive entries, `unzip -t` found no errors, all 25 paths changed from base/current working tree were present, and installation DB secrets/lock marker were excluded. |
+| `php-wasm-cli --version` and extension probe | PHP 8.5.12 (WASM CLI); `pdo_mysql` extension reported loaded. No MySQL server was available. |
+| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/idor-scan.php` | **PASS** — `passed 47 failed 0`; `IDOR SCAN: ALL CHECKS PASSED`. Host exit code 0; script summary indicates success. Source/static scan only, not HTTP authorization proof. |
+| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/rate-limit-failsafe.php` | **PARTIAL / BLOCKED** — `passed 43 failed 0 blocked 2`; summary `RATE LIMIT FAIL-SAFE SUITE: SOME CHECKS BLOCKED`. Host exit code 0 (WASM masks PHP nonzero exits). Repeated-sweep details: `INFO repeated sweeps=15; expired remaining=0; total jobs inspected=105; active unchanged=yes`. Each seven-job sweep was within budget. The native child-process counter concurrency and separate-process cursor tests were BLOCKED by `no runnable PHP binary for a child process`. |
+| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/security-regression.php` | **PASS with one environment skip** — `passed 188 failed 0 skipped 1`; the skipped check was actual header emission (`not applicable in this environment`). Host exit code 0. This suite is primarily source/regression assertions, not live HTTP. |
+| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-unit.php` | **PASS** — `Passed: 66 · Failed: 0`. Host exit code 0. Pure/support-source tests only; no MySQL lookup was exercised. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli -l` on `tests/idor-scan.php`, `tests/rate-limit-failsafe.php`, `tests/security-regression.php`, and `tests/support-unit.php` | **PASS** — all four reported `No syntax errors detected`. |
+| PHP-WASM lint of the requested source files and changed PHP set | **PASS** — 22/22 files parsed/linted without a PHP syntax error. This remains WASM PHP 8.5, not the production host PHP binary. |
+| Custom source assertions (cleanup queue/cursor/lock contract, budgets, configured tracking limits, support SQL ownership, includes, module guards, and test wiring) | **PASS** — 15/15 textual assertions. Not runtime HTTP/database tests. |
+| Top-level declaration/include/signature inspection across the eight requested sources | No within-file duplicate declarations; six pre-existing cross-module helper-name overlaps are guarded with module sentinels. No missing shared tracking-helper include found. Existing two-argument cleanup and support tool callers remain compatible. |
+| `SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js node tests/support-chat-behavior.mjs` | **PASS** — 76 passed, 0 failed. Simulated API/browser DOM only; no live HTTP or database. |
+| Same environment with `node tests/support-chat-composer-behavior.mjs` | **PASS** — 32 passed, 0 failed. jsdom behavior harness only. |
+| Same environment with `node tests/support-chat-optimistic-behavior.mjs` | **PASS** — 63 passed, 0 failed. Mocked API behavior only. |
+| `php-wasm-cli -r 'exit(7);'` exit propagation probe | Host exit code 0 despite PHP requesting exit 7; confirms why suite summaries, not host status alone, are recorded. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-system.php` (disposable-DB preflight only) | **BLOCKED** — output: `BLOCKED support-system: database configuration is missing or incomplete`; no database mutations began. Host exit code 0 due WASM exit-status behavior. |
+| MySQL/MariaDB integration, synthetic Customer A/B HTTP, live tracking/support API and workflow regressions | **NOT RUN** — no native PHP host, server, disposable DB, staging URL, or authenticated HTTP environment. No test credentials or customer rows were created. |
+| Final ZIP integrity and changed-file coverage | **PASS** — 417 archive entries; all 25 base/current changed paths included; installation database config and install lock excluded. |
 
 ### Requested real-request test matrix
 
-No HTTP request was sent to the application in this workspace, so there are no HTTP status/body observations to report. The results below are **not run / blocked**, not passes:
+No HTTP request was sent to the application. The following are **NOT RUN / BLOCKED**, not passes:
 
-| Requested scenario | Actual result |
+| Exact scenario | Status and reason |
 |---|---|
-| Create independent synthetic Customer A and Customer B accounts | Not performed: no runnable PHP application/database environment or disposable DB was configured. No synthetic accounts were created. |
-| A requests B's profile, email, or phone | Not run: no authenticated HTTP client/session and no test database. |
-| A reads or modifies B's address; verify B's DB row is unchanged | Not run: no HTTP application or database available to execute and inspect the mutation. |
-| A reads B's order/details; change submitted user/order IDs | Not run: no authenticated HTTP application/database. |
-| Unauthenticated requests to private customer endpoints | Not run over HTTP. The source-level guard assertions are not substitutes for responses. |
-| Public tracking invalid pair, known pair, per-IP threshold, per-order threshold, and concurrent attempts | Not run against the PHP limiter. No runtime/file-counter HTTP server was available. The configured policy in source is 40 per IP/10 minutes, 20 per normalized order key/hour, and 6 per order/phone pair/15 minutes. |
-| Expired-counter cleanup: repeated sweeps over 100 expired entries with five active counters; each budget-seven sweep; cursor persistence in separate PHP processes | NOT RUN: PHP CLI unavailable. The test harness asserts eventual removal, unchanged active counters, and per-sweep budget, but no observed repeated-sweep result is available. |
-| Concurrent cleanup plus active counter update stress | NOT RUN: PHP CLI unavailable. Worker tests are added; no runtime evidence of concurrency results is available. |
-| Anonymous support: known/unknown reference with missing phone and wrong phone | Not run against the application. Source now returns a phone prompt before querying for a missing phone and generic not-found for wrong/unknown references, but response parity is not runtime-verified. |
-| Force a duplicate order-reference collision and confirm bounded retry / unique-index behavior | Not run against a database. Source uses the unique index and retries up to five explicit duplicate-key collisions; integration behavior remains unverified. |
-| A updates own profile/address and views own orders | Not run: no test account or app runtime. |
-| Existing OTP and login flow | Not run: no PHP runtime, database, or request environment. |
+| Customer A reads Customer B's profile/contact; A reads/changes B's address; A reads B's order; tamper `user_id`/`order_id`; unauthenticated private endpoint calls | **NOT RUN** — no disposable DB, native PHP web server, authenticated HTTP client or synthetic accounts. No response bodies/statuses or database before/after state exist. |
+| Unauthorized payment update and verification that B's row is unchanged | **NOT RUN** — no HTTP/database fixture. |
+| Customer A reads/updates A's own profile, addresses and orders | **NOT RUN** — no HTTP/database fixture. |
+| Anonymous support: known/unknown ref without phone; incorrect phone vs unknown ref; correct reference-plus-checkout-phone | **NOT RUN** — SQL and response parity require a disposable DB plus HTTP request session. Source/unit assertions are not response evidence. |
+| Signed-in support owner-only order lookup | **NOT RUN** against MySQL/HTTP; source test confirms owner predicates only. |
+| Public HTML and JSON tracking response fields/timeline | **NOT RUN** against HTTP/database. |
+| Public tracker thresholds (40/IP/10m; 20/reference/hour; 6/reference-phone/15m) | **NOT RUN** through the actual public routes. Generic file limiter and repeated cleanup cases ran under PHP-WASM; they do not verify route-level thresholds or HTTP responses. |
+| Signup/login, email/phone OTP, guest-order recovery, address management, checkout, COD creation, manual payment, order details/timeline, admin order management | **NOT RUN** — all require a disposable DB, and most require HTTP/session and email/OTP fixtures. |
+| Support chat regression | **PASS, simulated only** — jsdom suites passed 76 + 32 + 63 assertions with mocked APIs; they do not verify server persistence, auth, or MySQL. |
 
-A parser-discovered syntax error in an intermediate version of `tests/idor-scan.php` was corrected. The final PHP parser pass succeeded. No application test results are being represented as passed.
+### Rate-limit execution detail
+
+`tests/rate-limit-failsafe.php` ran inside PHP-WASM's filesystem for the repeated single-process cleanup case. It created 100 expired and five active queued counter files, then executed 15 repeated sweeps with a requested per-sweep budget of 7; the test reported 105 jobs inspected total, zero expired files remaining and all five active files byte-for-byte unchanged. The test also reported every sweep within the budget. **This is an observed WASM runtime result, not a native filesystem or concurrent-worker result.**
+
+Separate-process cursor persistence, concurrent counter increments and concurrent cleanup-plus-update stress were explicitly **BLOCKED / NOT RUN** because the test helper could not find a runnable child PHP executable. A cursor advancing over repeated calls in one WASM process does not satisfy the requested separate-process verification.
 
 ## Incomplete verification and remaining risks
 
-1. **Runtime authorization behavior is unverified.** The requested synthetic Customer A/B checks remain necessary for profile, address, order/detail, payment, changed IDs, unauthenticated APIs, and unauthorized AJAX paths.
-2. **Full workflow regressions are unverified.** Login/registration/OTP, guest-order recovery, address management, checkout/retry, payment submission, support chat, and admin workflows need execution against a disposable or staging database with synthetic data.
+1. **Runtime authorization behavior is unverified.** The requested synthetic Customer A/B checks remain necessary for profile, address, order/detail, payment, changed IDs, unauthenticated APIs, and unauthorized AJAX paths. No HTTP statuses/bodies or database before/after evidence were captured.
+2. **Full workflow regressions are unverified.** Login/registration/OTP, guest-order recovery, address management, checkout/retry, payment submission, live support persistence, and admin workflows need execution against a disposable or staging database with synthetic data. The jsdom support-chat checks only cover mocked client behavior.
 3. **Rate-limit deployment assumptions:** storage, queue state, queue jobs, index markers, and stable lock files live under the configured local log directory; PHP must support atomic same-filesystem `rename()` and `flock()` shared by workers, and the PHP account must create/chmod private `0700` directories and `0600` files. NFS/shared-host semantics must be verified on the actual host. The sequence queue avoids scan starvation and spends at most the configured job budget per sweep. Counters created by older versions are indexed when next touched; an untouched legacy counter is not discoverable by the new queue and may remain on disk, so monitor/plan one-time maintenance if legacy volume exists. Active counters keep one queue marker/job; expired ones remove both. Queue state is monotonic and marker/job storage tracks live indexed counters. Fail-closed tracking denies requests if counter storage or required queue registration fails.
 4. **Legacy order references:** new references are unpredictable, but historical sequential references remain valid for existing orders. They are protected by shared limits, but do not gain the entropy of newly generated references. Database collision retries and the unique-index behavior still need a runtime DB test.
 5. **Session-bound guest access:** legacy guest order visibility depends on the guest order ID list remaining in the same PHP session; session expiration or browser/device changes may prevent access and require the existing recovery/support workflow.
@@ -132,7 +145,7 @@ A parser-discovered syntax error in an intermediate version of `tests/idor-scan.
 
 ## Phase status
 
-**Independent approval readiness:** The implementation is prepared for independent source review, but Phase 1 is **not ready to be approved as runtime-verified** until the blocked PHP cleanup/concurrency tests, disposable-DB, HTTP, and regression tests listed above are run. Repeated-sweep and concurrent test results are NOT RUN, not inferred from source assertions. No Phase 2 work has begun.
+**Independent approval readiness:** Phase 1 is **not approved or fully verified**. The repeated cleanup case passed only under PHP-WASM. Native cross-process/concurrent cleanup and counter behavior, the MySQL/HTTP Customer A/B matrix, anonymous support response parity, route-level tracking thresholds, and database/workflow regressions remain NOT RUN/BLOCKED. Independent approval requires those results from an isolated native PHP + disposable MySQL/staging environment. No Phase 2 work has begun.
 
 ## Project package
 

@@ -57,7 +57,8 @@ $opaqueOrderRef = 'AB' . str_repeat('A', 24);
 su_eq($opaqueOrderRef, sh_support_extract_order_ref('Order ' . $opaqueOrderRef . ' status please'), 'Opaque random order reference extracted for any configured two-letter prefix');
 su_ok(str_contains($src('includes/ai-support.php'), '[A-Z]{2}[A-F0-9]{24}'), 'AI support recognizes opaque random order references');
 su_eq(null, sh_support_extract_order_ref('my order id 12345 status ki'), 'Internal numeric database ID is not accepted as a customer order reference');
-su_ok(str_contains($src('includes/support.php'), '$uid <= 0 && $phone !== null')
+su_ok(str_contains($src('includes/support.php'), "\$uid = function_exists('sh_user_id') ? sh_user_id() : 0;")
+   && str_contains($src('includes/support.php'), 'AND customer_phone IN ({$phoneMarks}) LIMIT 1')
    && !str_contains($src('includes/support.php'), 'if (!$ok && $uid > 0'),
    'Support phone-pair verification is limited to anonymous chats; signed-in lookups require ownership');
 su_ok(!str_contains($src('includes/support.php'), "WHERE id = ? LIMIT 1', [(int)$ref]"), 'Support lookup does not resolve internal numeric order IDs');
@@ -79,8 +80,8 @@ su_ok($toolBody !== ''
 su_ok(str_contains($supportSrc, 'if ($phone !== null && $res[\'state\'] !== \'found\')')
    && str_contains($supportSrc, 'sh_support_rate_bump($bucket, 3600)'),
    'Failed anonymous support verification remains rate limited');
-su_ok(str_contains($supportSrc, 'Legacy and current support service modules cannot be loaded together.')
-   && str_contains($src('includes/ai-support.php'), 'Current and legacy support service modules cannot be loaded together.'),
+su_ok(str_contains($supportSrc, "defined('SH_CURRENT_SUPPORT_MODULE_LOADED')")
+   && str_contains($src('includes/ai-support.php'), "defined('SH_LEGACY_SUPPORT_MODULE_LOADED')"),
    'Overlapping legacy/current support declarations are guarded against co-loading');
 su_eq(null, sh_support_extract_order_ref('just browsing shoes'), 'No order ref in plain text');
 

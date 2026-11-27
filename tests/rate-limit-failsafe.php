@@ -24,10 +24,10 @@ ini_set('display_errors', '1');
 
 $GLOBALS['pass'] = 0;
 $GLOBALS['fail'] = 0;
-$GLOBALS['blocked'] = 0;
+$GLOBALS['blocked_count'] = 0;
 function t_blocked(string $name, string $reason): void
 {
-    $GLOBALS['blocked']++;
+    $GLOBALS['blocked_count']++;
     echo "  BLOCKED {$name}  [{$reason}]\n";
 }
 function t_ok(string $name, bool $pass, string $detail = ''): bool
@@ -53,6 +53,8 @@ $GLOBALS['log'] = [];
 function sh_log_line(string $channel, string $message): void { $GLOBALS['log'][] = $channel . ': ' . $message; }
 
 require_once $root . '/includes/security.php';
+require_once __DIR__ . '/_support_php_bin.php';
+$childPhp = sh_test_php_binary();
 
 // ---- helpers --------------------------------------------------------------
 function rl_dir(string $name): string
@@ -264,6 +266,8 @@ t_ok('repeated rotating sweeps eventually remove all 100 expired counters',
 t_ok('each repeated cleanup sweep stays within its seven-job budget', $sweepBudgetsHonored,
     'total inspected ' . $cleanupInspectedTotal . ' across ' . $repeatedSweeps . ' sweeps');
 t_ok('several active counters remain byte-for-byte unchanged', $activeUnchanged);
+printf("  INFO repeated sweeps=%d; expired remaining=%d; total jobs inspected=%d; active unchanged=%s\n",
+    $repeatedSweeps, $expiredRemaining, $cleanupInspectedTotal, $activeUnchanged ? 'yes' : 'no');
 $cursorStatePath = $boundedDir . '/.cleanup-queue/state.json';
 $cursorState = json_decode((string)@file_get_contents($cursorStatePath), true);
 t_ok('persistent cleanup cursor advanced across repeated calls', is_array($cursorState)
@@ -272,8 +276,8 @@ t_ok('persistent cleanup cursor advanced across repeated calls', is_array($curso
 // ===========================================================================
 t_sec('8. Concurrent workers cannot exceed a shared counter budget');
 // ===========================================================================
-if (!function_exists('proc_open') || PHP_BINARY === '') {
-    t_blocked('multi-process atomic-counter test', 'proc_open or PHP_BINARY is unavailable');
+if (!function_exists('proc_open') || empty($childPhp['ok'])) {
+    t_blocked('multi-process atomic-counter test', (string)($childPhp['reason'] ?? 'proc_open is unavailable'));
 } else {
     $parallelDir = rl_dir('parallel');
     $parallelKey = 'same-secret-counter-key';
@@ -285,7 +289,7 @@ if (!function_exists('proc_open') || PHP_BINARY === '') {
     $workers = []; $spawnFailed = false;
     for ($i = 0; $i < $workerCount; $i++) {
         $pipes = [];
-        $proc = @proc_open([PHP_BINARY, '-r', $workerCode], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $proc = @proc_open([$childPhp['bin'], '-r', $workerCode], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($proc)) { $spawnFailed = true; break; }
         fclose($pipes[0]);
         $workers[] = [$proc, $pipes[1], $pipes[2]];
@@ -316,8 +320,8 @@ if (!function_exists('proc_open') || PHP_BINARY === '') {
 // ===========================================================================
 t_sec('9. Cleanup cursor survives PHP processes and concurrent cleanup preserves counters');
 // ===========================================================================
-if (!function_exists('proc_open') || PHP_BINARY === '') {
-    t_blocked('cross-process cleanup cursor and cleanup/update race tests', 'proc_open or PHP_BINARY is unavailable');
+if (!function_exists('proc_open') || empty($childPhp['ok'])) {
+    t_blocked('cross-process cleanup cursor and cleanup/update race tests', (string)($childPhp['reason'] ?? 'proc_open is unavailable'));
 } else {
     $cursorDir = rl_dir('cursor-process');
     for ($i = 0; $i < 12; $i++) {
@@ -329,7 +333,7 @@ if (!function_exists('proc_open') || PHP_BINARY === '') {
         $code = 'require ' . var_export($root . '/includes/security.php', true) . '; $n=0; '
             . 'sh_file_rate_limit_cleanup(' . var_export($cursorDir, true) . ', 1, $n); echo $n;';
         $pipes = [];
-        $proc = @proc_open([PHP_BINARY, '-r', $code], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $proc = @proc_open([$childPhp['bin'], '-r', $code], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($proc)) { return [false, 'could not start worker']; }
         fclose($pipes[0]); $out = trim((string)stream_get_contents($pipes[1])); $err = trim((string)stream_get_contents($pipes[2]));
         fclose($pipes[1]); fclose($pipes[2]); $exit = proc_close($proc);
@@ -364,7 +368,7 @@ if (!function_exists('proc_open') || PHP_BINARY === '') {
         . 'for($i=0;$i<' . $raceIterations . ';$i++){ sh_file_rate_limit_cleanup(' . var_export($raceDir, true) . ',3); '
         . 'sh_file_rate_limit(' . var_export('race', true) . ',' . var_export($raceActiveKey, true) . ',1000,3600,' . var_export($raceDir, true) . '); } echo ' . var_export('ok', true) . ';';
     for ($i = 0; $i < $raceWorkerCount; $i++) {
-        $pipes = []; $proc = @proc_open([PHP_BINARY, '-r', $raceCode], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $pipes = []; $proc = @proc_open([$childPhp['bin'], '-r', $raceCode], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (!is_resource($proc)) { $raceSpawnFailed = true; break; }
         fclose($pipes[0]); $raceWorkers[] = [$proc, $pipes[1], $pipes[2]];
     }
@@ -393,12 +397,12 @@ if (!function_exists('proc_open') || PHP_BINARY === '') {
 // ===========================================================================
 rl_remove_tree(SH_LOG_DIR); rl_remove_tree($tmp);
 echo "\n" . str_repeat('=', 72) . "\n";
-printf("passed %d   failed %d   blocked %d\n", $GLOBALS['pass'], $GLOBALS['fail'], $GLOBALS['blocked']);
+printf("passed %d   failed %d   blocked %d\n", $GLOBALS['pass'], $GLOBALS['fail'], $GLOBALS['blocked_count']);
 if ($GLOBALS['fail'] > 0) {
     echo "RATE LIMIT FAIL-SAFE SUITE: FAILURES PRESENT\n";
     exit(1);
 }
-if ($GLOBALS['blocked'] > 0) {
+if ($GLOBALS['blocked_count'] > 0) {
     echo "RATE LIMIT FAIL-SAFE SUITE: SOME CHECKS BLOCKED\n";
     exit(2);
 }

@@ -198,6 +198,9 @@ $publicApi = [
     'cart.php'         => ['sh_csrf_require()', 'sh_cart_'],                     // session cart only
     'support.php'      => ['sh_support_origin_valid('],                          // origin + owner scoping
     'orders.php'       => ['sh_require_authenticated_customer(', 'sh_customer_order_get(', 'sh_order_tracking_rate_limited('], // public tracking is throttled; private lookup is owner-scoped
+    // The same endpoint has an authenticated manual-submit action and a
+    // server-to-server gateway callback with provider verification.
+    'payment.php'      => ['sh_require_authenticated_customer(', 'sh_gateway_verify('],
 ];
 $apiGuards = array_merge(GUARDS, ['sh_require_login(']);
 foreach ($files('api/*.php') as $path) {

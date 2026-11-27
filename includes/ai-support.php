@@ -12,11 +12,12 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/support-sms.php';
 
 // A separate legacy implementation in support.php declares several of the
-// same global helper names with incompatible signatures. Stop co-loading before
-// any declaration can produce an opaque PHP redeclaration fatal.
-if (function_exists('sh_support_seed_faqs')) {
+// same global helper names with incompatible signatures. Use a module sentinel
+// rather than function_exists because PHP registers declarations before execution.
+if (defined('SH_LEGACY_SUPPORT_MODULE_LOADED')) {
     throw new LogicException('Current and legacy support service modules cannot be loaded together.');
 }
+define('SH_CURRENT_SUPPORT_MODULE_LOADED', true);
 
 const SH_SUPPORT_MESSAGE_MAX = 2000;
 const SH_SUPPORT_HISTORY_BATCH = 30;
