@@ -467,14 +467,22 @@ sh_t('HTML and JSON public tracking share the atomic limiter and minimize fields
     $policy = (string)@file_get_contents(SH_ROOT . '/includes/order-tracking.php');
     $html = (string)@file_get_contents(SH_ROOT . '/track.php');
     $api = (string)@file_get_contents(SH_ROOT . '/api/orders.php');
-    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true", 'flock($fh, LOCK_EX)', 'chmod($dir, 0700)', 'chmod($file, 0600)', 'while ($offset < $length)'] as $needle) {
+    $timeline = (string)@file_get_contents(SH_ROOT . '/includes/order-timeline.php');
+    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true", 'sh_file_rate_limit_cleanup($dir, 24)'] as $needle) {
         if (!str_contains($policy, $needle)) { return 'tracking limiter policy is missing ' . $needle; }
+    }
+    $security = (string)@file_get_contents(SH_ROOT . '/includes/security.php');
+    foreach (['flock($lock, LOCK_EX)', 'LOCK_EX | LOCK_NB', 'min(32, $budget)', '/.locks'] as $needle) {
+        if (!str_contains($security, $needle)) { return 'counter cleanup/lock contract is missing ' . $needle; }
     }
     if (!str_contains($html, 'sh_order_tracking_rate_limited(') || !str_contains($api, 'sh_order_tracking_rate_limited(')) {
         return 'one public tracking route bypasses the shared limiter';
     }
-    if (str_contains($html, "SELECT * FROM orders") || str_contains($api, "SELECT * FROM orders")) {
-        return 'a public tracking route loads all order/customer fields';
+    if (str_contains($html, 'SELECT * FROM orders') || str_contains($api, 'SELECT * FROM orders')
+        || str_contains($html, 'SELECT o.id,') || str_contains($html, 'SELECT p.transaction_id')
+        || str_contains($html, 'SELECT p.gateway_reference') || !str_contains($html, 'AS has_reference')
+        || !str_contains($html, 'payment_method_type') || !str_contains($timeline, '!empty($payment[\'has_reference\'])')) {
+        return 'public tracking selects an unnecessary internal/payment field or fails to preserve payment timeline state';
     }
     return true;
 });

@@ -64,6 +64,17 @@ su_ok(!str_contains($src('includes/support.php'), "WHERE id = ? LIMIT 1', [(int)
 su_ok(str_contains($src('includes/support.php'), 'sh_order_tracking_rate_limited($ref')
    && str_contains($src('includes/support.php'), "require_once SH_ROOT . '/includes/order-tracking.php';"),
    'Anonymous support lookups share the public tracking rate limit');
+$supportSrc = $src('includes/support.php');
+$toolStart = strpos($supportSrc, 'function sh_support_tool_order(');
+$toolEnd = strpos($supportSrc, 'function sh_support_tool_latest_own_order(', $toolStart ?: 0);
+$toolBody = $toolStart !== false && $toolEnd !== false ? substr($supportSrc, $toolStart, $toolEnd - $toolStart) : '';
+su_ok($toolBody !== ''
+   && strpos($toolBody, 'if ($uid <= 0 && ($phone === null') < strpos($toolBody, 'SELECT * FROM orders')
+   && str_contains($toolBody, 'if (!$ok) { return [\'state\' => \'not_found\']; }'),
+   'Anonymous support does not query order existence without a phone and uses generic unauthorized results');
+su_ok(str_contains($supportSrc, 'if ($phone !== null && $res[\'state\'] !== \'found\')')
+   && str_contains($supportSrc, 'sh_support_rate_bump($bucket, 3600)'),
+   'Failed anonymous support verification remains rate limited');
 su_eq(null, sh_support_extract_order_ref('just browsing shoes'), 'No order ref in plain text');
 
 /* --- Product query cleanup --------------------------------------------------- */

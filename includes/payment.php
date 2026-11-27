@@ -982,6 +982,8 @@ function sh_order_is_cod(array $order, ?array $payment = null): bool
     if ($payment !== null && trim((string)($payment['kind'] ?? '')) !== '') {
         return (string)$payment['kind'] === 'cod';
     }
+    $methodType = trim((string)($order['payment_method_type'] ?? ''));
+    if ($methodType !== '') { return $methodType === 'cod'; }
     $methodId = (int)($order['payment_method_id'] ?? 0);
     if ($methodId <= 0) { return false; }
     try {

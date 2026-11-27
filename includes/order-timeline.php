@@ -97,6 +97,13 @@ function sh_order_timeline_step(string $key, string $label, string $state, ?stri
 function sh_order_timeline(array $order, ?array $payment = null, ?array $items = null): array
 {
     $orderId = (int)($order['id'] ?? 0);
+    $statusAt = static function (string $wantedStatus) use ($order, $orderId): ?string {
+        $publicTimes = $order['status_times'] ?? null;
+        if (is_array($publicTimes)) {
+            return isset($publicTimes[$wantedStatus]) ? (string)$publicTimes[$wantedStatus] : null;
+        }
+        return sh_order_timeline_status_at($orderId, $wantedStatus);
+    };
     $payment = $payment ?? ($orderId > 0 ? sh_order_latest_payment($orderId) : null);
     $orderStatus = sh_order_timeline_order_status($order['status'] ?? '');
     $paymentStatus = sh_order_timeline_payment_status($order['payment_status'] ?? '');
@@ -115,8 +122,13 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
     $submittedAt = sh_order_timeline_timestamp($payment['submitted_at'] ?? null);
     $verifiedAt = sh_order_timeline_timestamp($payment['verified_at'] ?? null);
 
+    // Public tracking supplies a database-computed boolean rather than loading
+    // payment identifiers into PHP. Private order views may still pass the
+    // underlying references for legacy submissions whose statuses were not
+    // synchronized with the order record.
     $hasReference = $payment !== null && (
-        trim((string)($payment['transaction_id'] ?? '')) !== ''
+        !empty($payment['has_reference'])
+        || trim((string)($payment['transaction_id'] ?? '')) !== ''
         || trim((string)($payment['gateway_reference'] ?? '')) !== ''
     );
     $paymentSubmitted = !$isCod && (
@@ -150,14 +162,14 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
             'label' => 'Cancelled',
             'detail' => 'This order was cancelled and will not be delivered.',
             'severity' => 'error',
-            'at' => sh_order_timeline_status_at($orderId, 'cancelled'),
+            'at' => $statusAt('cancelled'),
         ];
     } elseif ($returned) {
         $problem = [
             'label' => 'Returned',
             'detail' => 'This order was returned and is no longer progressing to delivery.',
             'severity' => 'error',
-            'at' => sh_order_timeline_status_at($orderId, 'returned'),
+            'at' => $statusAt('returned'),
         ];
     } elseif ($paymentFailed) {
         $problem = [
@@ -216,9 +228,9 @@ function sh_order_timeline(array $order, ?array $payment = null, ?array $items =
         $steps[] = sh_order_timeline_step('payment_verified', $verifiedLabel, $verifiedState, $paymentVerified ? $verifiedAt : ($paymentFailed ? $failedAt : null));
     }
 
-    $steps[] = sh_order_timeline_step('processing', 'Processing', $state('processing', $processingReached), sh_order_timeline_status_at($orderId, 'processing'));
+    $steps[] = sh_order_timeline_step('processing', 'Processing', $state('processing', $processingReached), $statusAt('processing'));
     $steps[] = sh_order_timeline_step('delivery', 'Delivery', $state('delivery', $deliveryReached),
-        $deliveryReached ? sh_order_timeline_status_at($orderId, $orderStatus) : null);
+        $deliveryReached ? $statusAt($orderStatus) : null);
 
     if ($cancelled || $returned) {
         $steps[] = sh_order_timeline_step($cancelled ? 'cancelled' : 'returned', $cancelled ? 'Cancelled' : 'Returned', 'bad', $problem['at']);

@@ -14,6 +14,34 @@ $lookupError = '';
 $orderNumber = '';
 $phone = '';
 
+/** Read only the audit timestamps needed for the public progress timeline. */
+function sh_track_public_status_times(string $orderNumber, array $phoneVariants): array
+{
+    if (!function_exists('sh_table_exists') || !sh_table_exists('admin_audit_logs') || $phoneVariants === []) { return []; }
+    try {
+        $holders = implode(',', array_fill(0, count($phoneVariants), '?'));
+        $rows = sh_all(
+            "SELECT a.new_value, a.created_at
+             FROM admin_audit_logs a JOIN orders o ON o.id = a.target_id
+             WHERE a.module = ? AND a.action = ? AND o.order_number = ?
+               AND o.customer_phone IN ($holders)
+             ORDER BY a.id DESC LIMIT 60",
+            array_merge(['order', 'order_status_changed', $orderNumber], $phoneVariants)
+        );
+        $times = [];
+        foreach ($rows as $row) {
+            $status = sh_order_timeline_order_status(trim((string)($row['new_value'] ?? ''), " \t\n\r\0\x0B\""));
+            if ($status !== '' && !isset($times[$status]) && !empty($row['created_at'])) {
+                $times[$status] = (string)$row['created_at'];
+            }
+        }
+        return $times;
+    } catch (Throwable $e) {
+        sh_log_exception($e, 'public-order-track-status-times');
+        return [];
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
     header('Cache-Control: no-store, private');
@@ -32,11 +60,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 $holders = implode(',', array_fill(0, count($variants), '?'));
-                // The public tracker loads only status data, never the customer's
-                // phone, email, address, notes, payment record or line-item PII.
+                // Only order status and COD-classification metadata are fetched
+                // here; customer contact/address fields and payment-method IDs stay out.
                 $order = sh_one(
-                    'SELECT id, order_number, status, payment_status, payment_method_id, created_at
-                     FROM orders WHERE order_number = ? AND customer_phone IN (' . $holders . ') LIMIT 1',
+                    'SELECT o.order_number, o.status, o.payment_status, pm.type AS payment_method_type, o.created_at
+                     FROM orders o LEFT JOIN payment_methods pm ON pm.id = o.payment_method_id
+                     WHERE o.order_number = ? AND o.customer_phone IN (' . $holders . ') LIMIT 1',
                     array_merge([$orderNumber], $variants)
                 );
                 if ($order === null) {
@@ -44,11 +73,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $lookupError = 'No order matched those details.';
                 } else {
                     $payment = sh_one(
-                        'SELECT kind, status, submitted_at, verified_at, transaction_id, gateway_reference
-                         FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1',
-                        [(int)$order['id']]
+                        "SELECT p.kind, p.status, p.submitted_at, p.verified_at,
+                                CASE WHEN COALESCE(p.transaction_id, '') <> '' OR COALESCE(p.gateway_reference, '') <> '' THEN 1 ELSE 0 END AS has_reference
+                         FROM payments p JOIN orders o ON o.id = p.order_id
+                         WHERE o.order_number = ? AND o.customer_phone IN ($holders)
+                         ORDER BY p.id DESC LIMIT 1",
+                        array_merge([$orderNumber], $variants)
                     );
-                    $items = sh_all('SELECT product_type FROM order_items WHERE order_id = ? ORDER BY id', [(int)$order['id']]);
+                    $items = sh_all(
+                        'SELECT oi.product_type FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                         WHERE o.order_number = ? AND o.customer_phone IN (' . $holders . ') ORDER BY oi.id',
+                        array_merge([$orderNumber], $variants)
+                    );
+                    $order['status_times'] = sh_track_public_status_times($orderNumber, $variants);
                     $timeline = sh_order_timeline($order, $payment, $items);
                 }
             } catch (Throwable $e) {

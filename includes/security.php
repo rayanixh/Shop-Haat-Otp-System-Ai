@@ -175,6 +175,99 @@ function sh_security_header_list(): array
  *
  * Every refusal is logged so the operator can see why the endpoint went quiet.
  */
+/**
+ * Sweep a bounded number of expired counter files.
+ *
+ * A stable per-bucket/hash-prefix lock is used by both writers and cleanup.
+ * Cleanup can therefore unlink only while holding the same lock all writers
+ * must acquire before opening the counter, avoiding open-inode/unlink races.
+ * At most 32 directory entries are examined in one call.
+ */
+function sh_file_rate_limit_cleanup(string $dir, int $budget = 24): int
+{
+    $budget = max(1, min(32, $budget));
+    $dir = rtrim($dir, '/');
+    $lockDir = $dir . '/.locks';
+    if (!is_dir($dir) || !is_dir($lockDir)) { return 0; }
+    $directory = @opendir($dir);
+    if ($directory === false) { return 0; }
+
+    $scanned = 0;
+    $removed = 0;
+    $now = time();
+    try {
+        while ($scanned < $budget && ($entry = readdir($directory)) !== false) {
+            if ($entry === '.' || $entry === '..') { continue; }
+            $scanned++;
+            if (preg_match('/^([a-z0-9_.-]+)-([a-f0-9]{64})\.txt$/i', $entry, $m) !== 1) { continue; }
+            $bucket = (string)$m[1];
+            $keyHash = strtolower((string)$m[2]);
+            $path = $dir . '/' . $entry;
+            if (is_link($path) || !is_file($path)) { continue; }
+
+            $lockPath = $lockDir . '/' . $bucket . '-' . substr($keyHash, 0, 2) . '.lck';
+            if (is_link($lockPath)) { continue; }
+            $lock = @fopen($lockPath, 'c+');
+            if ($lock === false) { continue; }
+            try {
+                if (!@chmod($lockPath, 0600)) { continue; }
+                $lockMode = @fileperms($lockPath);
+                if ($lockMode === false || (($lockMode & 0600) !== 0600) || (($lockMode & 0077) !== 0)
+                    || !flock($lock, LOCK_EX | LOCK_NB)) { continue; }
+
+                // The stable shard lock is held before opening the counter.
+                if (is_link($path) || !is_file($path)) { continue; }
+                $counter = @fopen($path, 'r');
+                if ($counter === false) { continue; }
+                try { $raw = stream_get_contents($counter); }
+                finally { fclose($counter); }
+                $data = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+                $validCounter = is_array($data) && isset($data['t'], $data['n'])
+                    && is_numeric($data['t']) && is_numeric($data['n']);
+                if (!$validCounter) {
+                    // A truncated/corrupt file cannot be an active trustworthy
+                    // counter. Retain it through a conservative grace period,
+                    // then reclaim it while still holding its shard lock.
+                    $mtime = @filemtime($path);
+                    if ($mtime !== false && ($now - $mtime) > 3600 && @unlink($path)) { $removed++; }
+                    continue;
+                }
+
+                // Older files did not store their window. Keep them for their
+                // known maximum window rather than risking deletion too early.
+                $legacyWindow = match ($bucket) {
+                    'public-order-track-ip' => 600,
+                    'public-order-track-target' => 3600,
+                    'public-order-track-pair' => 900,
+                    'csp', 'email_webhook' => 60,
+                    'install-unlock', 'backup-cron-token' => 900,
+                    default => 3600,
+                };
+                $window = isset($data['w']) && is_numeric($data['w']) ? max(1, (int)$data['w']) : $legacyWindow;
+                if (($now - (int)$data['t']) > $window && @unlink($path)) { $removed++; }
+            } finally {
+                fclose($lock); // releases the shard lock on every path
+            }
+        }
+    } catch (Throwable $e) {
+        // Cleanup is maintenance only; counter reads/writes still enforce the
+        // caller's fail-open/fail-closed policy below.
+        return $removed;
+    } finally {
+        closedir($directory);
+    }
+    return $removed;
+}
+
+/**
+ * File-backed rate limiter used by endpoints that must remain throttled even
+ * when the database is unavailable. Returns true when the caller is within
+ * $max events per $window seconds.
+ *
+ * Counter filenames contain only a fixed bucket label and a SHA-256 key hash;
+ * raw IPs, phones and order references are never stored in filenames or logs.
+ * A finite per-bucket set of stable shard locks serializes updates and cleanup.
+ */
 function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, string $dir = '', bool $failClosed = false): bool
 {
     $fallback = !$failClosed;
@@ -189,56 +282,79 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
     $dir = $dir !== '' ? rtrim($dir, '/') : (defined('SH_LOG_DIR') ? SH_LOG_DIR . '/limits' : '');
     if ($dir === '') { return $refused('no storage directory'); }
     if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) { return $refused('cannot create the storage directory'); }
-    // Rate counters affect security decisions. Keep the directory private to
-    // the PHP account even when the host's default umask is permissive.
     if (!@chmod($dir, 0700)) { return $refused('cannot restrict the storage directory permissions'); }
     $dirMode = @fileperms($dir);
     if ($dirMode === false || (($dirMode & 0700) !== 0700) || (($dirMode & 0077) !== 0) || !is_writable($dir)) {
         return $refused('storage directory permissions are not private and writable');
     }
 
-    $file = $dir . '/' . $bucket . '-' . hash('sha256', $key) . '.txt';
-    $now = time();
-    $fh = @fopen($file, 'c+');
-    if ($fh === false) { return $refused('cannot open the counter file'); }
+    $lockDir = $dir . '/.locks';
+    if (!is_dir($lockDir) && !@mkdir($lockDir, 0700) && !is_dir($lockDir)) { return $refused('cannot create lock storage'); }
+    if (!@chmod($lockDir, 0700)) { return $refused('cannot restrict lock storage permissions'); }
+    $lockDirMode = @fileperms($lockDir);
+    if ($lockDirMode === false || (($lockDirMode & 0700) !== 0700) || (($lockDirMode & 0077) !== 0) || !is_writable($lockDir)) {
+        return $refused('lock storage permissions are not private and writable');
+    }
+
+    // Bounded opportunistic retention: no glob/scandir and no full-directory
+    // walk, even if unique-reference traffic has created many counter files.
+    sh_file_rate_limit_cleanup($dir, 24);
+
+    $keyHash = hash('sha256', $key);
+    $file = $dir . '/' . $bucket . '-' . $keyHash . '.txt';
+    $lockPath = $lockDir . '/' . $bucket . '-' . substr($keyHash, 0, 2) . '.lck';
+    if (is_link($lockPath)) { return $refused('invalid lock path'); }
+    $lock = @fopen($lockPath, 'c+');
+    if ($lock === false) { return $refused('cannot open the rate-limit lock'); }
     try {
-        if (!@chmod($file, 0600)) { return $refused('cannot restrict the counter file permissions'); }
-        $fileMode = @fileperms($file);
-        if ($fileMode === false || (($fileMode & 0600) !== 0600) || (($fileMode & 0077) !== 0)) {
-            return $refused('counter file permissions are not private');
+        if (!@chmod($lockPath, 0600)) { return $refused('cannot restrict lock file permissions'); }
+        $lockMode = @fileperms($lockPath);
+        if ($lockMode === false || (($lockMode & 0600) !== 0600) || (($lockMode & 0077) !== 0)) {
+            return $refused('rate-limit lock permissions are not private');
         }
-        if (!flock($fh, LOCK_EX)) { return $refused('cannot lock the counter file'); }
-        if (!rewind($fh)) { return $refused('cannot read the counter file'); }
-        $raw = stream_get_contents($fh);
-        if (!is_string($raw)) { return $refused('cannot read the counter file'); }
-        $data = json_decode($raw, true);
-        if ($raw === '') {
-            $data = ['t' => $now, 'n' => 0];
-        } elseif (!is_array($data) || !isset($data['t'], $data['n']) || !is_numeric($data['t']) || !is_numeric($data['n'])) {
-            return $refused('counter data is invalid');
-        } elseif (($now - (int)$data['t']) > $window) {
-            $data = ['t' => $now, 'n' => 0];
+        if (!flock($lock, LOCK_EX)) { return $refused('cannot lock the counter shard'); }
+        if (is_link($file)) { return $refused('invalid counter path'); }
+        $fh = @fopen($file, 'c+');
+        if ($fh === false) { return $refused('cannot open the counter file'); }
+        try {
+            if (!@chmod($file, 0600)) { return $refused('cannot restrict the counter file permissions'); }
+            $fileMode = @fileperms($file);
+            if ($fileMode === false || (($fileMode & 0600) !== 0600) || (($fileMode & 0077) !== 0)) {
+                return $refused('counter file permissions are not private');
+            }
+            if (!rewind($fh)) { return $refused('cannot read the counter file'); }
+            $raw = stream_get_contents($fh);
+            if (!is_string($raw)) { return $refused('cannot read the counter file'); }
+            $data = json_decode($raw, true);
+            if ($raw === '') {
+                $data = ['t' => time(), 'n' => 0, 'w' => $window];
+            } elseif (!is_array($data) || !isset($data['t'], $data['n']) || !is_numeric($data['t']) || !is_numeric($data['n'])) {
+                $data = ['t' => time(), 'n' => 0, 'w' => $window];
+            } elseif ((time() - (int)$data['t']) > $window) {
+                $data = ['t' => time(), 'n' => 0, 'w' => $window];
+            }
+            $data['w'] = $window;
+            $data['n'] = (int)$data['n'] + 1;
+            $encoded = json_encode($data);
+            if (!is_string($encoded) || !ftruncate($fh, 0) || !rewind($fh)) {
+                return $refused('cannot prepare the counter update');
+            }
+            $offset = 0;
+            $length = strlen($encoded);
+            while ($offset < $length) {
+                $written = fwrite($fh, substr($encoded, $offset));
+                if ($written === false || $written === 0) { return $refused('cannot update the counter file'); }
+                $offset += $written;
+            }
+            if (!fflush($fh)) { return $refused('cannot flush the counter update'); }
+            return $data['n'] <= $max;
+        } finally {
+            fclose($fh);
         }
-        $data['n'] = (int)$data['n'] + 1;
-        $encoded = json_encode($data);
-        if (!is_string($encoded) || !ftruncate($fh, 0) || !rewind($fh)) {
-            return $refused('cannot prepare the counter update');
-        }
-        $offset = 0;
-        $length = strlen($encoded);
-        while ($offset < $length) {
-            $written = fwrite($fh, substr($encoded, $offset));
-            if ($written === false || $written === 0) { return $refused('cannot update the counter file'); }
-            $offset += $written;
-        }
-        if (!fflush($fh)) { return $refused('cannot flush the counter update'); }
-        $allowed = $data['n'] <= $max;
-        flock($fh, LOCK_UN);
-        return $allowed;
     } catch (Throwable $e) {
         return $refused('counter error: ' . $e->getMessage());
     } finally {
-        fclose($fh);
+        fclose($lock);
     }
 }
 

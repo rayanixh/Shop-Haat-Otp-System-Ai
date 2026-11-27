@@ -590,6 +590,12 @@ function sh_support_tool_order(string $ref, array $identity, ?string $phone): ar
     if ($uid <= 0 && sh_order_tracking_rate_limited($ref, (string)$phone)) {
         return ['state' => 'not_found'];
     }
+    // Do not query whether the reference exists until an anonymous visitor has
+    // supplied both verification factors. Missing-phone replies must therefore
+    // be identical for known and unknown references.
+    if ($uid <= 0 && ($phone === null || trim($phone) === '')) {
+        return ['state' => 'need_phone'];
+    }
     $row = null;
     try {
         $row = sh_one('SELECT * FROM orders WHERE order_number = ? LIMIT 1', [mb_strtoupper($ref)]);
@@ -608,10 +614,7 @@ function sh_support_tool_order(string $ref, array $identity, ?string $phone): ar
         $variants = sh_phone_variants($phone);
         if ($variants !== [] && in_array((string)$row['customer_phone'], $variants, true)) { $ok = true; $via = 'phone_pair'; }
     }
-    if (!$ok) {
-        if ($uid > 0) { return ['state' => 'not_found']; }
-        return ['state' => 'need_phone', 'order_number' => (string)$row['order_number']];
-    }
+    if (!$ok) { return ['state' => 'not_found']; }
     return ['state' => 'found', 'via' => $via, 'order' => sh_support_order_facts($row)];
 }
 
@@ -682,9 +685,8 @@ function sh_support_resolve(string $text, string $lang, array $conv, array $iden
                 $r['order_state'] = 'verify_limited'; $r['force_deterministic'] = true; return $r;
             }
             $res = sh_support_tool_order($useRef, $identity, $phone);
-            if ($res['state'] === 'need_phone' && $phone !== null) {
-                sh_support_rate_bump($bucket, 3600); // a failed verification attempt
-                $r['order_state'] = 'not_found'; $r['force_deterministic'] = true; return $r;
+            if ($phone !== null && $res['state'] !== 'found') {
+                sh_support_rate_bump($bucket, 3600); // failed or unmatched verification attempt
             }
             $r['order_state'] = $res['state'];
             if ($res['state'] === 'found') {
