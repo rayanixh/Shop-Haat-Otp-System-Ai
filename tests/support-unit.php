@@ -53,7 +53,17 @@ su_eq('+8801712345678', sh_support_extract_phone('call +8801712345678 please'), 
 su_eq(null, sh_support_extract_phone('order 12345'), 'Short number is not a phone');
 su_eq('SH26081501234', sh_support_extract_order_ref('order SH26081501234 kothay'), 'Full order number extracted');
 su_eq('SH260815-01234', sh_support_extract_order_ref('Order: sh260815-01234'), 'Dashed order number extracted');
-su_eq('12345', sh_support_extract_order_ref('my order id 12345 status ki'), 'Numeric id after "order" extracted');
+$opaqueOrderRef = 'AB' . str_repeat('A', 24);
+su_eq($opaqueOrderRef, sh_support_extract_order_ref('Order ' . $opaqueOrderRef . ' status please'), 'Opaque random order reference extracted for any configured two-letter prefix');
+su_ok(str_contains($src('includes/ai-support.php'), '[A-Z]{2}[A-F0-9]{24}'), 'AI support recognizes opaque random order references');
+su_eq(null, sh_support_extract_order_ref('my order id 12345 status ki'), 'Internal numeric database ID is not accepted as a customer order reference');
+su_ok(str_contains($src('includes/support.php'), '$uid <= 0 && $phone !== null')
+   && !str_contains($src('includes/support.php'), 'if (!$ok && $uid > 0'),
+   'Support phone-pair verification is limited to anonymous chats; signed-in lookups require ownership');
+su_ok(!str_contains($src('includes/support.php'), "WHERE id = ? LIMIT 1', [(int)$ref]"), 'Support lookup does not resolve internal numeric order IDs');
+su_ok(str_contains($src('includes/support.php'), 'sh_order_tracking_rate_limited($ref')
+   && str_contains($src('includes/support.php'), "require_once SH_ROOT . '/includes/order-tracking.php';"),
+   'Anonymous support lookups share the public tracking rate limit');
 su_eq(null, sh_support_extract_order_ref('just browsing shoes'), 'No order ref in plain text');
 
 /* --- Product query cleanup --------------------------------------------------- */

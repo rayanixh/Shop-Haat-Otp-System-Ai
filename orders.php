@@ -7,7 +7,7 @@ require_once SH_ROOT . '/includes/payment.php';
 require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
-$user = sh_require_login();
+$user = sh_require_authenticated_customer();
 
 $page = max(1, sh_int($_GET['page'] ?? 1, 1));
 $perPage = 10;

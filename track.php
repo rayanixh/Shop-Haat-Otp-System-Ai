@@ -5,6 +5,7 @@ require_once __DIR__ . '/config/config.php';
 sh_require_installed();
 require_once SH_ROOT . '/includes/payment.php';
 require_once SH_ROOT . '/includes/order-timeline.php';
+require_once SH_ROOT . '/includes/order-tracking.php';
 
 sh_session_start();
 $order = null;
@@ -15,28 +16,46 @@ $phone = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     sh_csrf_require();
+    header('Cache-Control: no-store, private');
     $orderNumber = mb_strtoupper(mb_substr(trim(sh_post('order_number')), 0, 40));
     $phone = mb_substr(trim(sh_post('phone')), 0, 30);
-    $variants = sh_phone_variants($phone);
 
-    if (!preg_match('/^[A-Z0-9-]{4,40}$/', $orderNumber) || !$variants) {
-        $lookupError = 'Enter the order number and the phone number used at checkout.';
+    if (sh_order_tracking_rate_limited($orderNumber, $phone)) {
+        http_response_code(429);
+        if (!headers_sent()) { header('Retry-After: 600'); }
+        $lookupError = 'Too many tracking attempts. Please wait and try again.';
     } else {
-        try {
-            $holders = implode(',', array_fill(0, count($variants), '?'));
-            $order = sh_one(
-                'SELECT * FROM orders WHERE order_number = ? AND customer_phone IN (' . $holders . ') ORDER BY id DESC LIMIT 1',
-                array_merge([$orderNumber], $variants)
-            );
-            if ($order === null) {
-                $lookupError = 'No order matches those details. Check the order number and phone number, then try again.';
-            } else {
-                $items = sh_order_items((int)$order['id']);
-                $timeline = sh_order_timeline($order, sh_order_latest_payment((int)$order['id']), $items);
+        $variants = sh_phone_variants($phone);
+        if (!preg_match('/^[A-Z0-9-]{4,40}$/', $orderNumber) || !$variants) {
+            http_response_code(404);
+            $lookupError = 'No order matched those details.';
+        } else {
+            try {
+                $holders = implode(',', array_fill(0, count($variants), '?'));
+                // The public tracker loads only status data, never the customer's
+                // phone, email, address, notes, payment record or line-item PII.
+                $order = sh_one(
+                    'SELECT id, order_number, status, payment_status, payment_method_id, created_at
+                     FROM orders WHERE order_number = ? AND customer_phone IN (' . $holders . ') LIMIT 1',
+                    array_merge([$orderNumber], $variants)
+                );
+                if ($order === null) {
+                    http_response_code(404);
+                    $lookupError = 'No order matched those details.';
+                } else {
+                    $payment = sh_one(
+                        'SELECT kind, status, submitted_at, verified_at, transaction_id, gateway_reference
+                         FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1',
+                        [(int)$order['id']]
+                    );
+                    $items = sh_all('SELECT product_type FROM order_items WHERE order_id = ? ORDER BY id', [(int)$order['id']]);
+                    $timeline = sh_order_timeline($order, $payment, $items);
+                }
+            } catch (Throwable $e) {
+                sh_log_exception($e, 'public-order-track');
+                http_response_code(503);
+                $lookupError = 'Order tracking is temporarily unavailable. Please try again shortly.';
             }
-        } catch (Throwable $e) {
-            sh_log_exception($e, 'public-order-track');
-            $lookupError = 'Order tracking is temporarily unavailable. Please try again shortly.';
         }
     }
 }
@@ -55,7 +74,7 @@ require_once SH_ROOT . '/includes/header.php';
     <form class="sh-filterbar" method="post">
       <?= sh_csrf_field() ?>
       <div class="sh-field"><label class="sh-field__label" for="track-number">Order number</label><input class="sh-input" id="track-number" name="order_number" value="<?= e($orderNumber) ?>" maxlength="40" autocomplete="off" required></div>
-      <div class="sh-field"><label class="sh-field__label" for="track-phone">Phone number</label><input class="sh-input" id="track-phone" name="phone" value="<?= e($phone) ?>" maxlength="30" inputmode="tel" autocomplete="tel" required></div>
+      <div class="sh-field"><label class="sh-field__label" for="track-phone">Phone number</label><input class="sh-input" id="track-phone" name="phone" value="" maxlength="30" inputmode="tel" autocomplete="tel" required></div>
       <button class="sh-btn" type="submit"><?= sh_icon('search', 15) ?> Track order</button>
     </form>
   </section>
@@ -67,7 +86,7 @@ require_once SH_ROOT . '/includes/header.php';
         <span class="sh-badge <?= e(sh_status_class((string)$order['status'])) ?>" style="margin-left:auto"><?= e(sh_status_label((string)$order['status'])) ?></span>
         <span class="sh-badge <?= e(sh_status_class((string)$order['payment_status'])) ?>">Payment: <?= e(sh_status_label((string)$order['payment_status'])) ?></span>
       </div>
-      <p class="sh-panel__note" style="margin:0 0 13px">Placed <?= e(date('d M Y, h:i A', strtotime((string)$order['created_at']))) ?> · <?= e((string)$order['payment_method_name']) ?></p>
+      <p class="sh-panel__note" style="margin:0 0 13px">Placed <?= e(date('d M Y, h:i A', strtotime((string)$order['created_at']))) ?></p>
       <?= sh_order_timeline_problem_render($timeline) ?>
       <div style="margin-top:<?= !empty($timeline['problem']) ? '14px' : '0' ?>"><?= sh_order_timeline_render($timeline) ?></div>
     </section>

@@ -447,6 +447,38 @@ sh_t('the failure limiter blocks after the configured budget', function () {
     return true;
 });
 
+sh_t('new public order references carry CSPRNG entropy and fit the existing schema', function () {
+    $first = sh_order_number(1);
+    $second = sh_order_number(1);
+    if (strlen($first) > 30 || preg_match('/^[A-Z]{2}[A-F0-9]{24}$/', $first) !== 1) {
+        return 'unexpected order reference format or length: ' . $first;
+    }
+    if ($first === $second) { return 'two references generated for the same row ID were identical'; }
+    $create = (string)@file_get_contents(SH_ROOT . '/includes/payment.php');
+    if (!str_contains($create, "'TMP' . bin2hex(random_bytes(12))")
+        || !str_contains($create, '$referenceAttempt < 5')
+        || !str_contains($create, '$driverCode === 1062')) {
+        return 'temporary references or unique-collision retry handling are missing';
+    }
+    return true;
+});
+
+sh_t('HTML and JSON public tracking share the atomic limiter and minimize fields', function () {
+    $policy = (string)@file_get_contents(SH_ROOT . '/includes/order-tracking.php');
+    $html = (string)@file_get_contents(SH_ROOT . '/track.php');
+    $api = (string)@file_get_contents(SH_ROOT . '/api/orders.php');
+    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true", 'flock($fh, LOCK_EX)', 'chmod($dir, 0700)', 'chmod($file, 0600)', 'while ($offset < $length)'] as $needle) {
+        if (!str_contains($policy, $needle)) { return 'tracking limiter policy is missing ' . $needle; }
+    }
+    if (!str_contains($html, 'sh_order_tracking_rate_limited(') || !str_contains($api, 'sh_order_tracking_rate_limited(')) {
+        return 'one public tracking route bypasses the shared limiter';
+    }
+    if (str_contains($html, "SELECT * FROM orders") || str_contains($api, "SELECT * FROM orders")) {
+        return 'a public tracking route loads all order/customer fields';
+    }
+    return true;
+});
+
 sh_t('login throttling consults the audit table, not just the session', function () {
     $src = (string)@file_get_contents(SH_ROOT . '/includes/auth.php');
     if (!str_contains($src, 'security_logs')) { return 'the DB-backed throttle was removed'; }

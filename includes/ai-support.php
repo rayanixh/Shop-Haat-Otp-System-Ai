@@ -359,8 +359,8 @@ function sh_support_order_intent(string $text): bool
     return preg_match('/\b(?:my|amar)\s+(?:(?:last|latest|recent|previous)\s+)?(?:order|shipment|parcel)\b/i', $text) === 1
         || preg_match('/\b(?:where(?:\s+is|\'s)|track(?:ing)?|check|status\s+of|update\s+on)\b.{0,60}\b(?:my|the)?\s*(?:order|shipment|parcel)\b/i', $text) === 1
         || preg_match('/\b(?:order|shipment|payment)\s+(?:status|tracking|update)\b/i', $text) === 1
-        || preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:SH|ORD|SHP)?[- ]?[A-Z0-9]{3,24}\b/i', $text) === 1
-        || preg_match('/\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text) === 1
+        || preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:[A-Z]{2}[A-F0-9]{24}|[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?|(?:SH|ORD|SHP)[- ]?[A-Z0-9]{3,24})\b/i', $text) === 1
+        || preg_match('/\b[A-Z]{2}[A-F0-9]{24}\b|\b[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?\b|\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text) === 1
         || preg_match('/আমার\s+(?:সর্বশেষ\s+|আগের\s+)?(?:অর্ডার|শিপমেন্ট|পার্সেল)|(?:অর্ডার|শিপমেন্ট).{0,50}(?:অবস্থা|স্ট্যাটাস|ট্র্যাক|কোথায়|কবে|পৌঁছ|ডেলিভারি)/u', $text) === 1
         || preg_match('/\b(?:amar|amar last|amar latest)\s+(?:order|shipment|parcel)\b.{0,60}\b(?:kothay|kobe|status|track|pabo|asbe|pouchhabe)\b/i', $text) === 1;
 }
@@ -593,12 +593,10 @@ function sh_support_find_authorized_order(string $text, array $owner, int $conve
     if (!$isOrderIntent) { return ['intent' => false, 'found' => false, 'order' => null]; }
     $uid = (int)($owner['user_id'] ?? 0);
     $number = '';
-    if (preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:is\s+|:)?((?:[A-Z]{2}\d{8,18}|(?:SH|ORD|SHP)[-]?[A-Z0-9]{3,24}|\d{4,20}))\b/i', $text, $m) === 1) {
+    if (preg_match('/\b(?:order|shipment)\s*(?:#|no\.?|number)\s*(?:is\s+|:)?((?:[A-Z]{2}[A-F0-9]{24}|[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?|(?:SH|ORD|SHP)[-]?[A-Z0-9]{3,24}))\b/i', $text, $m) === 1) {
         $number = strtoupper($m[1]);
-    } elseif (preg_match('/\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text, $m) === 1) {
+    } elseif (preg_match('/\b[A-Z]{2}[A-F0-9]{24}\b|\b[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?\b|\b(?:SH|ORD|SHP)[-]?[A-Z0-9]{4,24}\b/i', $text, $m) === 1) {
         $number = strtoupper($m[0]);
-    } elseif (preg_match('/(?<![\p{L}\p{N}])\d{6,20}(?![\p{L}\p{N}])/u', $text, $m) === 1) {
-        $number = $m[0];
     }
 
     $order = null;

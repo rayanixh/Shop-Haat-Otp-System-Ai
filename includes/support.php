@@ -22,6 +22,7 @@
 declare(strict_types=1);
 
 require_once SH_ROOT . '/install/schema.php';
+require_once SH_ROOT . '/includes/order-tracking.php';
 require_once SH_ROOT . '/ai/AIManager.php';
 
 /* ------------------------------------------------------------------ *\
@@ -403,15 +404,14 @@ function sh_support_extract_phone(string $text): ?string
     return null;
 }
 
-/** A typed order reference: full order number, or a bare numeric id. */
+/** A customer-visible order reference; internal numeric database IDs are not accepted. */
 function sh_support_extract_order_ref(string $text): ?string
 {
     $up = mb_strtoupper($text);
+    // New public references are prefix + 96-bit hexadecimal randomness.
+    // Recognize them before the legacy date/sequence format below.
+    if (preg_match('/\b[A-Z]{2}[A-F0-9]{24}\b/u', $up, $m) === 1) { return $m[0]; }
     if (preg_match('/\b[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?\b/u', $up, $m) === 1) { return $m[0]; }
-    if (preg_match('/(?:order|অর্ডার)\s*(?:no|number|id|নম্বর)?\s*[:#]?\s*(\d{3,10})\b/iu', $text, $m) === 1) {
-        // A bare number after the word "order" is an id candidate, never a phone.
-        if (sh_support_extract_phone($m[1]) === null) { return $m[1]; }
-    }
     return null;
 }
 
@@ -576,37 +576,42 @@ function sh_support_order_facts(array $o): array
 
 /**
  * Authorized order lookup. Identification is cheap; AUTHORIZATION is the
- * gate: account ownership, account-phone match, or the track.php pair
- * (order number + checkout phone). Returns minimal facts only.
+ * gate: authenticated account ownership, or for anonymous support chats only,
+ * the track.php pair (order number + checkout phone). Returns minimal facts only.
  */
 function sh_support_tool_order(string $ref, array $identity, ?string $phone): array
 {
     $ref = trim($ref);
     if ($ref === '') { return ['state' => 'need_number']; }
+    $uid = (int)($identity['user_id'] ?? 0);
+    // Anonymous order-number probing shares the same atomic public-tracking
+    // budget as track.php and the JSON tracker. Signed-in users still use the
+    // owner-only path below and do not consume a public lookup budget.
+    if ($uid <= 0 && sh_order_tracking_rate_limited($ref, (string)$phone)) {
+        return ['state' => 'not_found'];
+    }
     $row = null;
     try {
         $row = sh_one('SELECT * FROM orders WHERE order_number = ? LIMIT 1', [mb_strtoupper($ref)]);
         if ($row === null && str_contains($ref, '-')) {
             $row = sh_one('SELECT * FROM orders WHERE order_number = ? LIMIT 1', [str_replace('-', '', mb_strtoupper($ref))]);
         }
-        if ($row === null && ctype_digit($ref)) {
-            $row = sh_one('SELECT * FROM orders WHERE id = ? LIMIT 1', [(int)$ref]);
-        }
     } catch (Throwable $e) { return ['state' => 'not_found']; }
     if ($row === null) { return ['state' => 'not_found']; }
 
     $ok = false; $via = '';
-    $uid = (int)$identity['user_id'];
     if ($uid > 0 && (int)($row['user_id'] ?? 0) === $uid) { $ok = true; $via = 'account'; }
-    if (!$ok && $phone !== null && $phone !== '') {
+    // A logged-in account is authorized by ownership only. Order-number plus
+    // checkout-phone verification remains available to anonymous support chats,
+    // matching the separate public tracking flow without bypassing account ACLs.
+    if (!$ok && $uid <= 0 && $phone !== null && $phone !== '') {
         $variants = sh_phone_variants($phone);
         if ($variants !== [] && in_array((string)$row['customer_phone'], $variants, true)) { $ok = true; $via = 'phone_pair'; }
     }
-    if (!$ok && $uid > 0 && (string)($identity['phone'] ?? '') !== '') {
-        $variants = sh_phone_variants((string)$identity['phone']);
-        if ($variants !== [] && in_array((string)$row['customer_phone'], $variants, true)) { $ok = true; $via = 'account_phone'; }
+    if (!$ok) {
+        if ($uid > 0) { return ['state' => 'not_found']; }
+        return ['state' => 'need_phone', 'order_number' => (string)$row['order_number']];
     }
-    if (!$ok) { return ['state' => 'need_phone', 'order_number' => (string)$row['order_number']]; }
     return ['state' => 'found', 'via' => $via, 'order' => sh_support_order_facts($row)];
 }
 

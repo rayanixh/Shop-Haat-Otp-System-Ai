@@ -8,22 +8,20 @@ require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
 $orderId = sh_int($_GET['id'] ?? 0);
-$order = $orderId > 0 ? sh_order_get($orderId) : null;
 
-// A customer-owned order opened after automatic logout should resume through
-// Login, not look like an unknown order. Logged-in customers must satisfy
-// the server-side email verification requirement before viewing order details.
-// Deliberately logged-out/guessed IDs still take the ordinary IDOR-safe 404 path below.
-if ($order !== null && (int)($order['user_id'] ?? 0) > 0) {
-    if (sh_user() === null && sh_customer_session_expired()) {
-        sh_require_login('order-details.php?id=' . $orderId);
-    } elseif (sh_user() !== null) {
-        sh_require_login('order-details.php?id=' . $orderId);
-    }
+// A live customer must satisfy the existing verification gate. If a browser's
+// customer session expired, send it through Login without first loading the
+// requested order; the destination is still checked against the new session.
+if (sh_user() !== null) {
+    sh_require_authenticated_customer('order-details.php?id=' . $orderId);
+} elseif ($orderId > 0 && sh_customer_session_expired()) {
+    sh_require_authenticated_customer('order-details.php?id=' . $orderId);
 }
 
-// IDOR protection: only the owner (or the guest session that created it) may view.
-if ($order === null || !sh_order_can_view($order)) {
+// The owner predicate is part of the database lookup; an ID from the URL is
+// only a selector and never evidence of authorization.
+$order = $orderId > 0 ? sh_customer_order_get($orderId) : null;
+if ($order === null) {
     http_response_code(404);
     $pageTitle = 'Order not found';
     require_once SH_ROOT . '/includes/header.php';

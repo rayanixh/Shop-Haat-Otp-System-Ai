@@ -16,7 +16,7 @@ sh_session_start();
 // the customer was trying to recover.
 $retryOrderHint = sh_int($_GET['retry_order'] ?? 0);
 $checkoutReturn = $retryOrderHint > 0 ? 'checkout.php?retry_order=' . $retryOrderHint : 'checkout.php';
-$user = sh_require_login($checkoutReturn, false);
+$user = sh_require_authenticated_customer($checkoutReturn, false);
 require_once SH_ROOT . '/includes/firebase.php';
 require_once SH_ROOT . '/includes/mail.php';
 // One gate for both verifiers: the store's own emailed code when SMTP is
@@ -45,8 +45,8 @@ if (!$summary['items'] && $_SERVER['REQUEST_METHOD'] !== 'POST' && $retryOrderId
 $methods = sh_payment_methods_available((bool)$summary['has_physical']);
 
 if ($retryOrderId > 0) {
-    $retryOrder = sh_order_get($retryOrderId);
-    if ($retryOrder === null || (int)($retryOrder['user_id'] ?? 0) !== (int)$user['id']) {
+    $retryOrder = sh_customer_order_get($retryOrderId);
+    if ($retryOrder === null) {
         http_response_code(404);
         $pageTitle = 'Order not found';
         require_once SH_ROOT . '/includes/header.php';

@@ -956,9 +956,18 @@ function sh_paginate(int $total, int $perPage, int $current, string $baseUrl): s
     return $out . '</nav>';
 }
 
+/**
+ * Generate the customer-visible order reference.
+ *
+ * The database primary key is deliberately not part of this value. New order
+ * references use 96 bits from the operating system CSPRNG and fit the existing
+ * VARCHAR(30) schema (two-letter store prefix plus 24 hexadecimal characters).
+ * The $id argument is retained for source compatibility with existing callers;
+ * it is not used as an authorization secret or included in the reference.
+ */
 function sh_order_number(int $id): string
 {
-    return sh_order_number_prefix() . date('ymd') . str_pad((string)$id, 5, '0', STR_PAD_LEFT);
+    return sh_order_number_prefix() . strtoupper(bin2hex(random_bytes(12)));
 }
 
 /**

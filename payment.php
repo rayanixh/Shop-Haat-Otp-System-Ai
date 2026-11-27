@@ -11,12 +11,12 @@ require_once SH_ROOT . '/includes/notifications.php';
 sh_session_start();
 // Payment confirmation requires an authenticated account — guests are sent to
 // Login/Signup and returned here after authenticating (cart/order preserved).
-sh_require_login('', false);
+sh_require_authenticated_customer('', false);
 
 $orderId = sh_int($_GET['id'] ?? $_POST['order_id'] ?? 0);
-$order = $orderId > 0 ? sh_order_get($orderId) : null;
+$order = $orderId > 0 ? sh_customer_order_get($orderId) : null;
 
-if ($order === null || !sh_order_can_view($order)) {
+if ($order === null) {
     http_response_code(404);
     $pageTitle = 'Order not found';
     require_once SH_ROOT . '/includes/header.php';
@@ -67,7 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && sh_post('form') === 'manual') {
     $error = $res['error'];
 }
 
-$order = sh_order_get($orderId);
+// Re-read only through the authenticated owner-scoped loader after a failed or
+// stale form submission; never replace the authorized row with an unscoped ID read.
+$order = sh_customer_order_get($orderId);
+if ($order === null) { sh_render_error_page(404, 'Order not found', 'This order could not be found.'); }
 $payment = sh_order_latest_payment($orderId);
 $route = sh_order_payment_route($order, $payment);
 $method = is_array($route['method'] ?? null) ? $route['method'] : null;

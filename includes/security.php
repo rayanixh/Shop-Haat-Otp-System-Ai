@@ -188,23 +188,50 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
     $bucket = preg_replace('/[^a-z0-9_.-]+/i', '-', $bucket) ?: 'general';
     $dir = $dir !== '' ? rtrim($dir, '/') : (defined('SH_LOG_DIR') ? SH_LOG_DIR . '/limits' : '');
     if ($dir === '') { return $refused('no storage directory'); }
-    if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) { return $refused('cannot create the storage directory'); }
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) { return $refused('cannot create the storage directory'); }
+    // Rate counters affect security decisions. Keep the directory private to
+    // the PHP account even when the host's default umask is permissive.
+    if (!@chmod($dir, 0700)) { return $refused('cannot restrict the storage directory permissions'); }
+    $dirMode = @fileperms($dir);
+    if ($dirMode === false || (($dirMode & 0700) !== 0700) || (($dirMode & 0077) !== 0) || !is_writable($dir)) {
+        return $refused('storage directory permissions are not private and writable');
+    }
 
     $file = $dir . '/' . $bucket . '-' . hash('sha256', $key) . '.txt';
     $now = time();
     $fh = @fopen($file, 'c+');
     if ($fh === false) { return $refused('cannot open the counter file'); }
     try {
+        if (!@chmod($file, 0600)) { return $refused('cannot restrict the counter file permissions'); }
+        $fileMode = @fileperms($file);
+        if ($fileMode === false || (($fileMode & 0600) !== 0600) || (($fileMode & 0077) !== 0)) {
+            return $refused('counter file permissions are not private');
+        }
         if (!flock($fh, LOCK_EX)) { return $refused('cannot lock the counter file'); }
-        $data = json_decode((string)stream_get_contents($fh), true);
-        if (!is_array($data) || !isset($data['t'], $data['n']) || ($now - (int)$data['t']) > $window) {
+        if (!rewind($fh)) { return $refused('cannot read the counter file'); }
+        $raw = stream_get_contents($fh);
+        if (!is_string($raw)) { return $refused('cannot read the counter file'); }
+        $data = json_decode($raw, true);
+        if ($raw === '') {
+            $data = ['t' => $now, 'n' => 0];
+        } elseif (!is_array($data) || !isset($data['t'], $data['n']) || !is_numeric($data['t']) || !is_numeric($data['n'])) {
+            return $refused('counter data is invalid');
+        } elseif (($now - (int)$data['t']) > $window) {
             $data = ['t' => $now, 'n' => 0];
         }
         $data['n'] = (int)$data['n'] + 1;
-        ftruncate($fh, 0);
-        rewind($fh);
-        $written = fwrite($fh, (string)json_encode($data));
-        if ($written === false || !fflush($fh)) { return $refused('cannot update the counter file'); }
+        $encoded = json_encode($data);
+        if (!is_string($encoded) || !ftruncate($fh, 0) || !rewind($fh)) {
+            return $refused('cannot prepare the counter update');
+        }
+        $offset = 0;
+        $length = strlen($encoded);
+        while ($offset < $length) {
+            $written = fwrite($fh, substr($encoded, $offset));
+            if ($written === false || $written === 0) { return $refused('cannot update the counter file'); }
+            $offset += $written;
+        }
+        if (!fflush($fh)) { return $refused('cannot flush the counter update'); }
         $allowed = $data['n'] <= $max;
         flock($fh, LOCK_UN);
         return $allowed;

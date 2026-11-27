@@ -191,9 +191,8 @@ function sh_reselect_order_payment_method(int $orderId, int $methodId): array
     try {
         $pdo->beginTransaction();
         $transactionStarted = true;
-        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        $order = sh_one('SELECT * FROM orders WHERE id = ? AND user_id = ? FOR UPDATE', [$orderId, $userId]);
         if ($order === null) { throw new DomainException('Order not found.'); }
-        if ((int)$order['user_id'] !== $userId) { throw new DomainException('You are not allowed to update this order.'); }
         if (in_array((string)$order['payment_status'], ['submitted', 'verified', 'refunded'], true)
             || in_array((string)$order['status'], ['cancelled', 'completed'], true)) {
             throw new DomainException('The payment method can no longer be changed for this order.');
@@ -235,8 +234,8 @@ function sh_reselect_order_payment_method(int $orderId, int $methodId): array
         sh_query(
             "UPDATE orders
              SET payment_method_id = ?, payment_method_name = ?, payment_status = 'unpaid', status = ?
-             WHERE id = ?",
-            [(int)$method['id'], (string)$method['name'], $orderStatus, $orderId]
+             WHERE id = ? AND user_id = ?",
+            [(int)$method['id'], (string)$method['name'], $orderStatus, $orderId, $userId]
         );
         sh_query(
             "UPDATE payments
@@ -448,7 +447,7 @@ function sh_create_order(array $input): array
 
 
         $orderId = sh_insert('orders', $verificationFields + [
-            'order_number'        => 'TMP' . bin2hex(random_bytes(6)),
+            'order_number'        => 'TMP' . bin2hex(random_bytes(12)),
             'user_id'             => $userId,
             'customer_name'       => $customerName,
             'customer_email'      => $email,
@@ -473,8 +472,30 @@ function sh_create_order(array $input): array
             'payment_status'      => 'unpaid',
         ]);
 
-        $orderNumber = sh_order_number($orderId);
-        sh_query('UPDATE orders SET order_number = ? WHERE id = ?', [$orderNumber, $orderId]);
+        // The unique database index is authoritative. Retry only an actual
+        // unique-reference collision; other database errors must abort the
+        // transaction rather than being mistaken for a collision.
+        $orderNumber = '';
+        $lastReferenceCollision = null;
+        for ($referenceAttempt = 0; $referenceAttempt < 5; $referenceAttempt++) {
+            $candidateReference = sh_order_number($orderId);
+            try {
+                sh_query('UPDATE orders SET order_number = ? WHERE id = ?', [$candidateReference, $orderId]);
+                $orderNumber = $candidateReference;
+                break;
+            } catch (PDOException $e) {
+                $driverCode = (int)($e->errorInfo[1] ?? 0);
+                $sqlState = (string)$e->getCode();
+                $isUniqueCollision = $driverCode === 1062
+                    || (in_array($sqlState, ['23000', '19'], true)
+                        && str_contains(strtolower($e->getMessage()), 'unique'));
+                if (!$isUniqueCollision) { throw $e; }
+                $lastReferenceCollision = $e;
+            }
+        }
+        if ($orderNumber === '') {
+            throw new RuntimeException('Could not allocate a unique customer order reference.', 0, $lastReferenceCollision);
+        }
 
         foreach ($summary['items'] as $it) {
             sh_insert('order_items', [
@@ -647,6 +668,29 @@ function sh_order_idempotency_reset(): void
 function sh_order_get(int $id): ?array
 {
     return sh_one('SELECT * FROM orders WHERE id = ? LIMIT 1', [$id]);
+}
+
+/**
+ * Load an order only when it belongs to the authenticated customer.
+ *
+ * Legacy guest orders remain visible only to the anonymous PHP session that
+ * contains their order ID; a signed-in customer's identity always takes
+ * precedence and cannot fall back to another guest-order entry.
+ */
+function sh_customer_order_get(int $id): ?array
+{
+    if ($id <= 0) { return null; }
+    $userId = sh_user_id();
+    if ($userId > 0) {
+        return sh_one('SELECT * FROM orders WHERE id = ? AND user_id = ? LIMIT 1', [$id, $userId]);
+    }
+
+    sh_session_start();
+    $guestOrders = $_SESSION['guest_orders'] ?? [];
+    if (!is_array($guestOrders) || !in_array($id, array_map('intval', $guestOrders), true)) {
+        return null;
+    }
+    return sh_one('SELECT * FROM orders WHERE id = ? AND user_id IS NULL LIMIT 1', [$id]);
 }
 
 /**
@@ -1046,11 +1090,19 @@ function sh_emit_payment_submitted_notifications(int $orderId, int $paymentId, s
 /** IDOR guard: a customer may only view their own orders. */
 function sh_order_can_view(array $order): bool
 {
+    $orderId = (int)($order['id'] ?? 0);
+    $ownerId = (int)($order['user_id'] ?? 0);
+    if ($orderId <= 0) { return false; }
+
     $uid = sh_user_id();
-    if ($uid > 0 && (int)$order['user_id'] === $uid) { return true; }
+    if ($uid > 0) { return $ownerId === $uid; }
+
+    // Guest-order access is limited to a NULL-owner legacy order retained in
+    // this exact browser session. It never grants a signed-in customer access.
+    if ($ownerId !== 0) { return false; }
     sh_session_start();
     $guest = $_SESSION['guest_orders'] ?? [];
-    return is_array($guest) && in_array((int)$order['id'], array_map('intval', $guest), true);
+    return is_array($guest) && in_array($orderId, array_map('intval', $guest), true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,11 +1141,8 @@ function sh_submit_manual_payment(int $orderId, string $transactionId, string $s
     try {
         $pdo->beginTransaction();
         $transactionStarted = true;
-        $order = sh_one('SELECT * FROM orders WHERE id = ? FOR UPDATE', [$orderId]);
+        $order = sh_one('SELECT * FROM orders WHERE id = ? AND user_id = ? FOR UPDATE', [$orderId, $userId]);
         if ($order === null) { throw new DomainException('Order not found.'); }
-        if ((int)$order['user_id'] !== $userId) {
-            throw new DomainException('You are not allowed to modify this order.');
-        }
         if (in_array((string)$order['payment_status'], ['verified', 'refunded'], true)) {
             throw new DomainException('This order has already been paid.');
         }
@@ -1174,7 +1223,7 @@ function sh_submit_manual_payment(int $orderId, string $transactionId, string $s
 
         // A manual submission is always pending verification; it never approves
         // itself regardless of a valid-looking customer Transaction ID.
-        sh_query("UPDATE orders SET status = 'payment_submitted', payment_status = 'submitted' WHERE id = ?", [$orderId]);
+        sh_query("UPDATE orders SET status = 'payment_submitted', payment_status = 'submitted' WHERE id = ? AND user_id = ?", [$orderId, $userId]);
         if (!$pdo->inTransaction()) {
             throw new LogicException('Payment submission transaction ended unexpectedly before commit.');
         }

@@ -137,20 +137,35 @@ t_ok('every id read from a request is cast', $unc === [], implode("\n         â†
 // ===========================================================================
 t_sec('5. Customer order screens check ownership before rendering');
 // ===========================================================================
-$orderScreens = ['order-details.php', 'order-success.php', 'payment.php', 'checkout.php', 'api/orders.php', 'api/payment.php'];
+$orderScreens = ['order-details.php', 'order-success.php', 'payment.php', 'checkout.php', 'api/orders.php'];
 foreach ($orderScreens as $file) {
     $src = $read($root . '/' . $file);
-    $hasGet = str_contains($src, 'sh_order_get(');
-    $guarded = str_contains($src, 'sh_order_can_view(')
-        || str_contains($src, "(int)(\$retryOrder['user_id'] ?? 0) !== (int)\$user['id']")
-        || str_contains($src, 'hash_equals($boundReference, $reference)');
-    t_ok($file . ($hasGet ? ' resolves an order and proves the caller may see it' : ' does not resolve orders'),
-        !$hasGet || $guarded);
+    $usesOwnerScopedLookup = str_contains($src, 'sh_customer_order_get(');
+    t_ok($file . ' resolves customer orders through the session-owner lookup', $usesOwnerScopedLookup);
 }
 $paySrc = $read($root . '/payment.php');
-t_ok('the payment page requires a login before it reads an order', strpos($paySrc, 'sh_require_login(') < strpos($paySrc, 'sh_order_get('));
-t_ok('the payment page refuses to submit for an order it cannot show',
-    str_contains($paySrc, 'if ($order === null || !sh_order_can_view($order)) {'));
+t_ok('the payment page requires an authenticated customer before reading the order',
+    strpos($paySrc, 'sh_require_authenticated_customer(') < strpos($paySrc, 'sh_customer_order_get('));
+t_ok('customer order mutations repeat owner ID in their locked lookup and writes',
+    str_contains($read($root . '/includes/payment.php'), 'WHERE id = ? AND user_id = ? FOR UPDATE')
+    && str_contains($read($root . '/includes/payment.php'), "WHERE id = ? AND user_id = ?\""));
+$apiOrders = $read($root . '/api/orders.php');
+t_ok('public API tracking is rate-limited without returning a database ID',
+    str_contains($apiOrders, 'sh_order_tracking_rate_limited(')
+    && str_contains($apiOrders, "'number' =>")
+    && str_contains($apiOrders, "'order_number'")
+    && !str_contains($apiOrders, "'id' =>"));
+$tracker = $read($root . '/track.php');
+t_ok('HTML tracking shares the API rate limiter and does not echo phone input',
+    str_contains($tracker, 'sh_order_tracking_rate_limited(')
+    && str_contains($tracker, 'value="" maxlength="30" inputmode="tel"'));
+t_ok('new customer order references use cryptographic randomness, not the row ID',
+    str_contains($read($root . '/includes/functions.php'), 'strtoupper(bin2hex(random_bytes(12)))'));
+$apiPayment = $read($root . '/api/payment.php');
+t_ok('manual-payment API requires a session and payment writes are owner-scoped in a transaction',
+    str_contains($apiPayment, 'sh_require_authenticated_customer(')
+    && str_contains($read($root . '/includes/payment.php'), 'WHERE id = ? AND user_id = ? FOR UPDATE')
+    && str_contains($read($root . '/includes/payment.php'), "WHERE id = ? AND user_id = ?\""));
 
 // ===========================================================================
 t_sec('6. Customer order lists are scoped by user_id');
@@ -158,6 +173,15 @@ t_sec('6. Customer order lists are scoped by user_id');
 $orders = $read($root . '/orders.php');
 t_ok('orders.php lists only the signed-in customer\'s orders',
     str_contains($orders, 'FROM orders WHERE user_id = ?'));
+$addressesSrc = $read($root . '/addresses.php');
+t_ok('address reads resolve through the current session owner',
+    str_contains($addressesSrc, 'sh_customer_address_get($id)')
+    && str_contains($addressesSrc, 'WHERE id = ? AND user_id = ?'));
+$accountSrc = $read($root . '/account.php');
+t_ok('profile writes use the server-loaded customer identity, not a request user ID',
+    str_contains($accountSrc, "sh_update('users', \$upd, 'id = ?', [(int)\$user['id']])")
+    && !str_contains($accountSrc, "\$_POST['user_id']")
+    && !str_contains($accountSrc, "\$_POST['customer_id']"));
 t_ok('the support widget conversation list is owner-scoped',
     str_contains($read($root . '/api/support.php'), 'sh_support_conversation_for_owner('));
 
@@ -173,7 +197,7 @@ $publicApi = [
     'otp.php'          => ['sh_otp_issue(', 'sh_csrf_require()'],                // rate limited, no object ids
     'cart.php'         => ['sh_csrf_require()', 'sh_cart_'],                     // session cart only
     'support.php'      => ['sh_support_origin_valid('],                          // origin + owner scoping
-    'orders.php'       => ['sh_require_login(', 'sh_order_can_view('],           // login for all but tracking
+    'orders.php'       => ['sh_require_authenticated_customer(', 'sh_customer_order_get(', 'sh_order_tracking_rate_limited('], // public tracking is throttled; private lookup is owner-scoped
 ];
 $apiGuards = array_merge(GUARDS, ['sh_require_login(']);
 foreach ($files('api/*.php') as $path) {
