@@ -262,7 +262,7 @@ function sh_rate_limit_cleanup_enqueue(string $dir, string $entry): bool
         $markerHandle = @fopen($marker, 'x');
         if ($markerHandle === false) { return is_file($marker); }
         try {
-            if (!@chmod($marker, 0600) || fwrite($markerHandle, "1\n") === false || !fflush($markerHandle)) { @unlink($marker); return false; }
+            if (!@chmod($marker, 0600) || fwrite($markerHandle, "1\n") !== 2 || !fflush($markerHandle)) { @unlink($marker); return false; }
         } finally { fclose($markerHandle); }
         return true;
     } finally { fclose($queueLock); }
