@@ -175,87 +175,209 @@ function sh_security_header_list(): array
  *
  * Every refusal is logged so the operator can see why the endpoint went quiet.
  */
-/**
- * Sweep a bounded number of expired counter files.
- *
- * A stable per-bucket/hash-prefix lock is used by both writers and cleanup.
- * Cleanup can therefore unlink only while holding the same lock all writers
- * must acquire before opening the counter, avoiding open-inode/unlink races.
- * At most 32 directory entries are examined in one call.
- */
-function sh_file_rate_limit_cleanup(string $dir, int $budget = 24): int
+/** Create or read the persistent bounded-cleanup queue state. Caller holds its lock. */
+function sh_rate_limit_cleanup_state(string $queueDir): ?array
 {
+    $path = $queueDir . '/state.json';
+    if (!is_file($path)) { return ['head' => 1, 'tail' => 1]; }
+    if (is_link($path)) { return null; }
+    $raw = @file_get_contents($path);
+    $state = is_string($raw) ? json_decode($raw, true) : null;
+    if (!is_array($state) || !isset($state['head'], $state['tail'])
+        || !is_numeric($state['head']) || !is_numeric($state['tail'])) { return null; }
+    $head = (int)$state['head']; $tail = (int)$state['tail'];
+    if ($head < 1 || $tail < $head || $tail > PHP_INT_MAX - 1024) { return null; }
+    return ['head' => $head, 'tail' => $tail];
+}
+
+/** Atomically persist a small state file. Caller holds the queue lock. */
+function sh_rate_limit_cleanup_state_write(string $queueDir, array $state): bool
+{
+    $temp = $queueDir . '/.state.tmp';
+    if (is_link($temp)) { return false; }
+    $fh = @fopen($temp, 'c+');
+    if ($fh === false) { return false; }
+    $encoded = json_encode(['head' => (int)$state['head'], 'tail' => (int)$state['tail']]);
+    try {
+        if (!is_string($encoded) || !@chmod($temp, 0600) || !ftruncate($fh, 0) || !rewind($fh)) { return false; }
+        $offset = 0; $length = strlen($encoded);
+        while ($offset < $length) {
+            $written = fwrite($fh, substr($encoded, $offset));
+            if ($written === false || $written === 0) { return false; }
+            $offset += $written;
+        }
+        if (!fflush($fh)) { return false; }
+    } finally { fclose($fh); }
+    return @rename($temp, $queueDir . '/state.json');
+}
+
+/** Enqueue one opaque counter filename while caller holds the persistent queue lock. */
+function sh_rate_limit_cleanup_enqueue_locked(string $queueDir, array &$state, string $entry): bool
+{
+    if (preg_match('/^[a-z0-9_.-]+-[a-f0-9]{64}\.txt$/i', $entry) !== 1 || $state['tail'] >= PHP_INT_MAX - 1024) { return false; }
+    $sequence = (int)$state['tail'];
+    $jobPath = $queueDir . '/job-' . sprintf('%020d', $sequence) . '.txt';
+    $temp = $queueDir . '/.job.tmp';
+    if (is_link($temp)) { return false; }
+    $tempHandle = @fopen($temp, 'c+');
+    if ($tempHandle === false) { return false; }
+    $payload = $entry . "\n";
+    $ok = false;
+    try {
+        if (!@chmod($temp, 0600) || !ftruncate($tempHandle, 0) || !rewind($tempHandle)) { return false; }
+        $written = fwrite($tempHandle, $payload);
+        if ($written !== strlen($payload) || !fflush($tempHandle)) { return false; }
+        $ok = true;
+    } finally { fclose($tempHandle); }
+    if (!$ok || !@rename($temp, $jobPath)) { return false; }
+    $state['tail'] = $sequence + 1;
+    return sh_rate_limit_cleanup_state_write($queueDir, $state);
+}
+
+/** Register a counter once in the persistent queue. Must run after its shard lock is released. */
+function sh_rate_limit_cleanup_enqueue(string $dir, string $entry): bool
+{
+    $queueDir = rtrim($dir, '/') . '/.cleanup-queue';
+    $indexDir = $queueDir . '/index';
+    $lockDir = rtrim($dir, '/') . '/.locks';
+    if ((!is_dir($queueDir) && !@mkdir($queueDir, 0700)) || (!is_dir($indexDir) && !@mkdir($indexDir, 0700))) { return false; }
+    if (is_link($queueDir) || is_link($indexDir) || !@chmod($queueDir, 0700) || !@chmod($indexDir, 0700)) { return false; }
+    $queueMode = @fileperms($queueDir); $indexMode = @fileperms($indexDir);
+    if ($queueMode === false || (($queueMode & 0700) !== 0700) || (($queueMode & 0077) !== 0)
+        || $indexMode === false || (($indexMode & 0700) !== 0700) || (($indexMode & 0077) !== 0)) { return false; }
+    $marker = $indexDir . '/' . hash('sha256', $entry) . '.idx';
+    if (is_link($marker)) { return false; }
+    if (is_file($marker)) { return true; }
+    $queueLockPath = $lockDir . '/cleanup-queue.lck';
+    if (is_link($queueLockPath)) { return false; }
+    $queueLock = @fopen($queueLockPath, 'c+');
+    if ($queueLock === false) { return false; }
+    try {
+        if (!@chmod($queueLockPath, 0600)) { return false; }
+        $mode = @fileperms($queueLockPath);
+        if ($mode === false || (($mode & 0600) !== 0600) || (($mode & 0077) !== 0) || !flock($queueLock, LOCK_EX)) { return false; }
+        if (is_file($marker)) { return true; }
+        $state = sh_rate_limit_cleanup_state($queueDir);
+        if ($state === null || !sh_rate_limit_cleanup_enqueue_locked($queueDir, $state, $entry)) { return false; }
+        $markerHandle = @fopen($marker, 'x');
+        if ($markerHandle === false) { return is_file($marker); }
+        try {
+            if (!@chmod($marker, 0600) || fwrite($markerHandle, "1\n") === false || !fflush($markerHandle)) { @unlink($marker); return false; }
+        } finally { fclose($markerHandle); }
+        return true;
+    } finally { fclose($queueLock); }
+}
+
+/**
+ * Process a bounded number of persistent cleanup-queue entries.
+ *
+ * Counter writers and cleanup share each stable bucket/hash-prefix lock. The
+ * queue itself has one private lock and a durable head/tail cursor, so every
+ * invocation resumes at the prior position without rescanning the directory.
+ * No directory enumeration is used; each inspected job is addressed directly
+ * by sequence number. Active counters are re-queued, expired ones are removed.
+ *
+ * @param int|null $inspected Optional test/diagnostic output: jobs examined.
+ */
+function sh_file_rate_limit_cleanup(string $dir, int $budget = 24, ?int &$inspected = null): int
+{
+    $inspected = 0;
     $budget = max(1, min(32, $budget));
     $dir = rtrim($dir, '/');
     $lockDir = $dir . '/.locks';
-    if (!is_dir($dir) || !is_dir($lockDir)) { return 0; }
-    $directory = @opendir($dir);
-    if ($directory === false) { return 0; }
-
-    $scanned = 0;
+    $queueDir = $dir . '/.cleanup-queue';
+    $indexDir = $queueDir . '/index';
+    if (!is_dir($dir) || !is_dir($lockDir) || !is_dir($queueDir) || !is_dir($indexDir)
+        || is_link($lockDir) || is_link($queueDir) || is_link($indexDir)) { return 0; }
+    foreach ([$lockDir, $queueDir, $indexDir] as $privateDir) {
+        $mode = @fileperms($privateDir);
+        if ($mode === false || (($mode & 0700) !== 0700) || (($mode & 0077) !== 0)) { return 0; }
+    }
+    $queueLockPath = $lockDir . '/cleanup-queue.lck';
+    if (is_link($queueLockPath)) { return 0; }
+    $queueLock = @fopen($queueLockPath, 'c+');
+    if ($queueLock === false) { return 0; }
     $removed = 0;
     $now = time();
     try {
-        while ($scanned < $budget && ($entry = readdir($directory)) !== false) {
-            if ($entry === '.' || $entry === '..') { continue; }
-            $scanned++;
-            if (preg_match('/^([a-z0-9_.-]+)-([a-f0-9]{64})\.txt$/i', $entry, $m) !== 1) { continue; }
-            $bucket = (string)$m[1];
-            $keyHash = strtolower((string)$m[2]);
-            $path = $dir . '/' . $entry;
-            if (is_link($path) || !is_file($path)) { continue; }
+        if (!@chmod($queueLockPath, 0600)) { return 0; }
+        $lockMode = @fileperms($queueLockPath);
+        if ($lockMode === false || (($lockMode & 0600) !== 0600) || (($lockMode & 0077) !== 0)
+            || !flock($queueLock, LOCK_EX | LOCK_NB)) { return 0; }
+        $state = sh_rate_limit_cleanup_state($queueDir);
+        if ($state === null) { return 0; }
+        // Re-queued active counters are deferred to the next invocation so one
+        // hot active entry cannot consume the whole budget repeatedly.
+        $availableAtStart = min($budget, (int)$state['tail'] - (int)$state['head']);
 
-            $lockPath = $lockDir . '/' . $bucket . '-' . substr($keyHash, 0, 2) . '.lck';
-            if (is_link($lockPath)) { continue; }
-            $lock = @fopen($lockPath, 'c+');
-            if ($lock === false) { continue; }
-            try {
-                if (!@chmod($lockPath, 0600)) { continue; }
-                $lockMode = @fileperms($lockPath);
-                if ($lockMode === false || (($lockMode & 0600) !== 0600) || (($lockMode & 0077) !== 0)
-                    || !flock($lock, LOCK_EX | LOCK_NB)) { continue; }
-
-                // The stable shard lock is held before opening the counter.
-                if (is_link($path) || !is_file($path)) { continue; }
-                $counter = @fopen($path, 'r');
-                if ($counter === false) { continue; }
-                try { $raw = stream_get_contents($counter); }
-                finally { fclose($counter); }
-                $data = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
-                $validCounter = is_array($data) && isset($data['t'], $data['n'])
-                    && is_numeric($data['t']) && is_numeric($data['n']);
-                if (!$validCounter) {
-                    // A truncated/corrupt file cannot be an active trustworthy
-                    // counter. Retain it through a conservative grace period,
-                    // then reclaim it while still holding its shard lock.
-                    $mtime = @filemtime($path);
-                    if ($mtime !== false && ($now - $mtime) > 3600 && @unlink($path)) { $removed++; }
-                    continue;
-                }
-
-                // Older files did not store their window. Keep them for their
-                // known maximum window rather than risking deletion too early.
-                $legacyWindow = match ($bucket) {
-                    'public-order-track-ip' => 600,
-                    'public-order-track-target' => 3600,
-                    'public-order-track-pair' => 900,
-                    'csp', 'email_webhook' => 60,
-                    'install-unlock', 'backup-cron-token' => 900,
-                    default => 3600,
-                };
-                $window = isset($data['w']) && is_numeric($data['w']) ? max(1, (int)$data['w']) : $legacyWindow;
-                if (($now - (int)$data['t']) > $window && @unlink($path)) { $removed++; }
-            } finally {
-                fclose($lock); // releases the shard lock on every path
+        while ($inspected < $availableAtStart && $state['head'] < $state['tail']) {
+            $sequence = (int)$state['head'];
+            $jobPath = $queueDir . '/job-' . sprintf('%020d', $sequence) . '.txt';
+            $inspected++;
+            $rawEntry = !is_link($jobPath) && is_file($jobPath) ? @file_get_contents($jobPath) : false;
+            $entry = is_string($rawEntry) ? trim($rawEntry) : '';
+            if (preg_match('/^([a-z0-9_.-]+)-([a-f0-9]{64})\.txt$/i', $entry, $m) !== 1) {
+                @unlink($jobPath);
+                $state['head'] = $sequence + 1;
+                if (!sh_rate_limit_cleanup_state_write($queueDir, $state)) { break; }
+                continue;
             }
+            $bucket = (string)$m[1]; $keyHash = strtolower((string)$m[2]);
+            $counterPath = $dir . '/' . $entry;
+            $marker = $indexDir . '/' . hash('sha256', $entry) . '.idx';
+            $shardLockPath = $lockDir . '/' . $bucket . '-' . substr($keyHash, 0, 2) . '.lck';
+            if (is_link($shardLockPath)) { break; }
+            $shardLock = @fopen($shardLockPath, 'c+');
+            if ($shardLock === false) { break; }
+            $active = false; $counterMissing = false; $counterExpired = false;
+            try {
+                if (!@chmod($shardLockPath, 0600)) { break; }
+                $mode = @fileperms($shardLockPath);
+                if ($mode === false || (($mode & 0600) !== 0600) || (($mode & 0077) !== 0)
+                    || !flock($shardLock, LOCK_EX | LOCK_NB)) { break; }
+                if (is_link($counterPath) || !is_file($counterPath)) {
+                    $counterMissing = true;
+                } else {
+                    $counter = @fopen($counterPath, 'r');
+                    if ($counter === false) { break; }
+                    try { $raw = stream_get_contents($counter); }
+                    finally { fclose($counter); }
+                    $data = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+                    $valid = is_array($data) && isset($data['t'], $data['n']) && is_numeric($data['t']) && is_numeric($data['n']);
+                    if (!$valid) {
+                        $mtime = @filemtime($counterPath);
+                        $active = $mtime === false || ($now - $mtime) <= 3600;
+                    } else {
+                        $legacyWindow = match ($bucket) {
+                            'public-order-track-ip' => 600,
+                            'public-order-track-target' => 3600,
+                            'public-order-track-pair' => 900,
+                            'csp', 'email_webhook' => 60,
+                            'install-unlock', 'backup-cron-token' => 900,
+                            default => 3600,
+                        };
+                        $window = isset($data['w']) && is_numeric($data['w']) ? max(1, (int)$data['w']) : $legacyWindow;
+                        $active = ($now - (int)$data['t']) <= $window;
+                    }
+                    if (!$active) {
+                        $counterExpired = @unlink($counterPath);
+                        if (!$counterExpired) { break; }
+                        $removed++;
+                    }
+                }
+                if ($counterMissing || $counterExpired) { @unlink($marker); }
+            } finally { fclose($shardLock); }
+
+            if ($active && !sh_rate_limit_cleanup_enqueue_locked($queueDir, $state, $entry)) { break; }
+            @unlink($jobPath);
+            $state['head'] = $sequence + 1;
+            if (!sh_rate_limit_cleanup_state_write($queueDir, $state)) { break; }
         }
     } catch (Throwable $e) {
-        // Cleanup is maintenance only; counter reads/writes still enforce the
-        // caller's fail-open/fail-closed policy below.
+        // Retention is maintenance only. The counter operation below continues
+        // to enforce the endpoint's configured fail-open/fail-closed behavior.
         return $removed;
-    } finally {
-        closedir($directory);
-    }
+    } finally { fclose($queueLock); }
     return $removed;
 }
 
@@ -296,8 +418,8 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
         return $refused('lock storage permissions are not private and writable');
     }
 
-    // Bounded opportunistic retention: no glob/scandir and no full-directory
-    // walk, even if unique-reference traffic has created many counter files.
+    // Bounded cleanup resumes from a persistent sequence cursor. It inspects no
+    // more than 24 jobs by default (hard cap 32), never walks a counter folder.
     sh_file_rate_limit_cleanup($dir, 24);
 
     $keyHash = hash('sha256', $key);
@@ -306,6 +428,7 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
     if (is_link($lockPath)) { return $refused('invalid lock path'); }
     $lock = @fopen($lockPath, 'c+');
     if ($lock === false) { return $refused('cannot open the rate-limit lock'); }
+    $updated = false; $allowed = false;
     try {
         if (!@chmod($lockPath, 0600)) { return $refused('cannot restrict lock file permissions'); }
         $lockMode = @fileperms($lockPath);
@@ -339,23 +462,27 @@ function sh_file_rate_limit(string $bucket, string $key, int $max, int $window, 
             if (!is_string($encoded) || !ftruncate($fh, 0) || !rewind($fh)) {
                 return $refused('cannot prepare the counter update');
             }
-            $offset = 0;
-            $length = strlen($encoded);
+            $offset = 0; $length = strlen($encoded);
             while ($offset < $length) {
                 $written = fwrite($fh, substr($encoded, $offset));
                 if ($written === false || $written === 0) { return $refused('cannot update the counter file'); }
                 $offset += $written;
             }
             if (!fflush($fh)) { return $refused('cannot flush the counter update'); }
-            return $data['n'] <= $max;
-        } finally {
-            fclose($fh);
-        }
+            $allowed = $data['n'] <= $max;
+            $updated = true;
+        } finally { fclose($fh); }
     } catch (Throwable $e) {
         return $refused('counter error: ' . $e->getMessage());
-    } finally {
-        fclose($lock);
+    } finally { fclose($lock); }
+
+    // Queue registration happens only after releasing the shard lock, preserving
+    // a single lock order with cleanup (queue lock then shard lock).
+    if (!$updated) { return $refused('counter update did not complete'); }
+    if (!sh_rate_limit_cleanup_enqueue($dir, basename($file))) {
+        return $refused('cannot register counter for bounded cleanup');
     }
+    return $allowed;
 }
 
 /**

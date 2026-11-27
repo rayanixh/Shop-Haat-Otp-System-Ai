@@ -69,12 +69,19 @@ $toolStart = strpos($supportSrc, 'function sh_support_tool_order(');
 $toolEnd = strpos($supportSrc, 'function sh_support_tool_latest_own_order(', $toolStart ?: 0);
 $toolBody = $toolStart !== false && $toolEnd !== false ? substr($supportSrc, $toolStart, $toolEnd - $toolStart) : '';
 su_ok($toolBody !== ''
-   && strpos($toolBody, 'if ($uid <= 0 && ($phone === null') < strpos($toolBody, 'SELECT * FROM orders')
-   && str_contains($toolBody, 'if (!$ok) { return [\'state\' => \'not_found\']; }'),
-   'Anonymous support does not query order existence without a phone and uses generic unauthorized results');
+   && str_contains($toolBody, '$uid = function_exists(\'sh_user_id\') ? sh_user_id() : 0;')
+   && strpos($toolBody, 'if ($uid <= 0 && ($phone === null') < strpos($toolBody, 'FROM orders WHERE order_number IN')
+   && str_contains($toolBody, 'AND user_id = ? LIMIT 1')
+   && str_contains($toolBody, 'AND customer_phone IN ({$phoneMarks}) LIMIT 1')
+   && !str_contains($toolBody, 'SELECT * FROM orders')
+   && !str_contains($toolBody, 'in_array((string)$row'),
+   'Support uses session-owner/reference SQL for signed-in customers and reference-plus-phone SQL for anonymous visitors');
 su_ok(str_contains($supportSrc, 'if ($phone !== null && $res[\'state\'] !== \'found\')')
    && str_contains($supportSrc, 'sh_support_rate_bump($bucket, 3600)'),
    'Failed anonymous support verification remains rate limited');
+su_ok(str_contains($supportSrc, 'Legacy and current support service modules cannot be loaded together.')
+   && str_contains($src('includes/ai-support.php'), 'Current and legacy support service modules cannot be loaded together.'),
+   'Overlapping legacy/current support declarations are guarded against co-loading');
 su_eq(null, sh_support_extract_order_ref('just browsing shoes'), 'No order ref in plain text');
 
 /* --- Product query cleanup --------------------------------------------------- */

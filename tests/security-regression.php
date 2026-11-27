@@ -472,8 +472,11 @@ sh_t('HTML and JSON public tracking share the atomic limiter and minimize fields
         if (!str_contains($policy, $needle)) { return 'tracking limiter policy is missing ' . $needle; }
     }
     $security = (string)@file_get_contents(SH_ROOT . '/includes/security.php');
-    foreach (['flock($lock, LOCK_EX)', 'LOCK_EX | LOCK_NB', 'min(32, $budget)', '/.locks'] as $needle) {
-        if (!str_contains($security, $needle)) { return 'counter cleanup/lock contract is missing ' . $needle; }
+    foreach (['flock($lock, LOCK_EX)', 'LOCK_EX | LOCK_NB', 'min(32, $budget)', '/.locks', 'cleanup-queue.lck', 'state.json', 'job-', 'sh_rate_limit_cleanup_enqueue_locked'] as $needle) {
+        if (!str_contains($security, $needle)) { return 'counter cleanup/lock/rotation contract is missing ' . $needle; }
+    }
+    if (str_contains($security, 'opendir($dir)') || str_contains($security, 'scandir($dir)') || str_contains($security, 'glob($dir')) {
+        return 'counter cleanup performs an unbounded directory scan';
     }
     if (!str_contains($html, 'sh_order_tracking_rate_limited(') || !str_contains($api, 'sh_order_tracking_rate_limited(')) {
         return 'one public tracking route bypasses the shared limiter';
