@@ -1,6 +1,6 @@
 # Shop-Haat Phase 1 Security Hardening Report
 
-**Scope:** Customer privacy and IDOR hardening in the PHP + MySQL/MariaDB cPanel-compatible application. This report covers Phase 1 only. No Phase 2 work was started.
+**Scope:** Customer privacy and IDOR hardening in the PHP + MySQL/MariaDB cPanel-compatible application. This report covers Phase 1 only. **Verification run:** 2026-11-18 (UTC). No Phase 2 work was started.
 
 ## Summary
 
@@ -10,8 +10,8 @@ This is partial runtime evidence from PHP-WASM, not a native PHP/cPanel host or 
 
 ## Runtime environment and isolation
 
-- Native `php`, `mysql`, `mariadb`, `mysqld`, Docker and Podman were unavailable. The workspace has no `config/database.php`, disposable test DSN or staging URL. No production configuration or customer data was accessed.
-- Installed `@php-wasm/cli` 3.1.66 only under `/tmp`; it ran PHP 8.5.12 with `pdo_mysql` listed, but no MySQL/MariaDB server was available. `tests/_support_php_bin.php` reported no runnable child PHP binary, so `proc_open` worker tests cannot run in this WASM CLI.
+- Native `php`, `mysql`, `mariadb`, `mysqld`, Docker and Podman were unavailable. `ss -lnt` showed no database/web listener; TCP probes to `127.0.0.1:3306` and `:3307` were refused. The workspace has no `config/database.php`, disposable test DSN or staging URL. No production configuration or customer data was accessed. `sudo` is available, but no apt package index was configured and external apt repositories are outside the workspace network allowlist, so no native database could be safely provisioned here.
+- Installed `@php-wasm/cli` 3.1.66 only under `/tmp` with `npm install --prefix /tmp/shophaat-php-wasm @php-wasm/cli` (host exit 0; npm emitted Node 22 vs package Node 24 engine warnings). It ran PHP 8.5.12; `pdo_mysql=loaded`, but there is no MySQL/MariaDB server. `tests/rate-limit-failsafe.php` confirmed no runnable child PHP binary, so `proc_open` worker tests cannot run in this WASM CLI. The available PHP-WASM runtime is therefore only a partial disposable CLI, not an isolated PHP+MySQL application environment.
 - The WASM CLI reports host exit status 0 even when a PHP script requests a nonzero exit (`php-wasm-cli -r 'exit(7);'` returned host status 0). Therefore the test suite's printed PASS/FAIL/BLOCKED summary is recorded alongside the host command status; host status alone is not treated as a pass.
 - A disposable MySQL/HTTP environment could not safely be provisioned in this workspace. The database tests have destructive guards; they were not bypassed.
 
@@ -83,22 +83,23 @@ Pre-edit copies of affected existing files were saved under `/tmp/shophaat-phase
 - `tests/support-unit.php` — source assertions for session-derived SQL authorization, minimal projections, and module sentinels.
 - `tests/security-regression.php` — source assertions for queue rotation and a tokenizer-correct trailing-output probe.
 - `SHOP_HAAT_PHASE_1_SECURITY_REPORT.md` — this final review, checks, risks, and blocked-test record.
+- `SHOP_HAAT_PHASE_1_TEST_OUTPUTS.txt` — verbatim output and host exit codes for the four requested PHP suites, disposable-DB preflight and three mocked support-chat tests.
 
 Other reviewed files (`includes/order-tracking.php`, `track.php`, `api/orders.php`, `includes/payment.php`, `includes/functions.php`) were inspected for wiring/signature compatibility and were not changed by this final review. Declaration inspection found six overlapping global helper names in the legacy `includes/support.php` and current `includes/ai-support.php` modules, with differing signatures; production routes load only the current module, while legacy test files load only the legacy module. Both entry files now use distinct module sentinel constants to stop before declarations if the other module was loaded first, preventing an opaque redeclaration fatal.
 
 ## Checks executed and results
 
-Commands below used `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli` (PHP 8.5.12 WASM), except the explicit Node/jsdom behavior suites. The WASM host does not propagate PHP `exit()` status; results therefore include both the host exit code and the script's printed summary.
+Commands below used `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli` (PHP 8.5.12 WASM), except the explicit Node/jsdom behavior suites. The complete verbatim stdout/stderr captures, commands and host exit codes for all ten suite/environment checks, plus the PHP exit-propagation probe, are in `SHOP_HAAT_PHASE_1_TEST_OUTPUTS.txt`. The WASM host does not propagate PHP `exit()` status; results therefore include both the host exit code and the script's printed summary. No native PHP/database runtime could be created.
 
 Initial WASM runs exposed test-harness issues rather than application runtime results: support-module guards used `function_exists()` (which sees declarations registered from the same file), the tokenizer probe did not account for whitespace attached to `T_CLOSE_TAG`, and the IDOR allowlist omitted the mixed manual-payment/gateway-callback controls. Those harness issues were corrected and the four requested suites were rerun; the final outputs below are from the corrected files.
 
 | Exact command/check | Result |
 |---|---|
 | `php-wasm-cli --version` and extension probe | PHP 8.5.12 (WASM CLI); `pdo_mysql` extension reported loaded. No MySQL server was available. |
-| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/idor-scan.php` | **PASS** — `passed 47 failed 0`; `IDOR SCAN: ALL CHECKS PASSED`. Host exit code 0; script summary indicates success. Source/static scan only, not HTTP authorization proof. |
-| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/rate-limit-failsafe.php` | **PARTIAL / BLOCKED** — `passed 43 failed 0 blocked 2`; summary `RATE LIMIT FAIL-SAFE SUITE: SOME CHECKS BLOCKED`. Host exit code 0 (WASM masks PHP nonzero exits). Repeated-sweep details: `INFO repeated sweeps=15; expired remaining=0; total jobs inspected=105; active unchanged=yes`. Each seven-job sweep was within budget. The native child-process counter concurrency and separate-process cursor tests were BLOCKED by `no runnable PHP binary for a child process`. |
-| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/security-regression.php` | **PASS with one environment skip** — `passed 188 failed 0 skipped 1`; the skipped check was actual header emission (`not applicable in this environment`). Host exit code 0. This suite is primarily source/regression assertions, not live HTTP. |
-| `timeout 240 /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-unit.php` | **PASS** — `Passed: 66 · Failed: 0`. Host exit code 0. Pure/support-source tests only; no MySQL lookup was exercised. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/idor-scan.php` | **PASS** — `passed 47 failed 0`; `IDOR SCAN: ALL CHECKS PASSED`. Host exit code 0; script summary indicates success. Source/static scan only, not HTTP authorization proof. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/rate-limit-failsafe.php` | **PARTIAL / BLOCKED** — `passed 43 failed 0 blocked 2`; summary `RATE LIMIT FAIL-SAFE SUITE: SOME CHECKS BLOCKED`. Host exit code 0 (WASM masks PHP nonzero exits). Repeated-sweep details: `INFO repeated sweeps=15; expired remaining=0; total jobs inspected=105; active unchanged=yes`. Each seven-job sweep was within budget. The native child-process counter concurrency and separate-process cursor tests were BLOCKED by `no runnable PHP binary for a child process`. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/security-regression.php` | **PASS with one environment skip** — `passed 188 failed 0 skipped 1`; the skipped check was actual header emission (`not applicable in this environment`). Host exit code 0. This suite is primarily source/regression assertions, not live HTTP. |
+| `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-unit.php` | **PASS** — `Passed: 66 · Failed: 0`. Host exit code 0. Pure/support-source tests only; no MySQL lookup was exercised. |
 | `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli -l` on `tests/idor-scan.php`, `tests/rate-limit-failsafe.php`, `tests/security-regression.php`, and `tests/support-unit.php` | **PASS** — all four reported `No syntax errors detected`. |
 | PHP-WASM lint of the requested source files and changed PHP set | **PASS** — 22/22 files parsed/linted without a PHP syntax error. This remains WASM PHP 8.5, not the production host PHP binary. |
 | Custom source assertions (cleanup queue/cursor/lock contract, budgets, configured tracking limits, support SQL ownership, includes, module guards, and test wiring) | **PASS** — 15/15 textual assertions. Not runtime HTTP/database tests. |
@@ -108,24 +109,54 @@ Initial WASM runs exposed test-harness issues rather than application runtime re
 | Same environment with `node tests/support-chat-optimistic-behavior.mjs` | **PASS** — 63 passed, 0 failed. Mocked API behavior only. |
 | `php-wasm-cli -r 'exit(7);'` exit propagation probe | Host exit code 0 despite PHP requesting exit 7; confirms why suite summaries, not host status alone, are recorded. |
 | `/tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-system.php` (disposable-DB preflight only) | **BLOCKED** — output: `BLOCKED support-system: database configuration is missing or incomplete`; no database mutations began. Host exit code 0 due WASM exit-status behavior. |
+| `node tests/support-chat-behavior.mjs`, `node tests/support-chat-composer-behavior.mjs`, `node tests/support-chat-optimistic-behavior.mjs` with `SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js` | **PASS, mocked client only** — 76, 32, and 63 passed; all three host exit codes 0. Full output in `SHOP_HAAT_PHASE_1_TEST_OUTPUTS.txt`. |
 | MySQL/MariaDB integration, synthetic Customer A/B HTTP, live tracking/support API and workflow regressions | **NOT RUN** — no native PHP host, server, disposable DB, staging URL, or authenticated HTTP environment. No test credentials or customer rows were created. |
-| Final ZIP integrity and changed-file coverage | **PASS** — 417 archive entries; all 25 base/current changed paths included; installation database config and install lock excluded. |
+| Final ZIP integrity and changed-file coverage | **PASS** — 418 archive entries (all 417 tracked files plus the test-output transcript); the updated report and output transcript are included; installation database config and install lock excluded. |
 
 ### Requested real-request test matrix
 
-No HTTP request was sent to the application. The following are **NOT RUN / BLOCKED**, not passes:
+No application HTTP request was sent, and no synthetic customers or test rows were created. All database-backed rows below are **NOT RUN**, not inferred passes. HTTP status/body and before/after database evidence are unavailable because there is no isolated MySQL server, app runtime, test DSN, or staging URL.
 
-| Exact scenario | Status and reason |
+#### Customer A/B authorization and data integrity
+
+| HTTP scenario | Result / evidence |
 |---|---|
-| Customer A reads Customer B's profile/contact; A reads/changes B's address; A reads B's order; tamper `user_id`/`order_id`; unauthenticated private endpoint calls | **NOT RUN** — no disposable DB, native PHP web server, authenticated HTTP client or synthetic accounts. No response bodies/statuses or database before/after state exist. |
-| Unauthorized payment update and verification that B's row is unchanged | **NOT RUN** — no HTTP/database fixture. |
-| Customer A reads/updates A's own profile, addresses and orders | **NOT RUN** — no HTTP/database fixture. |
-| Anonymous support: known/unknown ref without phone; incorrect phone vs unknown ref; correct reference-plus-checkout-phone | **NOT RUN** — SQL and response parity require a disposable DB plus HTTP request session. Source/unit assertions are not response evidence. |
-| Signed-in support owner-only order lookup | **NOT RUN** against MySQL/HTTP; source test confirms owner predicates only. |
-| Public HTML and JSON tracking response fields/timeline | **NOT RUN** against HTTP/database. |
-| Public tracker thresholds (40/IP/10m; 20/reference/hour; 6/reference-phone/15m) | **NOT RUN** through the actual public routes. Generic file limiter and repeated cleanup cases ran under PHP-WASM; they do not verify route-level thresholds or HTTP responses. |
-| Signup/login, email/phone OTP, guest-order recovery, address management, checkout, COD creation, manual payment, order details/timeline, admin order management | **NOT RUN** — all require a disposable DB, and most require HTTP/session and email/OTP fixtures. |
-| Support chat regression | **PASS, simulated only** — jsdom suites passed 76 + 32 + 63 assertions with mocked APIs; they do not verify server persistence, auth, or MySQL. |
+| Sign in synthetic Customer A; request Customer B's profile/contact | **NOT RUN** — no synthetic accounts or HTTP app; status/body and DB state unavailable. |
+| As A, read Customer B's address | **NOT RUN** — no DB fixture or HTTP request; address before/after unavailable. |
+| As A, modify Customer B's address/default/delete state | **NOT RUN** — no DB fixture or HTTP request; no before/after row evidence. |
+| As A, read Customer B's order/details | **NOT RUN** — no DB fixture or HTTP request; status/body and row state unavailable. |
+| Tamper submitted `user_id` and `order_id` in profile/address/order/payment/customer API requests | **NOT RUN** — no authenticated HTTP session or synthetic rows to attack. |
+| Call private customer endpoints without authentication | **NOT RUN** — no application HTTP server; no response status/body captured. |
+| Submit unauthorized payment update against B's order; compare payment/order DB rows before and after | **NOT RUN** — no DB fixture or request path; no row snapshots exist. |
+| As A, successfully access A's own account/profile, addresses and orders | **NOT RUN** — no synthetic A account/database or application session. |
+
+#### Support and public tracking
+
+| HTTP scenario | Result / evidence |
+|---|---|
+| Anonymous support lookup for an existing reference with phone omitted | **NOT RUN** — no disposable DB/API request; no response body/status. |
+| Compare anonymous wrong-phone response with unknown-order response | **NOT RUN** — no database fixtures or requests; generic-response equivalence not observed. |
+| Anonymous lookup with correct reference plus checkout phone | **NOT RUN** — no synthetic order or DB-backed support endpoint. |
+| Signed-in A attempts to retrieve B's order through support | **NOT RUN** — no customer sessions, database or HTTP response. |
+| Signed-in A retrieves A's own order through support | **NOT RUN** — no customer sessions, database or HTTP response. |
+| Request public HTML tracking for a valid reference/phone and inspect fields/timeline | **NOT RUN** — no DB-backed application HTTP runtime. |
+| Request public JSON tracking for a valid reference/phone and inspect fields | **NOT RUN** — no DB-backed application HTTP runtime. |
+| Exercise public route limits: 40/IP/600s, 20/reference/3600s, and 6/reference-phone/900s; verify block response at threshold | **NOT RUN** through tracker routes. The generic file limiter's single-process cleanup test ran, but no route-level HTTP attempts or threshold response were recorded. |
+
+#### End-to-end regressions
+
+| Workflow scenario | Result / evidence |
+|---|---|
+| Synthetic customer signup and login | **NOT RUN** — requires disposable DB, HTTP/session, and synthetic account fixture. |
+| Email OTP and phone OTP delivery/verification | **NOT RUN** — no DB, mail/SMS test transport, or OTP fixtures. |
+| Guest order recovery | **NOT RUN** — no synthetic guest order, session or recovery request. |
+| Create/read/update/delete customer address | **NOT RUN** against application/DB; no row-level before/after evidence. |
+| Checkout and order creation | **NOT RUN** — no product/catalogue/payment DB fixture or HTTP session. |
+| COD order creation | **NOT RUN** — no disposable DB or checkout request. |
+| Manual payment submission | **NOT RUN** — no synthetic order/payment method or HTTP request; DB before/after unavailable. |
+| Customer order details and timeline | **NOT RUN** — no synthetic order or authenticated HTTP request. |
+| Support chat backend persistence, authentication, and agent reply | **NOT RUN** end-to-end. Separate jsdom tests passed 76 + 32 + 63 checks using mocked APIs; they do not verify server persistence, authorization, or MySQL. |
+| Admin order management | **NOT RUN** — no disposable DB, admin test account/session, or HTTP actions. |
 
 ### Rate-limit execution detail
 
@@ -149,4 +180,4 @@ Separate-process cursor persistence, concurrent counter increments and concurren
 
 ## Project package
 
-`SHOP_HAAT_PHASE_1_COMPLETE_PROJECT.zip` contains the repository's tracked project files plus all current working-tree changes, including this report, the cleanup/concurrency regression test, and `includes/order-tracking.php`. It excludes `.git`, local backups, runtime logs, uploaded customer/store data, and ignored installation secrets such as `config/database.php` and `config/installed.lock`; a fresh deployment must supply its own protected configuration and install state.
+`SHOP_HAAT_PHASE_1_COMPLETE_PROJECT.zip` is regenerated after this verification and contains the repository project files plus current Phase 1 changes, this report, the test-output transcript, and `includes/order-tracking.php`. It excludes `.git`, local backups, runtime logs, uploaded customer/store data, and ignored installation secrets such as `config/database.php` and `config/installed.lock`; a fresh deployment must supply its own protected configuration and install state.
