@@ -10,15 +10,15 @@ require_once SH_ROOT . '/includes/order-timeline.php';
 
 sh_session_start();
 $orderId = sh_int($_GET['id'] ?? 0);
-$order = $orderId > 0 ? sh_order_get($orderId) : null;
 
-// Keep a timed-out customer in the normal login/recovery flow. Guest-order
-// protection remains unchanged for URLs that were never authenticated.
-if ($order !== null && (int)($order['user_id'] ?? 0) > 0 && sh_user() === null && sh_customer_session_expired()) {
-    sh_require_login('order-success.php?id=' . $orderId, false);
+// Resume an expired session through Login without looking up the supplied order
+// ID. The authenticated destination is resolved with an owner-scoped query.
+if ($orderId > 0 && sh_user() === null && sh_customer_session_expired()) {
+    sh_require_authenticated_customer('order-success.php?id=' . $orderId, false);
 }
+$order = $orderId > 0 ? sh_customer_order_get($orderId) : null;
 
-if ($order === null || !sh_order_can_view($order)) {
+if ($order === null) {
     http_response_code(404);
     $pageTitle = 'Order not found';
     require_once SH_ROOT . '/includes/header.php';

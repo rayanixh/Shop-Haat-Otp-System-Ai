@@ -8,7 +8,7 @@ require_once SH_ROOT . '/includes/mail.php';
 require_once SH_ROOT . '/includes/reporting.php';
 
 sh_session_start();
-$user = sh_require_login();
+$user = sh_require_authenticated_customer();
 sh_email_schema_ensure();
 $errors = [];
 // Which verifier owns the "email verified" flag: the store's own emailed code

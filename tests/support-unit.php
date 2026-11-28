@@ -53,7 +53,36 @@ su_eq('+8801712345678', sh_support_extract_phone('call +8801712345678 please'), 
 su_eq(null, sh_support_extract_phone('order 12345'), 'Short number is not a phone');
 su_eq('SH26081501234', sh_support_extract_order_ref('order SH26081501234 kothay'), 'Full order number extracted');
 su_eq('SH260815-01234', sh_support_extract_order_ref('Order: sh260815-01234'), 'Dashed order number extracted');
-su_eq('12345', sh_support_extract_order_ref('my order id 12345 status ki'), 'Numeric id after "order" extracted');
+$opaqueOrderRef = 'AB' . str_repeat('A', 24);
+su_eq($opaqueOrderRef, sh_support_extract_order_ref('Order ' . $opaqueOrderRef . ' status please'), 'Opaque random order reference extracted for any configured two-letter prefix');
+su_ok(str_contains($src('includes/ai-support.php'), '[A-Z]{2}[A-F0-9]{24}'), 'AI support recognizes opaque random order references');
+su_eq(null, sh_support_extract_order_ref('my order id 12345 status ki'), 'Internal numeric database ID is not accepted as a customer order reference');
+su_ok(str_contains($src('includes/support.php'), "\$uid = function_exists('sh_user_id') ? sh_user_id() : 0;")
+   && str_contains($src('includes/support.php'), 'AND customer_phone IN ({$phoneMarks}) LIMIT 1')
+   && !str_contains($src('includes/support.php'), 'if (!$ok && $uid > 0'),
+   'Support phone-pair verification is limited to anonymous chats; signed-in lookups require ownership');
+su_ok(!str_contains($src('includes/support.php'), "WHERE id = ? LIMIT 1', [(int)$ref]"), 'Support lookup does not resolve internal numeric order IDs');
+su_ok(str_contains($src('includes/support.php'), 'sh_order_tracking_rate_limited($ref')
+   && str_contains($src('includes/support.php'), "require_once SH_ROOT . '/includes/order-tracking.php';"),
+   'Anonymous support lookups share the public tracking rate limit');
+$supportSrc = $src('includes/support.php');
+$toolStart = strpos($supportSrc, 'function sh_support_tool_order(');
+$toolEnd = strpos($supportSrc, 'function sh_support_tool_latest_own_order(', $toolStart ?: 0);
+$toolBody = $toolStart !== false && $toolEnd !== false ? substr($supportSrc, $toolStart, $toolEnd - $toolStart) : '';
+su_ok($toolBody !== ''
+   && str_contains($toolBody, '$uid = function_exists(\'sh_user_id\') ? sh_user_id() : 0;')
+   && strpos($toolBody, 'if ($uid <= 0 && ($phone === null') < strpos($toolBody, 'FROM orders WHERE order_number IN')
+   && str_contains($toolBody, 'AND user_id = ? LIMIT 1')
+   && str_contains($toolBody, 'AND customer_phone IN ({$phoneMarks}) LIMIT 1')
+   && !str_contains($toolBody, 'SELECT * FROM orders')
+   && !str_contains($toolBody, 'in_array((string)$row'),
+   'Support uses session-owner/reference SQL for signed-in customers and reference-plus-phone SQL for anonymous visitors');
+su_ok(str_contains($supportSrc, 'if ($phone !== null && $res[\'state\'] !== \'found\')')
+   && str_contains($supportSrc, 'sh_support_rate_bump($bucket, 3600)'),
+   'Failed anonymous support verification remains rate limited');
+su_ok(str_contains($supportSrc, "defined('SH_CURRENT_SUPPORT_MODULE_LOADED')")
+   && str_contains($src('includes/ai-support.php'), "defined('SH_LEGACY_SUPPORT_MODULE_LOADED')"),
+   'Overlapping legacy/current support declarations are guarded against co-loading');
 su_eq(null, sh_support_extract_order_ref('just browsing shoes'), 'No order ref in plain text');
 
 /* --- Product query cleanup --------------------------------------------------- */

@@ -94,6 +94,29 @@ function sh_user_id(): int
     return $u ? (int)$u['id'] : 0;
 }
 
+/** Shared customer guard; identity always comes from the authenticated session. */
+function sh_require_authenticated_customer(string $redirectTo = '', bool $requireVerified = true): array
+{
+    return sh_require_login($redirectTo, $requireVerified);
+}
+
+/** Load an address only when the current session customer owns it. */
+function sh_customer_address_get(int $addressId): ?array
+{
+    $userId = sh_user_id();
+    if ($addressId <= 0 || $userId <= 0) { return null; }
+    return sh_one('SELECT * FROM addresses WHERE id = ? AND user_id = ? LIMIT 1', [$addressId, $userId]);
+}
+
+/**
+ * Does the authenticated customer own this address? The supplied address ID is
+ * only a selector; the owner is always derived from the server session.
+ */
+function sh_customer_owns_address(int $addressId): bool
+{
+    return sh_customer_address_get($addressId) !== null;
+}
+
 /**
  * Restrict a post-login destination to a customer-facing internal page.
  * Authentication pages and admin/API endpoints are intentionally excluded to

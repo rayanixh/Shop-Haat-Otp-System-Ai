@@ -5,7 +5,7 @@ sh_require_installed();
 require_once SH_ROOT . '/includes/auth.php';
 
 sh_session_start();
-$user = sh_require_login();
+$user = sh_require_authenticated_customer();
 $uid = (int)$user['id'];
 $errors = [];
 
@@ -14,18 +14,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form = sh_post('form');
     if ($form === 'delete') {
         $id = sh_int($_POST['id'] ?? 0);
-        // Ownership check prevents IDOR.
+        // Resolve through the centralized session-owner helper before mutation;
+        // the DELETE repeats the owner predicate to keep the write atomic.
+        if (sh_customer_address_get($id) === null) {
+            sh_render_error_page(404, 'Address not found', 'This address could not be found.');
+        }
         sh_query('DELETE FROM addresses WHERE id = ? AND user_id = ?', [$id, $uid]);
         sh_flash('info', 'Address removed.');
         sh_redirect('addresses.php');
     } elseif ($form === 'default') {
         $id = sh_int($_POST['id'] ?? 0);
-        $own = sh_one('SELECT id FROM addresses WHERE id = ? AND user_id = ?', [$id, $uid]);
-        if ($own) {
-            sh_query('UPDATE addresses SET is_default = 0 WHERE user_id = ?', [$uid]);
-            sh_query('UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?', [$id, $uid]);
-            sh_flash('success', 'Default address updated.');
+        if (sh_customer_address_get($id) === null) {
+            sh_render_error_page(404, 'Address not found', 'This address could not be found.');
         }
+        sh_query('UPDATE addresses SET is_default = 0 WHERE user_id = ?', [$uid]);
+        sh_query('UPDATE addresses SET is_default = 1 WHERE id = ? AND user_id = ?', [$id, $uid]);
+        sh_flash('success', 'Default address updated.');
         sh_redirect('addresses.php');
     } else {
         $v = new ShValidator($_POST);

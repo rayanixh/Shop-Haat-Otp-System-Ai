@@ -22,7 +22,16 @@
 declare(strict_types=1);
 
 require_once SH_ROOT . '/install/schema.php';
+require_once SH_ROOT . '/includes/order-tracking.php';
 require_once SH_ROOT . '/ai/AIManager.php';
+
+// The repository retains a separate legacy support service in ai-support.php.
+// Use a module sentinel (not function_exists: PHP registers declarations from
+// this file before executing it) to stop co-loading before redeclarations.
+if (defined('SH_CURRENT_SUPPORT_MODULE_LOADED')) {
+    throw new LogicException('Legacy and current support service modules cannot be loaded together.');
+}
+define('SH_LEGACY_SUPPORT_MODULE_LOADED', true);
 
 /* ------------------------------------------------------------------ *\
  * Schema (additive, lazy) + seed FAQs
@@ -403,15 +412,14 @@ function sh_support_extract_phone(string $text): ?string
     return null;
 }
 
-/** A typed order reference: full order number, or a bare numeric id. */
+/** A customer-visible order reference; internal numeric database IDs are not accepted. */
 function sh_support_extract_order_ref(string $text): ?string
 {
     $up = mb_strtoupper($text);
+    // New public references are prefix + 96-bit hexadecimal randomness.
+    // Recognize them before the legacy date/sequence format below.
+    if (preg_match('/\b[A-Z]{2}[A-F0-9]{24}\b/u', $up, $m) === 1) { return $m[0]; }
     if (preg_match('/\b[A-Z]{1,5}-?\d{4,14}(?:-\d{1,6})?\b/u', $up, $m) === 1) { return $m[0]; }
-    if (preg_match('/(?:order|অর্ডার)\s*(?:no|number|id|নম্বর)?\s*[:#]?\s*(\d{3,10})\b/iu', $text, $m) === 1) {
-        // A bare number after the word "order" is an id candidate, never a phone.
-        if (sh_support_extract_phone($m[1]) === null) { return $m[1]; }
-    }
     return null;
 }
 
@@ -576,38 +584,53 @@ function sh_support_order_facts(array $o): array
 
 /**
  * Authorized order lookup. Identification is cheap; AUTHORIZATION is the
- * gate: account ownership, account-phone match, or the track.php pair
- * (order number + checkout phone). Returns minimal facts only.
+ * gate: authenticated account ownership, or for anonymous support chats only,
+ * the track.php pair (order number + checkout phone). Returns minimal facts only.
  */
 function sh_support_tool_order(string $ref, array $identity, ?string $phone): array
 {
     $ref = trim($ref);
     if ($ref === '') { return ['state' => 'need_number']; }
-    $row = null;
-    try {
-        $row = sh_one('SELECT * FROM orders WHERE order_number = ? LIMIT 1', [mb_strtoupper($ref)]);
-        if ($row === null && str_contains($ref, '-')) {
-            $row = sh_one('SELECT * FROM orders WHERE order_number = ? LIMIT 1', [str_replace('-', '', mb_strtoupper($ref))]);
-        }
-        if ($row === null && ctype_digit($ref)) {
-            $row = sh_one('SELECT * FROM orders WHERE id = ? LIMIT 1', [(int)$ref]);
-        }
-    } catch (Throwable $e) { return ['state' => 'not_found']; }
-    if ($row === null) { return ['state' => 'not_found']; }
+    // Never authorize from the supplied identity array: the authenticated owner
+    // is read again from the current server-side session for this lookup.
+    $uid = function_exists('sh_user_id') ? sh_user_id() : 0;
+    $upperRef = mb_strtoupper($ref);
+    $refVariants = array_values(array_unique([$upperRef, str_replace('-', '', $upperRef)]));
+    $refMarks = implode(',', array_fill(0, count($refVariants), '?'));
+    $factColumns = 'id, order_number, status, payment_status, created_at, total, delivery_fee';
 
-    $ok = false; $via = '';
-    $uid = (int)$identity['user_id'];
-    if ($uid > 0 && (int)($row['user_id'] ?? 0) === $uid) { $ok = true; $via = 'account'; }
-    if (!$ok && $phone !== null && $phone !== '') {
-        $variants = sh_phone_variants($phone);
-        if ($variants !== [] && in_array((string)$row['customer_phone'], $variants, true)) { $ok = true; $via = 'phone_pair'; }
+    // Anonymous order-number probing shares the same atomic public-tracking
+    // budget as track.php and the JSON tracker. Signed-in lookups use the
+    // session-owner predicate and do not consume a public lookup budget.
+    if ($uid <= 0 && sh_order_tracking_rate_limited($ref, (string)$phone)) {
+        return ['state' => 'not_found'];
     }
-    if (!$ok && $uid > 0 && (string)($identity['phone'] ?? '') !== '') {
-        $variants = sh_phone_variants((string)$identity['phone']);
-        if ($variants !== [] && in_array((string)$row['customer_phone'], $variants, true)) { $ok = true; $via = 'account_phone'; }
+    // Do not query whether the reference exists until an anonymous visitor has
+    // supplied both verification factors. Missing-phone replies are generic.
+    if ($uid <= 0 && ($phone === null || trim($phone) === '')) {
+        return ['state' => 'need_phone'];
     }
-    if (!$ok) { return ['state' => 'need_phone', 'order_number' => (string)$row['order_number']]; }
-    return ['state' => 'found', 'via' => $via, 'order' => sh_support_order_facts($row)];
+
+    try {
+        if ($uid > 0) {
+            $row = sh_one(
+                "SELECT {$factColumns} FROM orders WHERE order_number IN ({$refMarks}) AND user_id = ? LIMIT 1",
+                array_merge($refVariants, [$uid])
+            );
+            if ($row === null) { return ['state' => 'not_found']; }
+            return ['state' => 'found', 'via' => 'account', 'order' => sh_support_order_facts($row)];
+        }
+
+        $phoneVariants = sh_phone_variants($phone);
+        if ($phoneVariants === []) { return ['state' => 'not_found']; }
+        $phoneMarks = implode(',', array_fill(0, count($phoneVariants), '?'));
+        $row = sh_one(
+            "SELECT {$factColumns} FROM orders WHERE order_number IN ({$refMarks}) AND customer_phone IN ({$phoneMarks}) LIMIT 1",
+            array_merge($refVariants, $phoneVariants)
+        );
+        if ($row === null) { return ['state' => 'not_found']; }
+        return ['state' => 'found', 'via' => 'phone_pair', 'order' => sh_support_order_facts($row)];
+    } catch (Throwable $e) { return ['state' => 'not_found']; }
 }
 
 function sh_support_tool_latest_own_order(int $userId): ?array
@@ -677,9 +700,8 @@ function sh_support_resolve(string $text, string $lang, array $conv, array $iden
                 $r['order_state'] = 'verify_limited'; $r['force_deterministic'] = true; return $r;
             }
             $res = sh_support_tool_order($useRef, $identity, $phone);
-            if ($res['state'] === 'need_phone' && $phone !== null) {
-                sh_support_rate_bump($bucket, 3600); // a failed verification attempt
-                $r['order_state'] = 'not_found'; $r['force_deterministic'] = true; return $r;
+            if ($phone !== null && $res['state'] !== 'found') {
+                sh_support_rate_bump($bucket, 3600); // failed or unmatched verification attempt
             }
             $r['order_state'] = $res['state'];
             if ($res['state'] === 'found') {

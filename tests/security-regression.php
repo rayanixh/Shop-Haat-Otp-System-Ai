@@ -447,6 +447,52 @@ sh_t('the failure limiter blocks after the configured budget', function () {
     return true;
 });
 
+sh_t('new public order references carry CSPRNG entropy and fit the existing schema', function () {
+    $first = sh_order_number(1);
+    $second = sh_order_number(1);
+    if (strlen($first) > 30 || preg_match('/^[A-Z]{2}[A-F0-9]{24}$/', $first) !== 1) {
+        return 'unexpected order reference format or length: ' . $first;
+    }
+    if ($first === $second) { return 'two references generated for the same row ID were identical'; }
+    $create = (string)@file_get_contents(SH_ROOT . '/includes/payment.php');
+    if (!str_contains($create, "'TMP' . bin2hex(random_bytes(12))")
+        || !str_contains($create, '$referenceAttempt < 5')
+        || !str_contains($create, '$driverCode === 1062')) {
+        return 'temporary references or unique-collision retry handling are missing';
+    }
+    return true;
+});
+
+sh_t('HTML and JSON public tracking share the atomic limiter and minimize fields', function () {
+    $policy = (string)@file_get_contents(SH_ROOT . '/includes/order-tracking.php');
+    $html = (string)@file_get_contents(SH_ROOT . '/track.php');
+    $api = (string)@file_get_contents(SH_ROOT . '/api/orders.php');
+    $timeline = (string)@file_get_contents(SH_ROOT . '/includes/order-timeline.php');
+    foreach (['public-order-track-ip', 'public-order-track-target', 'public-order-track-pair', "'', true"] as $needle) {
+        if (!str_contains($policy, $needle)) { return 'tracking limiter policy is missing ' . $needle; }
+    }
+    $security = (string)@file_get_contents(SH_ROOT . '/includes/security.php');
+    if (!str_contains($security, 'sh_file_rate_limit_cleanup($dir, 24)')) {
+        return 'rate limiter no longer invokes bounded cleanup';
+    }
+    foreach (['flock($lock, LOCK_EX)', 'LOCK_EX | LOCK_NB', 'min(32, $budget)', '/.locks', 'cleanup-queue.lck', 'state.json', 'job-', 'sh_rate_limit_cleanup_enqueue_locked'] as $needle) {
+        if (!str_contains($security, $needle)) { return 'counter cleanup/lock/rotation contract is missing ' . $needle; }
+    }
+    if (str_contains($security, 'opendir($dir)') || str_contains($security, 'scandir($dir)') || str_contains($security, 'glob($dir')) {
+        return 'counter cleanup performs an unbounded directory scan';
+    }
+    if (!str_contains($html, 'sh_order_tracking_rate_limited(') || !str_contains($api, 'sh_order_tracking_rate_limited(')) {
+        return 'one public tracking route bypasses the shared limiter';
+    }
+    if (str_contains($html, 'SELECT * FROM orders') || str_contains($api, 'SELECT * FROM orders')
+        || str_contains($html, 'SELECT o.id,') || str_contains($html, 'SELECT p.transaction_id')
+        || str_contains($html, 'SELECT p.gateway_reference') || !str_contains($html, 'AS has_reference')
+        || !str_contains($html, 'payment_method_type') || !str_contains($timeline, '!empty($payment[\'has_reference\'])')) {
+        return 'public tracking selects an unnecessary internal/payment field or fails to preserve payment timeline state';
+    }
+    return true;
+});
+
 sh_t('login throttling consults the audit table, not just the session', function () {
     $src = (string)@file_get_contents(SH_ROOT . '/includes/auth.php');
     if (!str_contains($src, 'security_logs')) { return 'the DB-backed throttle was removed'; }
@@ -3195,7 +3241,13 @@ function sh_security_php_inline_output(string $source, string $kind): ?string
     if (!str_starts_with(ltrim($source), '<?php')) { return 'content before opening PHP tag'; }
     $hasMarkup = false;
     foreach (token_get_all($source) as $token) {
-        if (!is_array($token) || $token[0] !== T_INLINE_HTML || $token[1] === '') { continue; }
+        if (!is_array($token)) { continue; }
+        // The tokenizer attaches following whitespace to T_CLOSE_TAG rather
+        // than returning it as a separate T_INLINE_HTML token.
+        if ($token[0] === T_CLOSE_TAG && $kind === 'php-only' && substr($token[1], 2) !== '') {
+            return 'inline output outside PHP tags';
+        }
+        if ($token[0] !== T_INLINE_HTML || $token[1] === '') { continue; }
         if (trim($token[1]) !== '') { $hasMarkup = true; }
         // PHP-only code (especially APIs, config, cron and libraries) must not
         // emit even whitespace outside PHP: it can corrupt headers and JSON.
@@ -3222,7 +3274,8 @@ sh_t('PHP-only libraries and endpoints cannot emit output; view templates may re
     if (sh_security_php_inline_output("<?php header('Content-Type: application/json'); ?>\n", 'php-only') === null) {
         return 'the probe did not detect whitespace emitted by a PHP-only endpoint';
     }
-    if (sh_security_php_inline_output("<?php \$value = 1; ?>\n<div>view</div>\n<?php /* end */ ?>\n", 'template') !== null) {
+    $validTemplateProbe = '<?php $value = 1; ?>' . "\n<div>view</div>\n<?php /* end */ ?>\n";
+    if (sh_security_php_inline_output($validTemplateProbe, 'template') !== null) {
         return 'the probe rejected valid mixed PHP/HTML template output';
     }
     $offenders = [];

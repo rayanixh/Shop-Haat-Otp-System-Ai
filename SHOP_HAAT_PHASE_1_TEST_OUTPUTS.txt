@@ -1,0 +1,728 @@
+SHOP HAAT PHASE 1 — TEST OUTPUT CAPTURE
+Captured on the current workspace during this verification. Exit codes below are host process exit codes; PHP-WASM does not propagate a PHP script exit(7) as a nonzero host status. Output is recorded verbatim.
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli --version
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+PHP 8.5.12 (cli) (built: Nov  5 2026 08:59:29) (NTS)
+Copyright (c) The PHP Group
+Zend Engine v4.5.12, Copyright (c) Zend Technologies
+    with Zend OPcache v8.5.12, Copyright (c), by Zend Technologies
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli -r echo PHP_VERSION, "\n"; echo extension_loaded("pdo_mysql") ? "pdo_mysql=loaded\n" : "pdo_mysql=absent\n";
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+8.5.12
+pdo_mysql=loaded
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/idor-scan.php
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+
+1. Every admin page is behind an admin guard
+  ok   56 admin pages checked, every one calls a guard
+  ok   the layout partial still enforces the admin guard itself
+  ok   admin/index.php redirects instead of rendering
+  ok   admin/login.php is the only page that handles credentials without a session
+
+2. Every admin page that mutates data requires CSRF
+  ok   24 mutating admin pages, every one calls sh_csrf_require()
+  ok   the AJAX verification fragment checks CSRF itself
+  ok   the AJAX fragment answers with a refresh signal, not a full error page
+
+3. No request value is concatenated into SQL
+  ok   no SQL string is built from $_GET/$_POST
+
+4. Client-supplied ids are cast before use
+  ok   every id read from a request is cast
+
+5. Customer order screens check ownership before rendering
+  ok   order-details.php resolves customer orders through the session-owner lookup
+  ok   order-success.php resolves customer orders through the session-owner lookup
+  ok   payment.php resolves customer orders through the session-owner lookup
+  ok   checkout.php resolves customer orders through the session-owner lookup
+  ok   api/orders.php resolves customer orders through the session-owner lookup
+  ok   the payment page requires an authenticated customer before reading the order
+  ok   customer order mutations repeat owner ID in their locked lookup and writes
+  ok   public API tracking is rate-limited without returning a database ID
+  ok   HTML tracking shares the API rate limiter and does not echo phone input
+  ok   new customer order references use cryptographic randomness, not the row ID
+  ok   manual-payment API requires a session and payment writes are owner-scoped in a transaction
+
+6. Customer order lists are scoped by user_id
+  ok   orders.php lists only the signed-in customer's orders
+  ok   address reads resolve through the current session owner
+  ok   profile writes use the server-loaded customer identity, not a request user ID
+  ok   the support widget conversation list is owner-scoped
+
+7. Every api endpoint is guarded or public on purpose
+  ok   ai.php requires a session or an admin guard
+  ok   cart.php is public but keeps its control
+  ok   checkout.php requires a session or an admin guard
+  ok   csp-report.php is public but keeps its control
+  ok   email-events.php is public but keeps its control
+  ok   notifications.php requires a session or an admin guard
+  ok   orders.php is public but keeps its control
+  ok   otp.php is public but keeps its control
+  ok   payment.php is public but keeps its control
+  ok   search.php is public but keeps its control
+  ok   support.php is public but keeps its control
+  ok   the public list covers every file in api/
+
+8. Support conversations cannot be read by another customer
+  ok   customer message reads are checked against the owner
+  ok   customer sends are owner-scoped by the helper, not by the request
+  ok   admin support actions require support.view/support.reply/support.manage
+  ok   admin support actions require CSRF on POST
+
+9. The caller cannot name itself
+  ok   no page takes user_id/admin_id from the request
+
+10. Admin sub-resource views are permission-scoped
+  ok   admin/orders.php requires a specific permission (not just "any admin")
+  ok   admin/payments.php requires a specific permission (not just "any admin")
+  ok   admin/customers.php requires a specific permission (not just "any admin")
+  ok   admin/parcels.php requires a specific permission (not just "any admin")
+  ok   admin/support-conversation.php requires a specific permission (not just "any admin")
+  ok   admin/settings-history.php requires a specific permission (not just "any admin")
+
+========================================================================
+passed 47   failed 0
+IDOR SCAN: ALL CHECKS PASSED
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/rate-limit-failsafe.php
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+
+1. A working limiter still counts and blocks
+  ok   attempt 1 is allowed
+  ok   attempt 2 is allowed
+  ok   attempt 3 is allowed
+  ok   attempt 4 is blocked
+  ok   a different key is unaffected
+  ok   a stale counter is reset once the window passes
+  ok   a corrupted counter file is treated as a fresh window
+  ok   a traversal-ish bucket name stays inside the limits directory
+  ok   the sanitised bucket file was written locally
+
+2. Broken storage, flood-protection surfaces: fail OPEN
+  ok   CSP-style bucket allows the request when storage is broken
+  ok   webhook-style bucket allows the request when storage is broken
+  ok   a missing SH_LOG_DIR also fails open
+  ok   fail-open refusals are not spammed into the security log
+
+3. Broken storage, secret-protection surfaces: fail CLOSED
+  ok   an uncreatable directory denies a fail-closed bucket
+  ok   the denial is logged so the operator can see why
+  ok   the log line names the bucket and the reason
+  ok   it never claims a token was wrong
+  ok   the default storage directory is created on demand
+  ok   the default directory now exists
+  ok   no bogus refusal was logged
+  ok   an unopenable counter file denies a fail-closed bucket
+  ok   the counter failure is logged
+  ok   the same directory still allows a fail-open bucket
+
+4. The endpoints are wired to the right policy
+  ok   installer unlock throttling fails closed
+  ok   installer unlock only throttles a wrong token (a correct one still works)
+  ok   backup cron token throttling fails closed
+  ok   CSP collector stays on the fail-open default (no fail-closed argument)
+  ok   email webhook stays on the fail-open default (no fail-closed argument)
+
+5. The OTP limiter fails closed when its database is unavailable
+  ok   sh_otp_rate_begin refuses when the rate tables cannot be ensured
+  ok   the refusal message does not reveal the failure reason to the visitor
+  ok   an exception inside the reservation also refuses
+  ok   the OTP limiter never falls back to "allow" on error
+
+6. A refused request is never counted as a success
+  ok   the counter records every attempt, including blocked ones
+  ok   a fail-closed denial does not touch the counter store
+
+7. Expired-file cleanup is bounded and preserves active counters
+  ok   bounded sweeper removes the expired queued counter
+  ok   expired counter file is actually gone
+  ok   single-sweep work stays within the requested budget
+  ok   active counter remains with its count unchanged
+  ok   limiter storage permissions are private
+  ok   repeated rotating sweeps eventually remove all 100 expired counters
+  ok   each repeated cleanup sweep stays within its seven-job budget
+  ok   several active counters remain byte-for-byte unchanged
+  INFO repeated sweeps=15; expired remaining=0; total jobs inspected=105; active unchanged=yes
+  ok   persistent cleanup cursor advanced across repeated calls
+
+8. Concurrent workers cannot exceed a shared counter budget
+  BLOCKED multi-process atomic-counter test  [no runnable PHP binary for a child process: PHP_BINARY (/tmp/php-wasm-binGUxB7o/php) could not execute a script. Set SH_TEST_PHP_BIN=/path/to/php to enable these checks.]
+
+9. Cleanup cursor survives PHP processes and concurrent cleanup preserves counters
+  BLOCKED cross-process cleanup cursor and cleanup/update race tests  [no runnable PHP binary for a child process: PHP_BINARY (/tmp/php-wasm-binGUxB7o/php) could not execute a script. Set SH_TEST_PHP_BIN=/path/to/php to enable these checks.]
+
+========================================================================
+passed 43   failed 0   blocked 2
+RATE LIMIT FAIL-SAFE SUITE: SOME CHECKS BLOCKED
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/security-regression.php
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+ShopHaat security regression tests
+PHP 8.5.12 (cli)
+
+1. Security response headers
+----------------------------
+  PASS  the header list contains the baseline protections
+  PASS  clickjacking is blocked by default
+  PASS  MIME sniffing is disabled
+  PASS  a Content Security Policy is present by default
+  PASS  the CSP blocks inline script except by nonce
+  PASS  the CSP nonce is unpredictable and changes per process
+  PASS  HSTS is not sent over plain HTTP
+  PASS  HSTS is sent over HTTPS
+  PASS  frame-ancestors rejects injected junk
+  SKIP  the headers are actually emitted
+        not applicable in this environment
+
+2. Installer access control
+---------------------------
+  PASS  a brand-new store can be installed
+  PASS  an installed store cannot create an administrator from the web
+  PASS  a store with only a saved config (lock file deleted) is still restricted
+  PASS  repair is available over the saved connection
+  PASS  repair fails closed when the saved config is missing
+  PASS  an unlock restores full setup permissions
+  PASS  unlock tokens are compared in constant time and need real length
+  PASS  the installer consults the access rules
+
+3. Redirect and return-target validation
+----------------------------------------
+  PASS  open redirects are rejected
+  PASS  legitimate internal redirects still work
+  PASS  authentication pages cannot be used as a return target
+
+4. CSRF tokens
+--------------------
+  PASS  a session token is generated with full entropy
+  PASS  a wrong or missing token is rejected
+
+5. HTML sanitizer (rich text from the AI provider)
+--------------------------------------------------
+  PASS  scripts, handlers and unsafe URLs are removed
+  PASS  later-arriving vectors are neutralised too
+  PASS  deeply nested input neither crashes nor emits markup
+  PASS  the allowed markup is preserved
+
+6. Upload validation
+--------------------
+  PASS  a missing file field is rejected
+  PASS  upload errors are reported by cause, not swallowed
+  PASS  a file that was not uploaded by PHP cannot be imported
+  PASS  uploads are never given an executable extension
+
+7. Authentication throttling
+----------------------------
+  PASS  the audit identifier is pseudonymous
+  PASS  the failure limiter blocks after the configured budget
+  PASS  new public order references carry CSPRNG entropy and fit the existing schema
+  PASS  HTML and JSON public tracking share the atomic limiter and minimize fields
+  PASS  login throttling consults the audit table, not just the session
+
+8. Logging and secret handling
+------------------------------
+  PASS  secrets are redacted before they reach the log
+  PASS  response output cannot inject headers or log lines
+  PASS  no live credentials are tracked by version control
+  PASS  HTML escaping covers every metacharacter
+
+9. Web-server guards
+--------------------
+  PASS  every sensitive directory ships a guard file
+  PASS  the upload guard refuses to execute code
+  PASS  the upload guard still serves the generated demo images
+  PASS  configuration and logs deny all access
+  PASS  the root guard removes directory listings
+  PASS  the installer no longer claims an unreachable store is a new one
+
+10. CSP compatibility of the shipped markup
+-------------------------------------------
+  PASS  no inline event handlers remain in shipped markup
+  PASS  every inline script tag carries the CSP nonce
+  PASS  the strict policy does not fall back to unsafe-inline scripts
+  PASS  data URIs are not allowed for scripts or objects
+
+11. SEO output integrity
+------------------------
+  PASS  the renderer emits exactly one of each critical tag
+  PASS  JSON-LD cannot break out of its script element
+  PASS  URL validation refuses anything that is not an address
+  PASS  the robots directive is an allowlist, never free text
+  PASS  sitemap XML escapes correctly and invents nothing
+  PASS  the sitemap index points at absolute URLs on the canonical domain
+  PASS  robots.txt welcomes crawlers and points at the sitemap
+  PASS  no shipped page writes a second title or canonical tag
+  PASS  the sitemap and robots endpoints serve the right content types
+  PASS  private routes are never published in the sitemap
+  PASS  every file that uses an SEO helper loads the engine first
+  PASS  SEO settings and fields are guarded like any other admin data
+
+Phase 11 — the "Digital Codes" feature is fully removed
+---------------------------------------------------------
+  PASS  the removed feature has no page and no admin route left
+  PASS  no shipped file still calls the code-delivery API
+  PASS  no shipped page links to the removed pages
+  PASS  no shipped page advertises instant digital delivery
+  PASS  the order timeline no longer promises a code-delivery step
+  PASS  the seeded notification matrix has no code_delivered event
+  PASS  the removal migration is data-safe and idempotent
+  PASS  a legacy digital product cannot be sold
+  PASS  the storefront layout is balanced for two banner cards and no code box
+
+Page transition — first load, refresh, direct URL and admin panel
+-------------------------------------------------------------------
+  PASS  every full-page layout wires the one global transition
+  PASS  the head snippet can only come from one place
+  PASS  the excluded layouts are excluded on purpose and stay that way
+  PASS  no shipped file renders the overlay twice
+  PASS  the initial-load hold is emitted for a cold load and never when disabled
+  PASS  the overlay markup carries only the configured values
+  PASS  the transition stylesheet keeps the hold and its CSS-only release
+  PASS  the script releases the initial load, honours the marker and cleans up
+  PASS  the behaviour harness ships with its fixtures
+  PASS  transition settings are stored and validated like every other setting
+  PASS  the transition never blocks the page when JavaScript is missing
+
+Product category cards (storefront and admin)
+---------------------------------------------
+  PASS  one renderer produces every category card
+  PASS  a card shows the image and the name, and nothing else
+  PASS  the uploaded category image wins over the placeholder
+  PASS  the placeholder is a neutral, self-contained image
+  PASS  the category grid is responsive and keeps its shape
+  PASS  every card carries its saved size as a validated modifier
+  PASS  the category size is chosen per category and validated on save
+  PASS  the email delivery log has one home, in the System group
+  PASS  the SEO preview shows the real product image, not a placeholder
+  PASS  the complete-product draft is server-side and permissioned
+  PASS  a generated draft can only carry fields that really exist
+  PASS  Add Product has no AI generator; AI Auto Work is the only entry point
+  PASS  the AI create client never writes price, stock or visibility by itself
+  PASS  a full product is saved in one all-or-nothing transaction
+  PASS  the save endpoint and schema back the create flow
+  PASS  the AI create client only touches controls the panel really renders
+  PASS  no shipped page still prints a category item count
+  PASS  the category navigation prints no item count
+  PASS  a navigation row uses the real upload and falls back to its icon
+
+Admin CRUD layout and form routing
+----------------------------------
+  PASS  every list page offers its create action at the top of the section
+  PASS  the create action is wired to the editor or to a modal
+  PASS  no listing page renders a create/edit form below its records
+  PASS  the new editor pages are guarded like the pages they replaced
+  PASS  old edit links keep working through a redirect
+  PASS  a save posted to a listing is forwarded, never silently dropped
+  PASS  mobile tables can render as record cards
+  PASS  no write sends an explicit NULL into a NOT NULL column
+  PASS  the installer never writes sample business records into an ordinary install
+  PASS  the setup wizard defaults to "no sample content" and honours the posted choice
+  PASS  the starter catalogue is idempotent and cannot be re-created by a normal request
+  PASS  the sample-content review screen and its navigation are gone
+  PASS  a fresh install never overwrites an existing administrator
+  PASS  no fixed or example password is shipped anywhere
+  PASS  the administrator password policy is length-only and configurable
+  PASS  the public homepage slider carries no call-to-action and no arrow controls
+  PASS  the slider crossfades instead of swapping, and never shows a blank frame
+  PASS  the slider keeps itself safe: hidden tab, off-screen, reduced motion, broken image
+  PASS  a disabled slide is absent from the homepage, and one slide renders no pagination
+  PASS  every column the installer and the fixtures write exists in the schema
+  PASS  the panel has exactly one page heading per screen
+  PASS  a listing does not repeat the page title above its records
+  PASS  every editor checks the token before it reads a posted value
+  PASS  the layout is the only place that prints the page title
+  PASS  the admin form helpers stay in one place
+
+Category image upload and replacement
+-------------------------------------
+  PASS  a failed upload never removes the existing image
+  PASS  keeping, replacing and removing are decided explicitly
+  PASS  the image file is only deleted in a safe order
+  PASS  the editor keeps every field the old inline form had
+
+Email verification, recovery and SMTP delivery
+----------------------------------------------
+  PASS  verification codes come from a cryptographically secure source
+  PASS  a code is stored as a hash, compared with password_verify and never in the clear
+  PASS  the delivery log cannot hold a body, a code or a token
+  PASS  no authentication code is ever placed in a URL
+  PASS  the reset flow invalidates every credential it can
+  PASS  the sign-in gate never marks an address verified by itself
+  PASS  every sender reports the transport result instead of assuming success
+  PASS  the provider webhook verifies its signature before it reads the payload
+  PASS  the SMTP password is never rendered, logged or returned
+  PASS  the Brevo API key is server-side only and delivery TLS verification is never disabled
+  PASS  a 403 from the Brevo account resource is reported as a permission, not an auth failure
+  PASS  Brevo credentials never cross transports and a denied send is never retried
+  PASS  email templates escape interpolated values and ship a text alternative
+  PASS  the verification link the provider sends is a page that exists
+  PASS  the mail library is vendored, loadable and unreachable over HTTP
+  PASS  the challenge table is indexed and tied to the account
+  PASS  existing accounts are grandfathered once instead of being locked out
+
+AI provider connection tests
+----------------------------
+  PASS  every bundled AI driver has its own connection test
+  PASS  the Gemini probe cannot mistake a token limit for a bad key
+  PASS  no provider probe uses an eight-token budget
+  PASS  OpenRouter validates the key before spending tokens
+  PASS  a provider test stores the code, HTTP status and next action
+  PASS  the test endpoint returns the real outcome instead of a bare failure
+  PASS  the Providers screen never renders a stored key
+  PASS  the browser test handler always restores its button
+  PASS  the redesigned provider cards have a responsive grid and no fixed heights
+  PASS  the AI navigation wraps in normal page flow and the card test area is flat
+  PASS  PHP-only libraries and endpoints cannot emit output; view templates may render HTML
+  PASS  only navigation drawers and the fixed support message log own internal scroll containers; AI content stays in page flow
+
+Courier connection tests
+------------------------
+  PASS  the test vocabulary covers every state the admin can see
+  PASS  HTTP statuses map to authentication, permission and network states
+  PASS  a test message cannot leak a stored credential
+  PASS  every required courier has a provider-specific probe
+  PASS  an HTTP 200 web page is never accepted as a provider answer
+  PASS  a Pathao test uses the official password-grant token flow and verifies the stored store
+  PASS  a RedX test validates the access token against the pickup stores
+  PASS  an ambiguous provider is never reported as connected
+  PASS  connection tests never book, pick up or charge
+  PASS  test results get their own additive table and never touch shipments
+  PASS  the test action exists on the card and on the courier details page
+  PASS  courier credentials are encrypted at rest with a legacy fallback
+  PASS  the Steadfast default points at the official host
+  PASS  paperfly asks for the key its API requires
+
+Admin forms never save on their own
+-----------------------------------
+  PASS  AI generation never writes generated text to a product
+  PASS  the category cropper stages the crop instead of saving it
+  PASS  the phone verification switch has an explicit Save button
+  PASS  editable forms carry a non-saving unsaved-changes guard
+  PASS  only read-only filters submit automatically
+  PASS  every editable admin form is guarded, and the guard itself never writes
+  PASS  no admin button can submit a form by accident
+
+Structured brand/type/colour dictionaries; retired features stay removed
+------------------------------------------------------------------------
+  PASS  brands, types and colours are managed as structured dictionaries
+  PASS  the storefront uses structured brand/type labels, not retired filters or badges
+  PASS  features and benefits are gone from every product form and page
+  PASS  retired free-text brand/features fields stay gone; structured dictionary joins are additive
+
+SEO copy has no arbitrary character limit
+-----------------------------------------
+  PASS  the SEO editor has no maxlength or target-length advice
+  PASS  the SEO Manager and product saves do not truncate SEO copy
+  PASS  the SEO columns are TEXT and older installs are widened safely
+  PASS  SEO copy an administrator wrote reaches the page unshortened
+  PASS  only generated SEO copy is excerpted, and the UI counts nothing
+
+========================================================================
+passed 188   failed 0   skipped 1
+
+Not exercised in this environment:
+  - the headers are actually emitted — not applicable in this environment
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-unit.php
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+Support unit tests (no DB)
+  PASS  Bengali script detected as bn (expected 'bn', got 'bn')
+  PASS  Bengali order question detected as bn (expected 'bn', got 'bn')
+  PASS  Banglish availability detected (expected 'banglish', got 'banglish')
+  PASS  Banglish order complaint detected (expected 'banglish', got 'banglish')
+  PASS  Banglish follow-up detected (expected 'banglish', got 'banglish')
+  PASS  Banglish price question detected (expected 'banglish', got 'banglish')
+  PASS  English detected (expected 'en', got 'en')
+  PASS  English order question detected (expected 'en', got 'en')
+  PASS  English greeting+request detected (expected 'en', got 'en')
+  PASS  BD phone extracted with separators (expected '01712345678', got '01712345678')
+  PASS  BD phone extracted with country code (expected '+8801712345678', got '+8801712345678')
+  PASS  Short number is not a phone (expected NULL, got NULL)
+  PASS  Full order number extracted (expected 'SH26081501234', got 'SH26081501234')
+  PASS  Dashed order number extracted (expected 'SH260815-01234', got 'SH260815-01234')
+  PASS  Opaque random order reference extracted for any configured two-letter prefix (expected 'ABAAAAAAAAAAAAAAAAAAAAAAAA', got 'ABAAAAAAAAAAAAAAAAAAAAAAAA')
+  PASS  AI support recognizes opaque random order references
+  PASS  Internal numeric database ID is not accepted as a customer order reference (expected NULL, got NULL)
+  PASS  Support phone-pair verification is limited to anonymous chats; signed-in lookups require ownership
+  PASS  Support lookup does not resolve internal numeric order IDs
+  PASS  Anonymous support lookups share the public tracking rate limit
+  PASS  Support uses session-owner/reference SQL for signed-in customers and reference-plus-phone SQL for anonymous visitors
+  PASS  Failed anonymous support verification remains rate limited
+  PASS  Overlapping legacy/current support declarations are guarded against co-loading
+  PASS  No order ref in plain text (expected NULL, got NULL)
+  PASS  Query keeps product words (Banglish) (expected 'nike shoe', got 'nike shoe')
+  PASS  Query strips price words (expected 'nike shoe', got 'nike shoe')
+  PASS  Query strips English filler (expected 'running shoes', got 'running shoes')
+  PASS  Banglish product reply carries verified price + low stock count
+  PASS  Size answer is honest: options on product page, product-level stock
+  PASS  Out-of-stock is stated plainly in Banglish
+  PASS  Bengali need-phone reply asks for checkout phone (both-factor)
+  PASS  Not-found order reply is generic (no enumeration hints)
+  PASS  Order reply uses real status + tracking from facts
+  PASS  Guard allows the verified price (Bengali)
+  PASS  Guard allows verified price without separators
+  PASS  Guard rejects an invented lower price
+  PASS  Guard rejects invented taka amount
+  PASS  Guard rejects first-person cancel claim
+  PASS  Guard rejects Bengali cancel claim
+  PASS  Guard rejects Banglish refund claim
+  PASS  Guard allows amount-free text
+  PASS  Guard rejects any amount when none are verified
+  PASS  Deterministic assistant message renders as assistant bubble (expected 'assistant', got 'assistant')
+  PASS  Deterministic message is NOT flagged as AI (expected false, got false)
+  PASS  Model-generated message IS flagged as AI (expected true, got true)
+  PASS  Admin message renders as agent (expected 'agent', got 'agent')
+  PASS  Public shape leaks no internal fields
+  PASS  Support API enforces CSRF
+  PASS  Support API checks conversation ownership
+  PASS  Support never uses sh_ai_dispatch (would log full conversations)
+  PASS  AI replies pass the factual guard
+  PASS  Pipeline uses row locks around state changes
+  PASS  Widget is mounted in the storefront footer
+  PASS  All support permissions are registered in the permission catalogue
+  PASS  Admin sidebar has a guarded support unread counter and permission-gated links
+  PASS  support_chat AI task registered
+  PASS  Caller timeout honored in ai/providers/OpenAICompatibleProvider.php
+  PASS  Caller timeout honored in ai/providers/GeminiProvider.php
+  PASS  Caller timeout honored in ai/providers/AnthropicProvider.php
+  PASS  Client message id is unique (idempotent sends)
+  PASS  Six additive support tables declared
+  PASS  Widget renders message text via textContent only (no HTML injection)
+  PASS  Only the fixed widget message log and both composer textareas scroll internally; no other support CSS creates a scroll box
+  PASS  Widget panel is fixed/bottom-anchored with safe-area support and no document-scroll pinning
+  PASS  Admin actions require support.reply
+  PASS  Settings page has a real AI probe (never assumed working)
+
+Passed: 66 · Failed: 0
+
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli tests/support-system.php
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+BLOCKED support-system: database configuration is missing or incomplete
+
+
+========================================================================================
+ENVIRONMENT: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js
+COMMAND: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js node tests/support-chat-behavior.mjs
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+  ok  shipped widget markup has #sh-schat-fab
+  ok  shipped widget markup has #sh-schat-sheet
+  ok  shipped widget markup has #sh-schat-messages
+  ok  shipped widget markup has #sh-schat-suggest
+  ok  shipped widget markup has #sh-schat-form
+  ok  shipped widget markup has #sh-schat-input
+  ok  shipped widget markup has #sh-schat-send
+  ok  shipped widget markup has #sh-schat-status
+  ok  shipped widget markup has #sh-schat-badge
+  ok  shipped widget markup has #sh-schat-handoff
+  ok  shipped widget markup has #sh-schat-new
+  ok  shipped widget markup has #sh-schat-close
+  ok  shipped widget markup has #sh-schat-menu
+  ok  shipped widget markup has #sh-schat-opt-facebook
+  ok  shipped widget markup has #sh-schat-opt-whatsapp
+  ok  shipped widget markup has #sh-schat-opt-chat
+  ok  chat panel is viewport-fixed, bottom-anchored and safe-area aware
+  ok  only the message log and fixed composer textarea own internal scroll regions
+  ok  widget JS never pins the panel to document scroll and re-measures the viewport
+  ok  input type is subtly smaller than a message bubble but still readable
+  ok  Send button text and icon are subtly reduced, not removed
+  ok  input padding is reduced without losing a comfortable touch target
+  ok  Talk to a human stays visible and balanced with the smaller composer
+  ok  input and Send remain horizontally aligned on mobile
+  ok  Bangla/Banglish/English placeholder and orange brand colour survive
+  ok  the Customer Support popup has no subtitle or explanatory replacement
+  ok  the title-only header is centered with no leftover subtitle gap
+  ok  legacy widget API adapter maps URL-encoded sends and handoffs into the transactional support service
+  ok  support service has no conversation/message pruning query
+  ok  the launcher shows no "Support" text label
+  ok  the menu starts hidden and out of the accessibility tree
+  ok  the menu offers exactly three configured support channels
+  ok  external options are safe new-tab links to the configured destinations
+  ok  the launcher opens the menu instead of jumping into the chat
+  ok  the launcher reports the open menu
+  ok  opening the menu does not start a conversation
+  ok  focus moves to the first option for keyboard users
+  ok  ArrowDown moves to the next option
+  ok  End jumps to the last option
+  ok  Escape closes the menu and returns focus to the launcher
+  ok  a closed menu leaves the tab order
+  ok  a press outside closes the menu without opening the chat
+  ok  sheet starts hidden
+  ok  opening reveals the panel
+  ok  opening never writes an inline document-scroll top
+  ok  viewport metrics are applied to the fixed panel
+  ok  chat replies never scroll the website behind the fixed panel
+  ok  website scrolling stays unlocked and independent
+  ok  a document scroll event never re-pins the panel
+  ok  the AI Assistant option opens the existing panel and folds the menu
+  ok  start called once with the CSRF token
+  ok  welcome message renders
+  ok  quick suggestions render
+  ok  suggestion is sent as a message
+  ok  send carries a UUIDv4 client_msg_id and conversation id
+  ok  deterministic reply is labelled Support, never AI
+  ok  same-origin product URL becomes a link
+  ok  model reply is labelled AI assistant
+  ok  XSS payload renders as inert text (no elements injected)
+  ok  foreign-origin URL is NOT turned into a link
+  ok  failed send keeps the message and offers Retry
+  ok  failure is explained in the status line
+  ok  retry reuses the same client_msg_id (server dedupes)
+  ok  rate limit message asks the customer to wait
+  ok  polled agent reply renders as Support agent
+  ok  repeated polls never duplicate a message
+  ok  handoff posts to the API
+  ok  handoff hides the button and records human mode without a replacement subtitle
+  ok  handoff notice renders as a system line
+  ok  handoff uses a UUIDv4 idempotency key
+  ok  human-mode follow-up is saved in the same thread without AI or a repeated notice
+  ok  new conversation clears the old thread
+  ok  Escape closes the panel
+  ok  reopening from the menu does not create a second start call
+  ok  Enter submits the message
+  ok  Enter-to-send actually posted
+
+76 passed, 0 failed
+SUPPORT CHAT BEHAVIOUR: ALL CHECKS PASSED
+
+
+========================================================================================
+ENVIRONMENT: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js
+COMMAND: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js node tests/support-chat-composer-behavior.mjs
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+  ok  popup textarea opts out of global auto-grow
+  ok  app.js grower checks the explicit opt-out before touching inline styles
+  ok  ordinary textarea growth remains available for other fields
+  ok  widget client contains no composer scrollHeight or inline-height resizing
+  ok  widget client clears stale inline composer dimensions on init
+  ok  dedicated support client no longer uses scrollHeight or inline heights for its composer
+  ok  dedicated support page textarea opts out of global auto-grow
+  ok  composer is a non-wrapping flex row aligned to the bottom
+  ok  textarea has fixed height, max-height, internal vertical scroll and no resize handle
+  ok  long words wrap inside the textarea instead of widening the composer
+  ok  Send button has fixed dimensions and never stretches
+  ok  Send icon and label remain centered
+  ok  Talk to a human stays below the composer in shipped markup
+  ok  dedicated support composer also has fixed height and internal scroll
+  ok  global grower function is registered by app.js
+  ok  one word: no inline height or hidden overflow is written
+  ok  one word: typed text and send button remain unchanged
+  ok  short sentence: no inline height or hidden overflow is written
+  ok  short sentence: typed text and send button remain unchanged
+  ok  5 lines: no inline height or hidden overflow is written
+  ok  5 lines: typed text and send button remain unchanged
+  ok  20 lines: no inline height or hidden overflow is written
+  ok  20 lines: typed text and send button remain unchanged
+  ok  very long paragraph: no inline height or hidden overflow is written
+  ok  very long paragraph: typed text and send button remain unchanged
+  ok  Bengali: no inline height or hidden overflow is written
+  ok  Bengali: typed text and send button remain unchanged
+  ok  Banglish: no inline height or hidden overflow is written
+  ok  Banglish: typed text and send button remain unchanged
+  ok  English: no inline height or hidden overflow is written
+  ok  English: typed text and send button remain unchanged
+  ok  the opt-out attribute survives runtime initialization
+
+32 passed, 0 failed
+SUPPORT CHAT COMPOSER: ALL CHECKS PASSED
+
+
+========================================================================================
+ENVIRONMENT: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js
+COMMAND: SH_JSDOM_PATH=/tmp/shophaat-jsdom/node_modules/jsdom/lib/api.js node tests/support-chat-optimistic-behavior.mjs
+HOST_EXIT_CODE: 0
+----------------------------------------------------------------------------------------
+  ok  Customer Support eyebrow keeps the Chat with ShopHaat Support main title
+  ok  customer chat has no language selector or diagnostic banner
+  ok  obsolete AI/FAQ explanations are absent from customer chat
+  ok  automatic Bengali, Banglish and English detection is present
+  ok  eyebrow styles and mobile chat rules preserve the intended visual hierarchy and layout
+  ok  FAQ matching, catalogue products and verified order/policy facts are model context only
+  ok  selected-model test makes a bounded real text-generation call and rejects empty output
+  ok  ordinary messages reach selected-model inference after order authorization
+  ok  configuration and inference failures mark the saved message failed instead of saving an FAQ reply
+  ok  stale pending replies become retryable after the same bounded 180-second window
+  ok  only real AI replies are stored/rendered as assistant messages
+  ok  customer send is owner-scoped and blocks only resolved/closed threads, not human takeover
+  ok  human-controlled follow-ups preserve state and update only inbox activity
+  ok  human-controlled follow-ups create no AI, fallback, handoff event, FAQ reply, or repeated system notice
+  ok  human-controlled sends use no AI reply state and return before inference
+  ok  pending/assigned/closed status alone also blocks AI before inference and suppresses late replies
+  ok  committed messages have an exact-row acknowledgement and idempotent retries are checked before resolved status
+  ok  customer AI-reply retry during takeover queues the existing row for the agent without invoking AI
+  ok  customer API still enforces CSRF, request limits, length/client-ID validation and owner-scoped send
+  ok  customer GET state is read-only; unread clearing uses owner-scoped CSRF POST and frontend follows it
+  ok  cross-customer isolation still scopes logged-in users and guest tokens independently
+  ok  customer snapshots exclude internal notes while the agent thread remains separate
+  ok  opening an admin thread is read-only GET; marking it read is a CSRF-protected POST
+  ok  assigned follow-ups remain visible and bubble the assigned conversation in the agent inbox
+  ok  support schema keeps both legacy AI and new assistant sender labels plus the non-AI none status
+  ok  legacy support fields, schema-v4 upgrade and restrictive history foreign keys are present without replacing old rows
+  ok  handoff event upsert is idempotent and is part of the transaction
+  ok  reopen keeps AI paused until a separate explicit Resume AI action
+  ok  no support conversation/message/event deletion or retention-prune query remains in live handlers
+  ok  front end accepts a committed message acknowledgement even when the snapshot omits that row
+  ok  customer state loaded before sending
+  ok  unread customer state is cleared only by same-origin POST carrying the CSRF token
+  ok  message appears optimistically before the HTTP response
+  ok  honest loading spinner is shown while the request is pending
+  ok  one request uses a stable idempotency key
+  ok  state requests no longer require a selected language
+  ok  server identity reconciles the optimistic row without duplication
+  ok  mocked successful send displays the returned assistant response
+  ok  confirmed send clears the composer
+  ok  network loss keeps the customer message and shows a short unconfirmed state
+  ok  failed transport offers one inline safe retry without a duplicate banner
+  ok  safe send retry reuses the original client id
+  ok  mocked inference failure keeps the customer message and shows only a friendly retryable error
+  ok  model failure exposes a reply retry action and clears confirmed composer text
+  ok  reply retry preserves message identity and replaces the failure state with the response
+  ok  chat labels follow the latest Banglish message
+  ok  chat labels follow the latest Bengali message
+  ok  chat labels follow the latest English message
+  ok  human handoff/requested state still allows the existing conversation form
+  ok  customer message after requesting human support is confirmed by persisted-row acknowledgement
+  ok  pending human-support message uses the same conversation and is not sent to AI
+  ok  agent assignment/reply is visible after polling the same thread
+  ok  customer can send again after an agent reply without changing conversation or assignment
+  ok  second agent reply persists and renders between customer follow-ups
+  ok  repeated customer-agent-customer-agent cycle remains sendable on one conversation
+  ok  lost response after commit leaves a retryable customer message instead of losing it
+  ok  human-mode retry reuses its original id and does not duplicate a committed message
+  ok  HTTP rate-limit failure remains visibly unconfirmed, explains the safe error and is not prematurely persisted
+  ok  genuinely failed request retries the same client ID and is saved exactly once
+  ok  success-shaped but incomplete API response is not treated as saved
+  ok  malformed-response retry keeps the same ID and saves once after valid acknowledgement
+  ok  refresh/poll keeps both customer follow-ups and later agent replies visible once
+  ok  cold page reload restores persisted customer and agent messages from server state
+
+63 passed, 0 failed
+SUPPORT CHAT OPTIMISTIC BEHAVIOUR: ALL CHECKS PASSED
+
+========================================================================================
+COMMAND: /tmp/shophaat-php-wasm/node_modules/.bin/php-wasm-cli -r 'exit(7);'
+HOST_EXIT_CODE: 0
+OUTPUT: (empty)
